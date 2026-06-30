@@ -44,7 +44,7 @@ class ClaudeRuntime:
         if not self.is_configured():
             raise RuntimeError("Claude Agent SDK runtime is not configured")
 
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, query
+        from claude_agent_sdk import ClaudeAgentOptions
 
         options = ClaudeAgentOptions(
             tools=["Read", "Write", "Edit", "Glob", "Grep"],
@@ -83,13 +83,18 @@ class ClaudeRuntime:
 
         from claude_agent_sdk import ClaudeAgentOptions
 
+        # Read/Glob/Grep stay enabled so the selected skill can load its own
+        # resources/*.md framework files (e.g. the original SKILL.md instructs
+        # "view_file resources/chart_reading_rules.md"). Write/Edit remain
+        # disabled: the backend still persists artifacts from the JSON wrapper.
         options = ClaudeAgentOptions(
-            tools=[],
-            allowed_tools=[],
-            disallowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"],
+            tools=["Read", "Glob", "Grep"],
+            allowed_tools=["Read", "Glob", "Grep"],
+            disallowed_tools=["Bash", "Write", "Edit", "WebFetch", "WebSearch"],
             permission_mode="dontAsk",
             setting_sources=["project"],
             cwd=Path.cwd(),
+            add_dirs=[Path.cwd()],
             env=self._agent_env(),
             model=self.settings.anthropic_model,
             max_turns=max_turns or self.settings.agent_max_turns,
@@ -97,9 +102,11 @@ class ClaudeRuntime:
             skills=skills,
             system_prompt=(
                 "You are adapting the original vedic-astro-skills workflow into file artifacts. "
-                "Return only the requested JSON wrapper. Artifact content must preserve the selected "
-                "skill's markdown style, phase order, and interaction rules. Do not add app cards, "
-                "daily notes, checkout flows, or extra summaries."
+                "You may use Read/Glob/Grep to open the selected skill's own resources/*.md files "
+                "when its instructions reference them. After following the skill, return only the "
+                "requested JSON wrapper. Artifact content must preserve the selected skill's markdown "
+                "style, phase order, and interaction rules. Do not add app cards, daily notes, "
+                "checkout flows, or extra summaries."
             ),
         )
         return await self._run_query(task_name, prompt, options)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -160,4 +160,6 @@ class CalculationSnapshot(ApiModel):
     validation_status: Literal["passed", "degraded", "limited"] = Field(alias="validationStatus")
     structured_data: str = Field(alias="structuredData")
     facts: ChartFacts
-    generated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), alias="generatedAt")
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(), alias="generatedAt"
+    )

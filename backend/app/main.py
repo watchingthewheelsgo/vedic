@@ -99,6 +99,17 @@ async def run_skill(input_data: SkillRunInput) -> SkillSessionResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        # asyncio.timeout raises a builtin TimeoutError whose str() is empty,
+        # which previously surfaced as a 500 with no detail. Report it clearly
+        # so the caller knows to retry or reduce the batch context.
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"{input_data.skill} 运行超时（>{get_settings().agent_timeout_ms} ms）。"
+                "请重试；若反复超时，请减少该批次的上下文或调大 AGENT_TIMEOUT_MS。"
+            ),
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

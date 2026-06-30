@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import SkillBirthInput, SkillRunInput, SkillSessionResponse, SynastryBirthInput
@@ -195,7 +195,7 @@ class SkillRuntime:
             f"{existing}"
             "## 验前事反馈\n\n"
             f"{feedback_markdown.strip()}\n\n"
-            f"_updated_at: {datetime.utcnow().isoformat()}_\n"
+            f"_updated_at: {datetime.now(timezone.utc).isoformat()}_\n"
         )
         self.workspace.write_artifact(session_id, "user_context.md", content)
         return SkillSessionResponse(
@@ -535,7 +535,7 @@ User message:
     def _synastry_folder(self, label: str) -> str:
         slug = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "_", label.strip() or "B").strip("_")
         slug = slug[:40] or "B"
-        return f"synastry_{slug}_{datetime.utcnow().strftime('%Y%m%d')}"
+        return f"synastry_{slug}_{datetime.now(timezone.utc).strftime('%Y%m%d')}"
 
     def _synastry_intake(self, input_data: SynastryBirthInput) -> str:
         lines = [
