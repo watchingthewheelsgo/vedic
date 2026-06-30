@@ -71,6 +71,7 @@ class SkillSessionResponse(ApiModel):
     stage: Literal[
         "reader_ready",
         "reader_validation",
+        "core_in_progress",
         "core_complete",
         "career_complete",
         "love_complete",

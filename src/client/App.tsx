@@ -22,7 +22,7 @@ const precisionOptions: Array<{ value: BirthTimePrecision; label: string }> = [
 const skillActions: Array<{ skill: SkillRunInput["skill"]; label: string; requiresSynastry?: boolean }> =
   [
     { skill: "vedic-reader", label: "vedic-reader 验前事" },
-    { skill: "vedic-core", label: "vedic-core 完整分析" },
+    { skill: "vedic-core", label: "vedic-core 推进一批" },
     { skill: "vedic-career", label: "vedic-career 事业" },
     { skill: "vedic-love", label: "vedic-love 感情" },
     { skill: "vedic-rectifier", label: "vedic-rectifier 校时" },

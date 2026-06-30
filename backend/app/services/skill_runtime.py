@@ -95,6 +95,9 @@ class SkillRuntime:
 
     async def run_skill(self, input_data: SkillRunInput) -> SkillSessionResponse:
         self.workspace.require_session_dir(input_data.session_id)
+        if input_data.skill == "vedic-core":
+            return await self._run_core(input_data)
+
         prompt = self._artifact_prompt_for(input_data)
         result = await self.agent_runtime.run_skill_prompt_task(
             input_data.skill,
@@ -117,6 +120,68 @@ class SkillRuntime:
             chat_message=str(parsed["chatMessage"]),
             artifacts=artifacts,
             active_artifact=self._preferred_artifact(input_data.skill, artifacts),
+        )
+
+    async def _run_core(self, input_data: SkillRunInput) -> SkillSessionResponse:
+        batches = self._core_batches(input_data.user_message)
+        existing_paths = {artifact.path for artifact in self.workspace.read_artifacts(input_data.session_id)}
+        batch = next(
+            (
+                item
+                for item in batches
+                if not set(self._batch_files(item)).issubset(existing_paths)
+            ),
+            None,
+        )
+        if batch is None:
+            artifacts = self.workspace.read_artifacts(input_data.session_id)
+            return SkillSessionResponse(
+                session_id=input_data.session_id,
+                stage="core_complete",
+                chat_message="vedic-core 已完成。可继续运行 vedic-career、vedic-love，或进行追问。",
+                artifacts=artifacts,
+                active_artifact=self._preferred_artifact(input_data.skill, artifacts),
+            )
+
+        artifacts_for_prompt = self._artifacts_for_skill(
+            input_data.skill,
+            self.workspace.read_artifacts(input_data.session_id),
+        )
+        prompt = self._artifact_prompt(str(batch["prompt"]), artifacts_for_prompt)
+        result = await self.agent_runtime.run_skill_prompt_task(
+            input_data.skill,
+            prompt,
+            skills=[input_data.skill],
+            max_turns=self._max_turns_for(input_data.skill),
+        )
+        parsed = self._parse_artifact_response(result.raw_text)
+        expected = set(self._batch_files(batch))
+        for artifact in parsed["artifacts"]:
+            path = str(artifact["path"])
+            if path not in expected:
+                raise ValueError(f"vedic-core returned unexpected artifact: {path}")
+            self.workspace.write_artifact(
+                input_data.session_id,
+                path,
+                str(artifact["content"]),
+            )
+
+        artifacts = self.workspace.read_artifacts(input_data.session_id)
+        completed_paths = {artifact.path for artifact in artifacts}
+        core_complete = all(
+            set(self._batch_files(item)).issubset(completed_paths) for item in batches
+        )
+        next_message = (
+            "vedic-core 全部批次已完成。"
+            if core_complete
+            else "继续点击 vedic-core，可按原流程生成下一批文件。"
+        )
+        return SkillSessionResponse(
+            session_id=input_data.session_id,
+            stage="core_complete" if core_complete else "core_in_progress",
+            chat_message=f"{parsed['chatMessage']}\n\n{next_message}",
+            artifacts=artifacts,
+            active_artifact=self._batch_files(batch)[0],
         )
 
     async def record_reader_feedback(
@@ -164,6 +229,9 @@ class SkillRuntime:
             self.workspace.read_artifacts(input_data.session_id),
         )
         base_prompt = self._prompt_for(input_data)
+        return self._artifact_prompt(base_prompt, artifacts)
+
+    def _artifact_prompt(self, base_prompt: str, artifacts: dict[str, str]) -> str:
         artifact_context = "\n\n".join(
             f"--- FILE: {path} ---\n{content}" for path, content in artifacts.items()
         )
@@ -188,6 +256,124 @@ Rules:
 - Do not omit important sections with phrases like see above.
 - Do not include any artifact outside the original skill's expected file set.
 - The JSON wrapper is only for the backend; the user sees the markdown artifacts."""
+
+    def _core_batches(self, user_message: str) -> list[dict[str, object]]:
+        user_line = user_message or "开始分析"
+        return [
+            {
+                "files": ["p1_overview.md"],
+                "prompt": self._core_batch_prompt(
+                    "P1 身份总览",
+                    ["p1_overview.md"],
+                    "Run vedic-core Step 0 and P1 only. Use structured_data.md. Do not use user_context.md in this batch.",
+                    user_line,
+                ),
+            },
+            self._core_batch(
+                "P2A 行星审计 Sun/Moon",
+                "p2a_planets.md",
+                "Run the original Step 1 Group 1 only: Sun and Moon. Include the Yoga pre-scan at the beginning as specified by vedic-core. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                user_line,
+            ),
+            self._core_batch(
+                "P2B 行星审计 Mars/Mercury",
+                "p2b_planets.md",
+                "Run the original Step 1 Group 2 only: Mars and Mercury. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                user_line,
+            ),
+            self._core_batch(
+                "P2C 行星审计 Jupiter/Venus",
+                "p2c_planets.md",
+                "Run the original Step 1 Group 3 only: Jupiter and Venus. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                user_line,
+            ),
+            self._core_batch(
+                "P2D 行星审计 Saturn/Rahu/Ketu",
+                "p2d_planets.md",
+                "Run the original Step 1 Group 4 only: Saturn, Rahu, and Ketu. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                user_line,
+            ),
+            self._core_batch(
+                "P3A D9 逐星深度审计",
+                "p3a_d9.md",
+                "Run the original Step 2.1 D9 audit only. Use completed p2a-p2d artifacts and structured_data.md. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                user_line,
+            ),
+            self._core_batch(
+                "P3B D10/D4/D5 分盘交叉",
+                "p3b_divisional.md",
+                "Run the original Step 2.2-2.4 D10/D4/D5 overview only. Use structured_data.md and completed P2/P3A artifacts.",
+                user_line,
+            ),
+            self._core_batch(
+                "P4A 宫位诊断 1-6宫",
+                "p4a_houses.md",
+                "Run the original Step 3 house diagnosis for houses 1-6 only. Use existing P1-P3 artifacts as prior audit context.",
+                user_line,
+            ),
+            self._core_batch(
+                "P4B 宫位诊断 7-12宫",
+                "p4b_houses.md",
+                "Run the original Step 3 house diagnosis for houses 7-12 only, including the Parivartana scan at the end as required by vedic-core. Use existing P1-P4A artifacts as prior audit context.",
+                user_line,
+            ),
+            self._core_batch(
+                "P5A 十大板块 1-5",
+                "p5a_life.md",
+                "Run the original Step 4 life synthesis blocks 1-5 only. Use existing P1-P4 artifacts and structured_data.md. If user_context.md exists, use it only for the original contextual calibration stage.",
+                user_line,
+            ),
+            self._core_batch(
+                "P5B 十大板块 6-10",
+                "p5b_life.md",
+                "Run the original Step 4 life synthesis blocks 6-10 only. Use existing P1-P4 artifacts and structured_data.md. If user_context.md exists, use it only for the original contextual calibration stage.",
+                user_line,
+            ),
+            self._core_batch(
+                "Step 5 技术附录",
+                "appendix.md",
+                "Run the original Step 5 technical appendix only, including the P1-P12 parameter table, divisional data overview, validation report, and Dasha timeline.",
+                user_line,
+            ),
+        ]
+
+    def _core_batch(
+        self, batch_name: str, file_name: str, instruction: str, user_message: str
+    ) -> dict[str, object]:
+        return {
+            "files": [file_name],
+            "prompt": self._core_batch_prompt(
+                batch_name,
+                [file_name],
+                instruction,
+                user_message,
+            ),
+        }
+
+    def _core_batch_prompt(
+        self, batch_name: str, files: list[str], instruction: str, user_message: str
+    ) -> str:
+        file_list = ", ".join(files)
+        return f"""Run vedic-core exactly as the original skill, but only for this backend batch: {batch_name}.
+
+Batch instruction:
+{instruction}
+
+Output exactly these original file names and no others:
+{file_list}
+
+Rules:
+- Preserve the original vedic-core phase order, terminology, markdown style, evidence weighting, and QA/report rules.
+- Use structured_data.md as the calculation source of truth.
+- Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
+- Each requested file must be complete markdown, not a placeholder and not "see previous".
+- The chat response should only state this batch is complete and list the files generated.
+
+User message:
+{user_message}"""
+
+    def _batch_files(self, batch: dict[str, object]) -> list[str]:
+        return [str(path) for path in batch["files"]]
 
     def _artifacts_for_skill(self, skill: str, artifacts: list[object]) -> dict[str, str]:
         selected: dict[str, str] = {}
@@ -234,7 +420,7 @@ Workspace contains structured_data.md and may contain user_context.md / reader_p
 Rules:
 - Follow vedic-core Step 0 through Step 5.
 - Preserve blind-audit rules: Step 1-3 must not use user_context.md.
-- Write the original expected markdown files: p1_overview.md, p2a_planets.md, p2b_planets.md, p2c_planets.md, p3a_divisional.md, p3b_divisional.md, p4a_houses.md, p4b_houses.md, p5a_life.md, p5b_life.md, appendix.md.
+- Write the original expected markdown files: p1_overview.md, p2a_planets.md, p2b_planets.md, p2c_planets.md, p2d_planets.md, p3a_d9.md, p3b_divisional.md, p4a_houses.md, p4b_houses.md, p5a_life.md, p5b_life.md, appendix.md.
 - Chat response should only report completion and available next actions, matching the skill style.
 - Do not compress the report into app-specific sections, claims, daily notes, or JSON.
 

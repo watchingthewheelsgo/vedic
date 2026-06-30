@@ -36,6 +36,7 @@ POST /api/skill-runs
   sessionId + skill name + optional userMessage
   -> ClaudeRuntime.run_skill_prompt_task()
   -> markdown artifacts written to the session workspace
+  -> vedic-core advances one original phase batch per call
 
 POST /api/skill-feedback
   sessionId + feedbackMarkdown
