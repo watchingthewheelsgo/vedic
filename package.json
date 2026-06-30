@@ -1,0 +1,30 @@
+{
+  "name": "vedic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:backend:dev\" \"npm:client:dev\"",
+    "client:dev": "vite --host 127.0.0.1",
+    "backend:dev": "uv run --project backend uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload",
+    "backend:check": "uv run --project backend python -m compileall backend/app",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
+  }
+}
