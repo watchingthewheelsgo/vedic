@@ -3,7 +3,10 @@ dist
 .venv
 backend/.venv
 .claude/skills/**/venv
-backend/data
+backend/data/*
+!backend/data/exports/
+backend/data/exports/*
+!backend/data/exports/.gitkeep
 .playwright-cli/
 output/
 tmp/

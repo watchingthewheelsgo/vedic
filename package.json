@@ -8,6 +8,7 @@
     "client:dev": "vite --host 127.0.0.1",
     "backend:dev": "uv run --project backend uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload --reload-dir backend/app",
     "backend:check": "uv run --project backend python -m compileall backend/app",
+    "report:export": "uv run --project backend python scripts/export-report.py",
     "workflow:test": "node scripts/run-full-workflow.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",

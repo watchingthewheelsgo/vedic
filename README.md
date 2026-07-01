@@ -70,6 +70,25 @@ npm run backend:check
 npm run build
 ```
 
+## Report Export
+
+Export a completed session's public markdown artifacts into a themed HTML
+report:
+
+```bash
+npm run report:export -- <session_id>
+```
+
+Output defaults to `backend/data/exports/<session_id>/report.html`.
+
+PDF export uses the same HTML/CSS renderer and requires Python Playwright:
+
+```bash
+uv add --project backend playwright
+uv run --project backend python -m playwright install chromium
+npm run report:export -- <session_id> --pdf
+```
+
 ## API Surface
 
 - `GET /api/health`
