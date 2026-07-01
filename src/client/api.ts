@@ -1,4 +1,5 @@
 import type {
+  CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
   SkillBirthInput,
@@ -60,6 +61,9 @@ export const api = {
   createSkillSession(input: SkillBirthInput) {
     return postJson<SkillSessionResponse, SkillBirthInput>("/api/skill-sessions", input);
   },
+  getSkillSession(sessionId: string) {
+    return getJson<SkillSessionResponse>(`/api/skill-sessions/${encodeURIComponent(sessionId)}`);
+  },
   createSynastrySubject(input: SynastryBirthInput) {
     return postJson<SkillSessionResponse, SynastryBirthInput>(
       "/api/skill-synastry-subject",
@@ -68,6 +72,12 @@ export const api = {
   },
   runSkill(input: SkillRunInput) {
     return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input);
+  },
+  startCoreJob(input: SkillRunInput) {
+    return postJson<CoreJobResponse, SkillRunInput>("/api/core-jobs", input);
+  },
+  getCoreJob(jobId: string) {
+    return getJson<CoreJobResponse>(`/api/core-jobs/${encodeURIComponent(jobId)}`);
   },
   recordSkillFeedback(input: SkillFeedbackInput) {
     return postJson<SkillSessionResponse, SkillFeedbackInput>("/api/skill-feedback", input);

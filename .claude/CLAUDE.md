@@ -2,7 +2,8 @@
 
 This project runs the original `vedic-astro-skills` workflow inside a web
 runtime. Version 1 must preserve the original skill behavior as closely as
-possible.
+possible. The repo-local `.claude/skills` directory is the runtime source of
+truth; do not depend on a sibling checkout for normal app behavior.
 
 Rules:
 

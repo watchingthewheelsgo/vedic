@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import SkillBirthInput, SkillRunInput, SkillSessionResponse, SynastryBirthInput
@@ -27,8 +28,30 @@ class SkillRuntime:
 
     async def create_reader_session(self, input_data: SkillBirthInput) -> SkillSessionResponse:
         session_id = self.workspace.create_session()
+        started = datetime.now(timezone.utc)
         calculation = self.calculator.calculate(input_data)
+        finished = datetime.now(timezone.utc)
         self.workspace.write_artifact(session_id, "structured_data.md", calculation.structured_data)
+        self.workspace.write_artifact(
+            session_id,
+            "run_metrics.json",
+            json.dumps(
+                {
+                    "sessionId": session_id,
+                    "status": "calculator_complete",
+                    "calculator": {
+                        "startedAt": started.isoformat(),
+                        "finishedAt": finished.isoformat(),
+                        "durationSeconds": round((finished - started).total_seconds(), 3),
+                    },
+                    "waves": [],
+                    "nodes": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
 
         chat_message = (
             "读盘基础数据已生成。\n\n"
@@ -41,6 +64,29 @@ class SkillRuntime:
             chat_message=chat_message,
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="structured_data.md",
+        )
+
+    def load_session(self, session_id: str) -> SkillSessionResponse:
+        artifacts = self.workspace.read_artifacts(session_id)
+        paths = {artifact.path for artifact in artifacts}
+        if "appendix.md" in paths and "run_metrics.json" in paths:
+            stage = "core_complete"
+            active = "run_metrics.json"
+            message = "已载入完整 core 报告和运行耗时统计。"
+        elif "structured_data.md" in paths:
+            stage = "reader_ready"
+            active = "structured_data.md"
+            message = "已载入 structured_data.md。"
+        else:
+            stage = "reader_ready"
+            active = artifacts[0].path if artifacts else None
+            message = "已载入 session。"
+        return SkillSessionResponse(
+            session_id=session_id,
+            stage=stage,
+            chat_message=message,
+            artifacts=artifacts,
+            active_artifact=active,
         )
 
     async def create_synastry_subject(
@@ -123,53 +169,95 @@ class SkillRuntime:
         )
 
     async def _run_core(self, input_data: SkillRunInput) -> SkillSessionResponse:
-        batches = self._core_batches(input_data.user_message)
-        existing_paths = {artifact.path for artifact in self.workspace.read_artifacts(input_data.session_id)}
+        session_dir = self.workspace.require_session_dir(input_data.session_id)
+        batches = self.core_batches(input_data.user_message)
+        existing_paths = self._session_paths(session_dir)
         batch = next(
             (
                 item
                 for item in batches
-                if not set(self._batch_files(item)).issubset(existing_paths)
+                if not set(self.core_batch_files(item)).issubset(existing_paths)
             ),
             None,
         )
         if batch is None:
-            artifacts = self.workspace.read_artifacts(input_data.session_id)
-            return SkillSessionResponse(
+            return self.core_progress_response(
                 session_id=input_data.session_id,
                 stage="core_complete",
                 chat_message="vedic-core 已完成。可继续运行 vedic-career、vedic-love，或进行追问。",
-                artifacts=artifacts,
-                active_artifact=self._preferred_artifact(input_data.skill, artifacts),
             )
 
-        artifacts_for_prompt = self._artifacts_for_skill(
-            input_data.skill,
-            self.workspace.read_artifacts(input_data.session_id),
+        return await self.run_core_batch(input_data, batch, batches=batches)
+
+    def core_batches(self, user_message: str) -> list[dict[str, object]]:
+        return self._core_batches(user_message)
+
+    def core_batch_files(self, batch: dict[str, object]) -> list[str]:
+        return self._batch_files(batch)
+
+    def core_batch_complete(self, session_id: str, batch: dict[str, object]) -> bool:
+        session_dir = self.workspace.require_session_dir(session_id)
+        existing_paths = self._session_paths(session_dir)
+        return set(self.core_batch_files(batch)).issubset(existing_paths)
+
+    def core_progress_response(
+        self,
+        session_id: str,
+        chat_message: str,
+        *,
+        stage: str = "core_in_progress",
+        active_artifact: str | None = None,
+    ) -> SkillSessionResponse:
+        artifacts = self.workspace.read_artifacts(session_id)
+        return SkillSessionResponse(
+            session_id=session_id,
+            stage=stage,
+            chat_message=chat_message,
+            artifacts=artifacts,
+            active_artifact=active_artifact or self._preferred_artifact("vedic-core", artifacts),
         )
-        prompt = self._artifact_prompt(str(batch["prompt"]), artifacts_for_prompt)
-        result = await self.agent_runtime.run_skill_prompt_task(
+
+    async def run_core_batch(
+        self,
+        input_data: SkillRunInput,
+        batch: dict[str, object],
+        *,
+        batches: list[dict[str, object]] | None = None,
+    ) -> SkillSessionResponse:
+        session_dir = self.workspace.require_session_dir(input_data.session_id)
+        batches = batches or self.core_batches(input_data.user_message)
+        expected = set(self.core_batch_files(batch))
+        if expected.issubset(self._session_paths(session_dir)):
+            self._compose_core_outputs(session_dir)
+            artifacts = self.workspace.read_artifacts(input_data.session_id)
+            return SkillSessionResponse(
+                session_id=input_data.session_id,
+                stage="core_in_progress",
+                chat_message=f"{self._chat_message_for_batch(batch, '')}\n\n该批次已存在，已跳过。",
+                artifacts=artifacts,
+                active_artifact=self._active_artifact_for_batch(batch, artifacts),
+            )
+
+        result = await self.agent_runtime.run_skill_task(
             input_data.skill,
-            prompt,
+            str(batch["prompt"]),
+            cwd=session_dir,
             skills=[input_data.skill],
             max_turns=self._max_turns_for(input_data.skill),
         )
-        parsed = self._parse_artifact_response(result.raw_text)
-        expected = set(self._batch_files(batch))
-        for artifact in parsed["artifacts"]:
-            path = str(artifact["path"])
-            if path not in expected:
-                raise ValueError(f"vedic-core returned unexpected artifact: {path}")
-            self.workspace.write_artifact(
-                input_data.session_id,
-                path,
-                str(artifact["content"]),
+        missing = [path for path in expected if not (session_dir / path).exists()]
+        if missing:
+            raise ValueError(
+                "vedic-core did not create expected artifact(s): "
+                + ", ".join(missing)
+                + f"\nAgent output:\n{result.raw_text[:2000]}"
             )
 
+        self._compose_core_outputs(session_dir)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
-        completed_paths = {artifact.path for artifact in artifacts}
+        completed_paths = self._session_paths(session_dir)
         core_complete = all(
-            set(self._batch_files(item)).issubset(completed_paths) for item in batches
+            set(self.core_batch_files(item)).issubset(completed_paths) for item in batches
         )
         next_message = (
             "vedic-core 全部批次已完成。"
@@ -179,9 +267,9 @@ class SkillRuntime:
         return SkillSessionResponse(
             session_id=input_data.session_id,
             stage="core_complete" if core_complete else "core_in_progress",
-            chat_message=f"{parsed['chatMessage']}\n\n{next_message}",
+            chat_message=f"{self._chat_message_for_batch(batch, result.raw_text)}\n\n{next_message}",
             artifacts=artifacts,
-            active_artifact=self._batch_files(batch)[0],
+            active_artifact=self._active_artifact_for_batch(batch, artifacts),
         )
 
     async def record_reader_feedback(
@@ -259,92 +347,257 @@ Rules:
 
     def _core_batches(self, user_message: str) -> list[dict[str, object]]:
         user_line = user_message or "开始分析"
-        return [
-            {
-                "files": ["p1_overview.md"],
-                "prompt": self._core_batch_prompt(
-                    "P1 身份总览",
-                    ["p1_overview.md"],
-                    "Run vedic-core Step 0 and P1 only. Use structured_data.md. Do not use user_context.md in this batch.",
-                    user_line,
-                ),
-            },
+        planets = [
+            ("sun", "Sun", "太阳"),
+            ("moon", "Moon", "月亮"),
+            ("mars", "Mars", "火星"),
+            ("mercury", "Mercury", "水星"),
+            ("jupiter", "Jupiter", "木星"),
+            ("venus", "Venus", "金星"),
+            ("saturn", "Saturn", "土星"),
+            ("rahu", "Rahu", "罗睺"),
+            ("ketu", "Ketu", "计都"),
+        ]
+        p2_node_ids = [f"p2_{slug}" for slug, _, _ in planets]
+        d9_node_ids = [f"p3a_d9_{slug}" for slug, _, _ in planets]
+        divisional_node_ids = ["p3b_d10", "p3b_d4", "p3b_d5"]
+        p3_done = [*d9_node_ids, *divisional_node_ids]
+        house_node_ids = [f"p4_house_{number:02d}" for number in range(1, 13)]
+        life_node_ids = [f"p5_block_{number:02d}" for number in range(1, 11)]
+
+        batches: list[dict[str, object]] = [
             self._core_batch(
-                "P2A 行星审计 Sun/Moon",
-                "p2a_planets.md",
-                "Run the original Step 1 Group 1 only: Sun and Moon. Include the Yoga pre-scan at the beginning as specified by vedic-core. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                "p1",
+                "P1 身份总览",
+                "p1_overview.md",
+                "Run vedic-core Step 0 and P1 only. Use structured_data.md. Do not use user_context.md in this batch.",
                 user_line,
             ),
             self._core_batch(
-                "P2B 行星审计 Mars/Mercury",
-                "p2b_planets.md",
-                "Run the original Step 1 Group 2 only: Mars and Mercury. Preserve the blind-audit rule: do not use user_context.md in this batch.",
+                "p2_yoga",
+                "P2 Yoga/NBRY 预扫描",
+                ".runtime/p2/yoga.md",
+                "Run only the original Step 1 Yoga pre-scan before planet audit. Read structured_data.md and resources/yogas.md. Check every listed Yoga/NBRY condition. Write the content that belongs at the top of p2a_planets.md: the opening framework note plus 已确认格局 / 待验证格局 / 落陷星NBRY状态. Do not audit Sun or Moon in this batch.",
                 user_line,
-            ),
-            self._core_batch(
-                "P2C 行星审计 Jupiter/Venus",
-                "p2c_planets.md",
-                "Run the original Step 1 Group 3 only: Jupiter and Venus. Preserve the blind-audit rule: do not use user_context.md in this batch.",
-                user_line,
-            ),
-            self._core_batch(
-                "P2D 行星审计 Saturn/Rahu/Ketu",
-                "p2d_planets.md",
-                "Run the original Step 1 Group 4 only: Saturn, Rahu, and Ketu. Preserve the blind-audit rule: do not use user_context.md in this batch.",
-                user_line,
-            ),
-            self._core_batch(
-                "P3A D9 逐星深度审计",
-                "p3a_d9.md",
-                "Run the original Step 2.1 D9 audit only. Use completed p2a-p2d artifacts and structured_data.md. Preserve the blind-audit rule: do not use user_context.md in this batch.",
-                user_line,
-            ),
-            self._core_batch(
-                "P3B D10/D4/D5 分盘交叉",
-                "p3b_divisional.md",
-                "Run the original Step 2.2-2.4 D10/D4/D5 overview only. Use structured_data.md and completed P2/P3A artifacts.",
-                user_line,
-            ),
-            self._core_batch(
-                "P4A 宫位诊断 1-6宫",
-                "p4a_houses.md",
-                "Run the original Step 3 house diagnosis for houses 1-6 only. Use existing P1-P3 artifacts as prior audit context.",
-                user_line,
-            ),
-            self._core_batch(
-                "P4B 宫位诊断 7-12宫",
-                "p4b_houses.md",
-                "Run the original Step 3 house diagnosis for houses 7-12 only, including the Parivartana scan at the end as required by vedic-core. Use existing P1-P4A artifacts as prior audit context.",
-                user_line,
-            ),
-            self._core_batch(
-                "P5A 十大板块 1-5",
-                "p5a_life.md",
-                "Run the original Step 4 life synthesis blocks 1-5 only. Use existing P1-P4 artifacts and structured_data.md. If user_context.md exists, use it only for the original contextual calibration stage.",
-                user_line,
-            ),
-            self._core_batch(
-                "P5B 十大板块 6-10",
-                "p5b_life.md",
-                "Run the original Step 4 life synthesis blocks 6-10 only. Use existing P1-P4 artifacts and structured_data.md. If user_context.md exists, use it only for the original contextual calibration stage.",
-                user_line,
-            ),
-            self._core_batch(
-                "Step 5 技术附录",
-                "appendix.md",
-                "Run the original Step 5 technical appendix only, including the P1-P12 parameter table, divisional data overview, validation report, and Dasha timeline.",
-                user_line,
+                active="p1_overview.md",
+                progress_message="P2 Yoga/NBRY 预扫描已完成。",
             ),
         ]
 
+        for slug, planet, chinese_name in planets:
+            others = ", ".join(item[1] for item in planets if item[0] != slug)
+            batches.append(
+                self._core_batch(
+                    f"p2_{slug}",
+                    f"P2 {planet} 行星审计",
+                    f".runtime/p2/{slug}.md",
+                    (
+                        f"Run only the original Step 1 P1-P12 planet audit for {planet} "
+                        f"({chinese_name}). Read structured_data.md, resources/p1_p12.md, "
+                        "and .runtime/p2/yoga.md for Yoga/NBRY labels. Preserve the "
+                        "P1-P12 framework, PAC联合判定, SAV读取铁规, 美贴标注, and confidence "
+                        f"rules. Write only the complete {planet} section. Do not audit or "
+                        f"summarize these other planets: {others}."
+                    ),
+                    user_line,
+                    dependencies=["p2_yoga"],
+                    active="p1_overview.md",
+                    progress_message=f"P2 {planet} 审计已完成。",
+                )
+            )
+
+        for slug, planet, chinese_name in planets:
+            batches.append(
+                self._core_batch(
+                    f"p3a_d9_{slug}",
+                    f"P3A D9 {planet} 审计",
+                    f".runtime/p3/d9_{slug}.md",
+                    (
+                        f"Run only the original Step 2.1 D9 audit for {planet} ({chinese_name}). "
+                        "Use structured_data.md and the completed p2a_planets.md, "
+                        "p2b_planets.md, p2c_planets.md, p2d_planets.md artifacts as prior "
+                        "blind-audit context. Preserve the D9三条铁律, 身份继承矩阵, "
+                        "D9 quality/兑现率 logic, and the original markdown style. "
+                        f"Write only the complete D9 section for {planet}; do not audit other planets."
+                    ),
+                    user_line,
+                    dependencies=p2_node_ids,
+                    active="p2a_planets.md",
+                    progress_message=f"P3A D9 {planet} 审计已完成。",
+                )
+            )
+
+        divisional_batches = [
+            (
+                "p3b_d10",
+                "P3B D10 事业概述",
+                ".runtime/p3/d10.md",
+                "Run only original Step 2.2 D10 career overview. Read structured_data.md and completed P2 artifacts. Cover D10 Lagna, strong D10 planets, D10 10th lord position, career direction clues, and confidence. Do not write D4/D5.",
+            ),
+            (
+                "p3b_d4",
+                "P3B D4 财产概述",
+                ".runtime/p3/d4.md",
+                "Run only original Step 2.3 D4 property/comfort overview. Read structured_data.md and completed P2 artifacts. Cover D4 Lagna, D4 4th lord/Venus, D1 4th vs D4 cross-check, and property/vehicle indications. Do not write D10/D5.",
+            ),
+            (
+                "p3b_d5",
+                "P3B D5 权力概述",
+                ".runtime/p3/d5.md",
+                "Run only original Step 2.4 D5 authority/creative power overview. Read structured_data.md and completed P2 artifacts. Cover D5 Sun/Jupiter, authority/influence, and creative potential. Do not write D10/D4.",
+            ),
+        ]
+        for node_id, label, file_name, instruction in divisional_batches:
+            batches.append(
+                self._core_batch(
+                    node_id,
+                    label,
+                    file_name,
+                    instruction,
+                    user_line,
+                    dependencies=p2_node_ids,
+                    active="p2a_planets.md",
+                    progress_message=f"{label} 已完成。",
+                )
+            )
+
+        for number in range(1, 13):
+            batches.append(
+                self._core_batch(
+                    f"p4_house_{number:02d}",
+                    f"P4 第{number}宫诊断",
+                    f".runtime/houses/house_{number:02d}.md",
+                    (
+                        f"Run only the original Step 3 house diagnosis for house {number}. "
+                        "Before writing, read structured_data.md, p2a_planets.md, p2b_planets.md, "
+                        "p2c_planets.md, p2d_planets.md, p3a_d9.md, and p3b_divisional.md. "
+                        "Preserve the four-dimensional house framework: manager/house lord, tenant "
+                        "planets, aspects, SAV hardware, divisional cross-checks, Dasha event "
+                        "association, evidence weighting, and markdown style. Write only this one "
+                        "house section. Do not diagnose other houses and do not run the Parivartana scan."
+                    ),
+                    user_line,
+                    dependencies=p3_done,
+                    active="p3a_d9.md",
+                    progress_message=f"P4 第{number}宫诊断已完成。",
+                )
+            )
+
+        batches.append(
+            self._core_batch(
+                "p4_parivartana",
+                "P4 Parivartana 互溶扫描",
+                ".runtime/houses/parivartana.md",
+                (
+                    "Run only the original Step 3 Parivartana scan required after all 12 house "
+                    "diagnoses. Read structured_data.md, p2a-p2d, p3a/p3b, and all "
+                    ".runtime/houses/house_01.md through .runtime/houses/house_12.md. Include "
+                    "the original exchange-check logic, confirmed/excluded exchange pairs, final "
+                    "house-diagnosis synthesis for houses 7-12, and the Step 3 completion marker. "
+                    "Do not repeat the full 12 house diagnoses."
+                ),
+                user_line,
+                dependencies=house_node_ids,
+                active="p4a_houses.md",
+                progress_message="P4 Parivartana 互溶扫描已完成。",
+            )
+        )
+
+        batches.append(
+            self._core_batch(
+                "dasha_review",
+                "Step 4 Dasha速查与格局激活",
+                ".runtime/dasha_review.md",
+                (
+                    "Run only the original Step 4 prerequisite: Dasha回顾速查表 and Yoga x "
+                    "Dasha x D9 activation validation. Read structured_data.md, completed "
+                    "p2a-p2d artifacts, p3a_d9.md, and p3b_divisional.md. Produce a reusable "
+                    "markdown reference for later life blocks. Do not write any life synthesis blocks."
+                ),
+                user_line,
+                dependencies=p3_done,
+                active="p3a_d9.md",
+                progress_message="Dasha速查与格局激活验证已完成。",
+            )
+        )
+
+        life_blocks = [
+            (1, "人格核心", "Use p1_overview.md, p2 Sun/Moon findings, p3a Sun/Moon D9 settlement, Lagna, Moon, Sun, and AK. Write block 1 only."),
+            (2, "财富潜力", "Use house 2 and house 11 diagnoses, D4 data, p2 money-relevant planet audits, and Dasha review. Write block 2 only."),
+            (3, "事业方向", "Use house 10 diagnosis, D10 data, L10/AmK audits, Yoga activation, and Dasha review. Write block 3 only."),
+            (4, "感情/婚姻", "Use house 7 diagnosis, D9, Venus/Jupiter/DK/UL signals, and Dasha review. Write block 4 only."),
+            (5, "健康提醒", "Use house 1 and house 6 diagnoses, Mars/Saturn audits, Maraka context, and Dasha review. Write block 5 only."),
+            (6, "教育/学习", "Use house 4 and house 5 diagnoses, D5 data, Mercury/Jupiter/Moon signals, and Dasha review. Write block 6 only."),
+            (7, "家庭/居住", "Use house 4 and house 9 diagnoses, D4 data, parental/home indicators, and Dasha review. Write block 7 only."),
+            (8, "社交/声誉", "Use AL data from structured_data.md, house 11 diagnosis, relevant p2/p4 signals, and Dasha review. Write block 8 only."),
+            (9, "灵性/成长", "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only."),
+            (10, "赛道优势地图", "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into supported tracks, business/wealth paths, and timing. Write block 10 only."),
+        ]
+        for number, title, instruction in life_blocks:
+            batches.append(
+                self._core_batch(
+                    f"p5_block_{number:02d}",
+                    f"P5 板块{number} {title}",
+                    f".runtime/life/block_{number:02d}.md",
+                    (
+                        "Run only the original Step 4 life synthesis block requested below. "
+                        "Before writing, read p1_overview.md, p2a-p2d, p3a_d9.md, "
+                        "p3b_divisional.md, p4a_houses.md, p4b_houses.md, and "
+                        ".runtime/dasha_review.md. Follow the Step 4 context rule: you may use "
+                        "confirmed facts only as supporting evidence, never to reverse-infer the "
+                        "chart. No data tables except where the original block explicitly allows it. "
+                        f"{instruction}"
+                    ),
+                    user_line,
+                    dependencies=["p4_parivartana", "dasha_review"],
+                    active="p4b_houses.md",
+                    progress_message=f"P5 板块{number} {title} 已完成。",
+                )
+            )
+
+        batches.append(
+            self._core_batch(
+                "appendix",
+                "Step 5 技术附录",
+                "appendix.md",
+                (
+                    "Run the original Step 5 technical appendix only. Read structured_data.md, "
+                    "p2a-p2d, p3a/p3b, p4a/p4b, p5a/p5b, and .runtime/dasha_review.md. "
+                    "Include the P1-P12 parameter table, divisional data overview, validation "
+                    "report, Dasha timeline, and the Dasha回顾速查表 if available."
+                ),
+                user_line,
+                dependencies=life_node_ids,
+                active="p5a_life.md",
+                progress_message="Step 5 技术附录已完成。",
+            )
+        )
+
+        return batches
+
     def _core_batch(
-        self, batch_name: str, file_name: str, instruction: str, user_message: str
+        self,
+        batch_id: str,
+        batch_name: str,
+        file_name: str | list[str],
+        instruction: str,
+        user_message: str,
+        *,
+        dependencies: list[str] | None = None,
+        active: str | None = None,
+        progress_message: str | None = None,
     ) -> dict[str, object]:
+        files = [file_name] if isinstance(file_name, str) else file_name
         return {
-            "files": [file_name],
+            "id": batch_id,
+            "label": batch_name,
+            "files": files,
+            "dependencies": dependencies or [],
+            "active": active or files[0],
+            "progress_message": progress_message,
             "prompt": self._core_batch_prompt(
                 batch_name,
-                [file_name],
+                files,
                 instruction,
                 user_message,
             ),
@@ -359,7 +612,7 @@ Rules:
 Batch instruction:
 {instruction}
 
-Output exactly these original file names and no others:
+Write exactly these batch file names in the current workspace and no others:
 {file_list}
 
 Rules:
@@ -367,13 +620,132 @@ Rules:
 - Use structured_data.md as the calculation source of truth.
 - Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
 - Each requested file must be complete markdown, not a placeholder and not "see previous".
-- The chat response should only state this batch is complete and list the files generated.
+- If the requested file is under .runtime/, treat it as an internal shard; do not write the public composed files such as p2a_planets.md, p3a_d9.md, p4a_houses.md, p4b_houses.md, p5a_life.md, or p5b_life.md.
+- Do not create, edit, or rename any file outside the exact requested batch file name(s).
+- Do not return JSON for this batch. Write the markdown file directly, then state the batch is complete and list the file generated.
 
 User message:
 {user_message}"""
 
     def _batch_files(self, batch: dict[str, object]) -> list[str]:
         return [str(path) for path in batch["files"]]
+
+    def _session_paths(self, session_dir: Path) -> set[str]:
+        return {
+            path.relative_to(session_dir).as_posix()
+            for path in session_dir.rglob("*")
+            if path.is_file()
+        }
+
+    def _compose_core_outputs(self, session_dir: Path) -> None:
+        p2a_parts = [
+            session_dir / ".runtime" / "p2" / "yoga.md",
+            session_dir / ".runtime" / "p2" / "sun.md",
+            session_dir / ".runtime" / "p2" / "moon.md",
+        ]
+        self._compose_parts(session_dir / "p2a_planets.md", p2a_parts)
+
+        p2b_parts = [
+            session_dir / ".runtime" / "p2" / "mars.md",
+            session_dir / ".runtime" / "p2" / "mercury.md",
+        ]
+        self._compose_parts(session_dir / "p2b_planets.md", p2b_parts)
+
+        p2c_parts = [
+            session_dir / ".runtime" / "p2" / "jupiter.md",
+            session_dir / ".runtime" / "p2" / "venus.md",
+        ]
+        self._compose_parts(session_dir / "p2c_planets.md", p2c_parts)
+
+        p2d_parts = [
+            session_dir / ".runtime" / "p2" / "saturn.md",
+            session_dir / ".runtime" / "p2" / "rahu.md",
+            session_dir / ".runtime" / "p2" / "ketu.md",
+        ]
+        self._compose_parts(session_dir / "p2d_planets.md", p2d_parts)
+
+        p3a_parts = [
+            session_dir / ".runtime" / "p3" / f"d9_{planet}.md"
+            for planet in [
+                "sun",
+                "moon",
+                "mars",
+                "mercury",
+                "jupiter",
+                "venus",
+                "saturn",
+                "rahu",
+                "ketu",
+            ]
+        ]
+        self._compose_parts(session_dir / "p3a_d9.md", p3a_parts)
+
+        p3b_parts = [
+            session_dir / ".runtime" / "p3" / "d10.md",
+            session_dir / ".runtime" / "p3" / "d4.md",
+            session_dir / ".runtime" / "p3" / "d5.md",
+        ]
+        self._compose_parts(session_dir / "p3b_divisional.md", p3b_parts)
+
+        p4a_parts = [
+            session_dir / ".runtime" / "houses" / f"house_{number:02d}.md"
+            for number in range(1, 7)
+        ]
+        self._compose_parts(session_dir / "p4a_houses.md", p4a_parts)
+
+        p4b_parts = [
+            *[
+                session_dir / ".runtime" / "houses" / f"house_{number:02d}.md"
+                for number in range(7, 13)
+            ],
+            session_dir / ".runtime" / "houses" / "parivartana.md",
+        ]
+        self._compose_parts(session_dir / "p4b_houses.md", p4b_parts)
+
+        p5a_parts = [
+            session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
+            for number in range(1, 6)
+        ]
+        self._compose_parts(session_dir / "p5a_life.md", p5a_parts)
+
+        p5b_parts = [
+            session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
+            for number in range(6, 11)
+        ]
+        self._compose_parts(session_dir / "p5b_life.md", p5b_parts)
+
+    def _compose_parts(self, target: Path, parts: list[Path]) -> None:
+        if all(path.exists() for path in parts):
+            target.write_text(
+                "\n\n".join(path.read_text(encoding="utf-8").strip() for path in parts) + "\n",
+                encoding="utf-8",
+            )
+
+    def _active_artifact_for_batch(self, batch: dict[str, object], artifacts: list[object]) -> str:
+        paths = {str(getattr(artifact, "path")) for artifact in artifacts}
+        active = str(batch.get("active") or self._batch_files(batch)[0])
+        if active in paths:
+            return active
+        for fallback in [
+            "p5a_life.md",
+            "p5b_life.md",
+            "p4b_houses.md",
+            "p4a_houses.md",
+            "p3a_d9.md",
+            "p2a_planets.md",
+            "p1_overview.md",
+            "reader_prevalidation.md",
+            "structured_data.md",
+        ]:
+            if fallback in paths:
+                return fallback
+        return active
+
+    def _chat_message_for_batch(self, batch: dict[str, object], raw_text: str) -> str:
+        progress = batch.get("progress_message")
+        if progress:
+            return str(progress)
+        return raw_text.strip()
 
     def _artifacts_for_skill(self, skill: str, artifacts: list[object]) -> dict[str, str]:
         selected: dict[str, str] = {}
@@ -498,7 +870,9 @@ User message:
     def _max_turns_for(self, skill: str) -> int:
         return {
             "vedic-reader": 6,
-            "vedic-core": 10,
+            # vedic-core batches still need several tool turns to load skill
+            # resources, inspect prior artifacts, and write the target report.
+            "vedic-core": 40,
             "vedic-career": 8,
             "vedic-love": 8,
             "vedic-rectifier": 6,

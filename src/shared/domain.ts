@@ -71,6 +71,53 @@ export type SkillRunInput = {
   userMessage?: string;
 };
 
+export type CoreJobStatus = "queued" | "running" | "completed" | "failed";
+export type CoreJobNodeStatus = "pending" | "running" | "completed" | "skipped" | "failed";
+
+export type CoreJobNode = {
+  id: string;
+  label: string;
+  files: string[];
+  dependencies: string[];
+  wave: number;
+  status: CoreJobNodeStatus;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  durationSeconds?: number | null;
+  error?: string | null;
+};
+
+export type CoreJobProgress = {
+  total: number;
+  completed: number;
+  running: number;
+  failed: number;
+  percent: number;
+};
+
+export type CoreJobWave = {
+  wave: number;
+  total: number;
+  completed: number;
+  running: number;
+  failed: number;
+  durationSeconds?: number | null;
+};
+
+export type CoreJobResponse = {
+  jobId: string;
+  sessionId: string;
+  status: CoreJobStatus;
+  message: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  durationSeconds?: number | null;
+  progress: CoreJobProgress;
+  waves: CoreJobWave[];
+  nodes: CoreJobNode[];
+  session?: SkillSessionResponse | null;
+};
+
 export type SkillFeedbackInput = {
   sessionId: string;
   feedbackMarkdown: string;

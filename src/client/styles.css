@@ -162,6 +162,252 @@ button:disabled {
   gap: 8px;
 }
 
+.core-job {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.core-job-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.core-job-header span,
+.core-progress-meta {
+  color: #667481;
+  font-size: 12px;
+}
+
+.core-job-header strong {
+  display: block;
+  margin-top: 3px;
+  color: #20313f;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.core-job-header b {
+  color: #0f3f3d;
+  font-size: 18px;
+}
+
+.core-progress-track {
+  height: 7px;
+  background: #e6edf2;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.core-progress-track span {
+  display: block;
+  height: 100%;
+  background: #1f5f5b;
+}
+
+.core-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.timing-strip {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.timing-strip > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  padding: 8px;
+  background: #f6f9fb;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.timing-strip span {
+  color: #667481;
+  font-size: 11px;
+}
+
+.timing-strip strong {
+  grid-column: 1 / -1;
+  color: #1e2e3a;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.core-wave-list {
+  display: grid;
+  gap: 10px;
+}
+
+.core-wave {
+  padding: 8px;
+  background: #fbfcfd;
+  border: 1px solid #e5ebf1;
+  border-radius: 6px;
+}
+
+.core-wave header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  color: #2c3c49;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.core-wave header small {
+  color: #667481;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.core-node-list {
+  display: grid;
+  gap: 5px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.core-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px 58px;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 5px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.core-node span {
+  min-width: 0;
+  overflow: hidden;
+  color: #354453;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.core-node em {
+  justify-self: end;
+  color: #667481;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.core-node small {
+  justify-self: end;
+  min-width: 48px;
+  padding: 2px 6px;
+  color: #596875;
+  background: #edf2f7;
+  border-radius: 999px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.core-node.running small {
+  color: #19415f;
+  background: #d7ecfb;
+}
+
+.core-node.completed small,
+.core-node.skipped small {
+  color: #155147;
+  background: #d9f0e9;
+}
+
+.core-node.failed small {
+  color: #7f1d1d;
+  background: #ffe4e6;
+}
+
+.metrics-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.metrics-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #667481;
+  font-size: 12px;
+}
+
+.metrics-title strong {
+  color: #155147;
+  font-size: 12px;
+}
+
+.metrics-wave-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metrics-wave-grid > div,
+.slow-node-list {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  background: #fbfcfd;
+  border: 1px solid #e5ebf1;
+  border-radius: 6px;
+}
+
+.metrics-wave-grid span,
+.slow-node-list > span {
+  color: #667481;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.metrics-wave-grid strong {
+  color: #20313f;
+  font-size: 14px;
+}
+
+.metrics-wave-grid small,
+.slow-node-list small {
+  color: #667481;
+  font-size: 11px;
+}
+
+.slow-node-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.slow-node-list strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #354453;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .error-banner {
   padding: 12px;
   color: #7f1d1d;
@@ -369,7 +615,9 @@ button:disabled {
   .field-grid,
   .action-grid,
   .status-bar,
-  .place-controls {
+  .place-controls,
+  .timing-strip,
+  .metrics-wave-grid {
     grid-template-columns: 1fr;
   }
 }

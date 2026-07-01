@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     """Runtime configuration for the skill-aligned backend.
 
     This backend owns HTTP, workspace state, and agent orchestration. The
-    external `vedic-astro-skills` checkout remains the source of truth for
-    astrology calculation and method documents.
+    vendored `.claude/skills` directory is the source of truth for astrology
+    calculation scripts, prompts, resources, and synastry helpers.
     """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str = Field(default="", alias="DEEPSEEK_API_KEY")
     agent_effort: str = Field(default="max", alias="AGENT_EFFORT")
     agent_max_turns: int = Field(default=8, alias="AGENT_MAX_TURNS")
-    agent_timeout_ms: int = Field(default=180_000, alias="AGENT_TIMEOUT_MS")
+    agent_timeout_ms: int = Field(default=420_000, alias="AGENT_TIMEOUT_MS")
 
     @property
     def project_root(self) -> Path:
@@ -60,19 +60,13 @@ class Settings(BaseSettings):
     def calculator_root(self) -> Path:
         if self.vedic_calculator_root:
             return Path(self.vedic_calculator_root).expanduser().resolve()
-        return (
-            self.tapvox_root
-            / "vedic-astro-skills"
-            / "codex"
-            / "skills"
-            / "vedic-calculator"
-        )
+        return self.skills_root / "vedic-calculator"
 
     @property
     def skills_root(self) -> Path:
         if self.vedic_astro_skills_root:
             return Path(self.vedic_astro_skills_root).expanduser().resolve()
-        return self.tapvox_root / "vedic-astro-skills" / "codex" / "skills"
+        return self.project_root / ".claude" / "skills"
 
     @property
     def calculator_scripts_dir(self) -> Path:
@@ -83,15 +77,34 @@ class Settings(BaseSettings):
         return self.calculator_root / "venv"
 
     def calculator_site_packages(self) -> Path:
+        runtime_site_packages = self.runtime_site_packages()
+        if (runtime_site_packages / "jhora").exists():
+            return runtime_site_packages
+
         lib_dir = self.calculator_venv / "lib"
         if not lib_dir.exists():
-            raise RuntimeError(f"Calculator venv not found: {self.calculator_venv}")
+            raise RuntimeError(
+                "Calculator dependencies not found. Run "
+                "`uv run --project backend python "
+                ".claude/skills/vedic-calculator/scripts/setup_env.py "
+                "--target backend/.venv` from the project root."
+            )
         for child in lib_dir.iterdir():
             if child.name.startswith("python"):
                 candidate = child / "site-packages"
-                if candidate.exists():
+                if candidate.exists() and (candidate / "jhora").exists():
                     return candidate
-        raise RuntimeError(f"Calculator site-packages not found under {lib_dir}")
+        raise RuntimeError(f"Calculator site-packages with PyJHora not found under {lib_dir}")
+
+    def runtime_site_packages(self) -> Path:
+        """Return the site-packages directory for the active backend interpreter."""
+
+        import sysconfig
+
+        purelib = sysconfig.get_paths().get("purelib")
+        if not purelib:
+            raise RuntimeError("Cannot resolve backend runtime site-packages")
+        return Path(purelib).resolve()
 
     def geonames_path(self) -> Path:
         if self.vedic_geonames_path:
@@ -104,7 +117,7 @@ class Settings(BaseSettings):
         raise RuntimeError("Cannot find PyJHora GeoNames CSV. Set VEDIC_GEONAMES_PATH.")
 
     def configure_calculator_imports(self) -> None:
-        """Expose the external calculator implementation to this backend process."""
+        """Expose the vendored calculator implementation to this backend process."""
 
         for path in [self.calculator_scripts_dir, self.calculator_site_packages()]:
             value = str(path)

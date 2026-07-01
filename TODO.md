@@ -1,50 +1,110 @@
-# TODO
+# Vedic Runtime TODO
 
-## Resume Point: `vedic-core` Runtime Reliability
+This list is based on the current repo state and focuses on making the product
+better at using the vendored skills, scheduling long runs, showing progress, and
+producing reliable user-facing reports.
 
-Current status:
+## Landed in this pass
 
-- `vedic-reader` has been verified end-to-end with DeepSeek Claude-compatible Agent SDK.
-- `vedic-synastry` preflight has been verified: B chart generation, validation script, `synastry_data.md`, and `reports/00_signal_triage.md`.
-- `vedic-core` P1 has produced `p1_overview.md` successfully.
-- `vedic-core` P2A (`p2a_planets.md`) still timed out with HTTP 500 and empty `detail`.
-- The current implementation now advances `vedic-core` one original file per call, but P2A still needs prompt/context reduction before it is reliable.
+- Use repo-local `.claude/skills` as the default runtime source instead of a
+  sibling `../vedic-astro-skills` checkout.
+- Add missing vendored `agents/openai.yaml` metadata for calculator, reader,
+  core, career, love, and rectifier skills.
+- Make `vedic-calculator/scripts/setup_env.py` work with `uv` venvs that do not
+  include a `bin/pip` executable.
+- Add core job timing telemetry: job duration, wave duration, node duration, and
+  a persisted `run_metrics.json` artifact.
+- Show timing data in the UI while the full core report is running.
 
-Next steps:
+## P0: correctness and reproducibility
 
-1. Reduce `vedic-core` P2A prompt/context size.
-   - Only pass `structured_data.md` plus `p1_overview.md` for P2A.
-   - Do not pass `reader_prevalidation.md` or `user_context.md` to P2A.
-   - Consider extracting only the needed structured data sections for Sun/Moon/Yoga pre-scan.
+- Add an automated smoke test script for the real workflow:
+  `create session -> run core job -> poll until complete -> verify public files`.
+  It should record calculator time, each core wave time, each node time, and total
+  report time.
+- Add a non-LLM DAG test for `vedic-core` batches:
+  verify unique IDs, valid dependencies, expected wave grouping, and expected
+  public artifact composition.
+- Add a local skills integrity check:
+  verify each runtime skill has `SKILL.md`, required `resources/`, required
+  `scripts/`, and `agents/openai.yaml` where expected.
+- Decide how calculator dependencies are reproduced in fresh environments.
+  Current setup uses the vendored `setup_env.py` after `uv sync`; a cleaner
+  option is a first-class backend command such as `npm run backend:calculator-sync`.
+- Persist job state outside process memory. A uvicorn reload or backend restart
+  currently loses in-flight core job state.
 
-2. Re-run P2A until it reliably creates `p2a_planets.md`.
-   - Verify response stage is `core_in_progress`.
-   - Verify active artifact is `p2a_planets.md`.
-   - Verify markdown is not a placeholder.
+## P0: skill execution quality
 
-3. Continue one-file validation for the rest of original `vedic-core` outputs:
-   - `p2b_planets.md`
-   - `p2c_planets.md`
-   - `p2d_planets.md`
-   - `p3a_d9.md`
-   - `p3b_divisional.md`
-   - `p4a_houses.md`
-   - `p4b_houses.md`
-   - `p5a_life.md`
-   - `p5b_life.md`
-   - `appendix.md`
+- Validate every generated public report file for non-placeholder content,
+  required headings, and minimum evidence density before marking a node complete.
+- Add output-specific QA rules for composed files:
+  `p2a-p2d`, `p3a/p3b`, `p4a/p4b`, `p5a/p5b`, and `appendix`.
+- Store the exact prompt sent to Claude Agent SDK for each node under an internal
+  `.runtime/prompts/` folder for debugging and reproducibility.
+- Capture LLM result metadata per node: SDK session ID, duration, cost if
+  available, stop reason, model, and retry count.
+- Compare vendored skills against their upstream source intentionally, with a
+  documented update process instead of ad hoc copying.
 
-4. Improve UI progress for repeated `vedic-core` runs.
-   - Show which core artifact is next.
-   - Keep the current button label as a step action, not a one-click full report promise.
+## P1: scheduler and speed
 
-5. After core is stable, smoke-test `vedic-career`, `vedic-love`, and `vedic-rectifier`.
+- Make max concurrency configurable per environment and per skill. `10` is a
+  useful local default but may be too high for provider rate limits.
+- Add bounded retries for transient LLM failures, with node-level retry history
+  shown in `run_metrics.json`.
+- Add cancellation and pause/resume endpoints for long core jobs.
+- Add ETA estimation from completed node timings and wave state.
+- Skip or reuse validated node outputs when rerunning a report unless the input
+  or prompt version changed.
+- Consider model routing:
+  smaller model for narrow audit shards, stronger model for synthesis blocks and
+  appendix validation.
 
-Useful commands:
+## P1: product interaction
 
-```bash
-npm run check
-npm run backend:check
-npm run build
-curl -s http://127.0.0.1:8787/api/health
-```
+- Replace raw skill names in primary controls with ordinary-user copy while
+  preserving the exact skill workflow underneath.
+- Render markdown as formatted report pages instead of only `<pre>` blocks.
+- Add a dedicated report timeline:
+  calculator, reader validation, core waves, final public files, optional
+  career/love/synastry extensions.
+- Add a public/private artifact filter. Users should see public report files by
+  default; internal `.runtime` and diagnostics should stay hidden unless debug
+  mode is enabled.
+- Add a report export path: markdown bundle first, then PDF when the report
+  format stabilizes.
+
+## P1: customization and extensibility
+
+- Introduce a skill registry instead of hard-coded skill action arrays in the
+  UI and scattered prompt branches in `SkillRuntime`.
+- Add typed skill descriptors:
+  inputs, prerequisite artifacts, output artifacts, allowed tools, max turns,
+  phase labels, and user-facing labels.
+- Add user profile/context controls that write explicit, traceable context files
+  instead of silently changing the astrology method.
+- Support per-run intent:
+  full report, focused question, relationship/synastry, career, love, rectifier.
+
+## P2: architecture
+
+- Split `SkillRuntime` into smaller services:
+  `CorePlanBuilder`, `ArtifactComposer`, `SkillPromptBuilder`,
+  `SkillResponseParser`, and `SkillRunService`.
+- Move session artifacts and job metadata behind repository interfaces so the
+  app can later switch from filesystem-only storage to database/object storage.
+- Add OpenAPI/schema checks so frontend and backend types cannot drift.
+- Add structured backend logging with request IDs, session IDs, job IDs, node IDs,
+  and elapsed time.
+- Add test fixtures for a tiny fake Agent SDK runtime so scheduler behavior can
+  be tested without spending LLM time.
+
+## P2: output polish
+
+- Add a final report index page that links all public markdown files and includes
+  generation time, input precision, and calculation metadata.
+- Add a concise human summary generated only after all original skill files pass
+  validation, clearly marked as a product layer.
+- Improve Chinese copy in chat progress so ordinary users understand what is
+  happening without needing to know `p2a`, `D9`, or internal skill names.

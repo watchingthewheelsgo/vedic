@@ -2,7 +2,11 @@ node_modules
 dist
 .venv
 backend/.venv
+.claude/skills/**/venv
 backend/data
+.playwright-cli/
+output/
+tmp/
 __pycache__
 *.pyc
 *.egg-info/

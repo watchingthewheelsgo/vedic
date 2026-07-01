@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.agents.claude_runtime import ClaudeRuntime
+from app.services.core_job_runtime import CoreJobRuntime
 from app.services.place_service import PlaceService
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
@@ -24,6 +25,7 @@ class AppContainer:
             workspace=self.skill_workspace,
             agent_runtime=self.agent_runtime,
         )
+        self.core_job_runtime = CoreJobRuntime(skill_runtime=self.skill_runtime)
 
 
 @lru_cache(maxsize=1)

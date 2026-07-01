@@ -128,18 +128,39 @@ def create_venv(python_cmd, venv_dir):
     return run_cmd(cmd, "创建 venv")
 
 
+def ensure_pip(venv_dir):
+    """Ensure pip is importable in the target venv.
+
+    uv-managed venvs do not always include a pip executable, so use
+    `python -m pip` for installs after bootstrapping pip when needed.
+    """
+    py = get_venv_python(venv_dir)
+    result = subprocess.run([py, "-m", "pip", "--version"], capture_output=True, text=True)
+    if result.returncode == 0:
+        return True
+
+    log("未找到 pip，使用 ensurepip 初始化")
+    if not run_cmd([py, "-m", "ensurepip", "--upgrade"], "初始化 pip"):
+        return False
+
+    result = subprocess.run([py, "-m", "pip", "--version"], capture_output=True, text=True)
+    return result.returncode == 0
+
+
 def install_packages(venv_dir):
     """按正确顺序安装依赖"""
-    pip = get_venv_pip(venv_dir)
-    
-    # 先升级 pip
     py = get_venv_python(venv_dir)
+
+    if not ensure_pip(venv_dir):
+        return False
+
+    # 先升级 pip
     run_cmd([py, "-m", "pip", "install", "--upgrade", "pip"], "升级 pip")
 
     for pkg_name, version_spec, extra_args in REQUIRED_PACKAGES:
         pkg_str = f"{pkg_name}{version_spec}"
         log(f"安装 {pkg_str} {' '.join(extra_args)}")
-        cmd = [pip, "install", pkg_str] + extra_args
+        cmd = [py, "-m", "pip", "install", pkg_str] + extra_args
         if not run_cmd(cmd, f"安装 {pkg_name}"):
             return False
     

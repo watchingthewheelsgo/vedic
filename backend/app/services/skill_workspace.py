@@ -47,7 +47,9 @@ class SkillWorkspace:
         files = [
             path
             for path in session_dir.rglob("*")
-            if path.is_file() and path.suffix.lower() in [".md", ".txt", ".json"]
+            if path.is_file()
+            and path.suffix.lower() in [".md", ".txt", ".json"]
+            and not any(part.startswith(".") for part in path.relative_to(session_dir).parts)
         ]
         files.sort(key=lambda path: (self._artifact_rank(path.name), path.name))
         return [self._artifact_from_path(session_dir, path) for path in files]
@@ -86,5 +88,6 @@ class SkillWorkspace:
             "p5a_life.md",
             "p5b_life.md",
             "appendix.md",
+            "run_metrics.json",
         ]
         return order.index(name) if name in order else 999

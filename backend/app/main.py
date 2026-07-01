@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.container import get_container
 from app.schemas import (
+    CoreJobResponse,
     PlaceSearchResponse,
     SkillBirthInput,
     SkillFeedbackInput,
@@ -79,6 +80,18 @@ async def create_skill_session(input_data: SkillBirthInput) -> SkillSessionRespo
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/api/skill-sessions/{session_id}", response_model=SkillSessionResponse)
+async def get_skill_session(session_id: str) -> SkillSessionResponse:
+    try:
+        return get_container().skill_runtime.load_session(session_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/api/skill-synastry-subject", response_model=SkillSessionResponse)
 async def create_synastry_subject(input_data: SynastryBirthInput) -> SkillSessionResponse:
     try:
@@ -110,6 +123,28 @@ async def run_skill(input_data: SkillRunInput) -> SkillSessionResponse:
                 "请重试；若反复超时，请减少该批次的上下文或调大 AGENT_TIMEOUT_MS。"
             ),
         ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/core-jobs", response_model=CoreJobResponse)
+async def start_core_job(input_data: SkillRunInput) -> CoreJobResponse:
+    try:
+        return await get_container().core_job_runtime.start(input_data)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/core-jobs/{job_id}", response_model=CoreJobResponse)
+async def get_core_job(job_id: str) -> CoreJobResponse:
+    try:
+        return await get_container().core_job_runtime.get(job_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

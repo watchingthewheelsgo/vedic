@@ -92,6 +92,54 @@ class SkillRunInput(ApiModel):
     user_message: str = Field(default="", alias="userMessage", max_length=4000)
 
 
+CoreJobStatus = Literal["queued", "running", "completed", "failed"]
+CoreJobNodeStatus = Literal["pending", "running", "completed", "skipped", "failed"]
+
+
+class CoreJobNode(ApiModel):
+    id: str
+    label: str
+    files: list[str]
+    dependencies: list[str] = Field(default_factory=list)
+    wave: int
+    status: CoreJobNodeStatus
+    started_at: str | None = Field(default=None, alias="startedAt")
+    finished_at: str | None = Field(default=None, alias="finishedAt")
+    duration_seconds: float | None = Field(default=None, alias="durationSeconds")
+    error: str | None = None
+
+
+class CoreJobProgress(ApiModel):
+    total: int
+    completed: int
+    running: int
+    failed: int
+    percent: int
+
+
+class CoreJobWave(ApiModel):
+    wave: int
+    total: int
+    completed: int
+    running: int
+    failed: int
+    duration_seconds: float | None = Field(default=None, alias="durationSeconds")
+
+
+class CoreJobResponse(ApiModel):
+    job_id: str = Field(alias="jobId")
+    session_id: str = Field(alias="sessionId")
+    status: CoreJobStatus
+    message: str
+    started_at: str | None = Field(default=None, alias="startedAt")
+    finished_at: str | None = Field(default=None, alias="finishedAt")
+    duration_seconds: float | None = Field(default=None, alias="durationSeconds")
+    progress: CoreJobProgress
+    waves: list[CoreJobWave] = Field(default_factory=list)
+    nodes: list[CoreJobNode]
+    session: SkillSessionResponse | None = None
+
+
 class SkillFeedbackInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
     feedback_markdown: str = Field(alias="feedbackMarkdown", min_length=1, max_length=8000)
