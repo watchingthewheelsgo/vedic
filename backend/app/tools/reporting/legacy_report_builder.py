@@ -20,21 +20,21 @@ Auto-detected file patterns:
   Love:         love_part1~2.md
   Q&A:          qa_*.md
 
-Requirements:  pip install markdown
+Runtime: backend dependency `markdown` is installed by `npm run backend:setup`.
 """
 
 import os
-import sys
 import re
 import glob
 import argparse
 
 try:
     import markdown
-except ImportError:
-    print("Installing markdown...")
-    os.system(f"{sys.executable} -m pip install markdown -q")
-    import markdown
+except ImportError as exc:
+    raise RuntimeError(
+        "markdown is not available in the backend runtime. "
+        "Run `npm run backend:setup` from the project root."
+    ) from exc
 
 # ── CSS ──
 CSS = """

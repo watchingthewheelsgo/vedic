@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +9,7 @@ from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import SkillBirthInput, SkillRunInput, SkillSessionResponse, SynastryBirthInput
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
+from app.tools.registry import BackendToolRunner
 
 
 class SkillRuntime:
@@ -25,6 +24,7 @@ class SkillRuntime:
         self.calculator = calculator
         self.workspace = workspace
         self.agent_runtime = agent_runtime
+        self.tools = BackendToolRunner(workspace.settings)
 
     async def create_reader_session(self, input_data: SkillBirthInput) -> SkillSessionResponse:
         session_id = self.workspace.create_session()
@@ -105,25 +105,17 @@ class SkillRuntime:
         self.workspace.write_artifact(input_data.session_id, f"{folder}/intake.md", intake)
 
         synastry_dir = session_dir / folder
-        validate_output = self._run_synastry_script(
-            "validate_synastry_data.py",
-            [
-                str(session_dir / "structured_data.md"),
-                str(synastry_dir / "structured_data_B.md"),
-            ],
-        )
-        build_output = self._run_synastry_script(
-            "build_synastry_data.py",
-            [
-                str(session_dir / "structured_data.md"),
-                str(synastry_dir / "structured_data_B.md"),
-                str(synastry_dir),
-                "--a",
-                "A",
-                "--b",
-                input_data.label or "B",
-            ],
-        )
+        validate_output = self.tools.validate_synastry_data(
+            session_dir / "structured_data.md",
+            synastry_dir / "structured_data_B.md",
+        ).output
+        build_output = self.tools.build_synastry_data(
+            session_dir / "structured_data.md",
+            synastry_dir / "structured_data_B.md",
+            synastry_dir,
+            a_label="A",
+            b_label=input_data.label or "B",
+        ).output
 
         return SkillSessionResponse(
             session_id=input_data.session_id,
@@ -921,21 +913,6 @@ User message:
             f"- question: {input_data.question or '未指定'}",
         ]
         return "\n".join(lines).strip() + "\n"
-
-    def _run_synastry_script(self, script_name: str, args: list[str]) -> str:
-        script = self.workspace.settings.skills_root / "vedic-synastry" / "scripts" / script_name
-        if not script.exists():
-            raise RuntimeError(f"Synastry script not found: {script}")
-        result = subprocess.run(
-            [sys.executable, str(script), *args],
-            check=False,
-            text=True,
-            capture_output=True,
-        )
-        output = "\n".join(part for part in [result.stdout, result.stderr] if part).strip()
-        if result.returncode != 0:
-            raise RuntimeError(output or f"{script_name} failed")
-        return output
 
     def _parse_artifact_response(self, raw_text: str) -> dict[str, object]:
         try:

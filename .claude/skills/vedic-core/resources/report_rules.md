@@ -4,34 +4,29 @@
 
 ---
 
-## 脚本位置
+## 服务化边界
 
-report_builder.py 在本skill的 `scripts/` 目录下。
-**完整路径**：使用相对于SKILL.md的路径 `scripts/report_builder.py`。
+报告打包由 backend report export/tool 负责。skill 只定义何时打包、打包哪些文件、
+以及完成后如何告知用户；skill 内不保存可执行脚本，不处理运行准备。
 
-如果执行时提示找不到脚本，按以下顺序查找：
-1. 当前skill目录下的 `scripts/report_builder.py`
-2. 工作目录下的 `report_builder.py`（用户可能手动复制过）
-3. 如果都找不到 → 告诉用户脚本路径，让用户确认位置
+## 输入
 
-## 打包命令
+- 工作目录 / session 目录
+- 可选：用户名称
+- 可选：Lagna
+- 可选：语言 `cn` / `en`
+- 可选：include 范围，例如 `core`、`core,career`
 
-```python
-# 打包全部已有文件
-python scripts/report_builder.py [工作目录] --lang cn
+## 输出
 
-# 只打包core
-python scripts/report_builder.py [工作目录] --include core --lang cn
+- HTML 报告路径
+- 可选 PDF 报告路径
 
-# 只打包core + career
-python scripts/report_builder.py [工作目录] --include core,career --lang cn
-```
-
-report_builder自动检测目录中存在哪些MD文件，只打包存在的。
-`--include`参数可选择只打包特定部分。
+report builder 自动检测目录中存在哪些 MD 文件，只打包存在的。
+`include` 参数可选择只打包特定部分。
 
 ## ⚠️ 禁止行为
 
 1. **禁止自动打开浏览器预览**：生成HTML后不要用 `open`/`start`/`xdg-open` 打开浏览器。只告诉用户文件路径，让用户自己决定是否打开。
-2. **禁止在聊天框中输出HTML代码**：HTML文件由脚本生成，不要在对话中贴代码。
+2. **禁止在聊天框中输出HTML代码**：HTML文件由 backend tool 生成，不要在对话中贴代码。
 3. **生成完成后只报路径**：`"报告已生成：[完整文件路径]"`，不做其他操作。

@@ -11,7 +11,7 @@ Vedic Rectifier — Time Scanner (swisseph版)
 
 注意: --time 参数为 UTC 时间。中国(UTC+8)需减8小时。
 
-依赖: pip install pyswisseph
+Runtime: backend dependency `pysweph` is installed by `npm run backend:setup`.
 """
 
 import swisseph as swe

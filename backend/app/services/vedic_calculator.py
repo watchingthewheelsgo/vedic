@@ -34,12 +34,11 @@ class BirthTime:
 
 
 class VedicCalculator:
-    """Adapter over the original `vedic-calculator` skill engine."""
+    """Adapter over the backend-owned Vedic calculation engine."""
 
     def __init__(self, settings: Settings, place_service: PlaceService) -> None:
         self.settings = settings
         self.place_service = place_service
-        self.settings.configure_calculator_imports()
 
     def calculate(self, intake: BirthInput) -> CalculationSnapshot:
         birth_date = self._parse_birth_date(intake.birth_date)
@@ -65,9 +64,9 @@ class VedicCalculator:
 
     def _run_engine(self, payload: dict[str, Any]) -> tuple[str, ChartFacts]:
         with redirect_stdout(sys.stderr):
-            from engine import SIGNS, calculate_full_chart  # type: ignore
-            from formatter import format_structured_data  # type: ignore
-            from transit import calc_transit  # type: ignore
+            from app.calculator.engine import SIGNS, calculate_full_chart
+            from app.calculator.formatter import format_structured_data
+            from app.calculator.transit import calc_transit
 
             chart = calculate_full_chart(
                 year=int(payload["year"]),

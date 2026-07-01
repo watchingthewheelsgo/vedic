@@ -199,15 +199,16 @@ Lagna确认后，进入渐进式校准：
 
 ### 3b. 时间扫描
 
-运行脚本：
-```python
-python scripts/time_scan.py \
-  --date [出生日期] \
-  --time [预估时间,UTC] \
-  --lat [纬度] \
-  --lon [经度] \
-  --range [扫描范围] \
-  --save rectification_scan.md
+调用 backend tool `vedic_rectifier_time_scan`：
+```json
+{
+  "date": "YYYY-MM-DD",
+  "time_utc": "HH:MM",
+  "lat": 0.0,
+  "lon": 0.0,
+  "range_minutes": 30,
+  "save_path": "rectification_scan.md"
+}
 ```
 
 **注意：出生时间需转为UTC**
@@ -216,7 +217,7 @@ python scripts/time_scan.py \
 印度(UTC+5:30): 本地时间 - 5.5小时 = UTC
 ```
 
-用view_file读取扫描结果，重点关注：
+读取扫描结果，重点关注：
 1. **Lagna换星座的分界点**（宫主表会完全改变）
 2. **D9换星座的分界点**（约每13分钟一次）
 3. 当前时间落在哪个区间
@@ -432,8 +433,7 @@ Nakshatra边界：每13°20'（即每个星座内 0°00', 13°20', 26°40'）
 2. **逻辑透明**：推理过程写在聊天框，让用户看到为什么
 3. **不过度校准**：5/5匹配就确认，不无意义扫描
 4. **扫描范围自适应**：时间精度差→扫大范围，精度好→扫小范围
-5. **UTC转换**：time_scan.py用UTC，展示给用户时转回本地时间
+5. **UTC转换**：`vedic_rectifier_time_scan` 使用UTC，展示给用户时转回本地时间
 6. **可追加事件**：如果5个事件不够区分，可以要求用户追加2-3个
 7. **Dasha随时间变**：改时间后必须用calc重算Dasha，不能沿用旧值
 8. **渐进式校准**：D9→D10→D4/D5，让用户选择是否继续深入
-

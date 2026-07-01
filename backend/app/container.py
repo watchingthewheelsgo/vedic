@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.agents.claude_runtime import ClaudeRuntime
+from app.runtime.preflight import RuntimePreflightReport, validate_backend_runtime
 from app.services.core_job_runtime import CoreJobRuntime
 from app.services.place_service import PlaceService
 from app.services.skill_runtime import SkillRuntime
@@ -16,6 +17,9 @@ class AppContainer:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.runtime_preflight: RuntimePreflightReport = validate_backend_runtime(
+            settings.project_root
+        )
         self.place_service = PlaceService(settings)
         self.calculator = VedicCalculator(settings, self.place_service)
         self.skill_workspace = SkillWorkspace(settings)

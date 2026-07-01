@@ -7,11 +7,13 @@
 用法: python validate_synastry_data.py <A_structured_data.md> <B_structured_data.md>
 退出码: 0 全通过 / 1 有硬性问题 / 2 参数错误
 """
-import sys
 import os
+import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_synastry_data import Chart, PLANETS  # noqa: E402
+try:
+    from .build_synastry_data import Chart, PLANETS
+except ImportError:  # pragma: no cover - supports direct script execution
+    from build_synastry_data import Chart, PLANETS  # type: ignore
 
 
 def check_one(c):
@@ -61,7 +63,7 @@ def main():
         for w in warns:
             print(f"  ⚠️  {w}")
 
-    print("\n结果:", "✅ 通过，可运行 build_synastry_data.py"
+    print("\n结果:", "✅ 通过，可生成 synastry_data.md"
           if ok_all else "❌ 存在硬性问题，先修复再合盘")
     sys.exit(0 if ok_all else 1)
 

@@ -53,7 +53,7 @@ description: 吠陀占星合盘(Synastry)分析引擎。比较两个人的星盘
   (b) 给盘 PDF/截图/已有 structured_data → vedic-reader 导入到子文件夹
   (c) 指向 B 已有的 structured_data.md → 复制只读副本进子文件夹
 
-两份齐 → 建子文件夹 → build_synastry_data.py → 进入分析
+两份齐 → 建子文件夹 → backend tool生成 synastry_data.md → 进入分析
 缺任一 → 停下，明确说缺哪份、怎么补
 ```
 
@@ -118,15 +118,15 @@ Layer 0.5（性质盲扫，不预设类型）
 
 ## 数据准备：生成 synastry_data.md
 
-凑齐两份盘后，先跑脚本（纯标准库，用系统 python，**无需 calculator 的 venv**）。
-脚本在本 skill 的 `scripts/` 目录下：
+凑齐两份盘后，由 backend tool 生成跨盘计算数据：
 
-1. **自检两份盘**：
-   `python scripts/validate_synastry_data.py <A_structured_data.md> <B_structured_data.md>`
-   → 退出码非 0 或有 ❌ → 按提示补数据，不强行合盘；⚠️ 警告项触发对应层降级但不阻塞。
-2. **生成跨盘数据**：
-   `python scripts/build_synastry_data.py <A> <B> <关系子文件夹> --a <A名> --b <B名>`
-   → 输出 `<子文件夹>/synastry_data.md`：八项月宿 + 双向落宫 + 跨盘相位/Drishti + 关键点位 + Dasha 原料。
+1. **自检两份盘**：调用 `vedic_synastry_validate`
+   - 输入：`A_structured_data.md`、`B_structured_data.md`
+   - 输出：硬性问题与软降级警告
+   - 有硬性问题 → 按提示补数据，不强行合盘；⚠️ 警告项触发对应层降级但不阻塞。
+2. **生成跨盘数据**：调用 `vedic_synastry_build`
+   - 输入：A/B structured_data、关系子文件夹、A/B名称
+   - 输出：`<子文件夹>/synastry_data.md`，包含八项月宿 + 双向落宫 + 跨盘相位/Drishti + 关键点位 + Dasha 原料。
 
 之后各层解读**只引用 synastry_data.md 的计算结果 + 双方 structured_data**，禁止自己重算跨盘数据。
 

@@ -15,9 +15,7 @@ try:
 except ImportError as e:                             # 用错python时给可执行纠正,不再含糊报错
     sys.stderr.write(
         "\n❌ swisseph 不可用—极可能用了系统 Python。\n"
-        "  系统 Python 装的是空壳(只有 dist-info、无 .pyd),必须改用 skill 自带 venv:\n"
-        "  Windows : vedic-calculator\\venv\\Scripts\\python.exe <脚本>\n"
-        "  Linux/Mac: vedic-calculator/venv/bin/python <脚本>\n"
+        "  请使用 backend runtime 启动服务，并先运行 npm run backend:setup。\n"
         f"  原始错误: {e}\n"
     )
     raise
@@ -32,34 +30,34 @@ from dashaflow.jaimini import calculate_jaimini_karakas
 # ── PyJHora 精确模块（必须全部加载，否则 fail-fast）──
 _SETUP_HINT = (
     "\n╔══════════════════════════════════════════════════════╗\n"
-    "║  PyJHora 未正确安装！请运行:                         ║\n"
-    "║  python vedic-calculator/scripts/setup_env.py        ║\n"
+    "║  Backend runtime 未正确安装 PyJHora/依赖。             ║\n"
+    "║  请在项目根目录运行: npm run backend:setup             ║\n"
     "╚══════════════════════════════════════════════════════╝"
 )
 
 _load_errors = []
 try:
-    from ashtakavarga_pyjhora import calculate_ashtakavarga_fixed as _av_pyjhora
+    from .ashtakavarga_pyjhora import calculate_ashtakavarga_fixed as _av_pyjhora
 except ImportError as e:
     _av_pyjhora = None
     _load_errors.append(f'ashtakavarga_pyjhora: {e}')
 try:
-    from shadbala_pyjhora import calculate_shadbala_fixed as _shadbala_pyjhora
+    from .shadbala_pyjhora import calculate_shadbala_fixed as _shadbala_pyjhora
 except ImportError as e:
     _shadbala_pyjhora = None
     _load_errors.append(f'shadbala_pyjhora: {e}')
 try:
-    from dasha_pyjhora import calculate_dasha_fixed as _dasha_pyjhora
+    from .dasha_pyjhora import calculate_dasha_fixed as _dasha_pyjhora
 except ImportError as e:
     _dasha_pyjhora = None
     _load_errors.append(f'dasha_pyjhora: {e}')
 try:
-    from divisional_pyjhora import calculate_divisional_charts as _div_pyjhora
+    from .divisional_pyjhora import calculate_divisional_charts as _div_pyjhora
 except ImportError as e:
     _div_pyjhora = None
     _load_errors.append(f'divisional_pyjhora: {e}')
 try:
-    from extras_pyjhora import (
+    from .extras_pyjhora import (
         calculate_bhava_bala as _bhava_bala_pyjhora,
         calculate_special_lagnas as _special_lagnas_pyjhora,
         calculate_vargeeya_bala as _vargeeya_bala_pyjhora,
@@ -78,7 +76,10 @@ if _missing:
     for err in _load_errors:
         print(f"   → {err}", file=sys.stderr)
     print(_SETUP_HINT, file=sys.stderr)
-    raise ImportError(f"vedic-calculator 核心模块缺失: {', '.join(_missing)}. 请运行 setup_env.py")
+    raise ImportError(
+        f"backend calculator 核心模块缺失: {', '.join(_missing)}. "
+        "请运行 npm run backend:setup"
+    )
 
 # === 配置 ===
 swe.set_sid_mode(swe.SIDM_TRUE_CITRA)

@@ -1,5 +1,15 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Clock3, FileText, MapPin, Play, Search } from "lucide-react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  BookOpen,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  LoaderCircle,
+  MapPin,
+  Play,
+  Search,
+  Sparkles
+} from "lucide-react";
 import { api } from "./api";
 import type {
   BirthInput,
@@ -7,33 +17,19 @@ import type {
   CoreJobResponse,
   PlaceOption,
   PlaceSearchLevel,
-  SkillRunInput,
+  SkillArtifact,
   SkillSessionResponse
 } from "../shared/domain";
 
-type LoadingState = "idle" | "session" | "skill" | "coreJob" | "feedback" | "synastry";
+type LoadingState = "idle" | "session" | "coreJob" | "feedback";
+type StepState = "done" | "active" | "waiting";
 
 type RunMetrics = {
-  jobId?: string;
   status?: string;
   calculator?: {
     durationSeconds?: number | null;
   } | null;
   durationSeconds?: number | null;
-  waves?: Array<{
-    wave: number;
-    total: number;
-    completed: number;
-    failed: number;
-    durationSeconds?: number | null;
-  }>;
-  nodes?: Array<{
-    id: string;
-    label?: string;
-    wave: number;
-    status: string;
-    durationSeconds?: number | null;
-  }>;
 };
 
 const precisionOptions: Array<{ value: BirthTimePrecision; label: string }> = [
@@ -43,67 +39,80 @@ const precisionOptions: Array<{ value: BirthTimePrecision; label: string }> = [
   { value: "unknown", label: "未知出生时间" }
 ];
 
-const skillActions: Array<{ skill: SkillRunInput["skill"]; label: string; requiresSynastry?: boolean }> =
-  [
-    { skill: "vedic-reader", label: "vedic-reader 验前事" },
-    { skill: "vedic-core", label: "生成完整 core 报告" },
-    { skill: "vedic-career", label: "vedic-career 事业" },
-    { skill: "vedic-love", label: "vedic-love 感情" },
-    { skill: "vedic-rectifier", label: "vedic-rectifier 校时" },
-    { skill: "vedic-synastry", label: "vedic-synastry 合盘", requiresSynastry: true }
-  ];
-
 const emptyBirthInput: BirthInput = {
   birthDate: "",
   birthTime: "",
   birthPlace: "",
   birthTimePrecision: "exact",
-  gender: "[待填]",
-  relationship: "[待填]",
-  timeSource: "未追问"
+  gender: "",
+  relationship: "",
+  timeSource: ""
+};
+
+const reportOrder = [
+  "p1_overview.md",
+  "p2a_planets.md",
+  "p2b_planets.md",
+  "p2c_planets.md",
+  "p2d_planets.md",
+  "p3a_d9.md",
+  "p3b_divisional.md",
+  "p4a_houses.md",
+  "p4b_houses.md",
+  "p5a_life.md",
+  "p5b_life.md",
+  "appendix.md",
+  "career_phase4a.md",
+  "love_report.md",
+  "rectification_report.md"
+];
+
+const reportTitles: Record<string, string> = {
+  "p1_overview.md": "总览",
+  "p2a_planets.md": "行星结构一",
+  "p2b_planets.md": "行星结构二",
+  "p2c_planets.md": "行星结构三",
+  "p2d_planets.md": "行星结构四",
+  "p3a_d9.md": "D9 与分盘",
+  "p3b_divisional.md": "分盘补充",
+  "p4a_houses.md": "宫位主题一",
+  "p4b_houses.md": "宫位主题二",
+  "p5a_life.md": "人生板块一",
+  "p5b_life.md": "人生板块二",
+  "appendix.md": "附录",
+  "career_phase4a.md": "事业",
+  "love_report.md": "关系",
+  "rectification_report.md": "校时"
 };
 
 export function App() {
   const [birthInput, setBirthInput] = useState<BirthInput>(emptyBirthInput);
-  const [synastryBirth, setSynastryBirth] = useState<BirthInput>(emptyBirthInput);
-  const [synastryLabel, setSynastryLabel] = useState("B");
-  const [relationshipType, setRelationshipType] = useState("");
-  const [currentStage, setCurrentStage] = useState("");
-  const [synastryQuestion, setSynastryQuestion] = useState("");
   const [sessionLookup, setSessionLookup] = useState(
     () => new URLSearchParams(window.location.search).get("sessionId") ?? ""
   );
   const [session, setSession] = useState<SkillSessionResponse | null>(null);
-  const [selectedArtifactPath, setSelectedArtifactPath] = useState("structured_data.md");
+  const [selectedReportPath, setSelectedReportPath] = useState("");
   const [feedbackMarkdown, setFeedbackMarkdown] = useState("");
-  const [skillMessage, setSkillMessage] = useState("");
   const [coreJob, setCoreJob] = useState<CoreJobResponse | null>(null);
   const [loading, setLoading] = useState<LoadingState>("idle");
   const [error, setError] = useState("");
+
   const coreJobId = coreJob?.jobId;
   const coreJobStatus = coreJob?.status;
   const isCoreJobActive = coreJobStatus === "queued" || coreJobStatus === "running";
-
-  const selectedArtifact = useMemo(() => {
-    if (!session) return null;
-    return (
-      session.artifacts.find((artifact) => artifact.path === selectedArtifactPath) ??
-      session.artifacts[0] ??
-      null
-    );
-  }, [selectedArtifactPath, session]);
-
-  const hasSynastryData = useMemo(
-    () => Boolean(session?.artifacts.some((artifact) => artifact.path.endsWith("synastry_data.md"))),
-    [session?.artifacts]
-  );
+  const reportSections = useMemo(() => getReportSections(session), [session]);
+  const selectedReport =
+    reportSections.find((artifact) => artifact.path === selectedReportPath) ??
+    reportSections[0] ??
+    null;
   const runMetrics = useMemo(() => parseRunMetrics(session), [session]);
-
-  useEffect(() => {
-    if (session?.activeArtifact) {
-      setSelectedArtifactPath(session.activeArtifact);
-    }
-  }, [session?.activeArtifact]);
+  const progress = getProgress({
+    session,
+    coreJob,
+    loading,
+    reportSections,
+    hasError: Boolean(error)
+  });
 
   useEffect(() => {
     const initialSessionId = new URLSearchParams(window.location.search).get("sessionId");
@@ -111,6 +120,13 @@ export function App() {
       void loadSessionById(initialSessionId);
     }
   }, []);
+
+  useEffect(() => {
+    if (!reportSections.length) return;
+    if (!reportSections.some((artifact) => artifact.path === selectedReportPath)) {
+      setSelectedReportPath(reportSections[0].path);
+    }
+  }, [reportSections, selectedReportPath]);
 
   useEffect(() => {
     if (!coreJobId || (coreJobStatus !== "queued" && coreJobStatus !== "running")) return;
@@ -131,7 +147,7 @@ export function App() {
         })
         .catch((caught) => {
           if (!cancelled) {
-            setError(caught instanceof Error ? caught.message : "无法刷新 core 报告进度");
+            setError(caught instanceof Error ? caught.message : "无法刷新报告进度");
           }
         });
     }, 5000);
@@ -145,14 +161,15 @@ export function App() {
   async function submitBirthData(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setCoreJob(null);
     setLoading("session");
     try {
-      const response = await api.createSkillSession(birthInput);
+      const response = await api.createSkillSession(normalizeBirthInput(birthInput));
       setSession(response);
-      setCoreJob(null);
-      setSelectedArtifactPath(response.activeArtifact ?? "structured_data.md");
+      setSessionLookup(response.sessionId);
+      await startCoreReport(response.sessionId);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法生成 structured_data.md");
+      setError(caught instanceof Error ? caught.message : "无法生成报告");
     } finally {
       setLoading("idle");
     }
@@ -171,72 +188,29 @@ export function App() {
       const response = await api.getSkillSession(sessionId);
       setSession(response);
       setCoreJob(null);
-      setSelectedArtifactPath(response.activeArtifact ?? "run_metrics.json");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法载入 session");
+      setError(caught instanceof Error ? caught.message : "无法载入报告");
     } finally {
       setLoading("idle");
     }
   }
 
-  async function submitSynastryBirth(event: FormEvent) {
-    event.preventDefault();
-    if (!session) return;
+  async function startCoreReport(sessionId = session?.sessionId) {
+    if (!sessionId) return;
     setError("");
-    setLoading("synastry");
+    setLoading("coreJob");
     try {
-      const response = await api.createSynastrySubject({
-        sessionId: session.sessionId,
-        label: synastryLabel,
-        relationshipType,
-        currentStage,
-        question: synastryQuestion,
-        birth: synastryBirth
+      const response = await api.startCoreJob({
+        sessionId,
+        skill: "vedic-core",
+        userMessage: ""
       });
-      setSession(response);
-      setSelectedArtifactPath(response.activeArtifact ?? selectedArtifactPath);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法生成合盘前置数据");
-    } finally {
-      setLoading("idle");
-    }
-  }
-
-  async function runSkill(skill: SkillRunInput["skill"]) {
-    if (!session) return;
-    setError("");
-    if (skill === "vedic-core") {
-      setLoading("coreJob");
-      try {
-        const response = await api.startCoreJob({
-          sessionId: session.sessionId,
-          skill,
-          userMessage: skillMessage
-        });
-        setCoreJob(response);
-        if (response.session) {
-          setSession(response.session);
-        }
-        setSkillMessage("");
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "完整 core 报告启动失败");
-      } finally {
-        setLoading("idle");
+      setCoreJob(response);
+      if (response.session) {
+        setSession(response.session);
       }
-      return;
-    }
-
-    setLoading("skill");
-    try {
-      const response = await api.runSkill({
-        sessionId: session.sessionId,
-        skill,
-        userMessage: skillMessage
-      });
-      setSession(response);
-      setSkillMessage("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : `${skill} 执行失败`);
+      setError(caught instanceof Error ? caught.message : "完整报告启动失败");
     } finally {
       setLoading("idle");
     }
@@ -254,194 +228,160 @@ export function App() {
       setSession(response);
       setFeedbackMarkdown("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "反馈写入失败");
+      setError(caught instanceof Error ? caught.message : "补充信息写入失败");
     } finally {
       setLoading("idle");
     }
   }
 
   return (
-    <main className="skill-app">
-      <section className="control-pane">
-        <div className="brand-row">
-          <div className="brand-mark">
-            <CalendarDays size={20} />
+    <main className="advisor-app">
+      <section className="intake-shell">
+        <header className="app-title">
+          <div className="title-mark">
+            <Sparkles size={19} />
           </div>
           <div>
-            <h1>吠陀占星 Skills 工作台</h1>
-            <p>calculator → reader → core / career / love / rectifier / synastry</p>
+            <h1>命盘顾问</h1>
+            <p>私人报告</p>
           </div>
-        </div>
+        </header>
 
-        <form className="panel" onSubmit={submitBirthData}>
-          <h2>A 盘出生信息</h2>
-          <BirthFields input={birthInput} onChange={setBirthInput} />
-          <button className="primary-button" disabled={loading !== "idle" || isCoreJobActive}>
-            <Play size={16} />
-            生成 structured_data.md
-          </button>
-        </form>
-
-        <form className="panel" onSubmit={loadExistingSession}>
-          <h2>载入已有结果</h2>
-          <label>
-            Session ID
-            <input
-              value={sessionLookup}
-              onChange={(event) => setSessionLookup(event.target.value)}
-              placeholder="skill_..."
-            />
-          </label>
-          <button type="submit" disabled={loading !== "idle" || isCoreJobActive}>
-            载入报告与耗时
-          </button>
-        </form>
-
-        {session && (
-          <section className="panel">
-            <h2>原始 skills</h2>
-            <textarea
-              value={skillMessage}
-              onChange={(event) => setSkillMessage(event.target.value)}
-              rows={3}
-              placeholder="可选：传给当前 skill 的用户消息"
-            />
-            <div className="action-grid">
-              {skillActions.map((action) => (
-                <button
-                  key={action.skill}
-                  type="button"
-                  onClick={() => runSkill(action.skill)}
-                  disabled={
-                    loading !== "idle" ||
-                    isCoreJobActive ||
-                    Boolean(action.requiresSynastry && !hasSynastryData)
-                  }
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-            {coreJob && <CoreJobProgressPanel job={coreJob} />}
-            {!coreJob && runMetrics && <RunMetricsPanel metrics={runMetrics} />}
-          </section>
+        {progress.reportReady && (
+          <ProgressPanel
+            progress={progress}
+            job={coreJob}
+            metrics={runMetrics}
+            canResume={Boolean(session && !isCoreJobActive && reportSections.length === 0)}
+            onResume={() => void startCoreReport()}
+          />
         )}
 
-        {session && (
-          <form className="panel" onSubmit={submitSynastryBirth}>
-            <h2>合盘 B 盘</h2>
-            <label>
-              B 名称
-              <input
-                value={synastryLabel}
-                onChange={(event) => setSynastryLabel(event.target.value)}
-              />
-            </label>
-            <BirthFields input={synastryBirth} onChange={setSynastryBirth} />
-            <div className="field-grid">
-              <label>
-                关系类型
-                <input
-                  value={relationshipType}
-                  onChange={(event) => setRelationshipType(event.target.value)}
-                  placeholder="可留空"
-                />
-              </label>
-              <label>
-                当前阶段
-                <input
-                  value={currentStage}
-                  onChange={(event) => setCurrentStage(event.target.value)}
-                  placeholder="可留空"
-                />
-              </label>
+        {!progress.reportReady ? (
+          <form className="intake-card" onSubmit={submitBirthData}>
+            <div className="card-heading">
+              <span>出生信息</span>
+              <small>用于生成完整报告</small>
             </div>
+            <BirthFields input={birthInput} onChange={setBirthInput} />
+            <button className="primary-button" disabled={loading !== "idle" || isCoreJobActive}>
+              <Play size={16} />
+              生成完整报告
+            </button>
+          </form>
+        ) : (
+          <details className="quiet-panel">
+            <summary>新建一份报告</summary>
+            <form className="collapsed-form" onSubmit={submitBirthData}>
+              <BirthFields input={birthInput} onChange={setBirthInput} />
+              <button className="primary-button" disabled={loading !== "idle" || isCoreJobActive}>
+                <Play size={16} />
+                生成完整报告
+              </button>
+            </form>
+          </details>
+        )}
+
+        {!progress.reportReady && (
+          <ProgressPanel
+            progress={progress}
+            job={coreJob}
+            metrics={runMetrics}
+            canResume={Boolean(session && !isCoreJobActive && reportSections.length === 0)}
+            onResume={() => void startCoreReport()}
+          />
+        )}
+
+        <details className="quiet-panel">
+          <summary>打开已有报告</summary>
+          <form onSubmit={loadExistingSession}>
             <label>
-              合盘问题
-              <textarea
-                value={synastryQuestion}
-                onChange={(event) => setSynastryQuestion(event.target.value)}
-                rows={3}
-                placeholder="可留空"
+              报告编号
+              <input
+                value={sessionLookup}
+                onChange={(event) => setSessionLookup(event.target.value)}
+                placeholder="skill_..."
               />
             </label>
             <button type="submit" disabled={loading !== "idle" || isCoreJobActive}>
-              生成 B 盘与 synastry_data.md
+              打开
             </button>
           </form>
-        )}
+        </details>
 
         {session && (
-          <section className="panel">
-            <h2>验前事反馈 / 用户补充</h2>
+          <details className="quiet-panel">
+            <summary>补充已验证信息</summary>
             <textarea
               value={feedbackMarkdown}
               onChange={(event) => setFeedbackMarkdown(event.target.value)}
-              rows={5}
-              placeholder="逐条写：1 准 / 2 不准 / 3 部分准..."
+              rows={4}
+              placeholder="例如：哪些地方准确、哪些地方不准确、想补充的经历"
             />
             <button
               type="button"
               onClick={submitFeedback}
               disabled={loading !== "idle" || isCoreJobActive}
             >
-              写入 user_context.md
+              保存补充
             </button>
-          </section>
+          </details>
         )}
 
         {error && <div className="error-banner">{error}</div>}
       </section>
 
-      <section className="artifact-pane">
-        <div className="status-bar">
+      <section className="report-shell">
+        <header className="report-top">
           <div>
-            <span>Session</span>
-            <strong>{session?.sessionId ?? "未创建"}</strong>
+            <span>你的报告</span>
+            <h2>{selectedReport ? titleForArtifact(selectedReport) : "报告将在这里呈现"}</h2>
           </div>
-          <div>
-            <span>Stage</span>
-            <strong>{session?.stage ?? "idle"}</strong>
-          </div>
-        </div>
+          {session && <small>编号 {session.sessionId}</small>}
+        </header>
 
-        {session?.chatMessage && (
-          <section className="chat-output">
-            <h2>聊天框输出</h2>
-            <pre>{session.chatMessage}</pre>
-          </section>
+        {reportSections.length > 0 ? (
+          <div className="report-layout">
+            <nav className="chapter-tabs" aria-label="报告章节">
+              {reportSections.map((artifact, index) => (
+                <button
+                  key={artifact.path}
+                  type="button"
+                  className={artifact.path === selectedReport?.path ? "selected" : ""}
+                  onClick={() => setSelectedReportPath(artifact.path)}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  {titleForArtifact(artifact)}
+                </button>
+              ))}
+            </nav>
+            <article className="report-paper">
+              {selectedReport && (
+                <>
+                  <div className="report-section-kicker">
+                    <BookOpen size={16} />
+                    <span>{titleForArtifact(selectedReport)}</span>
+                  </div>
+                  <MarkdownReport content={selectedReport.content} />
+                </>
+              )}
+            </article>
+          </div>
+        ) : (
+          <EmptyReport progress={progress} />
         )}
-
-        <section className="artifact-workspace">
-          <aside className="artifact-list">
-            {(session?.artifacts ?? []).map((artifact) => (
-              <button
-                key={artifact.path}
-                className={artifact.path === selectedArtifact?.path ? "selected" : ""}
-                onClick={() => setSelectedArtifactPath(artifact.path)}
-              >
-                <FileText size={15} />
-                {artifact.path}
-              </button>
-            ))}
-          </aside>
-          <article className="artifact-view">
-            {selectedArtifact ? (
-              <>
-                <header>
-                  <h2>{selectedArtifact.path}</h2>
-                  <span>{new Date(selectedArtifact.updatedAt).toLocaleString()}</span>
-                </header>
-                <pre>{selectedArtifact.content}</pre>
-              </>
-            ) : (
-              <div className="empty-state">等待生成 structured_data.md</div>
-            )}
-          </article>
-        </section>
       </section>
     </main>
   );
+}
+
+function normalizeBirthInput(input: BirthInput): BirthInput {
+  return {
+    ...input,
+    gender: input.gender.trim() || "[待填]",
+    relationship: input.relationship.trim() || "[待填]",
+    timeSource: input.timeSource.trim() || "未追问"
+  };
 }
 
 function parseRunMetrics(session: SkillSessionResponse | null): RunMetrics | null {
@@ -454,162 +394,199 @@ function parseRunMetrics(session: SkillSessionResponse | null): RunMetrics | nul
   }
 }
 
-function CoreJobProgressPanel({ job }: { job: CoreJobResponse }) {
-  const statusText: Record<CoreJobResponse["status"], string> = {
-    queued: "排队中",
-    running: "生成中",
-    completed: "已完成",
-    failed: "失败"
-  };
-  const nodeStatusText = {
-    pending: "等待",
-    running: "运行",
-    completed: "完成",
-    skipped: "已存在",
-    failed: "失败"
-  } satisfies Record<CoreJobResponse["nodes"][number]["status"], string>;
-  const nodesByWave = job.waves.map((wave) => ({
-    ...wave,
-    nodes: job.nodes.filter((node) => node.wave === wave.wave)
-  }));
+function getReportSections(session: SkillSessionResponse | null) {
+  const artifacts = session?.artifacts ?? [];
+  return artifacts
+    .filter(isReportArtifact)
+    .sort((a, b) => reportRank(a.path) - reportRank(b.path) || a.path.localeCompare(b.path));
+}
 
+function isReportArtifact(artifact: SkillArtifact) {
+  const path = artifact.path;
+  if (!path.endsWith(".md")) return false;
+  if (
+    path === "structured_data.md" ||
+    path === "reader_prevalidation.md" ||
+    path === "user_context.md" ||
+    path === "intake.md" ||
+    path.endsWith("structured_data_B.md") ||
+    path.endsWith("synastry_data.md")
+  ) {
+    return false;
+  }
   return (
-    <div className="core-job">
-      <div className="core-job-header">
-        <div>
-          <span>{statusText[job.status]}</span>
-          <strong>{job.message}</strong>
-        </div>
-        <b>{job.progress.percent}%</b>
-      </div>
-      <div
-        className="core-progress-track"
-        role="progressbar"
-        aria-valuenow={job.progress.percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
-        <span style={{ width: `${job.progress.percent}%` }} />
-      </div>
-      <div className="core-progress-meta">
-        <span>
-          {job.progress.completed}/{job.progress.total} 步完成
-        </span>
-        <span>{job.progress.running} 步运行中</span>
-      </div>
-
-      <div className="timing-strip">
-        <div>
-          <Clock3 size={14} />
-          <span>总耗时</span>
-          <strong>{formatDuration(job.durationSeconds)}</strong>
-        </div>
-        <div>
-          <span>开始</span>
-          <strong>{formatTimestamp(job.startedAt)}</strong>
-        </div>
-        <div>
-          <span>结束</span>
-          <strong>{formatTimestamp(job.finishedAt)}</strong>
-        </div>
-      </div>
-
-      <div className="core-wave-list">
-        {nodesByWave.map((wave) => (
-          <section key={wave.wave} className="core-wave">
-            <header>
-              <span>Wave {wave.wave}</span>
-              <small>
-                {wave.completed}/{wave.total} · {formatDuration(wave.durationSeconds)}
-              </small>
-            </header>
-            <div className="core-node-list">
-              {wave.nodes.map((node) => (
-                <div key={node.id} className={`core-node ${node.status}`}>
-                  <span>{node.label}</span>
-                  <em>{formatDuration(node.durationSeconds)}</em>
-                  <small>{nodeStatusText[node.status]}</small>
-                </div>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
+    path.startsWith("p") ||
+    path === "appendix.md" ||
+    path.startsWith("career_") ||
+    path.startsWith("love_") ||
+    path === "rectification_report.md" ||
+    path.includes("/reports/")
   );
 }
 
-function RunMetricsPanel({ metrics }: { metrics: RunMetrics }) {
-  const waves = metrics.waves ?? [];
-  const slowest = [...(metrics.nodes ?? [])]
-    .filter((node) => node.durationSeconds != null)
-    .sort((a, b) => (b.durationSeconds ?? 0) - (a.durationSeconds ?? 0))
-    .slice(0, 5);
+function reportRank(path: string) {
+  const normalized = path.split("/").pop() ?? path;
+  const index = reportOrder.indexOf(normalized);
+  if (index >= 0) return index;
+  if (path.includes("/reports/")) return 200 + path.localeCompare("");
+  return 100 + path.localeCompare("");
+}
 
+function titleForArtifact(artifact: SkillArtifact) {
+  const basename = artifact.path.split("/").pop() ?? artifact.path;
+  if (reportTitles[basename]) return reportTitles[basename];
+  if (artifact.title && artifact.title !== artifact.path) return artifact.title;
+  return basename.replace(/\.md$/, "").replace(/[_-]+/g, " ");
+}
+
+function getProgress({
+  session,
+  coreJob,
+  loading,
+  reportSections,
+  hasError
+}: {
+  session: SkillSessionResponse | null;
+  coreJob: CoreJobResponse | null;
+  loading: LoadingState;
+  reportSections: SkillArtifact[];
+  hasError: boolean;
+}) {
+  const reportReady =
+    reportSections.length > 0 &&
+    (session?.stage === "core_complete" || coreJob?.status === "completed" || !coreJob);
+  const activeAnalysis = coreJob?.status === "queued" || coreJob?.status === "running";
+  const percent = hasError
+    ? coreJob?.progress.percent ?? 0
+    : activeAnalysis
+      ? coreJob.progress.percent
+      : reportReady
+        ? 100
+        : session
+          ? 28
+          : loading === "session"
+            ? 12
+            : 0;
+
+  const steps: Array<{ label: string; state: StepState }> = [
+    {
+      label: "信息",
+      state: session ? "done" : loading === "session" ? "active" : "waiting"
+    },
+    {
+      label: "排盘",
+      state: session ? "done" : loading === "session" ? "active" : "waiting"
+    },
+    {
+      label: "分析",
+      state: reportReady ? "done" : activeAnalysis || loading === "coreJob" ? "active" : "waiting"
+    },
+    {
+      label: "报告",
+      state: reportReady ? "done" : "waiting"
+    }
+  ];
+
+  const title = hasError
+    ? "需要处理"
+    : reportReady
+      ? "报告已完成"
+      : activeAnalysis
+        ? "正在生成报告"
+        : session
+          ? "星盘已建立"
+          : "等待出生信息";
+
+  const detail = activeAnalysis
+    ? `${coreJob.progress.completed}/${coreJob.progress.total} 步完成`
+    : reportReady
+      ? `${reportSections.length} 个章节`
+      : session
+        ? "可以继续生成完整报告"
+        : "填写后开始";
+
+  return { percent, steps, title, detail, reportReady };
+}
+
+function ProgressPanel({
+  progress,
+  job,
+  metrics,
+  canResume,
+  onResume
+}: {
+  progress: ReturnType<typeof getProgress>;
+  job: CoreJobResponse | null;
+  metrics: RunMetrics | null;
+  canResume: boolean;
+  onResume: () => void;
+}) {
   return (
-    <div className="metrics-panel">
-      <div className="metrics-title">
-        <span>运行耗时</span>
-        <strong>{metrics.status ?? "recorded"}</strong>
+    <section className="progress-card">
+      <div className="progress-title">
+        <div>
+          <span>进度</span>
+          <strong>{progress.title}</strong>
+        </div>
+        <b>{progress.percent}%</b>
       </div>
-      <div className="timing-strip">
-        <div>
-          <Clock3 size={14} />
-          <span>Calculator</span>
-          <strong>{formatDuration(metrics.calculator?.durationSeconds)}</strong>
-        </div>
-        <div>
-          <span>Core</span>
-          <strong>{formatDuration(metrics.durationSeconds)}</strong>
-        </div>
-        <div>
-          <span>Job</span>
-          <strong>{metrics.jobId ? metrics.jobId.slice(0, 8) : "—"}</strong>
-        </div>
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-valuenow={progress.percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <span style={{ width: `${progress.percent}%` }} />
       </div>
-      <div className="metrics-wave-grid">
-        {waves.map((wave) => (
-          <div key={wave.wave}>
-            <span>Wave {wave.wave}</span>
-            <strong>{formatDuration(wave.durationSeconds)}</strong>
-            <small>
-              {wave.completed}/{wave.total} · failed {wave.failed}
-            </small>
+      <div className="step-row">
+        {progress.steps.map((step) => (
+          <div key={step.label} className={`step-pill ${step.state}`}>
+            {step.state === "done" ? (
+              <CheckCircle2 size={15} />
+            ) : step.state === "active" ? (
+              <LoaderCircle size={15} />
+            ) : (
+              <span className="step-dot" />
+            )}
+            {step.label}
           </div>
         ))}
       </div>
-      {slowest.length > 0 && (
-        <div className="slow-node-list">
-          <span>最慢节点</span>
-          {slowest.map((node) => (
-            <div key={node.id}>
-              <strong>{node.id}</strong>
-              <small>{formatDuration(node.durationSeconds)}</small>
-            </div>
-          ))}
-        </div>
+      <div className="progress-meta">
+        <span>{progress.detail}</span>
+        <span>{job ? formatDuration(job.durationSeconds) : formatDuration(metrics?.durationSeconds)}</span>
+      </div>
+      {canResume && (
+        <button type="button" className="secondary-button" onClick={onResume}>
+          <Sparkles size={15} />
+          继续生成
+        </button>
       )}
+    </section>
+  );
+}
+
+function EmptyReport({ progress }: { progress: ReturnType<typeof getProgress> }) {
+  return (
+    <div className="empty-report">
+      <div className="empty-symbol">
+        <CalendarDays size={28} />
+      </div>
+      <h2>{progress.title}</h2>
+      <p>{progress.detail}</p>
     </div>
   );
 }
 
 function formatDuration(seconds?: number | null) {
-  if (seconds == null) return "运行中";
+  if (seconds == null) return "—";
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
   const minutes = Math.floor(seconds / 60);
   const remaining = Math.round(seconds % 60);
   if (minutes < 60) return `${minutes}m ${remaining}s`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${minutes % 60}m`;
-}
-
-function formatTimestamp(value?: string | null) {
-  if (!value) return "—";
-  return new Date(value).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
 }
 
 function BirthFields({ input, onChange }: { input: BirthInput; onChange: (value: BirthInput) => void }) {
@@ -632,6 +609,7 @@ function BirthFields({ input, onChange }: { input: BirthInput; onChange: (value:
             value={input.birthTime}
             onChange={(event) => onChange({ ...input, birthTime: event.target.value })}
             disabled={input.birthTimePrecision === "unknown"}
+            required={input.birthTimePrecision !== "unknown"}
           />
         </label>
       </div>
@@ -653,14 +631,6 @@ function BirthFields({ input, onChange }: { input: BirthInput; onChange: (value:
           ))}
         </select>
       </label>
-      <label>
-        时间来源
-        <input
-          value={input.timeSource}
-          onChange={(event) => onChange({ ...input, timeSource: event.target.value })}
-          placeholder="出生证 / 家人记忆 / 大概回忆 / 未追问"
-        />
-      </label>
       <BirthPlacePicker
         value={input.birthPlace}
         onChange={(birthPlace) => onChange({ ...input, birthPlace })}
@@ -671,6 +641,7 @@ function BirthFields({ input, onChange }: { input: BirthInput; onChange: (value:
           <input
             value={input.gender}
             onChange={(event) => onChange({ ...input, gender: event.target.value })}
+            placeholder="可留空"
           />
         </label>
         <label>
@@ -678,9 +649,18 @@ function BirthFields({ input, onChange }: { input: BirthInput; onChange: (value:
           <input
             value={input.relationship}
             onChange={(event) => onChange({ ...input, relationship: event.target.value })}
+            placeholder="可留空"
           />
         </label>
       </div>
+      <label>
+        时间来源
+        <input
+          value={input.timeSource}
+          onChange={(event) => onChange({ ...input, timeSource: event.target.value })}
+          placeholder="出生证 / 家人记忆 / 大概回忆"
+        />
+      </label>
     </>
   );
 }
@@ -739,7 +719,12 @@ function BirthPlacePicker({
         出生地点
         <div className="place-input">
           <MapPin size={16} />
-          <input value={value} onChange={(event) => onChange(event.target.value)} required />
+          <input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="城市"
+            required
+          />
         </div>
       </label>
       <div className="place-controls">
@@ -753,12 +738,12 @@ function BirthPlacePicker({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search"
+            placeholder="搜索"
           />
         </div>
       </div>
       <div className="place-options">
-        {options.slice(0, 8).map((option) => (
+        {options.slice(0, 6).map((option) => (
           <button key={option.id} type="button" onClick={() => pick(option)}>
             <span>{option.label}</span>
             <small>{option.meta}</small>
@@ -767,4 +752,138 @@ function BirthPlacePicker({
       </div>
     </div>
   );
+}
+
+type MarkdownBlock =
+  | { type: "heading"; level: number; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "quote"; text: string }
+  | { type: "list"; items: string[] }
+  | { type: "table"; lines: string[] }
+  | { type: "code"; text: string };
+
+function MarkdownReport({ content }: { content: string }) {
+  const blocks = useMemo(() => parseMarkdown(content), [content]);
+  return (
+    <div className="markdown-report">
+      {blocks.map((block, index) => (
+        <MarkdownBlockView key={index} block={block} />
+      ))}
+    </div>
+  );
+}
+
+function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
+  if (block.type === "heading") {
+    const level = Math.min(Math.max(block.level, 2), 4);
+    const Tag = `h${level}` as "h2" | "h3" | "h4";
+    return <Tag>{renderInline(block.text)}</Tag>;
+  }
+  if (block.type === "quote") return <blockquote>{renderInline(block.text)}</blockquote>;
+  if (block.type === "list") {
+    return (
+      <ul>
+        {block.items.map((item, index) => (
+          <li key={index}>{renderInline(item)}</li>
+        ))}
+      </ul>
+    );
+  }
+  if (block.type === "table") return <pre className="md-table">{block.lines.join("\n")}</pre>;
+  if (block.type === "code") return <pre className="md-code">{block.text}</pre>;
+  return <p>{renderInline(block.text)}</p>;
+}
+
+function parseMarkdown(content: string): MarkdownBlock[] {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      index += 1;
+      const code: string[] = [];
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      index += 1;
+      blocks.push({ type: "code", text: code.join("\n") });
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      blocks.push({ type: "heading", level: heading[1].length + 1, text: heading[2] });
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      const quote: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quote.push(lines[index].trim().replace(/^>\s?/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "quote", text: quote.join(" ") });
+      continue;
+    }
+
+    if (isTableLine(trimmed)) {
+      const table: string[] = [];
+      while (index < lines.length && isTableLine(lines[index].trim())) {
+        table.push(lines[index]);
+        index += 1;
+      }
+      blocks.push({ type: "table", lines: table });
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "list", items });
+      continue;
+    }
+
+    const paragraph: string[] = [];
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !lines[index].trim().startsWith("```") &&
+      !lines[index].trim().startsWith(">") &&
+      !lines[index].trim().match(/^(#{1,4})\s+/) &&
+      !/^[-*]\s+/.test(lines[index].trim()) &&
+      !isTableLine(lines[index].trim())
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+  }
+
+  return blocks;
+}
+
+function isTableLine(line: string) {
+  return line.includes("|") && line.split("|").length >= 3;
+}
+
+function renderInline(text: string): ReactNode[] {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={index}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    return <span key={index}>{part}</span>;
+  });
 }

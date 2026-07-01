@@ -153,7 +153,6 @@ class PlaceService:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.settings.configure_calculator_imports()
 
     @cached_property
     def geonames_path(self) -> Path:

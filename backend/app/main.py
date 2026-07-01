@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Literal
 
 import uvicorn
@@ -19,7 +20,13 @@ from app.schemas import (
 from app.settings import get_settings
 
 
-app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    get_container()
+    yield
+
+
+app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +51,12 @@ async def health() -> dict[str, object]:
         "calculationMode": "real_vedic",
         "calculatorRoot": str(settings.calculator_root),
         "skillsRoot": str(settings.skills_root),
+        "runtimeSitePackages": str(settings.calculator_site_packages()),
+        "runtimePreflight": {
+            "dependencies": container.runtime_preflight.dependencies,
+            "ephemerisFiles": container.runtime_preflight.ephemeris_files,
+            "geonamesPath": container.runtime_preflight.geonames_path,
+        },
         "agent": container.agent_runtime.config_summary(),
     }
 

@@ -48,12 +48,20 @@ class ClaudeRuntime:
 
         options = ClaudeAgentOptions(
             tools=["Read", "Write", "Edit", "Glob", "Grep"],
-            allowed_tools=["Read", "Write", "Edit", "Glob", "Grep"],
+            allowed_tools=[
+                "Read",
+                "Write",
+                "Edit",
+                "Glob",
+                "Grep",
+                *self._backend_tool_names(),
+            ],
             disallowed_tools=["Bash", "WebFetch", "WebSearch"],
             permission_mode="dontAsk",
             setting_sources=["project"],
             cwd=cwd,
             add_dirs=[cwd],
+            mcp_servers=self._backend_tool_server(),
             env=self._agent_env(),
             model=self.settings.anthropic_model,
             max_turns=max_turns or self.settings.agent_max_turns,
@@ -89,12 +97,13 @@ class ClaudeRuntime:
         # disabled: the backend still persists artifacts from the JSON wrapper.
         options = ClaudeAgentOptions(
             tools=["Read", "Glob", "Grep"],
-            allowed_tools=["Read", "Glob", "Grep"],
+            allowed_tools=["Read", "Glob", "Grep", *self._backend_tool_names()],
             disallowed_tools=["Bash", "Write", "Edit", "WebFetch", "WebSearch"],
             permission_mode="dontAsk",
             setting_sources=["project"],
             cwd=Path.cwd(),
             add_dirs=[Path.cwd()],
+            mcp_servers=self._backend_tool_server(),
             env=self._agent_env(),
             model=self.settings.anthropic_model,
             max_turns=max_turns or self.settings.agent_max_turns,
@@ -126,6 +135,27 @@ class ClaudeRuntime:
             "CLAUDE_CODE_EFFORT_LEVEL": self._agent_effort(),
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
+
+    def _backend_tool_server(self) -> dict[str, object]:
+        from claude_agent_sdk import create_sdk_mcp_server
+
+        from app.tools.registry import BackendToolRunner
+
+        return {
+            "vedic_backend_tools": create_sdk_mcp_server(
+                name="vedic_backend_tools",
+                version="0.1.0",
+                tools=BackendToolRunner(self.settings).sdk_tools(),
+            )
+        }
+
+    def _backend_tool_names(self) -> list[str]:
+        return [
+            "mcp__vedic_backend_tools__vedic_synastry_validate",
+            "mcp__vedic_backend_tools__vedic_synastry_build",
+            "mcp__vedic_backend_tools__vedic_rectifier_time_scan",
+            "mcp__vedic_backend_tools__vedic_report_builder",
+        ]
 
     def _agent_effort(self) -> AgentEffort:
         value = self.settings.agent_effort
