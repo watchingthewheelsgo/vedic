@@ -52,6 +52,7 @@ ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
 ```bash
 npm install
 npm run backend:setup
+npm run backend:config
 npm run dev
 ```
 
@@ -62,19 +63,27 @@ Backend: `http://127.0.0.1:8787/`
 If port `8787` is already in use, stop the old uvicorn process or run the
 backend on another port with `PORT=8788`.
 
+`npm run backend:config` checks startup-only requirements before uvicorn starts:
+`.env`, LLM auth, Claude-compatible base URL, model name, and
+`claude-agent-sdk`. If it fails, copy `.env.example` to `.env`, set
+`DEEPSEEK_API_KEY=...`, then run `npm run dev` again. For UI-only local testing
+without an LLM, set `VEDIC_AI_MODE=mock`.
+
 ## Checks
 
 ```bash
 npm run check
 npm run backend:setup
+npm run backend:config
 npm run backend:check
 npm run build
 ```
 
 `npm run backend:dev` runs `backend:ensure` before starting uvicorn. The backend
-startup preflight fails fast if calculator dependencies, PyJHora data, or
-bundled ephemeris files are not ready. Run `npm run backend:setup` after a fresh
-clone or whenever `backend/.venv` is rebuilt.
+startup preflight fails fast if calculator dependencies, PyJHora data, bundled
+ephemeris files, `.env`, or LLM settings are not ready. Run
+`npm run backend:setup` after a fresh clone or whenever `backend/.venv` is
+rebuilt.
 
 ## Report Export
 

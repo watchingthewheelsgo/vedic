@@ -3,7 +3,12 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.agents.claude_runtime import ClaudeRuntime
-from app.runtime.preflight import RuntimePreflightReport, validate_backend_runtime
+from app.runtime.preflight import (
+    RuntimePreflightReport,
+    StartupConfigPreflightReport,
+    validate_backend_runtime,
+    validate_startup_configuration,
+)
 from app.services.core_job_runtime import CoreJobRuntime
 from app.services.place_service import PlaceService
 from app.services.skill_runtime import SkillRuntime
@@ -17,6 +22,9 @@ class AppContainer:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.startup_config_preflight: StartupConfigPreflightReport = (
+            validate_startup_configuration(settings)
+        )
         self.runtime_preflight: RuntimePreflightReport = validate_backend_runtime(
             settings.project_root
         )

@@ -57,6 +57,12 @@ async def health() -> dict[str, object]:
             "ephemerisFiles": container.runtime_preflight.ephemeris_files,
             "geonamesPath": container.runtime_preflight.geonames_path,
         },
+        "startupConfig": {
+            "envFile": container.startup_config_preflight.env_file,
+            "agentMode": container.startup_config_preflight.agent_mode,
+            "baseUrl": container.startup_config_preflight.base_url,
+            "model": container.startup_config_preflight.model,
+        },
         "agent": container.agent_runtime.config_summary(),
     }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,16 @@ class RuntimePreflightReport:
     geonames_path: str
 
 
+@dataclass(frozen=True)
+class StartupConfigPreflightReport:
+    """Summary of startup configuration checks that are safe to expose."""
+
+    env_file: str | None
+    agent_mode: str
+    base_url: str
+    model: str
+
+
 REQUIRED_IMPORTS: tuple[tuple[str, str], ...] = (
     ("swisseph", "pysweph>=2.10.3.5"),
     ("dashaflow", "dashaflow>=0.3 installed with --no-deps"),
@@ -28,6 +39,64 @@ REQUIRED_IMPORTS: tuple[tuple[str, str], ...] = (
     ("dateutil", "python-dateutil"),
     ("requests", "requests"),
 )
+
+
+def validate_startup_configuration(settings: Any) -> StartupConfigPreflightReport:
+    """Fail fast when local startup cannot reach the LLM-backed agent runtime."""
+
+    project_root = Path(settings.project_root)
+    env_path = project_root / ".env"
+    mock_mode = str(settings.vedic_ai_mode).strip().lower() == "mock"
+    errors: list[str] = []
+
+    if not env_path.exists() and not mock_mode:
+        errors.append(f"Missing .env file at {env_path}.")
+
+    token = settings.get_agent_auth_token()
+    if not mock_mode and not token:
+        errors.append(
+            "No LLM auth token configured. Set DEEPSEEK_API_KEY (recommended), "
+            "or ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY."
+        )
+
+    base_url = str(settings.anthropic_base_url or "").strip()
+    if not mock_mode and (not base_url or not base_url.startswith(("http://", "https://"))):
+        errors.append("ANTHROPIC_BASE_URL must be a non-empty http(s) URL.")
+
+    model = str(settings.anthropic_model or "").strip()
+    if not mock_mode and not model:
+        errors.append("ANTHROPIC_MODEL must be set.")
+
+    if not mock_mode:
+        try:
+            importlib.import_module("claude_agent_sdk")
+        except Exception as exc:
+            errors.append(
+                "claude-agent-sdk is not importable in the backend runtime. "
+                f"Run `uv sync --project backend` or `npm run backend:setup`. ({exc})"
+            )
+
+    if errors:
+        raise RuntimeError(
+            "Backend startup configuration is not ready:\n"
+            + "\n".join(f"- {item}" for item in errors)
+            + "\n\nHow to fix:\n"
+            + "1. Run `cp .env.example .env` from the project root if `.env` is missing.\n"
+            + "2. Edit `.env` and set `DEEPSEEK_API_KEY=...`.\n"
+            + "3. Keep `ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` unless you use "
+            + "another Claude-compatible provider.\n"
+            + "4. Run `npm run dev` again.\n"
+            + "\nFor UI-only local testing without an LLM, set `VEDIC_AI_MODE=mock` in `.env` "
+            + "or your shell."
+        )
+
+    env_source = str(env_path) if env_path.exists() else ("process-env" if os.environ else None)
+    return StartupConfigPreflightReport(
+        env_file=env_source,
+        agent_mode="mock" if mock_mode else "claude",
+        base_url=base_url,
+        model=model,
+    )
 
 
 def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:

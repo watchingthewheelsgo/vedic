@@ -8,6 +8,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the skill-aligned backend.
 
@@ -17,7 +20,7 @@ class Settings(BaseSettings):
     concepts, and output contracts.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", extra="ignore")
 
     host: str = Field(default="127.0.0.1", alias="HOST")
     port: int = Field(default=8787, alias="PORT")
@@ -49,7 +52,7 @@ class Settings(BaseSettings):
 
     @property
     def project_root(self) -> Path:
-        return Path(__file__).resolve().parents[2]
+        return PROJECT_ROOT
 
     @property
     def tapvox_root(self) -> Path:
