@@ -1,12 +1,18 @@
-import { FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
-import DatePicker from "react-datepicker";
-import Select from "react-select";
+import { FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { format } from "date-fns";
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { PlacePicker } from "../components/PlacePicker";
+import { Button } from "../components/ui/button";
+import { Calendar, CalendarButton } from "../components/ui/calendar";
+import { Card, CardContent } from "../components/ui/card";
+import { Field } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { cn } from "../lib/cn";
 import type { BirthInput, BirthTimePrecision } from "../../shared/domain";
-import "react-datepicker/dist/react-datepicker.css";
 
 type SelectOption<T extends string = string> = {
   value: T;
@@ -60,7 +66,7 @@ const RELATIONSHIP_OPTIONS: SelectOption[] = [
 ];
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const COMMON_MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
+const ALL_MINUTES = Array.from({ length: 60 }, (_, i) => i);
 const QUARTER_MINUTES = [0, 15, 30, 45];
 const QUICK_TIMES = [
   { label: "Midnight", hour: 0, minute: 0 },
@@ -134,176 +140,246 @@ export function Intake() {
   }
 
   return (
-    <div className="form-screen-wrap">
-      <div className="form-inner intake-modern">
-        <button className="back-btn" onClick={() => navigate("/")}>← Back</button>
+    <div className="min-h-screen bg-cream-2 px-5 py-9 sm:px-10 sm:py-14">
+      <div className="mx-auto max-w-[760px]">
+        <button
+          className="mb-8 inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
+          onClick={() => navigate("/")}
+        >
+          ← Back
+        </button>
 
-        <div className="progress-steps">
-          <div className="p-step active"><div className="p-dot">1</div>Personal Info</div>
-          <div className="p-step"><div className="p-dot">2</div>Workshop</div>
-          <div className="p-step"><div className="p-dot">3</div>Report</div>
+        <div className="mb-12 flex items-start">
+          <ProgressStep active label="Personal Info" index={1} />
+          <ProgressStep label="Workshop" index={2} />
+          <ProgressStep label="Report" index={3} last />
         </div>
 
-        <section className="intake-hero">
-          <div className="intake-hero-icon"><UserRound size={18} /></div>
+        <section className="mb-6 flex items-start gap-3.5">
+          <div className="grid size-[38px] shrink-0 place-items-center rounded-[10px] bg-night text-gold shadow-[0_10px_24px_rgba(15,12,9,0.12)]">
+            <UserRound size={18} />
+          </div>
           <div>
-            <h2 className="form-h2">Personal Information</h2>
-            <p className="form-sub">
+            <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">Personal Information</h2>
+            <p className="mb-9 text-sm text-body">
               These details calculate your chart and determine how strict the pre-validation should be.
             </p>
           </div>
         </section>
 
-        <form className="intake-card" onSubmit={onStart} noValidate>
-          <div className="field-grid">
-            <FieldShell
-              label="Date of birth"
-              icon={<CalendarDays size={16} />}
-              hint="Calendar input replaces manual year/month/day selection."
-              error={errors.birthDate}
-            >
-              <DatePicker
-                selected={birthDate}
-                onChange={(date: Date | null) => {
-                  setBirthDate(date);
-                  clearError(setErrors, "birthDate");
+        <Card>
+          <CardContent className="p-5 sm:p-6">
+            <form onSubmit={onStart} noValidate>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Date of birth"
+                  icon={<CalendarDays size={16} />}
+                  hint="Calendar input replaces manual year/month/day selection."
+                  error={errors.birthDate}
+                >
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <CalendarButton aria-invalid={Boolean(errors.birthDate)}>
+                        <CalendarDays className="size-4 text-gold-dim" />
+                        {birthDate ? format(birthDate, "MMMM d, yyyy") : <span className="text-muted">Select date</span>}
+                      </CalendarButton>
+                    </PopoverTrigger>
+                    <PopoverContent className="p-2">
+                      <Calendar
+                        mode="single"
+                        selected={birthDate ?? undefined}
+                        onSelect={(date) => {
+                          setBirthDate(date ?? null);
+                          clearError(setErrors, "birthDate");
+                        }}
+                        disabled={{ after: new Date() }}
+                        captionLayout="dropdown"
+                        startMonth={new Date(1900, 0)}
+                        endMonth={new Date()}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </Field>
+
+                <Field
+                  label="Birth time"
+                  icon={<Clock3 size={16} />}
+                  hint={
+                    timePrecision === "unknown"
+                      ? "No time required. The engine uses 12:00 as a placeholder."
+                      : timePrecision === "part_of_day"
+                        ? "Select the closest known hour."
+                        : "Minute-level time picker. Use the best source you have."
+                  }
+                  error={errors.birthTime}
+                >
+                  <BirthTimePicker
+                    value={birthTime}
+                    precision={timePrecision}
+                    invalid={Boolean(errors.birthTime)}
+                    onChange={(date) => {
+                      setBirthTime(date);
+                      clearError(setErrors, "birthTime");
+                    }}
+                  />
+                </Field>
+              </div>
+
+              <Field
+                label="Birth time confidence"
+                icon={<ShieldCheck size={16} />}
+                hint={precisionOption.description}
+              >
+                <Select
+                  value={timePrecision}
+                  onValueChange={(value) => {
+                    const next = value as BirthTimePrecision;
+                    setTimePrecision(next);
+                    setBirthTime((current) => normalizeTimeForPrecision(current, next));
+                    if (next !== "exact") {
+                      setTimeSource("");
+                      clearError(setErrors, "timeSource");
+                    }
+                    if (next === "unknown") {
+                      clearError(setErrors, "birthTime");
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select confidence" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIME_PRECISION_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              {timePrecision === "exact" && (
+                <Field
+                  label="Birth time source"
+                  hint="The reader skill converts source quality into effective precision."
+                  error={errors.timeSource}
+                >
+                  <Select
+                    value={timeSource || undefined}
+                    onValueChange={(value) => {
+                      setTimeSource(value);
+                      clearError(setErrors, "timeSource");
+                    }}
+                  >
+                    <SelectTrigger aria-invalid={Boolean(errors.timeSource)}>
+                      <SelectValue placeholder="Select source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIME_SOURCE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+
+              {timePrecision === "unknown" && (
+                <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
+                  Unknown birth time is allowed, but the next validation step becomes more important.
+                </div>
+              )}
+
+              <PlacePicker
+                value={place}
+                onChange={(value) => {
+                  setPlace(value);
+                  if (value) clearError(setErrors, "place");
                 }}
-                placeholderText="Select date"
-                dateFormat="MMMM d, yyyy"
-                maxDate={new Date()}
-                showMonthDropdown
-                showYearDropdown
-                dropdownMode="select"
-                scrollableYearDropdown
-                yearDropdownItemNumber={90}
-                className={`date-input ${errors.birthDate ? "field-invalid" : ""}`}
-                wrapperClassName="date-picker-wrap"
+                error={errors.place}
               />
-            </FieldShell>
 
-            <FieldShell
-              label="Birth time"
-              icon={<Clock3 size={16} />}
-              hint={
-                timePrecision === "unknown"
-                  ? "No time required. The engine uses 12:00 as a placeholder."
-                  : timePrecision === "part_of_day"
-                    ? "Select the closest known hour."
-                    : "Minute-level time picker. Use the best source you have."
-              }
-              error={errors.birthTime}
-            >
-              <BirthTimePicker
-                value={birthTime}
-                precision={timePrecision}
-                invalid={Boolean(errors.birthTime)}
-                onChange={(date) => {
-                  setBirthTime(date);
-                  clearError(setErrors, "birthTime");
-                }}
-              />
-            </FieldShell>
-          </div>
+              <Field label="Name" hint="Optional. Used only to address you in the experience.">
+                <Input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="How should the report address you?"
+                />
+              </Field>
 
-          <FieldShell
-            label="Birth time confidence"
-            icon={<ShieldCheck size={16} />}
-            hint={precisionOption.description}
-          >
-            <Select
-              value={precisionOption}
-              onChange={(option) => {
-                const next = option?.value ?? "exact";
-                setTimePrecision(next);
-                setBirthTime((current) => normalizeTimeForPrecision(current, next));
-                if (next !== "exact") {
-                  setTimeSource("");
-                  clearError(setErrors, "timeSource");
-                }
-                if (next === "unknown") {
-                  clearError(setErrors, "birthTime");
-                }
-              }}
-              options={TIME_PRECISION_OPTIONS}
-              classNamePrefix="modern-select"
-              className="modern-select"
-              isSearchable={false}
-            />
-          </FieldShell>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Gender" hint="Used for wording and role interpretation in the report.">
+                  <Select value={gender || undefined} onValueChange={setGender}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GENDER_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
 
-          {timePrecision === "exact" && (
-            <FieldShell
-              label="Birth time source"
-              hint="The reader skill converts source quality into effective precision."
-              error={errors.timeSource}
-            >
-              <Select
-                value={TIME_SOURCE_OPTIONS.find((option) => option.value === timeSource) ?? null}
-                onChange={(option) => {
-                  setTimeSource(option?.value ?? "");
-                  clearError(setErrors, "timeSource");
-                }}
-                options={TIME_SOURCE_OPTIONS}
-                placeholder="Select source"
-                classNamePrefix="modern-select"
-                className={`modern-select ${errors.timeSource ? "field-invalid-select" : ""}`}
-              />
-            </FieldShell>
-          )}
+                <Field label="Relationship status" hint="Shapes the validation and relationship wording.">
+                  <Select value={relationship || undefined} onValueChange={setRelationship}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RELATIONSHIP_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
 
-          {timePrecision === "unknown" && (
-            <div className="form-note compact modern-note">
-              Unknown birth time is allowed, but the next validation step becomes more important.
-            </div>
-          )}
+              {errors.submit && (
+                <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
+                  {errors.submit}
+                </div>
+              )}
 
-          <PlacePicker value={place} onChange={(value) => {
-            setPlace(value);
-            if (value) clearError(setErrors, "place");
-          }} error={errors.place} />
-
-          <FieldShell label="Name" hint="Optional. Used only to address you in the experience.">
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="How should the report address you?"
-              className="text-input"
-            />
-          </FieldShell>
-
-          <div className="field-grid">
-            <FieldShell label="Gender" hint="Used for wording and role interpretation in the report.">
-              <Select
-                value={GENDER_OPTIONS.find((option) => option.value === gender) ?? null}
-                onChange={(option) => setGender(option?.value ?? "")}
-                options={GENDER_OPTIONS}
-                placeholder="Select"
-                classNamePrefix="modern-select"
-                className="modern-select"
-                isSearchable={false}
-              />
-            </FieldShell>
-
-            <FieldShell label="Relationship status" hint="Shapes the validation and relationship wording.">
-              <Select
-                value={RELATIONSHIP_OPTIONS.find((option) => option.value === relationship) ?? null}
-                onChange={(option) => setRelationship(option?.value ?? "")}
-                options={RELATIONSHIP_OPTIONS}
-                placeholder="Select"
-                classNamePrefix="modern-select"
-                className="modern-select"
-                isSearchable={false}
-              />
-            </FieldShell>
-          </div>
-
-          {errors.submit && <div className="form-error submit-error">{errors.submit}</div>}
-
-          <button className="btn btn-gold intake-submit" disabled={busy}>
-            {busy ? "Preparing…" : "Continue to Workshop →"}
-          </button>
-        </form>
+              <Button className="mt-2 w-full" size="lg" disabled={busy}>
+                {busy ? "Preparing..." : "Continue to Workshop →"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
+    </div>
+  );
+}
+
+function ProgressStep({
+  active = false,
+  label,
+  index,
+  last = false
+}: {
+  active?: boolean;
+  label: string;
+  index: number;
+  last?: boolean;
+}) {
+  return (
+    <div className={cn("relative flex-1 text-center text-xs tracking-[0.3px]", active ? "text-gold" : "text-muted")}>
+      {!last && <div className="absolute left-[55%] right-[-55%] top-[15px] h-px bg-gold/25" />}
+      <div
+        className={cn(
+          "relative z-[1] mx-auto mb-2 grid size-[30px] place-items-center rounded-full border text-[13px]",
+          active ? "border-gold bg-gold text-white" : "border-gold/25 bg-cream text-muted"
+        )}
+      >
+        {index}
+      </div>
+      {label}
     </div>
   );
 }
@@ -320,184 +396,167 @@ function BirthTimePicker({
   onChange: (date: Date | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const disabled = precision === "unknown";
   const selectedHour = value?.getHours() ?? null;
-  const selectedMinute = value?.getMinutes() ?? 0;
-  const minuteOptions =
-    precision === "part_of_day"
-      ? [0]
-      : precision === "approximate"
-        ? QUARTER_MINUTES
-        : COMMON_MINUTES;
-
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
-  useEffect(() => {
-    function onDocClick(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
+  const selectedMinute = value ? normalizeMinuteForPrecision(value.getMinutes(), precision) : null;
+  const minuteOptions = precision === "part_of_day" ? [0] : precision === "approximate" ? QUARTER_MINUTES : ALL_MINUTES;
+  const precisionLabel =
+    precision === "part_of_day" ? "Hour only" : precision === "approximate" ? "15 minute step" : "Exact minute";
 
   function commit(hour: number, minute: number) {
     onChange(makeTime(hour, normalizeMinuteForPrecision(minute, precision)));
   }
 
-  function pickHour(hour: number) {
-    commit(hour, selectedMinute);
+  function selectHour(hour: number) {
+    commit(hour, selectedMinute ?? 0);
   }
 
-  function pickMinute(minute: number) {
+  function selectMinute(minute: number) {
     commit(selectedHour ?? 8, minute);
   }
 
-  function pickExactMinute(rawValue: string) {
-    const digits = rawValue.replace(/\D/g, "");
-    if (!digits) {
-      pickMinute(0);
-      return;
-    }
-    pickMinute(Math.max(0, Math.min(59, Number(digits))));
-  }
-
   return (
-    <div className="time-picker" ref={rootRef}>
-      <button
-        type="button"
-        className={`time-trigger ${invalid ? "field-invalid" : ""} ${value ? "filled" : ""}`}
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setOpen(false);
-        }}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-      >
-        <span className="time-trigger-main">{disabled ? "Time unknown" : value ? formatTimeLabel(value, precision) : "Select time"}</span>
-        <span className="time-trigger-meta">
-          {disabled ? "No input needed" : precision === "part_of_day" ? "Hour only" : "HH:MM"}
-        </span>
-      </button>
+    <div className="space-y-2.5">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-invalid={invalid}
+            className={cn(
+              "flex h-[52px] w-full items-center gap-3 rounded-[10px] border border-gold/30 bg-white px-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] outline-none transition focus:border-gold focus:ring-4 focus:ring-gold/15 disabled:cursor-not-allowed disabled:opacity-60",
+              invalid && "border-red bg-red/5"
+            )}
+          >
+            <Clock3 className="size-4 shrink-0 text-gold-dim" />
+            <span className={cn("min-w-0 flex-1 text-[15px] font-medium tabular-nums", value ? "text-ink" : "text-muted")}>
+              {disabled ? "Time unknown" : value ? formatTimeLabel(value, precision) : "Select time"}
+            </span>
+            <span className="shrink-0 text-xs text-muted">{disabled ? "No input" : precisionLabel}</span>
+          </button>
+        </PopoverTrigger>
 
-      {open && !disabled && (
-        <div className="time-popover" role="dialog" aria-label="Choose birth time">
-          <div className="time-readout">
-            <span>Selected time</span>
-            <strong>{value ? formatTimeLabel(value, precision) : "--:--"}</strong>
-            <em>{precision === "exact" ? "Exact minute" : precision === "approximate" ? "15 minute step" : "Hour only"}</em>
-          </div>
-
-          <div className="time-quick-row">
-            {QUICK_TIMES.map((item) => (
-              <button
-                type="button"
-                key={item.label}
-                onClick={() => {
-                  commit(item.hour, item.minute);
-                  setOpen(false);
-                }}
-              >
-                <b>{item.label}</b>
-                <span>{pad(item.hour)}:{pad(item.minute)}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="time-columns">
-            <div className="time-panel-section">
-              <div className="time-panel-title">Hour</div>
-              <div className="time-grid hours">
-                {HOURS.map((hour) => (
-                  <button
-                    type="button"
-                    key={hour}
-                    className={selectedHour === hour ? "selected" : ""}
-                    onClick={() => pickHour(hour)}
-                  >
-                    {pad(hour)}
-                  </button>
-                ))}
+        {!disabled && (
+          <PopoverContent className="w-[min(92vw,360px)] p-3" align="start">
+            <div className="mb-3 rounded-lg border border-gold/20 bg-cream px-3 py-2">
+              <span className="block text-[10px] uppercase tracking-[1.6px] text-muted">Selected birth time</span>
+              <div className="mt-0.5 flex items-end justify-between gap-3">
+                <strong className="text-2xl font-semibold leading-none text-gold-dim tabular-nums">
+                  {value ? formatTimeLabel(value, precision) : "--:--"}
+                </strong>
+                <span className="text-xs text-muted">{precisionLabel}</span>
               </div>
             </div>
 
-            <div className="time-panel-section">
-              <div className="time-panel-title">Minute</div>
-              {precision === "part_of_day" ? (
-                <div className="minute-locked">Fixed to :00 for hour-level precision.</div>
-              ) : precision === "exact" ? (
-                <>
-                  <label className="minute-exact-input">
-                    <span>Exact minute</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={59}
-                      value={selectedMinute}
-                      onChange={(event) => pickExactMinute(event.target.value)}
-                    />
-                  </label>
-                  <div className="minute-presets" aria-label="Common minute presets">
-                    {minuteOptions.map((minute) => (
-                      <button
-                        type="button"
-                        key={minute}
-                        className={selectedMinute === minute ? "selected" : ""}
-                        onClick={() => pickMinute(minute)}
-                      >
-                        {pad(minute)}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="time-grid minutes">
-                  {minuteOptions.map((minute) => (
-                    <button
-                      type="button"
-                      key={minute}
-                      className={selectedMinute === minute ? "selected" : ""}
-                      onClick={() => pickMinute(minute)}
-                    >
-                      {pad(minute)}
-                    </button>
-                  ))}
-                </div>
-              )}
+            <div className="grid grid-cols-2 gap-3">
+              <TimeOptionList
+                title="Hour"
+                values={HOURS}
+                selected={selectedHour}
+                onSelect={selectHour}
+              />
+              <TimeOptionList
+                title="Minute"
+                values={minuteOptions}
+                selected={selectedMinute}
+                onSelect={selectMinute}
+                disabled={precision === "part_of_day"}
+              />
             </div>
-          </div>
 
-          <div className="time-popover-footer">
-            <span>{value ? `Selected ${formatTimeLabel(value, precision)}` : "Pick an hour and minute"}</span>
-            <button type="button" onClick={() => setOpen(false)}>Done</button>
-          </div>
+            <div className="mt-3 grid grid-cols-4 gap-1.5">
+              {QUICK_TIMES.map((item) => {
+                const selected =
+                  value?.getHours() === item.hour &&
+                  normalizeMinuteForPrecision(value.getMinutes(), precision) === normalizeMinuteForPrecision(item.minute, precision);
+                return (
+                  <button
+                    type="button"
+                    key={item.label}
+                    onClick={() => {
+                      commit(item.hour, item.minute);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "rounded-md border px-2 py-1.5 text-left transition",
+                      selected
+                        ? "border-gold bg-gold text-white"
+                        : "border-gold/20 bg-cream text-body hover:border-gold/50 hover:bg-gold/10"
+                    )}
+                  >
+                    <span className="block text-[11px] font-semibold leading-tight">{item.label}</span>
+                    <span className={cn("block text-[11px] tabular-nums", selected ? "text-white/80" : "text-muted")}>
+                      {pad(item.hour)}:{pad(normalizeMinuteForPrecision(item.minute, precision))}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex items-center justify-between border-t border-gold/15 pt-3">
+              <button type="button" className="text-xs text-muted hover:text-ink" onClick={() => onChange(null)}>
+                Clear
+              </button>
+              <Button type="button" size="sm" onClick={() => setOpen(false)}>
+                Done
+              </Button>
+            </div>
+          </PopoverContent>
+        )}
+      </Popover>
+
+      {disabled ? (
+        <div className="rounded-lg border border-gold/20 bg-cream px-3 py-2 text-xs leading-relaxed text-muted">
+          Birth time is intentionally left blank. The engine will use 12:00 only as a calculation placeholder.
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function FieldShell({
-  label,
-  hint,
-  error,
-  icon,
-  children
+function TimeOptionList({
+  title,
+  values,
+  selected,
+  disabled = false,
+  onSelect
 }: {
-  label: string;
-  hint?: string;
-  error?: string;
-  icon?: ReactNode;
-  children: ReactNode;
+  title: string;
+  values: number[];
+  selected: number | null;
+  disabled?: boolean;
+  onSelect: (value: number) => void;
 }) {
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: "center" });
+  }, [selected, values]);
+
   return (
-    <div className={`form-group modern-field ${error ? "has-error" : ""}`}>
-      <label>{icon}<span>{label}</span></label>
-      {children}
-      {error ? <div className="field-error">{error}</div> : hint ? <div className="hint">{hint}</div> : null}
+    <div>
+      <div className="mb-1.5 text-[10px] uppercase tracking-[1.4px] text-muted">{title}</div>
+      <div className="max-h-36 overflow-y-auto rounded-lg border border-gold/20 bg-white p-1">
+        {values.map((value) => {
+          const active = selected === value;
+          return (
+            <button
+              type="button"
+              key={value}
+              ref={active ? selectedRef : undefined}
+              disabled={disabled}
+              onClick={() => onSelect(value)}
+              className={cn(
+                "flex h-8 w-full items-center justify-center rounded-md text-sm font-medium tabular-nums transition",
+                active ? "bg-gold text-white" : "text-body hover:bg-gold/10 hover:text-ink",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
+            >
+              {pad(value)}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

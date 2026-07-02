@@ -15,6 +15,7 @@ import {
 import dagre from "dagre";
 import "@xyflow/react/dist/style.css";
 import { formatDuration, type PipelineData, type PipelineNode } from "../lib/pipeline";
+import { cn } from "../lib/cn";
 
 export type StageStatus = "done" | "running" | "waiting" | "failed" | "pending";
 
@@ -129,12 +130,35 @@ function nodeStatusClass(status: StageStatus): StageStatus {
 }
 
 function StageNode({ data }: NodeProps<StageFlowNode>) {
+  const statusClass: Record<StageStatus, string> = {
+    done: "border-gold bg-linear-to-b from-gold/15 to-night-3 text-gold-light",
+    running: "border-gold bg-night-3 text-white shadow-[0_0_0_1px_var(--color-gold),0_4px_18px_rgba(201,169,110,0.35)]",
+    waiting: "border-gold bg-linear-to-b from-gold/10 to-night-3 text-gold-light",
+    failed: "border-red bg-night-3 text-cream",
+    pending: "border-gold/25 bg-night-3 text-cream opacity-60"
+  };
   return (
-    <div className={`stage-node ${data.seed ? "seed" : nodeStatusClass(data.status)} ${data.selected ? "selected" : ""}`}>
+    <div
+      className={cn(
+        "relative min-h-14 w-[186px] cursor-pointer rounded-lg border-[1.5px] px-3 py-2 font-sans shadow-[0_4px_14px_rgba(0,0,0,0.3)] transition hover:-translate-y-px hover:border-gold/75",
+        data.seed ? "border-gold bg-night text-gold" : statusClass[nodeStatusClass(data.status)],
+        data.selected && "shadow-[0_0_0_2px_var(--color-gold),0_10px_28px_rgba(201,169,110,0.28)]"
+      )}
+    >
       <Handle type="target" position={Position.Top} isConnectable={false} />
-      <div className="stage-node-title">{data.label}</div>
-      <div className="stage-node-sub">{data.sub}</div>
-      {data.badge && <span className="stage-node-badge">{data.badge}</span>}
+      <div className="text-sm font-semibold">{data.label}</div>
+      <div className="mt-0.5 text-[11px] text-cream/45">{data.sub}</div>
+      {data.badge && (
+        <span
+          className={cn(
+            "absolute right-3 top-2 rounded-lg bg-gold px-2 py-0.5 text-[10.5px] font-extrabold tabular-nums text-night",
+            data.status === "failed" && "bg-red text-white",
+            data.status === "pending" && "bg-gold/40"
+          )}
+        >
+          {data.badge}
+        </span>
+      )}
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </div>
   );
@@ -196,29 +220,32 @@ export function PipelineFlow({
   );
 
   return (
-    <div className="pipeline-flow">
-      <div className="flow-head">
-        <div className="flow-head-row">
-          <span>Progress</span>
-          <b>{data.percent}%</b>
+    <div className="flex h-full flex-col">
+      <div className="grid gap-2 border-b border-gold/15 bg-night-2 px-5 py-3.5">
+        <div className="flex items-baseline justify-between">
+          <span className="text-xs uppercase tracking-[1px] text-cream/50">Progress</span>
+          <b className="text-2xl font-semibold text-gold">{data.percent}%</b>
         </div>
         <div
-          className="progress-track"
+          className="h-[7px] overflow-hidden rounded-full bg-night-3"
           role="progressbar"
           aria-valuenow={data.percent}
           aria-valuemin={0}
           aria-valuemax={100}
         >
-          <span style={{ width: `${data.percent}%` }} />
+          <span
+            className="block h-full bg-linear-to-r from-gold-dim to-gold transition-[width] duration-300"
+            style={{ width: `${data.percent}%` }}
+          />
         </div>
-        <div className="flow-head-meta">
+        <div className="flex justify-between text-xs text-cream/45">
           <span>
             {data.completed}/{data.total} steps{data.failed > 0 ? ` · ${data.failed} failed` : ""}
           </span>
           <span>{formatDuration(data.durationSeconds)}</span>
         </div>
       </div>
-      <div className="flow-canvas">
+      <div className="flow-canvas relative min-h-0 flex-1">
         <ReactFlow
           nodes={nodes}
           edges={edges}

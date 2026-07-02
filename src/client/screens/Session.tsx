@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { BookOpen, Download, LoaderCircle, Workflow } from "lucide-react";
 import { api } from "../api";
@@ -9,6 +10,9 @@ import {
   type StageStatus
 } from "../components/PipelineFlow";
 import { MarkdownReport } from "../components/MarkdownReport";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Textarea } from "../components/ui/textarea";
 import {
   formatDuration,
   getPipelineData,
@@ -17,6 +21,7 @@ import {
   type PipelineNode
 } from "../lib/pipeline";
 import { getReportSections, titleForArtifact } from "../lib/report";
+import { cn } from "../lib/cn";
 import type { BirthInput, CoreJobResponse, SkillArtifact, SkillSessionResponse } from "../../shared/domain";
 
 type NavState = { name?: string; birth?: BirthInput; concern?: string } | null;
@@ -129,6 +134,13 @@ const STATUS_LABELS: Record<StageStatus, string> = {
   failed: "Failed",
   pending: "Pending"
 };
+
+function statusBadgeVariant(status: StageStatus): ComponentProps<typeof Badge>["variant"] {
+  if (status === "done") return "done";
+  if (status === "running" || status === "waiting") return "gold";
+  if (status === "failed") return "error";
+  return "neutral";
+}
 
 export function Session() {
   const { id = "" } = useParams();
@@ -306,25 +318,29 @@ export function Session() {
   }
 
   return (
-    <div className="app-shell">
-      <div className="app-tabs">
-        <div className="logo" style={{ marginRight: 12 }} onClick={() => navigate("/")}>
+    <div className="app-shell flex min-h-screen flex-col bg-cream-2">
+      <div className="app-tabs sticky top-0 z-10 flex items-center gap-2 border-b border-gold/25 bg-cream/95 px-5 py-3 backdrop-blur-lg sm:px-8">
+        <button className="brand-logo mr-3 border-0 bg-transparent" onClick={() => navigate("/")}>
           Veda<span>Light</span>
-        </div>
-        <button className={`rnav-item ${tab === "workshop" ? "active" : ""}`} onClick={() => setTab("workshop")}>
+        </button>
+        <Button variant="tab" size="sm" data-active={tab === "workshop"} onClick={() => setTab("workshop")}>
           <Workflow size={14} /> Workshop
-        </button>
-        <button className={`rnav-item ${tab === "report" ? "active" : ""}`} onClick={() => setTab("report")}>
+        </Button>
+        <Button variant="tab" size="sm" data-active={tab === "report"} onClick={() => setTab("report")}>
           <BookOpen size={14} /> Report
-        </button>
-        <div className="spacer" />
-        <span className="sid">{id}</span>
+        </Button>
+        <div className="flex-1" />
+        <span className="hidden text-xs tracking-[0.3px] text-muted sm:inline">{id}</span>
       </div>
 
-      {error && <div className="form-error" style={{ margin: "12px 32px 0" }}>{error}</div>}
+      {error && (
+        <div className="screen-error mx-5 mt-3 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red sm:mx-8">
+          {error}
+        </div>
+      )}
 
       {tab === "workshop" ? (
-        <div className="workshop">
+        <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[340px_1fr]">
           <WorkshopDetailPanel
             selectedStageId={selectedStageId}
             session={session}
@@ -339,7 +355,7 @@ export function Session() {
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
           />
-          <div className="flow-wrap">
+          <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh]">
             {pipelineData ? (
               <PipelineFlow
                 data={pipelineData}
@@ -347,51 +363,62 @@ export function Session() {
                 onSelectStage={setSelectedStageId}
               />
             ) : (
-              <div style={{ height: "100%", display: "grid", placeItems: "center", color: "rgba(245,239,230,.5)" }}>
-                <div style={{ textAlign: "center" }}>
-                  <LoaderCircle size={26} style={{ animation: "spin 1s linear infinite" }} />
-                  <p style={{ marginTop: 10 }}>Preparing pipeline…</p>
+              <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
+                <div className="text-center">
+                  <LoaderCircle className="mx-auto size-7 animate-spin" />
+                  <p className="mt-2.5">Preparing pipeline...</p>
                 </div>
               </div>
             )}
           </div>
         </div>
       ) : complete && reportSections.length > 0 ? (
-        <div className="report-doc">
-          <main className="report-main">
-            <div className="report-doc-head">
-              <h1>Your Vedic Report</h1>
-              <button className="btn btn-gold" onClick={onExport}>
+        <div className="report-doc grid h-[calc(100vh-57px)] grid-cols-1 lg:grid-cols-[1fr_260px]">
+          <main className="report-main overflow-y-auto bg-cream px-6 py-9 pb-20 sm:px-11">
+            <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
+              <h1 className="text-[28px] font-light tracking-normal">Your Vedic Report</h1>
+              <Button onClick={onExport}>
                 <Download size={15} /> Export PDF
-              </button>
+              </Button>
             </div>
             {reportSections.map((artifact, index) => (
-              <section className="r-section" id={`section-${index}`} key={artifact.path}>
-                <div className="r-tag">Section {String(index + 1).padStart(2, "0")}</div>
-                <div className="r-title">{titleForArtifact(artifact)}</div>
+              <section
+                className="report-section mb-12 scroll-mt-20 border-b border-gold/25 pb-12 last:border-0"
+                id={`section-${index}`}
+                key={artifact.path}
+              >
+                <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
+                  Section {String(index + 1).padStart(2, "0")}
+                </div>
+                <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">{titleForArtifact(artifact)}</div>
                 <MarkdownReport content={artifact.content} />
               </section>
             ))}
           </main>
-          <nav className="report-toc">
-            <h4>Contents</h4>
+          <nav className="report-toc hidden overflow-y-auto border-l border-gold/25 bg-cream-2 px-4 py-6 lg:block">
+            <h4 className="mb-3.5 text-[11px] uppercase tracking-[2px] text-muted">Contents</h4>
             {reportSections.map((artifact, index) => (
-              <a
+              <button
                 key={artifact.path}
-                className={activeSection === index ? "active" : ""}
+                className={cn(
+                  "flex w-full items-baseline gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-body transition hover:bg-gold/10 hover:text-ink",
+                  activeSection === index && "bg-gold text-white hover:bg-gold hover:text-white"
+                )}
                 onClick={() => scrollToSection(index)}
               >
-                <span className="n">{String(index + 1).padStart(2, "0")}</span>
+                <span className={cn("shrink-0 text-[11px] font-bold text-gold", activeSection === index && "text-white")}>
+                  {String(index + 1).padStart(2, "0")}
+                </span>
                 {titleForArtifact(artifact)}
-              </a>
+              </button>
             ))}
           </nav>
         </div>
       ) : (
-        <div className="report-generating">
+        <div className="grid min-h-[calc(100vh-57px)] place-items-center px-6 py-10 text-center">
           <div>
-            <div className="spin" />
-            <h2>
+            <div className="mx-auto mb-5 size-11 animate-spin rounded-full border-[3px] border-gold/25 border-t-gold" />
+            <h2 className="mb-2 text-2xl font-light">
               {coreJob?.status === "failed"
                 ? "Generation failed"
                 : awaitingValidationFeedback
@@ -400,18 +427,18 @@ export function Session() {
                     ? "Generating pre-validation"
                     : "Your report is being generated"}
             </h2>
-            <p>
+            <p className="mx-auto mb-6 max-w-[420px] text-sm text-body">
               {coreJob?.status === "failed"
                 ? coreJob.message
                 : awaitingValidationFeedback
                   ? "Reply to the validation anchors in Workshop before the full report starts."
                   : `The full analysis runs stage by stage${
-                      pipelineData ? ` — ${pipelineData.completed}/${pipelineData.total} steps done` : ""
+                      pipelineData ? ` - ${pipelineData.completed}/${pipelineData.total} steps done` : ""
                     }. Watch it live in the Workshop tab.`}
             </p>
-            <button className="btn btn-gold" onClick={() => setTab("workshop")}>
+            <Button onClick={() => setTab("workshop")}>
               <Workflow size={15} /> Go to Workshop
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -452,13 +479,13 @@ function WorkshopDetailPanel({
   const status = stage.seed ? "done" : stageAgg?.status ?? "pending";
 
   return (
-    <aside className="info-panel stage-detail-panel">
-      <div className="detail-kicker">Workshop detail</div>
-      <div className="detail-title-row">
-        <h3>{stage.label}</h3>
-        <span className={`stage-status-pill ${status}`}>{STATUS_LABELS[status]}</span>
+    <aside className="border-r border-gold/25 bg-cream px-6 py-7 max-lg:border-b max-lg:border-r-0 lg:overflow-y-auto">
+      <div className="mb-2 text-[10px] uppercase tracking-[2.4px] text-gold">Workshop detail</div>
+      <div className="mb-2.5 flex items-start justify-between gap-3">
+        <h3 className="text-lg font-semibold tracking-normal text-ink">{stage.label}</h3>
+        <Badge variant={statusBadgeVariant(status)}>{STATUS_LABELS[status]}</Badge>
       </div>
-      <p className="stage-purpose">{STAGE_COPY[stage.id]?.purpose}</p>
+      <p className="mb-5 text-[13px] leading-[1.65] text-body">{STAGE_COPY[stage.id]?.purpose}</p>
 
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
@@ -490,7 +517,7 @@ function WorkshopDetailPanel({
 function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
   return (
     <>
-      <div className="detail-section">
+      <div className="my-4">
         <InfoRow label="Date" value={birthInfo.date} />
         <InfoRow label="Time" value={birthInfo.time} />
         <InfoRow label="Place" value={birthInfo.place} />
@@ -501,13 +528,13 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
         {birthInfo.relationship && <InfoRow label="Relationship" value={birthInfo.relationship} />}
       </div>
       {birthInfo.concern && (
-        <div className="detail-section">
-          <div className="detail-subtitle">Initial concern</div>
-          <p className="detail-text">{birthInfo.concern}</p>
+        <div className="my-4">
+          <DetailSubtitle>Initial concern</DetailSubtitle>
+          <p className="m-0 text-[13px] leading-[1.7] text-body">{birthInfo.concern}</p>
         </div>
       )}
       <DetailList title="Outputs" items={STAGE_COPY.src.outputs} />
-      <div className="info-note">
+      <div className="mt-5 text-xs leading-[1.7] text-muted">
         This data is the source of structured_data.md. Later stages should read this file instead of
         reinterpreting the original form fields.
       </div>
@@ -542,9 +569,9 @@ function ReaderDetail({
       <>
         <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
         <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
-        <div className="detail-section">
-          <div className="detail-subtitle">{readerRunning ? "Running now" : "Not started"}</div>
-          <p className="detail-text">
+        <div className="my-4">
+          <DetailSubtitle>{readerRunning ? "Running now" : "Not started"}</DetailSubtitle>
+          <p className="m-0 text-[13px] leading-[1.7] text-body">
             {readerRunning
               ? `Elapsed ${formatElapsed(readerStartedAt, now)}. The LLM is generating validation anchors from structured_data.md.`
               : STAGE_COPY.reader.expected}
@@ -556,7 +583,7 @@ function ReaderDetail({
 
   return (
     <>
-      <div className="detail-section">
+      <div className="my-4">
         <InfoRow label="Generated" value={formatTimestamp(prevalidation.updatedAt)} />
         <InfoRow label="Feedback" value={feedback ? "Recorded" : "Required before full report"} />
       </div>
@@ -564,17 +591,17 @@ function ReaderDetail({
       {feedback ? (
         <ArtifactExcerpt artifact={feedback} title="Recorded feedback" />
       ) : (
-        <form className="validation-form" onSubmit={onSubmitFeedback}>
-          <label>Reply to each anchor</label>
-          <textarea
+        <form className="mt-4 grid gap-2.5" onSubmit={onSubmitFeedback}>
+          <label className="text-[11px] uppercase tracking-[1.4px] text-muted">Reply to each anchor</label>
+          <Textarea
             rows={7}
             value={validationFeedback}
             onChange={(event) => onValidationFeedbackChange(event.target.value)}
             placeholder={"1. 准 / 不准 / 部分准 - ...\n2. 准 / 不准 / 部分准 - ...\n3. 准 / 不准 / 部分准 - ..."}
           />
-          <button className="btn btn-gold" disabled={submittingFeedback || !validationFeedback.trim()}>
-            {submittingFeedback ? "Recording…" : "Record feedback and start report"}
-          </button>
+          <Button disabled={submittingFeedback || !validationFeedback.trim()}>
+            {submittingFeedback ? "Recording..." : "Record feedback and start report"}
+          </Button>
         </form>
       )}
     </>
@@ -605,7 +632,7 @@ function CoreStageDetail({
 
   return (
     <>
-      <div className="detail-section">
+      <div className="my-4">
         <InfoRow label="Stage status" value={STATUS_LABELS[status]} />
         {nodes.length > 0 && <InfoRow label="Nodes" value={`${completedNodes.length}/${nodes.length} complete`} />}
         {stageDuration > 0 && <InfoRow label="Completed node time" value={formatDuration(stageDuration)} />}
@@ -613,24 +640,24 @@ function CoreStageDetail({
       </div>
 
       {status === "pending" && (
-        <div className="detail-section">
-          <div className="detail-subtitle">What will run here</div>
-          <p className="detail-text">{copy.expected}</p>
+        <div className="my-4">
+          <DetailSubtitle>What will run here</DetailSubtitle>
+          <p className="m-0 text-[13px] leading-[1.7] text-body">{copy.expected}</p>
         </div>
       )}
 
       {runningNodes.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-subtitle">Running nodes</div>
-          <div className="node-list">
+        <div className="my-4">
+          <DetailSubtitle>Running nodes</DetailSubtitle>
+          <div className="grid gap-2">
             {runningNodes.map((node) => (
-              <div className="node-item" key={node.id}>
-                <b>{node.label}</b>
-                <span>{formatElapsedIso(node.startedAt, now)} elapsed</span>
+              <div className="flex justify-between gap-2.5 rounded-md border border-gold/25 bg-cream-2 px-2.5 py-2 text-[12.5px]" key={node.id}>
+                <b className="font-semibold text-ink">{node.label}</b>
+                <span className="text-right text-muted">{formatElapsedIso(node.startedAt, now)} elapsed</span>
               </div>
             ))}
           </div>
-          <p className="detail-text muted">
+          <p className="m-0 mt-2.5 text-[13px] leading-[1.7] text-muted">
             Expected time depends mostly on LLM latency; parallel waves reduce wall-clock time when
             independent nodes are ready together.
           </p>
@@ -638,13 +665,13 @@ function CoreStageDetail({
       )}
 
       {failedNodes.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-subtitle">Errors</div>
-          <div className="node-list">
+        <div className="my-4">
+          <DetailSubtitle>Errors</DetailSubtitle>
+          <div className="grid gap-2">
             {failedNodes.map((node) => (
-              <div className="node-item error" key={node.id}>
-                <b>{node.label}</b>
-                <span>{node.error || "Failed"}</span>
+              <div className="flex justify-between gap-2.5 rounded-md border border-red/30 bg-red/10 px-2.5 py-2 text-[12.5px]" key={node.id}>
+                <b className="font-semibold text-ink">{node.label}</b>
+                <span className="text-right text-red">{node.error || "Failed"}</span>
               </div>
             ))}
           </div>
@@ -655,16 +682,16 @@ function CoreStageDetail({
       <DetailList title="Outputs" items={copy.outputs} />
 
       {nodes.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-subtitle">Node details</div>
-          <div className="node-list compact">
+        <div className="my-4">
+          <DetailSubtitle>Node details</DetailSubtitle>
+          <div className="grid gap-1.5">
             {nodes.slice(0, 8).map((node) => (
-              <div className="node-item" key={node.id}>
-                <b>{node.label}</b>
-                <span>{node.status}{node.durationSeconds ? ` · ${formatDuration(node.durationSeconds)}` : ""}</span>
+              <div className="flex justify-between gap-2.5 rounded-md border border-gold/25 bg-cream-2 px-2.5 py-2 text-[12.5px]" key={node.id}>
+                <b className="font-semibold text-ink">{node.label}</b>
+                <span className="text-right text-muted">{node.status}{node.durationSeconds ? ` · ${formatDuration(node.durationSeconds)}` : ""}</span>
               </div>
             ))}
-            {nodes.length > 8 && <div className="detail-more">+{nodes.length - 8} more nodes</div>}
+            {nodes.length > 8 && <div className="px-1 text-xs text-muted">+{nodes.length - 8} more nodes</div>}
           </div>
         </div>
       )}
@@ -676,20 +703,22 @@ function CoreStageDetail({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="info-row">
-      <span className="k">{label}</span>
-      <span className="v">{value || "—"}</span>
+    <div className="flex justify-between gap-3 border-b border-gold/25 py-2.5 text-sm">
+      <span className="text-muted">{label}</span>
+      <span className="text-right font-medium text-ink">{value || "—"}</span>
     </div>
   );
 }
 
 function DetailList({ title, items }: { title: string; items: string[] }) {
   return (
-    <div className="detail-section">
-      <div className="detail-subtitle">{title}</div>
-      <ul className="detail-list">
+    <div className="my-4">
+      <DetailSubtitle>{title}</DetailSubtitle>
+      <ul className="list-disc pl-4">
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li key={item} className="text-[13px] leading-[1.65] text-body marker:text-gold">
+            {item}
+          </li>
         ))}
       </ul>
     </div>
@@ -698,11 +727,17 @@ function DetailList({ title, items }: { title: string; items: string[] }) {
 
 function ArtifactExcerpt({ artifact, title }: { artifact: SkillArtifact; title: string }) {
   return (
-    <div className="detail-section">
-      <div className="detail-subtitle">{title}</div>
-      <pre className="artifact-excerpt">{excerpt(artifact.content)}</pre>
+    <div className="my-4">
+      <DetailSubtitle>{title}</DetailSubtitle>
+      <pre className="m-0 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-md border border-gold/25 bg-cream-2 p-3 font-mono text-[12.5px] leading-[1.65] text-body">
+        {excerpt(artifact.content)}
+      </pre>
     </div>
   );
+}
+
+function DetailSubtitle({ children }: { children: ReactNode }) {
+  return <div className="mb-2 text-[11px] uppercase tracking-[1.4px] text-muted">{children}</div>;
 }
 
 function findStageArtifact(

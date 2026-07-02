@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { LoaderCircle, MapPin, Search } from "lucide-react";
 import { api } from "../api";
+import { cn } from "../lib/cn";
 import type { PlaceOption } from "../../shared/domain";
+import { Field } from "./ui/field";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 const isCoord = (s: string) => /lat\s*=/.test(s);
 
-// Single-field city autocomplete (the pattern used by Google Places, booking
-// sites, astrology apps): type a city → pick "City, Region, Country".
+// Single-field city autocomplete: type a city, then pick
+// "City, Region, Country" from the async place API.
 export function PlacePicker({
   value,
   onChange,
@@ -19,19 +22,22 @@ export function PlacePicker({
   const [query, setQuery] = useState(value);
   const [options, setOptions] = useState<PlaceOption[]>([]);
   const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(-1);
   const [loading, setLoading] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState(false);
 
-  // Debounced global search; skips when the text is already the committed value
-  // or a raw coordinate string.
+  useEffect(() => {
+    if (value && value !== query && options.length === 0) setQuery(value);
+  }, [options.length, query, value]);
+
   useEffect(() => {
     const q = query.trim();
     if (q === value || q.length < 2 || isCoord(q)) {
       setOptions([]);
+      setOpen(false);
       setLoading(false);
       return;
     }
+
     const controller = new AbortController();
     setLoading(true);
     const timer = window.setTimeout(() => {
@@ -39,26 +45,17 @@ export function PlacePicker({
         .searchPlaces({ level: "city", q, limit: 8 }, controller.signal)
         .then((response) => {
           setOptions(response.options);
-          setOpen(true);
-          setHighlight(-1);
+          if (focused && response.options.length > 0) setOpen(true);
         })
         .catch(() => setOptions([]))
         .finally(() => setLoading(false));
-    }, 250);
+    }, 350);
+
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query, value]);
-
-  // Close the menu on outside click.
-  useEffect(() => {
-    function onDocClick(event: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
+  }, [focused, query, value]);
 
   function commit(option: PlaceOption) {
     const picked = option.birthPlace ?? option.value;
@@ -66,13 +63,10 @@ export function PlacePicker({
     setQuery(picked);
     setOptions([]);
     setOpen(false);
-    setHighlight(-1);
   }
 
   function onInput(text: string) {
     setQuery(text);
-    // Editing away from a committed selection clears it (forces a re-pick),
-    // except raw coordinates which are valid as typed.
     if (isCoord(text)) {
       onChange(text.trim());
     } else if (value) {
@@ -81,22 +75,10 @@ export function PlacePicker({
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === "ArrowDown") {
+    if (event.key === "Enter" && isCoord(query)) {
       event.preventDefault();
-      setOpen(true);
-      setHighlight((h) => Math.min(h + 1, options.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
-    } else if (event.key === "Enter") {
-      if (highlight >= 0 && options[highlight]) {
-        event.preventDefault();
-        commit(options[highlight]);
-      } else if (isCoord(query)) {
-        event.preventDefault();
-        onChange(query.trim());
-        setOpen(false);
-      }
+      onChange(query.trim());
+      setOpen(false);
     } else if (event.key === "Escape") {
       setOpen(false);
     }
@@ -105,50 +87,74 @@ export function PlacePicker({
   const committed = Boolean(value) && query.trim() === value;
 
   return (
-    <div className={`form-group modern-field city-modern-field ${error ? "has-error" : ""}`} ref={boxRef}>
-      <label><MapPin size={16} /><span>City of birth</span></label>
-      <div className={`city-field ${committed ? "committed" : ""} ${error ? "field-invalid" : ""}`}>
-        <MapPin size={16} />
-        <input
-          value={query}
-          onChange={(event) => onInput(event.target.value)}
-          onFocus={() => options.length && setOpen(true)}
-          onKeyDown={onKeyDown}
-          placeholder="Type a city — e.g. Shanghai, London, New York"
-          autoComplete="off"
-          role="combobox"
-          aria-expanded={open && options.length > 0}
-          aria-controls="city-listbox"
-          aria-autocomplete="list"
-          aria-activedescendant={highlight >= 0 ? `city-opt-${highlight}` : undefined}
-        />
-        {loading ? <LoaderCircle size={15} className="city-spin" /> : <Search size={15} />}
-        {open && options.length > 0 && (
-          <ul className="city-menu" id="city-listbox" role="listbox">
-            {options.map((option, index) => (
-              <li
-                key={option.id}
-                id={`city-opt-${index}`}
-                role="option"
-                aria-selected={index === highlight}
-                className={index === highlight ? "active" : ""}
-                onMouseEnter={() => setHighlight(index)}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  commit(option);
-                }}
-              >
-                <span className="city-name">{option.label}</span>
-                <small>{option.meta}</small>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      {error ? <div className="field-error">{error}</div> : <div className="hint">
-        Worldwide search. No match? Paste coordinates:
-        <code style={{ marginLeft: 6 }}>lat=34.05, lon=-118.24, tz=America/Los_Angeles</code>
-      </div>}
-    </div>
+    <Field
+      label="City of birth"
+      icon={<MapPin size={16} />}
+      error={error}
+      hint="Worldwide search. No match? Paste coordinates: lat=34.05, lon=-118.24, tz=America/Los_Angeles"
+    >
+      <Popover open={open && (loading || options.length > 0)} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <div
+            className={cn(
+              "flex h-[52px] items-center gap-3 rounded-[10px] border border-gold/30 bg-white px-4 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] transition focus-within:border-gold focus-within:ring-4 focus-within:ring-gold/15",
+              committed && "text-ink",
+              error && "border-red bg-red/5"
+            )}
+          >
+            <MapPin className="size-4 shrink-0" />
+            <input
+              value={query}
+              onChange={(event) => onInput(event.target.value)}
+              onFocus={() => {
+                setFocused(true);
+                if (options.length) setOpen(true);
+              }}
+              onBlur={() => setFocused(false)}
+              onKeyDown={onKeyDown}
+              placeholder="Search city"
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={open && options.length > 0}
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[15px] text-ink outline-none placeholder:text-muted"
+            />
+            {loading ? (
+              <LoaderCircle className="size-4 shrink-0 animate-spin text-gold" />
+            ) : (
+              <Search className="size-4 shrink-0" />
+            )}
+          </div>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-[var(--radix-popover-trigger-width)] p-1"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="max-h-[300px] overflow-y-auto">
+            {loading ? (
+              <div className="px-3 py-6 text-center text-sm text-muted">Searching...</div>
+            ) : (
+              <div role="listbox" aria-label="City search results" className="grid gap-1">
+                {options.map((option) => (
+                  <button
+                    type="button"
+                    key={option.id}
+                    role="option"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      commit(option);
+                    }}
+                    className="flex items-baseline justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-muted outline-none transition hover:bg-gold/15 hover:text-ink focus:bg-gold/15 focus:text-ink"
+                  >
+                    <span className="font-medium text-ink">{option.label}</span>
+                    <span className="max-w-[55%] truncate text-xs text-muted">{option.meta}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </Field>
   );
 }

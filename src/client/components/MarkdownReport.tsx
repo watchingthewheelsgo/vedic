@@ -11,7 +11,7 @@ type MarkdownBlock =
 export function MarkdownReport({ content }: { content: string }) {
   const blocks = useMemo(() => parseMarkdown(content), [content]);
   return (
-    <div className="markdown-report">
+    <div>
       {blocks.map((block, index) => (
         <MarkdownBlockView key={index} block={block} />
       ))}
@@ -23,21 +23,47 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   if (block.type === "heading") {
     const level = Math.min(Math.max(block.level, 2), 4);
     const Tag = `h${level}` as "h2" | "h3" | "h4";
-    return <Tag>{renderInline(block.text)}</Tag>;
+    const className =
+      level === 2
+        ? "my-3 mt-6 text-lg font-semibold tracking-normal text-gold-dim"
+        : level === 3
+          ? "my-2.5 mt-5 text-base font-semibold tracking-normal text-ink"
+          : "my-2 mt-4 text-sm font-semibold tracking-normal text-ink";
+    return <Tag className={className}>{renderInline(block.text)}</Tag>;
   }
-  if (block.type === "quote") return <blockquote>{renderInline(block.text)}</blockquote>;
+  if (block.type === "quote") {
+    return (
+      <blockquote className="my-3.5 rounded-r border-l-[3px] border-gold bg-gold/10 px-4 py-3 text-[13px] leading-[1.8] text-body">
+        {renderInline(block.text)}
+      </blockquote>
+    );
+  }
   if (block.type === "list") {
     return (
-      <ul>
+      <ul className="my-3.5 list-disc pl-5">
         {block.items.map((item, index) => (
-          <li key={index}>{renderInline(item)}</li>
+          <li key={index} className="text-sm leading-[1.85] text-body marker:text-gold">
+            {renderInline(item)}
+          </li>
         ))}
       </ul>
     );
   }
-  if (block.type === "table") return <pre className="md-table">{block.lines.join("\n")}</pre>;
-  if (block.type === "code") return <pre className="md-code">{block.text}</pre>;
-  return <p>{renderInline(block.text)}</p>;
+  if (block.type === "table") {
+    return (
+      <pre className="my-3.5 overflow-x-auto whitespace-pre rounded-md border border-gold/25 bg-cream-2 p-3 font-mono text-[12.5px] text-body">
+        {block.lines.join("\n")}
+      </pre>
+    );
+  }
+  if (block.type === "code") {
+    return (
+      <pre className="my-3.5 overflow-x-auto whitespace-pre rounded-md border border-gold/25 bg-cream-2 p-3 font-mono text-[12.5px] text-body">
+        {block.text}
+      </pre>
+    );
+  }
+  return <p className="my-2.5 text-sm leading-[1.9] text-body">{renderInline(block.text)}</p>;
 }
 
 function parseMarkdown(content: string): MarkdownBlock[] {
@@ -128,7 +154,13 @@ function isTableLine(line: string) {
 function renderInline(text: string): ReactNode[] {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
-    if (part.startsWith("`") && part.endsWith("`")) return <code key={index}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code key={index} className="rounded bg-cream-3 px-1.5 py-0.5 font-mono text-[0.88em] text-gold-dim">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
     if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
     return <span key={index}>{part}</span>;
   });
