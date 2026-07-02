@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.container import get_container
@@ -100,9 +100,15 @@ async def create_skill_session(input_data: SkillBirthInput) -> SkillSessionRespo
 
 
 @app.get("/api/skill-sessions/{session_id}", response_model=SkillSessionResponse)
-async def get_skill_session(session_id: str) -> SkillSessionResponse:
+async def get_skill_session(
+    session_id: str,
+    x_session_token: str | None = Header(default=None),
+) -> SkillSessionResponse:
     try:
+        _validate_session_access(session_id, x_session_token)
         return get_container().skill_runtime.load_session(session_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -112,9 +118,15 @@ async def get_skill_session(session_id: str) -> SkillSessionResponse:
 
 
 @app.post("/api/skill-synastry-subject", response_model=SkillSessionResponse)
-async def create_synastry_subject(input_data: SynastryBirthInput) -> SkillSessionResponse:
+async def create_synastry_subject(
+    input_data: SynastryBirthInput,
+    x_session_token: str | None = Header(default=None),
+) -> SkillSessionResponse:
     try:
+        _validate_session_access(input_data.session_id, x_session_token)
         return await get_container().skill_runtime.create_synastry_subject(input_data)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
@@ -124,9 +136,15 @@ async def create_synastry_subject(input_data: SynastryBirthInput) -> SkillSessio
 
 
 @app.post("/api/skill-runs", response_model=SkillSessionResponse)
-async def run_skill(input_data: SkillRunInput) -> SkillSessionResponse:
+async def run_skill(
+    input_data: SkillRunInput,
+    x_session_token: str | None = Header(default=None),
+) -> SkillSessionResponse:
     try:
+        _validate_session_access(input_data.session_id, x_session_token)
         return await get_container().skill_runtime.run_skill(input_data)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -147,9 +165,15 @@ async def run_skill(input_data: SkillRunInput) -> SkillSessionResponse:
 
 
 @app.post("/api/core-jobs", response_model=CoreJobResponse)
-async def start_core_job(input_data: SkillRunInput) -> CoreJobResponse:
+async def start_core_job(
+    input_data: SkillRunInput,
+    x_session_token: str | None = Header(default=None),
+) -> CoreJobResponse:
     try:
+        _validate_session_access(input_data.session_id, x_session_token)
         return await get_container().core_job_runtime.start(input_data)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -159,9 +183,16 @@ async def start_core_job(input_data: SkillRunInput) -> CoreJobResponse:
 
 
 @app.get("/api/core-jobs/{job_id}", response_model=CoreJobResponse)
-async def get_core_job(job_id: str) -> CoreJobResponse:
+async def get_core_job(
+    job_id: str,
+    x_session_token: str | None = Header(default=None),
+) -> CoreJobResponse:
     try:
-        return await get_container().core_job_runtime.get(job_id)
+        response = await get_container().core_job_runtime.get(job_id)
+        _validate_session_access(response.session_id, x_session_token)
+        return response
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -169,18 +200,28 @@ async def get_core_job(job_id: str) -> CoreJobResponse:
 
 
 @app.post("/api/skill-feedback", response_model=SkillSessionResponse)
-async def record_skill_feedback(input_data: SkillFeedbackInput) -> SkillSessionResponse:
+async def record_skill_feedback(
+    input_data: SkillFeedbackInput,
+    x_session_token: str | None = Header(default=None),
+) -> SkillSessionResponse:
     try:
+        _validate_session_access(input_data.session_id, x_session_token)
         return await get_container().skill_runtime.record_reader_feedback(
             input_data.session_id,
             input_data.feedback_markdown,
         )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _validate_session_access(session_id: str, token: str | None) -> None:
+    get_container().skill_runtime.workspace.validate_session_access(session_id, token)
 
 
 def start() -> None:

@@ -40,6 +40,8 @@ type BirthInfo = {
 
 type StageCopy = {
   purpose: string;
+  userResult: string;
+  userAction: string;
   inputs: string[];
   outputs: string[];
   expected: string;
@@ -47,73 +49,97 @@ type StageCopy = {
 
 const STAGE_COPY: Record<string, StageCopy> = {
   src: {
-    purpose: "Calculate the canonical chart data from birth details and write structured_data.md.",
+    purpose: "Locks the birth details that every later reading must use.",
+    userResult: "A stable chart data snapshot is created. This avoids later stages reinterpreting the form fields differently.",
+    userAction: "Review the date, time, place, and time confidence. If something is wrong, start a fresh workshop.",
     inputs: ["Birth date, time, place", "Time precision and source", "Gender and relationship status"],
     outputs: ["structured_data.md", "structured_data.json", "run_metrics.json"],
     expected: "Usually seconds. If place resolution fails, fix the city input before continuing."
   },
   reader: {
-    purpose: "Run vedic-reader Calc mode: signal pre-scan, Yoga scan, then 3-5 falsifiable validation anchors.",
+    purpose: "Checks whether the birth time feels plausible before spending time on the full report.",
+    userResult: "You get 3-5 concrete anchors to mark as accurate, inaccurate, or partly accurate.",
+    userAction: "Reply to each anchor. The full report starts only after this feedback is recorded.",
     inputs: ["structured_data.md"],
     outputs: ["reader_prevalidation.md", "user_context.md after your feedback"],
     expected: "Usually a few minutes because this is an LLM reading step."
   },
   p1: {
-    purpose: "Build the identity overview and establish the core chart frame.",
+    purpose: "Builds the first identity frame for the report.",
+    userResult: "The report starts with temperament, chart lord, and core orientation.",
+    userAction: "No action required. Wait for this stage to finish.",
     inputs: ["structured_data.md"],
     outputs: ["p1_overview.md"],
     expected: "First core node; starts after validation feedback is recorded."
   },
   yoga: {
-    purpose: "Pre-scan Yoga and Neecha Bhanga Raja Yoga conditions before individual planet audits.",
+    purpose: "Finds major chart patterns before judging individual planets.",
+    userResult: "Confirmed and rejected pattern signals are carried into later interpretation.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", "resources/yogas.md"],
     outputs: [".runtime/p2/yoga.md", "p2a_planets.md after composition"],
     expected: "Runs in parallel with P1 where dependencies allow."
   },
   p2: {
-    purpose: "Audit all nine planets using the original P1-P12 framework.",
+    purpose: "Scores the nine planetary actors that drive most report sections.",
+    userResult: "Strength, dignity, house role, and constraints are prepared for later synthesis.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", ".runtime/p2/yoga.md"],
     outputs: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
     expected: "Nine independent planet nodes can run in parallel after Yoga pre-scan."
   },
   d9: {
-    purpose: "Audit each planet in D9/Navamsha and carry forward the D1 identity matrix.",
+    purpose: "Checks whether the surface chart promise holds at a deeper Navamsha level.",
+    userResult: "The report can separate visible potential from deeper fulfillment quality.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", "p2a-p2d planet audits"],
     outputs: ["p3a_d9.md"],
     expected: "Nine D9 planet nodes can run in parallel after P2."
   },
   div: {
-    purpose: "Read D10 career, D4 property/comfort, and D5 authority divisions.",
+    purpose: "Adds context for career, home/property, and authority/creative themes.",
+    userResult: "Specialized charts add evidence without overwhelming the main report.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", "p2a-p2d planet audits"],
     outputs: ["p3b_divisional.md"],
     expected: "Three divisional summaries can run in parallel after P2."
   },
   house: {
-    purpose: "Diagnose all 12 houses with lord, tenant, aspect, SAV, division, and Dasha evidence.",
+    purpose: "Reviews the 12 life areas that the final report will synthesize.",
+    userResult: "Money, work, relationships, health, learning, family, reputation, and spiritual areas get evidence.",
+    userAction: "No action required.",
     inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
     outputs: ["p4a_houses.md", "p4b_houses.md"],
     expected: "Twelve house nodes can run in parallel after D9 and divisional summaries."
   },
   dasha: {
-    purpose: "Prepare the Dasha review and Yoga activation reference for life-block synthesis.",
+    purpose: "Builds the timing reference used by the life synthesis.",
+    userResult: "Current and upcoming periods can be tied back to the chart evidence.",
+    userAction: "No action required.",
     inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
     outputs: [".runtime/dasha_review.md"],
     expected: "Runs once D9 and divisional outputs are ready."
   },
   pari: {
-    purpose: "Scan confirmed and excluded Parivartana exchange pairs after house diagnosis.",
+    purpose: "Cross-checks house interactions so the report does not overstate exchange patterns.",
+    userResult: "Confirmed and excluded links are recorded before the final synthesis.",
+    userAction: "No action required.",
     inputs: ["All 12 house diagnosis nodes"],
     outputs: [".runtime/houses/parivartana.md", "p4b_houses.md"],
     expected: "Runs after every house node completes."
   },
   life: {
-    purpose: "Synthesize life domains using prior blind-audit artifacts and user feedback where allowed.",
+    purpose: "Turns the evidence into readable life-domain sections.",
+    userResult: "The report assembles identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths.",
+    userAction: "No action required.",
     inputs: ["p4 outputs", "Dasha review", "user_context.md"],
     outputs: ["p5a_life.md", "p5b_life.md"],
     expected: "Ten life-block nodes can run in parallel after house and Dasha stages."
   },
   appx: {
-    purpose: "Write the technical appendix and final consistency notes.",
+    purpose: "Finalizes the report and keeps technical evidence available at the end.",
+    userResult: "The Report tab becomes available with export-ready markdown sections.",
+    userAction: "Open the Report tab when this completes.",
     inputs: ["All completed core report artifacts"],
     outputs: ["appendix.md"],
     expected: "Final core node."
@@ -255,7 +281,7 @@ export function Session() {
     let cancelled = false;
     const timer = window.setInterval(() => {
       api
-        .getCoreJob(jobId)
+        .getCoreJob(jobId, id)
         .then((response) => {
           if (cancelled) return;
           setCoreJob(response);
@@ -270,7 +296,7 @@ export function Session() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [coreJob?.jobId, coreJob?.status]);
+  }, [coreJob?.jobId, coreJob?.status, id]);
 
   function setTab(next: "workshop" | "report") {
     const params = new URLSearchParams(searchParams);
@@ -340,36 +366,45 @@ export function Session() {
       )}
 
       {tab === "workshop" ? (
-        <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[340px_1fr]">
-          <WorkshopDetailPanel
-            selectedStageId={selectedStageId}
-            session={session}
-            pipelineData={pipelineData}
-            coreJob={coreJob}
-            birthInfo={birthInfo}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <WorkshopOverview
+            complete={complete}
+            awaitingValidationFeedback={awaitingValidationFeedback}
             readerRunning={readerRunning}
-            readerStartedAt={readerStartedAt}
-            now={now}
-            validationFeedback={validationFeedback}
-            submittingFeedback={submittingFeedback}
-            onValidationFeedbackChange={setValidationFeedback}
-            onSubmitFeedback={onSubmitFeedback}
+            coreJob={coreJob}
+            pipelineData={pipelineData}
           />
-          <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh]">
-            {pipelineData ? (
-              <PipelineFlow
-                data={pipelineData}
-                selectedStageId={selectedStageId}
-                onSelectStage={setSelectedStageId}
-              />
-            ) : (
-              <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
-                <div className="text-center">
-                  <LoaderCircle className="mx-auto size-7 animate-spin" />
-                  <p className="mt-2.5">Preparing pipeline...</p>
+          <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[340px_1fr]">
+            <WorkshopDetailPanel
+              selectedStageId={selectedStageId}
+              session={session}
+              pipelineData={pipelineData}
+              coreJob={coreJob}
+              birthInfo={birthInfo}
+              readerRunning={readerRunning}
+              readerStartedAt={readerStartedAt}
+              now={now}
+              validationFeedback={validationFeedback}
+              submittingFeedback={submittingFeedback}
+              onValidationFeedbackChange={setValidationFeedback}
+              onSubmitFeedback={onSubmitFeedback}
+            />
+            <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh]">
+              {pipelineData ? (
+                <PipelineFlow
+                  data={pipelineData}
+                  selectedStageId={selectedStageId}
+                  onSelectStage={setSelectedStageId}
+                />
+              ) : (
+                <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
+                  <div className="text-center">
+                    <LoaderCircle className="mx-auto size-7 animate-spin" />
+                    <p className="mt-2.5">Preparing pipeline...</p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       ) : complete && reportSections.length > 0 ? (
@@ -446,6 +481,136 @@ export function Session() {
   );
 }
 
+function WorkshopOverview({
+  complete,
+  awaitingValidationFeedback,
+  readerRunning,
+  coreJob,
+  pipelineData
+}: {
+  complete: boolean;
+  awaitingValidationFeedback: boolean;
+  readerRunning: boolean;
+  coreJob: CoreJobResponse | null;
+  pipelineData: PipelineData | null;
+}) {
+  const action = workshopAction({
+    complete,
+    awaitingValidationFeedback,
+    readerRunning,
+    coreJob,
+    pipelineData
+  });
+
+  return (
+    <section className="border-b border-gold/25 bg-cream px-5 py-4 sm:px-8">
+      <div className="grid gap-3 lg:grid-cols-[1.25fr_1fr_1fr]">
+        <OverviewBlock
+          label="Current step"
+          title={action.title}
+          body={action.body}
+          badge={pipelineData ? `${pipelineData.percent}%` : "Starting"}
+          badgeVariant={action.variant}
+        />
+        <OverviewBlock
+          label="Data isolation"
+          title="Private session workspace"
+          body="Artifacts are written under one session folder. This browser keeps an access token, so a protected session cannot be opened from the URL alone."
+          badge="Session"
+        />
+        <OverviewBlock
+          label="Speed"
+          title="Resume before rerun"
+          body="The same browser can continue a matching birth input. Within a session, finished core artifacts are skipped instead of regenerated."
+          badge="Local"
+        />
+      </div>
+    </section>
+  );
+}
+
+function OverviewBlock({
+  label,
+  title,
+  body,
+  badge,
+  badgeVariant = "neutral"
+}: {
+  label: string;
+  title: string;
+  body: string;
+  badge: string;
+  badgeVariant?: ComponentProps<typeof Badge>["variant"];
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-gold/20 bg-cream-2 px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[10px] uppercase tracking-[1.8px] text-muted">{label}</span>
+        <Badge variant={badgeVariant}>{badge}</Badge>
+      </div>
+      <div className="text-sm font-semibold text-ink">{title}</div>
+      <p className="m-0 mt-1 text-xs leading-[1.6] text-body">{body}</p>
+    </div>
+  );
+}
+
+function workshopAction({
+  complete,
+  awaitingValidationFeedback,
+  readerRunning,
+  coreJob,
+  pipelineData
+}: {
+  complete: boolean;
+  awaitingValidationFeedback: boolean;
+  readerRunning: boolean;
+  coreJob: CoreJobResponse | null;
+  pipelineData: PipelineData | null;
+}): { title: string; body: string; variant: ComponentProps<typeof Badge>["variant"] } {
+  if (complete) {
+    return {
+      title: "Report is ready",
+      body: "Open the Report tab to read or export the completed analysis.",
+      variant: "done"
+    };
+  }
+  if (coreJob?.status === "failed") {
+    return {
+      title: "Generation needs attention",
+      body: coreJob.message || "A report stage failed. Check the selected stage for details.",
+      variant: "error"
+    };
+  }
+  if (awaitingValidationFeedback) {
+    return {
+      title: "Your feedback is needed",
+      body: "Mark each pre-validation anchor as accurate, inaccurate, or partly accurate before the full report starts.",
+      variant: "gold"
+    };
+  }
+  if (readerRunning) {
+    return {
+      title: "Generating time check",
+      body: "The system is producing a few concrete anchors to validate the birth time.",
+      variant: "gold"
+    };
+  }
+  if (coreJob?.status === "running" || coreJob?.status === "queued") {
+    return {
+      title: "Full report is running",
+      body: pipelineData
+        ? `${pipelineData.completed}/${pipelineData.total} stages have completed. You can leave this tab open and watch progress.`
+        : "The report pipeline has started and progress will appear shortly.",
+      variant: "gold"
+    };
+  }
+  return {
+    title: "Preparing workshop",
+    body: "The chart workspace is loading. The next useful step will appear here.",
+    variant: "neutral"
+  };
+}
+
 function WorkshopDetailPanel({
   selectedStageId,
   session,
@@ -485,7 +650,11 @@ function WorkshopDetailPanel({
         <h3 className="text-lg font-semibold tracking-normal text-ink">{stage.label}</h3>
         <Badge variant={statusBadgeVariant(status)}>{STATUS_LABELS[status]}</Badge>
       </div>
-      <p className="mb-5 text-[13px] leading-[1.65] text-body">{STAGE_COPY[stage.id]?.purpose}</p>
+      <p className="mb-4 text-[13px] leading-[1.65] text-body">{STAGE_COPY[stage.id]?.purpose}</p>
+      <div className="mb-5 grid gap-2.5">
+        <DetailCallout title="What you get">{STAGE_COPY[stage.id]?.userResult}</DetailCallout>
+        <DetailCallout title="What to do">{STAGE_COPY[stage.id]?.userAction}</DetailCallout>
+      </div>
 
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
@@ -533,11 +702,13 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
           <p className="m-0 text-[13px] leading-[1.7] text-body">{birthInfo.concern}</p>
         </div>
       )}
-      <DetailList title="Outputs" items={STAGE_COPY.src.outputs} />
-      <div className="mt-5 text-xs leading-[1.7] text-muted">
-        This data is the source of structured_data.md. Later stages should read this file instead of
-        reinterpreting the original form fields.
-      </div>
+      <TechnicalDetails>
+        <DetailList title="Outputs" items={STAGE_COPY.src.outputs} />
+        <div className="mt-3 text-xs leading-[1.7] text-muted">
+          This data is the source of structured_data.md. Later stages should read this file instead of
+          reinterpreting the original form fields.
+        </div>
+      </TechnicalDetails>
     </>
   );
 }
@@ -567,8 +738,6 @@ function ReaderDetail({
   if (!prevalidation) {
     return (
       <>
-        <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
-        <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
         <div className="my-4">
           <DetailSubtitle>{readerRunning ? "Running now" : "Not started"}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">
@@ -577,6 +746,10 @@ function ReaderDetail({
               : STAGE_COPY.reader.expected}
           </p>
         </div>
+        <TechnicalDetails>
+          <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
+          <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
+        </TechnicalDetails>
       </>
     );
   }
@@ -604,6 +777,10 @@ function ReaderDetail({
           </Button>
         </form>
       )}
+      <TechnicalDetails>
+        <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
+        <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
+      </TechnicalDetails>
     </>
   );
 }
@@ -678,25 +855,26 @@ function CoreStageDetail({
         </div>
       )}
 
-      <DetailList title="Inputs" items={copy.inputs} />
-      <DetailList title="Outputs" items={copy.outputs} />
+      {artifact && <ArtifactExcerpt artifact={artifact} title="Latest generated draft" />}
 
-      {nodes.length > 0 && (
-        <div className="my-4">
-          <DetailSubtitle>Node details</DetailSubtitle>
-          <div className="grid gap-1.5">
-            {nodes.slice(0, 8).map((node) => (
-              <div className="flex justify-between gap-2.5 rounded-md border border-gold/25 bg-cream-2 px-2.5 py-2 text-[12.5px]" key={node.id}>
-                <b className="font-semibold text-ink">{node.label}</b>
-                <span className="text-right text-muted">{node.status}{node.durationSeconds ? ` · ${formatDuration(node.durationSeconds)}` : ""}</span>
-              </div>
-            ))}
-            {nodes.length > 8 && <div className="px-1 text-xs text-muted">+{nodes.length - 8} more nodes</div>}
+      <TechnicalDetails>
+        <DetailList title="Inputs" items={copy.inputs} />
+        <DetailList title="Outputs" items={copy.outputs} />
+        {nodes.length > 0 && (
+          <div className="my-4">
+            <DetailSubtitle>Node details</DetailSubtitle>
+            <div className="grid gap-1.5">
+              {nodes.slice(0, 8).map((node) => (
+                <div className="flex justify-between gap-2.5 rounded-md border border-gold/25 bg-cream-2 px-2.5 py-2 text-[12.5px]" key={node.id}>
+                  <b className="font-semibold text-ink">{node.label}</b>
+                  <span className="text-right text-muted">{node.status}{node.durationSeconds ? ` · ${formatDuration(node.durationSeconds)}` : ""}</span>
+                </div>
+              ))}
+              {nodes.length > 8 && <div className="px-1 text-xs text-muted">+{nodes.length - 8} more nodes</div>}
+            </div>
           </div>
-        </div>
-      )}
-
-      {artifact && <ArtifactExcerpt artifact={artifact} title="Generated preview" />}
+        )}
+      </TechnicalDetails>
     </>
   );
 }
@@ -722,6 +900,26 @@ function DetailList({ title, items }: { title: string; items: string[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+function DetailCallout({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-gold/20 bg-cream-2 px-3 py-2.5">
+      <div className="mb-1 text-[10px] uppercase tracking-[1.4px] text-muted">{title}</div>
+      <p className="m-0 text-[12.5px] leading-[1.65] text-body">{children}</p>
+    </div>
+  );
+}
+
+function TechnicalDetails({ children }: { children: ReactNode }) {
+  return (
+    <details className="my-4 rounded-lg border border-gold/20 bg-cream-2 px-3 py-2.5">
+      <summary className="cursor-pointer text-[11px] uppercase tracking-[1.4px] text-muted">
+        Technical details
+      </summary>
+      <div className="pt-2">{children}</div>
+    </details>
   );
 }
 

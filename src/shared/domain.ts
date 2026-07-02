@@ -63,6 +63,7 @@ export type SkillSessionResponse = {
   chatMessage: string;
   artifacts: SkillArtifact[];
   activeArtifact?: string | null;
+  accessToken?: string | null;
 };
 
 export type SkillRunInput = {

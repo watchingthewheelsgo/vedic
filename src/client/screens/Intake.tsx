@@ -12,6 +12,12 @@ import { Input } from "../components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { cn } from "../lib/cn";
+import {
+  findRememberedSession,
+  forgetRememberedSession,
+  rememberSessionForBirth,
+  type RememberedSession
+} from "../lib/sessionAccess";
 import type { BirthInput, BirthTimePrecision } from "../../shared/domain";
 
 type SelectOption<T extends string = string> = {
@@ -89,14 +95,37 @@ export function Intake() {
   const [timeSource, setTimeSource] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [busy, setBusy] = useState(false);
+  const [resumeCandidate, setResumeCandidate] = useState<RememberedSession | null>(null);
 
   const precisionOption = useMemo(
     () => TIME_PRECISION_OPTIONS.find((option) => option.value === timePrecision) ?? TIME_PRECISION_OPTIONS[0],
     [timePrecision]
   );
 
+  const currentBirth = useMemo(
+    () =>
+      buildBirthInput({
+        birthDate,
+        birthTime,
+        place,
+        timePrecision,
+        gender,
+        relationship,
+        timeSource
+      }),
+    [birthDate, birthTime, gender, place, relationship, timePrecision, timeSource]
+  );
+
+  useEffect(() => {
+    setResumeCandidate(currentBirth ? findRememberedSession(currentBirth) : null);
+  }, [currentBirth]);
+
   async function onStart(event: FormEvent) {
     event.preventDefault();
+    await startSession(false);
+  }
+
+  async function startSession(forceNew: boolean) {
     const nextErrors: FormErrors = {};
 
     if (!birthDate) nextErrors.birthDate = "Select your date of birth.";
@@ -114,20 +143,28 @@ export function Intake() {
       return;
     }
 
-    const birth: BirthInput = {
-      birthDate: formatBirthDate(birthDate),
-      birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
-      birthPlace: place,
-      birthTimePrecision: timePrecision,
-      gender: gender || "未提供",
-      relationship: relationship || "未提供",
-      timeSource: timePrecision === "exact" ? timeSource : "未追问"
-    };
+    const birth = currentBirth;
+    if (!birth) return;
 
     setBusy(true);
     setErrors({});
     try {
+      const remembered = findRememberedSession(birth);
+      if (remembered && !forceNew) {
+        try {
+          await api.getSkillSession(remembered.sessionId);
+          navigate(`/session/${remembered.sessionId}?tab=workshop`, {
+            state: { name, birth }
+          });
+          return;
+        } catch {
+          forgetRememberedSession(birth);
+          setResumeCandidate(null);
+        }
+      }
+
       const session = await api.createSkillSession(birth);
+      rememberSessionForBirth(birth, session.sessionId, session.accessToken);
       navigate(`/session/${session.sessionId}?tab=workshop`, {
         state: { name, birth }
       });
@@ -346,8 +383,30 @@ export function Intake() {
                 </div>
               )}
 
+              {resumeCandidate && (
+                <div className="rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
+                  <div className="font-semibold text-ink">Previous workshop found</div>
+                  <div className="mt-1 text-muted">
+                    Same birth details were used before. Continuing it avoids recalculating finished stages.
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">{resumeCandidate.birthLabel}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto"
+                      disabled={busy}
+                      onClick={() => void startSession(true)}
+                    >
+                      Start fresh
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <Button className="mt-2 w-full" size="lg" disabled={busy}>
-                {busy ? "Preparing..." : "Continue to Workshop →"}
+                {busy ? "Preparing..." : resumeCandidate ? "Continue Previous Workshop →" : "Continue to Workshop →"}
               </Button>
             </form>
           </CardContent>
@@ -573,6 +632,39 @@ function clearError(setErrors: (value: SetStateAction<FormErrors>) => void, key:
 function formatBirthDate(date: Date | null): string {
   if (!date) return "";
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function buildBirthInput({
+  birthDate,
+  birthTime,
+  place,
+  timePrecision,
+  gender,
+  relationship,
+  timeSource
+}: {
+  birthDate: Date | null;
+  birthTime: Date | null;
+  place: string;
+  timePrecision: BirthTimePrecision;
+  gender: string;
+  relationship: string;
+  timeSource: string;
+}): BirthInput | null {
+  if (!birthDate) return null;
+  if (!place) return null;
+  if (timePrecision !== "unknown" && !birthTime) return null;
+  if (timePrecision === "exact" && !timeSource) return null;
+
+  return {
+    birthDate: formatBirthDate(birthDate),
+    birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
+    birthPlace: place,
+    birthTimePrecision: timePrecision,
+    gender: gender || "未提供",
+    relationship: relationship || "未提供",
+    timeSource: timePrecision === "exact" ? timeSource : "未追问"
+  };
 }
 
 function formatBirthTime(date: Date | null, precision: BirthTimePrecision): string {

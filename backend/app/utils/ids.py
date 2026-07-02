@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import random
+import secrets
 import string
 import time
 
 
 def make_id(prefix: str) -> str:
-    entropy = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    entropy = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(12))
     return f"{prefix}_{base36(int(time.time() * 1000))}_{entropy}"
 
 

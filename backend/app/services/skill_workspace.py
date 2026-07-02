@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+import json
+import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.schemas import SkillArtifact
@@ -24,6 +26,23 @@ class SkillWorkspace:
         self.session_dir(session_id).mkdir(parents=True, exist_ok=False)
         return session_id
 
+    def create_session_access_token(self, session_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        meta_dir = self.require_session_dir(session_id) / ".meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (meta_dir / "session.json").write_text(
+            json.dumps(
+                {
+                    "accessToken": token,
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return token
+
     def session_dir(self, session_id: str) -> Path:
         if "/" in session_id or "\\" in session_id or ".." in session_id:
             raise ValueError("Invalid session id")
@@ -34,6 +53,24 @@ class SkillWorkspace:
         if not path.exists():
             raise LookupError("Skill session not found")
         return path
+
+    def validate_session_access(self, session_id: str, token: str | None) -> None:
+        expected = self.session_access_token(session_id)
+        if not expected:
+            return
+        if not token or not secrets.compare_digest(token, expected):
+            raise PermissionError("This session is private to the browser that created it.")
+
+    def session_access_token(self, session_id: str) -> str | None:
+        meta_path = self.require_session_dir(session_id) / ".meta" / "session.json"
+        if not meta_path.exists():
+            return None
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        token = payload.get("accessToken") if isinstance(payload, dict) else None
+        return token if isinstance(token, str) and token else None
 
     def write_artifact(self, session_id: str, path: str, content: str) -> SkillArtifact:
         session_dir = self.require_session_dir(session_id)
