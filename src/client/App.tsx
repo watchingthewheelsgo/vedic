@@ -721,8 +721,8 @@ function BirthPlacePicker({
           <MapPin size={16} />
           <input
             value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="城市"
+            readOnly
+            placeholder="请从下方选择城市"
             required
           />
         </div>

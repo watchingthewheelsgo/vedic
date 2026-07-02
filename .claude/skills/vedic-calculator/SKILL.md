@@ -204,7 +204,8 @@ chart = {
     # 预分析
     'karakas': {'7k': [...], '8k': [...], 'dk_7k': 'Saturn', 'dk_8k': 'Rahu', 'dk_note': '7K(主)=Saturn, 8K(参考)=Rahu'},
     'dignity': {'Sun': {'compound': 'great_friend', ...}, ...},
-    'aspects': [{'p1':'Rahu','p2':'Ketu','type':'对冲(180°)','degree_diff':'180.0'}, ...],
+    'aspects': [{'source':'Mars','target':'Saturn','type':'4th Graha Drishti','strength':'紧密'}, ...],
+    'house_aspects': [{'source':'Jupiter','target_house':9,'type':'5th Graha Drishti'}, ...],
     'house_lords': {1: {'lord':'Moon','domain':'自我','lord_house':8}, ...},
     'special_points': {'AL': {'sign':'Virgo','house':3}, 'UL': {'sign':'Pisces','house':9}},
     'combustion': {},
@@ -229,7 +230,7 @@ chart = {
 | Vimsottari Dasha | 9段大运 + 当前/下一大运Antardasha |
 | 特殊点位 | AL(Arudha Lagna) + UL(Upapada Lagna) |
 | Compound Dignity | Panchadha Maitri（旺/入庙/陷直接确定） |
-| 相位关系 | Top 8最重要相位 |
+| 吠陀视相关系 | 同座接触 + Graha Drishti + 宫位被视相 |
 | 宫主表 | 12宫完整 |
 | 分盘 | D9/D10/D4/D5 + Vargottama |
 | 校验 | 12项自动校验 |

@@ -226,6 +226,14 @@ class PlaceService:
             return inline
 
         preference = self._detect_preference(trimmed)
+        ambiguous = self._ambiguous_exact_matches(preference)
+        if ambiguous:
+            examples = " / ".join(self._birth_place_value(record) for record in ambiguous[:5])
+            raise LookupError(
+                "出生城市存在多个同名地点，请从国家/省州/城市选择器中点选，"
+                f"或输入完整地点。候选示例：{examples}"
+            )
+
         best_score = 0
         best: PlaceRecord | None = None
         for record in self.records:
@@ -353,9 +361,16 @@ class PlaceService:
 
         parts = [part.strip() for part in re.split(r"[,，]", raw_query) if part.strip()]
         if len(parts) >= 3:
-            return PlacePreference(parts[0], country=parts[-1], state=parts[-2])
+            return PlacePreference(
+                parts[0],
+                country=self._canonical_country(parts[-1]),
+                state=self._canonical_region(parts[-2]),
+            )
         if len(parts) == 2:
-            return PlacePreference(parts[0], state=parts[1])
+            tail_country = self._canonical_country(parts[1])
+            if tail_country in self.country_counts:
+                return PlacePreference(parts[0], country=tail_country)
+            return PlacePreference(parts[0], state=self._canonical_region(parts[1]))
 
         country = None
         state = None
@@ -370,6 +385,40 @@ class PlaceService:
         elif "GA" in raw_query or "Georgia" in raw_query or "乔治亚" in raw_query:
             state = "Georgia"
         return PlacePreference(raw_query, country=country, state=state)
+
+    def _ambiguous_exact_matches(self, preference: PlacePreference) -> list[PlaceRecord]:
+        if preference.country or preference.state:
+            return []
+        query_norm = self.normalize(preference.query)
+        if not query_norm:
+            return []
+        place_name_matches = [
+            record for record in self.records if self.normalize(record.place_name) == query_norm
+        ]
+        matches = place_name_matches or [
+            record
+            for record in self.records
+            if query_norm in [self.normalize(item) for item in record.alternate_names.split("|") if item]
+        ]
+        unique_locations = {
+            (
+                self.normalize(record.place_name),
+                self.normalize(record.state),
+                self.normalize(record.country),
+            )
+            for record in matches
+        }
+        if len(unique_locations) <= 1:
+            return []
+        matches.sort(
+            key=lambda record: (
+                -self._priority(record.country, self.preferred_countries),
+                record.country,
+                record.state,
+                record.place_name,
+            )
+        )
+        return matches
 
     def _score_record(self, record: PlaceRecord, preference: PlacePreference) -> int:
         query_norm = self.normalize(preference.query)
@@ -396,6 +445,16 @@ class PlaceService:
         if record.state == record.place_name:
             score += 4
         return score
+
+    def _canonical_country(self, value: str | None) -> str | None:
+        if not value:
+            return value
+        return self.country_aliases.get(value, value)
+
+    def _canonical_region(self, value: str | None) -> str | None:
+        if not value:
+            return value
+        return self.region_aliases.get(value, value)
 
     def _timezone_for(self, lat: float, lon: float, timezone_hours: str) -> str:
         try:

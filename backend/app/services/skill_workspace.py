@@ -74,6 +74,7 @@ class SkillWorkspace:
     def _artifact_rank(self, name: str) -> int:
         order = [
             "structured_data.md",
+            "structured_data.json",
             "user_context.md",
             "reader_prevalidation.md",
             "p1_overview.md",

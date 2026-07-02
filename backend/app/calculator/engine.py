@@ -245,45 +245,116 @@ def calc_chara_karakas_7k8k(planets):
         'dk_note': f"7K(主)={dk_7k}, 8K(参考)={dk_8k}"
     }
 
+SPECIAL_DRISHTI = {
+    'Mars': [4, 8],
+    'Jupiter': [5, 9],
+    'Saturn': [3, 10],
+    # Rahu/Ketu special aspects are intentionally disabled for the KN Rao
+    # baseline. The 7th drishti is still included for all grahas below.
+}
+
+
+def _degree_gap_in_sign(p1, p2):
+    return abs(p1['degree'] - p2['degree'])
+
+
+def _degree_strength_tag(source_name, target_name, gap):
+    limit = 7 if source_name in {'Sun', 'Moon'} or target_name in {'Sun', 'Moon'} else 5
+    if gap < limit:
+        return '紧密'
+    if gap < 12:
+        return '一般'
+    return '整宫'
+
+
 def calc_aspects(planets):
-    """Calculate major aspects between planets"""
-    aspects = []
+    """Calculate Vedic whole-sign contacts and Graha Drishti.
+
+    This intentionally does not use Western aspect angles such as 60/90/120.
+    Degree gaps only grade strength inside an already-valid whole-sign contact.
+    """
+    contacts = []
     planet_names = list(planets.keys())
+
+    # Same-sign contact is mutual. Keep a single row per pair so the markdown
+    # fact source stays compact while preserving both participants.
     for i in range(len(planet_names)):
-        for j in range(i+1, len(planet_names)):
-            p1, p2 = planet_names[i], planet_names[j]
-            lon1, lon2 = planets[p1]['longitude'], planets[p2]['longitude']
-            diff = abs(lon1 - lon2)
-            if diff > 180: diff = 360 - diff
-            
-            # Check aspect types
-            aspect_type = None
-            orb = None
-            if diff < 10:
-                aspect_type = '合相'
-                orb = diff
-            elif abs(diff - 60) < 8:
-                aspect_type = '六合(60°)'
-                orb = abs(diff - 60)
-            elif abs(diff - 90) < 8:
-                aspect_type = '刑(90°)'
-                orb = abs(diff - 90)
-            elif abs(diff - 120) < 8:
-                aspect_type = '三合(120°)'
-                orb = abs(diff - 120)
-            elif abs(diff - 180) < 10:
-                aspect_type = '对冲(180°)'
-                orb = abs(diff - 180)
-            
-            if aspect_type and orb is not None:
-                aspects.append({
-                    'p1': p1, 'p2': p2, 'type': aspect_type,
-                    'degree_diff': round(diff, 2), 'orb': round(orb, 2)
+        for j in range(i + 1, len(planet_names)):
+            p1_name, p2_name = planet_names[i], planet_names[j]
+            p1, p2 = planets[p1_name], planets[p2_name]
+            if p1['sign_idx'] != p2['sign_idx']:
+                continue
+            gap = _degree_gap_in_sign(p1, p2)
+            contacts.append({
+                'source': p1_name,
+                'target': p2_name,
+                'direction': 'mutual',
+                'kind': 'same_sign',
+                'type': '同座接触',
+                'aspect': 1,
+                'source_house': p1['house'],
+                'target_house': p2['house'],
+                'target_sign': p2['sign'],
+                'degree_gap': round(gap, 2),
+                'strength': _degree_strength_tag(p1_name, p2_name, gap),
+            })
+
+    # Graha Drishti is directional. All grahas cast the 7th aspect; Mars,
+    # Jupiter, and Saturn add their classical special drishti.
+    for source_name in planet_names:
+        source = planets[source_name]
+        aspect_numbers = [7] + SPECIAL_DRISHTI.get(source_name, [])
+        for aspect_number in aspect_numbers:
+            target_sign_idx = (source['sign_idx'] + aspect_number - 1) % 12
+            for target_name in planet_names:
+                if source_name == target_name:
+                    continue
+                target = planets[target_name]
+                if target['sign_idx'] != target_sign_idx:
+                    continue
+                gap = _degree_gap_in_sign(source, target)
+                contacts.append({
+                    'source': source_name,
+                    'target': target_name,
+                    'direction': 'source_to_target',
+                    'kind': 'graha_drishti',
+                    'type': f'{aspect_number}th Graha Drishti',
+                    'aspect': aspect_number,
+                    'source_house': source['house'],
+                    'target_house': target['house'],
+                    'target_sign': target['sign'],
+                    'degree_gap': round(gap, 2),
+                    'strength': _degree_strength_tag(source_name, target_name, gap),
                 })
-    
-    # Sort by orb (tighter aspects first)
-    aspects.sort(key=lambda x: x['orb'])
-    return aspects[:8]  # Top 8 most significant
+
+    contacts.sort(key=lambda item: (
+        0 if item['kind'] == 'same_sign' else 1,
+        item['aspect'],
+        item['degree_gap'],
+        item['source'],
+        item['target'],
+    ))
+    return contacts
+
+
+def calc_house_aspects(planets, lagna_sign_idx):
+    """Return source graha -> target house drishti facts for house diagnosis."""
+    rows = []
+    for source_name, source in planets.items():
+        aspect_numbers = [7] + SPECIAL_DRISHTI.get(source_name, [])
+        for aspect_number in aspect_numbers:
+            target_sign_idx = (source['sign_idx'] + aspect_number - 1) % 12
+            target_house = get_house(target_sign_idx, lagna_sign_idx)
+            rows.append({
+                'source': source_name,
+                'aspect': aspect_number,
+                'source_house': source['house'],
+                'target_house': target_house,
+                'target_sign': SIGNS[target_sign_idx],
+                'type': f'{aspect_number}th Graha Drishti',
+            })
+    rows.sort(key=lambda item: (item['target_house'], item['source'], item['aspect']))
+    return rows
 
 def calc_house_lords(lagna_sign_idx):
     """Calculate house lord table"""
@@ -622,8 +693,9 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
     # 8. Chara Karakas (7K primary)
     karakas = calc_chara_karakas_7k8k(planets)
     
-    # 9. Aspects
+    # 9. Vedic aspects / Graha Drishti
     aspects = calc_aspects(planets)
+    house_aspects = calc_house_aspects(planets, lagna['sign_idx'])
     
     # 10. House lords
     house_lords = calc_house_lords(lagna['sign_idx'])
@@ -688,6 +760,7 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
         'combustion': combustion,
         'karakas': karakas,
         'aspects': aspects,
+        'house_aspects': house_aspects,
         'house_lords': house_lords,
         'dashas': dashas,
         'shadbala': shadbala_data,
@@ -735,9 +808,12 @@ if __name__ == '__main__':
         print(f"  {k}: {planet} ({deg:.1f}°)")
     print(f"  DK: 7K(主)={chart['karakas']['dk_7k']}, 8K(参考)={chart['karakas']['dk_8k']}")
     
-    print(f"\n--- Aspects (top 5) ---")
+    print(f"\n--- Vedic Contacts (top 5) ---")
     for a in chart['aspects'][:5]:
-        print(f"  {a['p1']}-{a['p2']}: {a['type']} ({a['degree_diff']}°, orb {a['orb']}°)")
+        print(
+            f"  {a['source']}->{a['target']}: {a['type']} "
+            f"(H{a['source_house']}→H{a['target_house']}, {a['strength']})"
+        )
     
     print(f"\n--- Dasha ---")
     for d in chart['dashas']:

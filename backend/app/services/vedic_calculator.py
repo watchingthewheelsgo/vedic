@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from contextlib import redirect_stdout
 from dataclasses import dataclass
@@ -45,7 +46,7 @@ class VedicCalculator:
         birth_time = self._parse_birth_time(intake.birth_time, intake.birth_time_precision)
         place = self.place_service.resolve(intake.birth_place)
         payload = self._calculator_payload(intake, birth_date, birth_time, place)
-        structured_data, facts = self._run_engine(payload)
+        structured_data, structured_data_json, facts = self._run_engine(payload)
 
         return CalculationSnapshot(
             snapshot_id=make_id("calc"),
@@ -59,13 +60,15 @@ class VedicCalculator:
             input_precision=intake.birth_time_precision,
             validation_status=PRECISION_STATUS[intake.birth_time_precision],
             structured_data=structured_data,
+            structured_data_json=structured_data_json,
             facts=facts,
         )
 
-    def _run_engine(self, payload: dict[str, Any]) -> tuple[str, ChartFacts]:
+    def _run_engine(self, payload: dict[str, Any]) -> tuple[str, str, ChartFacts]:
         with redirect_stdout(sys.stderr):
             from app.calculator.engine import SIGNS, calculate_full_chart
             from app.calculator.formatter import format_structured_data
+            from app.calculator.structured_schema import build_structured_schema
             from app.calculator.transit import calc_transit
 
             chart = calculate_full_chart(
@@ -89,6 +92,7 @@ class VedicCalculator:
                 "place": payload["place"],
                 "lat": payload["lat"],
                 "lon": payload["lon"],
+                "timezone": payload["timezone"],
                 "time_precision": payload["time_precision"],
                 "time_source": payload.get("time_source", "user-input"),
                 "effective_precision": payload.get("effective_precision", "birth-time-tiered"),
@@ -98,12 +102,14 @@ class VedicCalculator:
                 "relationship": payload.get("relationship", "[not-collected]"),
             }
             structured_data = format_structured_data(chart, transit, meta, user_info)
+            structured_payload = build_structured_schema(chart, transit, meta, user_info)
+            structured_data_json = json.dumps(structured_payload, ensure_ascii=False, indent=2) + "\n"
             sav_total = sum(chart["sav"].get(sign, 0) for sign in SIGNS)
             if sav_total != 337:
                 raise RuntimeError(f"SAV validation failed: {sav_total} != 337")
             facts = self._chart_facts(chart, sav_total)
 
-        return structured_data, facts
+        return structured_data, structured_data_json, facts
 
     def _chart_facts(self, chart: dict[str, Any], sav_total: int) -> ChartFacts:
         shadbala_items: list[StrengthFact] = []

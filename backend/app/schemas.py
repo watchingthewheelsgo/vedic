@@ -207,6 +207,7 @@ class CalculationSnapshot(ApiModel):
     input_precision: BirthTimePrecision = Field(alias="inputPrecision")
     validation_status: Literal["passed", "degraded", "limited"] = Field(alias="validationStatus")
     structured_data: str = Field(alias="structuredData")
+    structured_data_json: str = Field(alias="structuredDataJson")
     facts: ChartFacts
     generated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(), alias="generatedAt"

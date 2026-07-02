@@ -224,12 +224,30 @@ def format_structured_data(chart, transit_data, meta, user_info):
         lines.append(f"| {name} | {p['sign']} | {lord} | {compound} | |")
     lines.append("")
     
-    # Aspects
-    lines.append("### 主要相位关系")
-    lines.append("| 行星A | 行星B | 关系 | 度数差 | 影响 |")
-    lines.append("|-------|-------|------|--------|------|")
-    for a in chart['aspects'][:8]:
-        lines.append(f"| {a['p1']} | {a['p2']} | {a['type']} | {a['degree_diff']}° | |")
+    # Vedic aspects / Graha Drishti
+    lines.append("### 吠陀视相关系（Graha Drishti / 整宫接触）")
+    lines.append("> 判据：同座接触 + Graha Drishti。度数只标注强弱，不使用西方角度相位。")
+    lines.append("")
+    lines.append("| 发出星 | 接收目标 | 判据 | 目标宫位 | 度数强弱 | 说明 |")
+    lines.append("|--------|----------|------|----------|----------|------|")
+    for a in chart['aspects']:
+        direction = "双向" if a.get('direction') == 'mutual' else "单向"
+        gap = a.get('degree_gap')
+        gap_text = f"{gap}° / {a.get('strength', '整宫')}" if gap is not None else a.get('strength', '整宫')
+        lines.append(
+            f"| {a['source']} | {a['target']} | {a['type']}({direction}) | "
+            f"{a.get('target_house', '?')} | {gap_text} | |"
+        )
+    lines.append("")
+
+    lines.append("### 宫位被视相（House Drishti Map）")
+    lines.append("| 宫位 | 星座 | 视相来源 | 判据 |")
+    lines.append("|------|------|----------|------|")
+    for item in chart.get('house_aspects', []):
+        lines.append(
+            f"| {item['target_house']} | {item['target_sign']} | "
+            f"{item['source']}(H{item['source_house']}) | {item['type']} |"
+        )
     lines.append("")
     
     # House Lords

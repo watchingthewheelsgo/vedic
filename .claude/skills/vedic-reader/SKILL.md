@@ -559,13 +559,13 @@ time_risk=LOW：有效精度<=±5分钟，或±15分钟+Lagna安全
 ### Step 4: 信号预扫与Yoga扫描
 
 **⚠️ 本步骤不做任何计算！**
-宫主表、复合尊贵度、相位关系、Shadbala排名、Vargottama、燃烧检测
+宫主表、复合尊贵度、吠陀视相关系、Shadbala排名、Vargottama、燃烧检测
 全部由 vedic-calculator 已写入 structured_data.md 的"预分析"section。
 本步骤直接**读取**这些数据，做AI解读。
 
 ```
 从 structured_data.md 读取以下数据：
-  → "预分析"section → 宫主表 + 复合尊贵度 + 相位关系
+  → "预分析"section → 宫主表 + 复合尊贵度 + 吠陀视相关系
   → "量化数据"section → Shadbala排名 + SAV宫位映射
   → "D1基础数据"section → 行星位置 + 逆行 + Chara Karakas
   → "分盘数据"section → D9 + Vargottama

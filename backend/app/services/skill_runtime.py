@@ -34,6 +34,11 @@ class SkillRuntime:
         self.workspace.write_artifact(session_id, "structured_data.md", calculation.structured_data)
         self.workspace.write_artifact(
             session_id,
+            "structured_data.json",
+            calculation.structured_data_json,
+        )
+        self.workspace.write_artifact(
+            session_id,
             "run_metrics.json",
             json.dumps(
                 {
@@ -56,6 +61,7 @@ class SkillRuntime:
         chat_message = (
             "读盘基础数据已生成。\n\n"
             "已生成: structured_data.md\n"
+            "已生成: structured_data.json\n"
             "下一步按原 vedic-reader 流程运行验前事：点击「运行读盘验前事」。"
         )
         return SkillSessionResponse(
@@ -100,6 +106,11 @@ class SkillRuntime:
         calculation = self.calculator.calculate(input_data.birth)
         b_path = f"{folder}/structured_data_B.md"
         self.workspace.write_artifact(input_data.session_id, b_path, calculation.structured_data)
+        self.workspace.write_artifact(
+            input_data.session_id,
+            f"{folder}/structured_data_B.json",
+            calculation.structured_data_json,
+        )
 
         intake = self._synastry_intake(input_data)
         self.workspace.write_artifact(input_data.session_id, f"{folder}/intake.md", intake)
@@ -744,6 +755,8 @@ User message:
         for artifact in artifacts:
             path = str(getattr(artifact, "path"))
             content = str(getattr(artifact, "content"))
+            if path in {"structured_data.json"} or path.endswith("/structured_data_B.json"):
+                continue
             if skill == "vedic-synastry":
                 if path == "structured_data.md" or path.startswith("synastry_"):
                     selected[path] = content

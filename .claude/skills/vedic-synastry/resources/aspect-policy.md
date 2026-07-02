@@ -2,7 +2,7 @@
 
 > 合盘 Layer 2「方向性叠盘」的判据底座。
 > 体系：纯 Parashari / KN Rao。只用吠陀判据，不引入西方占星。
-> 数据来源：双方 structured_data.md 的 D1 行星位置 + 宫主表 + 尊贵度 + 相位关系表。
+> 数据来源：双方 structured_data.md 的 D1 行星位置 + 宫主表 + 尊贵度 + 吠陀视相关系表。
 
 ---
 

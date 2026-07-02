@@ -261,7 +261,7 @@ def overlay(src, dst):
 
 
 def cross_aspects(a, b):
-    """A 行星与 B 行星的跨盘接触：整宫合相/对宫 + Graha Drishti + 度数 orb 标注。"""
+    """A 行星与 B 行星的跨盘接触：整宫合相/对宫 + Graha Drishti + 度数强弱标注。"""
     out = []
     for an in PLANETS:
         ap = a.planets.get(an)
@@ -279,7 +279,7 @@ def cross_aspects(a, b):
             elif gap == 6:
                 kind = '对宫(对冲)'
             if kind:
-                orb_tag = ''
+                degree_strength = ''
                 if ap['lon'] is not None and bp['lon'] is not None:
                     diff = abs(ap['lon'] - bp['lon']) % 360
                     if diff > 180:
@@ -290,8 +290,8 @@ def cross_aspects(a, b):
                     tight = 7 if lum else 5
                     tier = '紧密' if od < tight else ('一般' if od < 12 else '整宫')
                     od_d, od_m = int(od), int(round((od - int(od)) * 60))
-                    orb_tag = f"{od_d}°{od_m:02d}'[{tier}]"
-                out.append({'a': an, 'b': bn, 'kind': kind, 'orb': orb_tag,
+                    degree_strength = f"{od_d}°{od_m:02d}'[{tier}]"
+                out.append({'a': an, 'b': bn, 'kind': kind, 'degree_strength': degree_strength,
                             'dir': 'A↔B'})
     return out
 
@@ -500,13 +500,13 @@ def build(a, b):
         L.append(f"| {r['planet']} | {r['sign']} | {r['house_in_dst']} | {r['dignity']} | {r['roles'] or '—'} |")
     L.append("")
 
-    L.append("## 4. 跨盘相位（整宫合相/对宫 + 度数标注）\n")
+    L.append("## 4. 跨盘接触（整宫合相/对宫 + 度数强弱标注）\n")
     ca = cross_aspects(a, b)
     if ca:
-        L.append("| A行星 | B行星 | 关系 | 度数 |")
+        L.append("| A行星 | B行星 | 关系 | 度数强弱 |")
         L.append("|-------|-------|------|------|")
         for r in ca:
-            L.append(f"| {r['a']} | {r['b']} | {r['kind']} | {r['orb']} |")
+            L.append(f"| {r['a']} | {r['b']} | {r['kind']} | {r['degree_strength']} |")
     L.append("")
 
     L.append("## 4b. 同宫共鸣（双方各自把同一行星放在相同宫位）\n")
