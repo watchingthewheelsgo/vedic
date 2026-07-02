@@ -65,7 +65,7 @@ def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:
         )
 
     jhora_root = Path(modules["jhora"].__file__).resolve().parent
-    geonames_path = jhora_root / "data" / "geonames_places_5k_IN.csv"
+    geonames_path = jhora_root / "data" / "geonames_places_5k.csv"
     if not geonames_path.exists():
         raise RuntimeError(
             f"PyJHora GeoNames data is missing at {geonames_path}. "

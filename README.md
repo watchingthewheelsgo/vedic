@@ -33,7 +33,7 @@ optional second chart
 
 - Node.js 20+
 - `uv`
-- Python 3.11 for this backend
+- Python 3.11+ for this backend
 - DeepSeek/Anthropic-compatible token in `.env`
 
 Example `.env`:
@@ -87,13 +87,9 @@ npm run report:export -- <session_id>
 
 Output defaults to `backend/data/exports/<session_id>/report.html`.
 
-PDF export uses the same HTML/CSS renderer and requires Python Playwright:
-
-```bash
-uv add --project backend playwright
-uv run --project backend python -m playwright install chromium
-npm run report:export -- <session_id> --pdf
-```
+In-app PDF export is handled in the browser: open the completed report, click
+`Export PDF`, then save from the browser print dialog. This avoids a backend
+PDF endpoint and does not require Python Playwright.
 
 ## API Surface
 

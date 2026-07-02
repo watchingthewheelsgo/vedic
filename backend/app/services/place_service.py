@@ -317,21 +317,28 @@ class PlaceService:
     def _search_cities(
         self, country: str | None, region: str | None, query: str, limit: int
     ) -> list[PlaceOption]:
-        if not country:
-            return []
         variants = self._query_variants("city", query)
-        if not region and not variants:
+        # Global single-box typeahead: no country context, search the whole world
+        # by name/alias. Require >= 2 chars so a single letter doesn't scan all.
+        global_search = not country
+        if global_search:
+            if not variants or max((len(v) for v in variants), default=0) < 2:
+                return []
+        elif not region and not variants:
             return []
 
         items = []
         for record in self.records:
-            if record.country != country:
+            if country and record.country != country:
                 continue
             if region and record.state != region:
                 continue
             score = self._label_score(record.place_name, record.search_text, variants)
             if score <= 0:
                 continue
+            if global_search:
+                # Surface well-known countries first when names collide (e.g. Paris).
+                score = score * 10 + self._priority(record.country, self.preferred_countries)
             items.append((score, record.place_name, record.state, record))
         items.sort(key=lambda item: (-item[0], item[1], item[2]))
         return [

@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import html
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 from app.schemas import SkillArtifact
 from app.services.skill_workspace import SkillWorkspace
-
-
-ReportFormat = Literal["html", "pdf"]
 
 
 PUBLIC_REPORT_ORDER = [
@@ -52,14 +47,14 @@ class ThemeConfig:
         return ThemeConfig(
             name="private-advisor",
             title="Vedic Report",
-            subtitle="Private advisor edition",
+            subtitle="Data-Driven Vedic Astrology",
             accent_palette=(
-                "#1f5f5b",
+                "#C9A96E",
+                "#9A7A4A",
+                "#B58A45",
                 "#8a5a22",
-                "#334b7d",
-                "#7f3d55",
-                "#4f6f38",
-                "#6d4c8d",
+                "#7a5a2a",
+                "#6d4c1d",
             ),
         )
 
@@ -68,12 +63,11 @@ class ThemeConfig:
 class ReportExportResult:
     session_id: str
     html_path: Path
-    pdf_path: Path | None
     section_count: int
 
 
 class ReportExporter:
-    """Export session markdown artifacts into themed HTML and optional PDF."""
+    """Export session markdown artifacts into themed HTML."""
 
     def __init__(self, workspace: SkillWorkspace) -> None:
         self.workspace = workspace
@@ -84,7 +78,6 @@ class ReportExporter:
         *,
         output_dir: Path | None = None,
         theme: ThemeConfig | None = None,
-        formats: tuple[ReportFormat, ...] = ("html",),
     ) -> ReportExportResult:
         artifacts = self.workspace.read_artifacts(session_id)
         report_theme = theme or ThemeConfig.private_advisor()
@@ -109,48 +102,11 @@ class ReportExporter:
             encoding="utf-8",
         )
 
-        pdf_path: Path | None = None
-        if "pdf" in formats:
-            pdf_path = target_dir / "report.pdf"
-            self.export_pdf(html_path=html_path, pdf_path=pdf_path)
-
         return ReportExportResult(
             session_id=session_id,
             html_path=html_path,
-            pdf_path=pdf_path,
             section_count=len(sections),
         )
-
-    def export_pdf(self, *, html_path: Path, pdf_path: Path) -> None:
-        asyncio.run(self._export_pdf_async(html_path=html_path, pdf_path=pdf_path))
-
-    async def _export_pdf_async(self, *, html_path: Path, pdf_path: Path) -> None:
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as exc:
-            raise RuntimeError(
-                "PDF export requires Python Playwright. Install it with "
-                "`uv add --project backend playwright`, then run "
-                "`uv run --project backend python -m playwright install chromium`."
-            ) from exc
-
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch()
-            page = await browser.new_page(viewport={"width": 1280, "height": 1800})
-            await page.goto(html_path.resolve().as_uri(), wait_until="networkidle")
-            await page.emulate_media(media="print")
-            await page.pdf(
-                path=str(pdf_path),
-                format="A4",
-                print_background=True,
-                margin={
-                    "top": "16mm",
-                    "right": "14mm",
-                    "bottom": "18mm",
-                    "left": "14mm",
-                },
-            )
-            await browser.close()
 
     def _collect_sections(
         self, artifacts: list[SkillArtifact], theme: ThemeConfig
@@ -408,10 +364,11 @@ class ReportExporter:
         return f"{minutes // 60}h {minutes % 60}m"
 
     def _css(self) -> str:
+        # Gold / cream / dark theme aligned with the web app (Downloads/test.html).
         return """
 :root {
-  color: #18232f;
-  background: #f1f3f0;
+  color: #2C1F0F;
+  background: #F0E8D8;
   font-family: ui-serif, Georgia, "Times New Roman", "Noto Serif SC", serif;
   line-height: 1.62;
 }
@@ -423,57 +380,58 @@ body { margin: 0; }
   display: grid;
   align-content: end;
   gap: 26px;
-  color: #f8fafc;
+  color: #FAF5EC;
   background:
-    linear-gradient(135deg, rgb(10 31 34 / 92%), rgb(56 42 74 / 88%)),
-    radial-gradient(circle at 20% 20%, #b58a45, transparent 34%);
+    linear-gradient(135deg, rgb(15 12 9 / 94%), rgb(42 32 24 / 90%)),
+    radial-gradient(circle at 22% 24%, #C9A96E, transparent 36%);
   border-radius: 14px;
   padding: 54px;
   page-break-after: always;
 }
-.eyebrow { margin: 0; color: #e0c58a; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
-.cover h1 { margin: 0; max-width: 760px; font-size: 64px; line-height: 1.02; letter-spacing: 0; }
+.eyebrow { margin: 0; color: #EDD9A3; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
+.cover h1 { margin: 0; max-width: 760px; font-size: 64px; line-height: 1.02; letter-spacing: 0; font-weight: 300; }
+.cover h1 strong, .cover h1 b { color: #C9A96E; font-weight: 600; }
 .cover-meta { display: grid; grid-template-columns: 110px 1fr; gap: 8px 18px; max-width: 640px; }
-.cover-meta span { color: #aec2bf; font-size: 12px; text-transform: uppercase; }
+.cover-meta span { color: rgb(237 217 163 / 65%); font-size: 12px; text-transform: uppercase; }
 .cover-meta strong { color: #fff; font-size: 14px; overflow-wrap: anywhere; }
 .metrics, .toc, .report-section {
   margin-top: 22px;
-  background: #fff;
-  border: 1px solid #d8ded9;
+  background: #FAF5EC;
+  border: 1px solid rgba(201,169,110,0.3);
   border-radius: 12px;
-  box-shadow: 0 12px 34px rgb(24 35 47 / 8%);
+  box-shadow: 0 12px 34px rgb(44 31 15 / 8%);
 }
 .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; }
-.metrics > div { padding: 18px; background: #fbfcfb; }
-.metrics span { display: block; color: #62736f; font-size: 12px; font-weight: 700; }
-.metrics strong { display: block; margin-top: 5px; color: #123f3d; font-size: 22px; }
-.metrics .wave-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; background: #fff; }
-.wave-row span { padding: 7px 10px; color: #273943; background: #eef5f2; border-radius: 999px; }
-.wave-row b { margin-left: 6px; color: #1f5f5b; }
+.metrics > div { padding: 18px; background: #FBF7EE; }
+.metrics span { display: block; color: #8A7A65; font-size: 12px; font-weight: 700; }
+.metrics strong { display: block; margin-top: 5px; color: #9A7A4A; font-size: 22px; }
+.metrics .wave-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; background: #FAF5EC; }
+.wave-row span { padding: 7px 10px; color: #5A4A35; background: #F0E8D8; border-radius: 999px; }
+.wave-row b { margin-left: 6px; color: #9A7A4A; }
 .toc { padding: 24px; }
 .toc h2 { margin: 0 0 14px; font-size: 24px; }
 .toc div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.toc a { color: #21323d; text-decoration: none; padding: 10px 12px; border: 1px solid #e2e8e2; border-radius: 8px; }
-.toc a span { color: #8a5a22; font-weight: 800; margin-right: 9px; }
+.toc a { color: #2C1F0F; text-decoration: none; padding: 10px 12px; border: 1px solid rgba(201,169,110,0.3); border-radius: 8px; }
+.toc a span { color: #9A7A4A; font-weight: 800; margin-right: 9px; }
 .report-section { padding: 30px; page-break-before: always; }
 .section-header { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; border-bottom: 2px solid var(--accent); }
 .section-header > span { display: grid; place-items: center; width: 48px; height: 48px; color: #fff; background: var(--accent); border-radius: 10px; font-weight: 800; }
-.section-header p { margin: 0; color: #65746f; font-size: 12px; font-weight: 700; }
+.section-header p { margin: 0; color: #8A7A65; font-size: 12px; font-weight: 700; }
 .section-header h2 { margin: 2px 0 0; font-size: 28px; line-height: 1.2; }
 .markdown-body { margin-top: 24px; }
-.markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5 { color: #172832; line-height: 1.25; }
-.markdown-body h2 { margin-top: 34px; font-size: 26px; }
+.markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5 { color: #2C1F0F; line-height: 1.25; }
+.markdown-body h2 { margin-top: 34px; font-size: 26px; color: #9A7A4A; }
 .markdown-body h3 { margin-top: 28px; font-size: 21px; }
 .markdown-body h4, .markdown-body h5 { margin-top: 22px; font-size: 17px; }
-.markdown-body p { margin: 12px 0; }
-blockquote { margin: 16px 0; padding: 12px 16px; color: #334b45; background: #eef5f2; border-left: 4px solid var(--accent); border-radius: 0 8px 8px 0; }
-pre { overflow: auto; padding: 14px; color: #f8fafc; background: #172832; border-radius: 8px; }
+.markdown-body p { margin: 12px 0; color: #5A4A35; }
+blockquote { margin: 16px 0; padding: 12px 16px; color: #5A4A35; background: rgba(201,169,110,0.09); border-left: 4px solid var(--accent); border-radius: 0 8px 8px 0; }
+pre { overflow: auto; padding: 14px; color: #F0E8D8; background: #1C1610; border-radius: 8px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .92em; }
-p code { padding: 2px 5px; color: #173b38; background: #e8f1ef; border-radius: 5px; }
+p code { padding: 2px 5px; color: #9A7A4A; background: #F0E8D8; border-radius: 5px; }
 table { width: 100%; margin: 18px 0; border-collapse: collapse; font-size: 13px; }
 th { color: #fff; background: var(--accent); }
-th, td { padding: 8px 9px; border: 1px solid #d8ded9; vertical-align: top; }
-tr:nth-child(even) td { background: #f8faf8; }
+th, td { padding: 8px 9px; border: 1px solid rgba(201,169,110,0.3); vertical-align: top; }
+tr:nth-child(even) td { background: #FBF7EE; }
 @page { size: A4; margin: 16mm 14mm 18mm; }
 @media print {
   body { background: #fff; }

@@ -89,7 +89,9 @@ class Settings(BaseSettings):
             explicit = Path(self.vedic_geonames_path).expanduser().resolve()
             if explicit.exists():
                 return explicit
-        candidate = self.calculator_site_packages() / "jhora" / "data" / "geonames_places_5k_IN.csv"
+        # Worldwide GeoNames dataset bundled with PyJHora (cities >= 5k population,
+        # 245 countries). Replaces the earlier India-only geonames_places_5k_IN.csv.
+        candidate = self.calculator_site_packages() / "jhora" / "data" / "geonames_places_5k.csv"
         if candidate.exists():
             return candidate
         raise RuntimeError("Cannot find PyJHora GeoNames CSV. Set VEDIC_GEONAMES_PATH.")

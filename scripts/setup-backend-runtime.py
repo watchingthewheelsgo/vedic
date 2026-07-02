@@ -26,7 +26,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = PROJECT_ROOT / "backend"
 DEFAULT_VENV = BACKEND_DIR / ".venv"
 MIN_PYTHON = (3, 11)
-MAX_PYTHON = (3, 11)
+# Upper bound only used when searching for a fallback interpreter; the runtime
+# supports 3.11 and newer.
+MAX_PYTHON = (3, 13)
 
 REQUIRED_PACKAGES: tuple[tuple[str, str, list[str]], ...] = (
     ("pysweph", ">=2.10.3.5", []),
@@ -55,7 +57,7 @@ def get_venv_python(venv_dir: Path) -> Path:
 
 
 def supported_version(version_info: tuple[int, int]) -> bool:
-    return MIN_PYTHON <= version_info <= MAX_PYTHON
+    return version_info >= MIN_PYTHON
 
 
 def find_python() -> str | None:
@@ -102,7 +104,7 @@ def run_cmd(
 def create_venv(venv_dir: Path) -> bool:
     python_cmd = find_python()
     if not python_cmd:
-        log("Python 3.11 is required for this backend runtime.", "ERR")
+        log("Python 3.11 or newer is required for this backend runtime.", "ERR")
         return False
     command = python_cmd.split() + ["-m", "venv", str(venv_dir)]
     log(f"Creating backend venv: {venv_dir}")
