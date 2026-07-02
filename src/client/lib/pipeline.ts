@@ -8,9 +8,14 @@ export type RunMetrics = {
   nodes?: Array<{
     id: string;
     label?: string;
+    files?: string[];
+    dependencies?: string[];
     wave?: number;
     status?: string;
+    startedAt?: string | null;
+    finishedAt?: string | null;
     durationSeconds?: number | null;
+    error?: string | null;
   }>;
 };
 
@@ -19,7 +24,12 @@ export type PipelineNode = {
   label: string;
   wave: number;
   status: string;
+  files: string[];
+  dependencies: string[];
+  startedAt?: string | null;
+  finishedAt?: string | null;
   durationSeconds?: number | null;
+  error?: string | null;
 };
 
 export type PipelineData = {
@@ -45,21 +55,36 @@ export function parseRunMetrics(session: SkillSessionResponse | null): RunMetric
 // memory (e.g. reopened session), the persisted run_metrics.json.
 export function getPipelineData(
   coreJob: CoreJobResponse | null,
-  runMetrics: RunMetrics | null
+  runMetrics: RunMetrics | null,
+  options: { session?: SkillSessionResponse | null; readerRunning?: boolean } = {}
 ): PipelineData | null {
+  const readerNode = readerPipelineNode(options.session ?? null, Boolean(options.readerRunning));
+
   if (coreJob && coreJob.nodes.length > 0) {
+    const coreNodes = coreJob.nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      wave: node.wave + 1,
+      status: node.status,
+      files: node.files,
+      dependencies: node.dependencies,
+      startedAt: node.startedAt,
+      finishedAt: node.finishedAt,
+      durationSeconds: node.durationSeconds,
+      error: node.error
+    }));
+    const nodes = readerNode ? [readerNode, ...coreNodes] : coreNodes;
+    const readerComplete = readerNode?.status === "completed" ? 1 : 0;
+    const readerFailed = readerNode?.status === "failed" ? 1 : 0;
+    const total = coreJob.progress.total + (readerNode ? 1 : 0);
+    const completed = coreJob.progress.completed + readerComplete;
+    const failed = coreJob.progress.failed + readerFailed;
     return {
-      nodes: coreJob.nodes.map((node) => ({
-        id: node.id,
-        label: node.label,
-        wave: node.wave,
-        status: node.status,
-        durationSeconds: node.durationSeconds
-      })),
-      percent: coreJob.progress.percent,
-      completed: coreJob.progress.completed,
-      total: coreJob.progress.total,
-      failed: coreJob.progress.failed,
+      nodes,
+      percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+      completed,
+      total,
+      failed,
       durationSeconds: coreJob.durationSeconds
     };
   }
@@ -69,10 +94,16 @@ export function getPipelineData(
     const normalized: PipelineNode[] = nodes.map((node) => ({
       id: node.id,
       label: node.label ?? node.id,
-      wave: node.wave ?? 1,
+      wave: (node.wave ?? 1) + 1,
       status: node.status ?? "pending",
+      files: node.files ?? [],
+      dependencies: node.dependencies ?? [],
+      startedAt: node.startedAt ?? null,
+      finishedAt: node.finishedAt ?? null,
+      error: node.error ?? null,
       durationSeconds: node.durationSeconds ?? null
     }));
+    const allNodes = readerNode ? [readerNode, ...normalized] : normalized;
     const total = runMetrics?.progress?.total ?? normalized.length;
     const completed =
       runMetrics?.progress?.completed ??
@@ -80,17 +111,61 @@ export function getPipelineData(
     const failed =
       runMetrics?.progress?.failed ??
       normalized.filter((node) => node.status === "failed").length;
+    const adjustedTotal = total + (readerNode ? 1 : 0);
+    const adjustedCompleted = completed + (readerNode?.status === "completed" ? 1 : 0);
+    const adjustedFailed = failed + (readerNode?.status === "failed" ? 1 : 0);
     return {
-      nodes: normalized,
-      percent: total > 0 ? Math.round((completed / total) * 100) : 0,
-      completed,
-      total,
-      failed,
+      nodes: allNodes,
+      percent: adjustedTotal > 0 ? Math.round((adjustedCompleted / adjustedTotal) * 100) : 0,
+      completed: adjustedCompleted,
+      total: adjustedTotal,
+      failed: adjustedFailed,
       durationSeconds: runMetrics?.durationSeconds ?? null
     };
   }
 
+  if (readerNode) {
+    const completed = readerNode.status === "completed" ? 1 : 0;
+    const failed = readerNode.status === "failed" ? 1 : 0;
+    return {
+      nodes: [readerNode],
+      percent: completed ? 100 : 0,
+      completed,
+      total: 1,
+      failed,
+      durationSeconds: null
+    };
+  }
+
   return null;
+}
+
+function readerPipelineNode(
+  session: SkillSessionResponse | null,
+  readerRunning: boolean
+): PipelineNode | null {
+  const artifacts = session?.artifacts ?? [];
+  const hasStructuredData = artifacts.some((artifact) => artifact.path === "structured_data.md");
+  if (!hasStructuredData) return null;
+  const prevalidation = artifacts.find((artifact) => artifact.path === "reader_prevalidation.md");
+  const feedback = artifacts.find((artifact) => artifact.path === "user_context.md");
+  let status = "pending";
+  if (feedback) status = "completed";
+  else if (prevalidation) status = "waiting";
+  else if (readerRunning) status = "running";
+
+  return {
+    id: "reader_prevalidation",
+    label: "Reader pre-validation",
+    wave: 1,
+    status,
+    files: ["reader_prevalidation.md", "user_context.md"],
+    dependencies: ["structured_data.md"],
+    startedAt: null,
+    finishedAt: feedback?.updatedAt ?? prevalidation?.updatedAt ?? null,
+    durationSeconds: null,
+    error: null
+  };
 }
 
 export function formatDuration(seconds?: number | null): string {

@@ -16,9 +16,9 @@ import dagre from "dagre";
 import "@xyflow/react/dist/style.css";
 import { formatDuration, type PipelineData, type PipelineNode } from "../lib/pipeline";
 
-type StageStatus = "done" | "running" | "failed" | "pending";
+export type StageStatus = "done" | "running" | "waiting" | "failed" | "pending";
 
-type StageDef = {
+export type StageDef = {
   id: string;
   label: string;
   sub: string;
@@ -29,8 +29,9 @@ type StageDef = {
 // Logical stages shown on the canvas. Each aggregates one group of backend
 // batch nodes, mirroring docs/pipeline.md so the graph stays readable while the
 // underlying DAG has ~48 nodes.
-const STAGES: StageDef[] = [
+export const WORKSHOP_STAGES: StageDef[] = [
   { id: "src", label: "Birth Data", sub: "structured_data", seed: true, match: () => false },
+  { id: "reader", label: "Pre-validation", sub: "vedic-reader", match: (id) => id === "reader_prevalidation" },
   { id: "p1", label: "Identity", sub: "P1", match: (id) => id === "p1" },
   { id: "yoga", label: "Yoga Pre-scan", sub: "P2 · pre", match: (id) => id === "p2_yoga" },
   { id: "p2", label: "Planet Audit", sub: "9 planets", match: (id) => id.startsWith("p2_") && id !== "p2_yoga" },
@@ -43,9 +44,10 @@ const STAGES: StageDef[] = [
   { id: "appx", label: "Appendix", sub: "technical", match: (id) => id === "appendix" }
 ];
 
-const STAGE_EDGES: Array<[string, string]> = [
-  ["src", "p1"],
-  ["src", "yoga"],
+export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
+  ["src", "reader"],
+  ["reader", "p1"],
+  ["reader", "yoga"],
   ["p1", "p2"],
   ["yoga", "p2"],
   ["p2", "d9"],
@@ -66,17 +68,25 @@ const NODE_H = 56;
 const STATUS_STROKE: Record<StageStatus, string> = {
   done: "#C9A96E",
   running: "#E8C877",
+  waiting: "#C9A96E",
   failed: "#B04A38",
   pending: "#4A3E2C"
 };
 
 type StageAgg = { status: StageStatus; done: number; total: number };
-type StageData = { label: string; sub: string; status: StageStatus; seed: boolean; badge: string };
+type StageData = {
+  label: string;
+  sub: string;
+  status: StageStatus;
+  seed: boolean;
+  selected: boolean;
+  badge: string;
+};
 type StageFlowNode = Node<StageData, "stage">;
 
-function aggregateStages(nodes: PipelineNode[]): Record<string, StageAgg> {
+export function aggregateWorkshopStages(nodes: PipelineNode[]): Record<string, StageAgg> {
   const result: Record<string, StageAgg> = {};
-  for (const stage of STAGES) {
+  for (const stage of WORKSHOP_STAGES) {
     if (stage.seed) {
       result[stage.id] = { status: "done", done: 0, total: 0 };
       continue;
@@ -89,6 +99,7 @@ function aggregateStages(nodes: PipelineNode[]): Record<string, StageAgg> {
     let status: StageStatus = "pending";
     if (total === 0) status = "pending";
     else if (matched.some((node) => node.status === "running")) status = "running";
+    else if (matched.some((node) => node.status === "waiting")) status = "waiting";
     else if (matched.some((node) => node.status === "failed")) status = "failed";
     else if (done === total) status = "done";
     result[stage.id] = { status, done, total };
@@ -102,11 +113,11 @@ function computeLayout(): Record<string, { x: number; y: number }> {
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 52, marginx: 24, marginy: 24 });
   graph.setDefaultEdgeLabel(() => ({}));
-  for (const stage of STAGES) graph.setNode(stage.id, { width: NODE_W, height: NODE_H });
-  for (const [source, target] of STAGE_EDGES) graph.setEdge(source, target);
+  for (const stage of WORKSHOP_STAGES) graph.setNode(stage.id, { width: NODE_W, height: NODE_H });
+  for (const [source, target] of WORKSHOP_STAGE_EDGES) graph.setEdge(source, target);
   dagre.layout(graph);
   const positions: Record<string, { x: number; y: number }> = {};
-  for (const stage of STAGES) {
+  for (const stage of WORKSHOP_STAGES) {
     const node = graph.node(stage.id);
     positions[stage.id] = { x: node.x - NODE_W / 2, y: node.y - NODE_H / 2 };
   }
@@ -119,7 +130,7 @@ function nodeStatusClass(status: StageStatus): StageStatus {
 
 function StageNode({ data }: NodeProps<StageFlowNode>) {
   return (
-    <div className={`stage-node ${data.seed ? "seed" : nodeStatusClass(data.status)}`}>
+    <div className={`stage-node ${data.seed ? "seed" : nodeStatusClass(data.status)} ${data.selected ? "selected" : ""}`}>
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <div className="stage-node-title">{data.label}</div>
       <div className="stage-node-sub">{data.sub}</div>
@@ -131,13 +142,21 @@ function StageNode({ data }: NodeProps<StageFlowNode>) {
 
 const nodeTypes = { stage: StageNode };
 
-export function PipelineFlow({ data }: { data: PipelineData }) {
+export function PipelineFlow({
+  data,
+  selectedStageId = "src",
+  onSelectStage
+}: {
+  data: PipelineData;
+  selectedStageId?: string;
+  onSelectStage?: (stageId: string) => void;
+}) {
   const positions = useMemo(() => computeLayout(), []);
-  const agg = useMemo(() => aggregateStages(data.nodes), [data.nodes]);
+  const agg = useMemo(() => aggregateWorkshopStages(data.nodes), [data.nodes]);
 
   const nodes = useMemo<StageFlowNode[]>(
     () =>
-      STAGES.map((stage) => {
+      WORKSHOP_STAGES.map((stage) => {
         const stat = agg[stage.id];
         return {
           id: stage.id,
@@ -151,17 +170,18 @@ export function PipelineFlow({ data }: { data: PipelineData }) {
             sub: stage.sub,
             status: stat.status,
             seed: Boolean(stage.seed),
-            badge: stat.total > 1 ? `${stat.done}/${stat.total}` : ""
+            selected: selectedStageId === stage.id,
+            badge: stat.status === "waiting" ? "input" : stat.total > 1 ? `${stat.done}/${stat.total}` : ""
           }
         };
       }),
-    [agg, positions]
+    [agg, positions, selectedStageId]
   );
 
   const edges = useMemo<Edge[]>(
     () =>
-      STAGE_EDGES.map(([source, target]) => {
-        const running = agg[target]?.status === "running";
+      WORKSHOP_STAGE_EDGES.map(([source, target]) => {
+        const running = agg[target]?.status === "running" || agg[target]?.status === "waiting";
         const stroke = running ? STATUS_STROKE.running : STATUS_STROKE.pending;
         return {
           id: `${source}-${target}`,
@@ -203,6 +223,7 @@ export function PipelineFlow({ data }: { data: PipelineData }) {
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          onNodeClick={(_, node) => onSelectStage?.(node.id)}
           fitView
           fitViewOptions={{ padding: 0.18 }}
           onInit={(instance) => instance.fitView({ padding: 0.18 })}

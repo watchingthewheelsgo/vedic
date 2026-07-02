@@ -9,10 +9,12 @@ const isCoord = (s: string) => /lat\s*=/.test(s);
 // sites, astrology apps): type a city → pick "City, Region, Country".
 export function PlacePicker({
   value,
-  onChange
+  onChange,
+  error
 }: {
   value: string;
   onChange: (value: string) => void;
+  error?: string;
 }) {
   const [query, setQuery] = useState(value);
   const [options, setOptions] = useState<PlaceOption[]>([]);
@@ -103,9 +105,9 @@ export function PlacePicker({
   const committed = Boolean(value) && query.trim() === value;
 
   return (
-    <div className="form-group" ref={boxRef}>
-      <label>City of Birth</label>
-      <div className={`city-field ${committed ? "committed" : ""}`}>
+    <div className={`form-group modern-field city-modern-field ${error ? "has-error" : ""}`} ref={boxRef}>
+      <label><MapPin size={16} /><span>City of birth</span></label>
+      <div className={`city-field ${committed ? "committed" : ""} ${error ? "field-invalid" : ""}`}>
         <MapPin size={16} />
         <input
           value={query}
@@ -143,10 +145,10 @@ export function PlacePicker({
           </ul>
         )}
       </div>
-      <div className="hint">
+      {error ? <div className="field-error">{error}</div> : <div className="hint">
         Worldwide search. No match? Paste coordinates:
         <code style={{ marginLeft: 6 }}>lat=34.05, lon=-118.24, tz=America/Los_Angeles</code>
-      </div>
+      </div>}
     </div>
   );
 }
