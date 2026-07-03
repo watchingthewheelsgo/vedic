@@ -1,12 +1,11 @@
 import { FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
-import { format } from "date-fns";
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { PlacePicker } from "../components/PlacePicker";
 import { Button } from "../components/ui/button";
-import { Calendar, CalendarButton } from "../components/ui/calendar";
 import { Card, CardContent } from "../components/ui/card";
+import { DatePicker } from "../components/ui/date-picker";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
@@ -184,28 +183,17 @@ export function Intake() {
                   hint="Calendar input replaces manual year/month/day selection."
                   error={errors.birthDate}
                 >
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <CalendarButton aria-invalid={Boolean(errors.birthDate)}>
-                        <CalendarDays className="size-4 text-gold-dim" />
-                        {birthDate ? format(birthDate, "MMMM d, yyyy") : <span className="text-muted">Select date</span>}
-                      </CalendarButton>
-                    </PopoverTrigger>
-                    <PopoverContent className="p-2">
-                      <Calendar
-                        mode="single"
-                        selected={birthDate ?? undefined}
-                        onSelect={(date) => {
-                          setBirthDate(date ?? null);
-                          clearError(setErrors, "birthDate");
-                        }}
-                        disabled={{ after: new Date() }}
-                        captionLayout="dropdown"
-                        startMonth={new Date(1900, 0)}
-                        endMonth={new Date()}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <DatePicker
+                    value={birthDate}
+                    invalid={Boolean(errors.birthDate)}
+                    disabled={{ after: new Date() }}
+                    startMonth={new Date(1900, 0)}
+                    endMonth={new Date()}
+                    onChange={(date) => {
+                      setBirthDate(date);
+                      clearError(setErrors, "birthDate");
+                    }}
+                  />
                 </Field>
 
                 <Field
