@@ -40,6 +40,8 @@ type BirthInfo = {
 
 type StageCopy = {
   purpose: string;
+  userResult: string;
+  userAction: string;
   inputs: string[];
   outputs: string[];
   expected: string;
@@ -47,73 +49,97 @@ type StageCopy = {
 
 const STAGE_COPY: Record<string, StageCopy> = {
   src: {
-    purpose: "Calculate the canonical chart data from birth details and write structured_data.md.",
+    purpose: "Locks the birth details that every later reading must use.",
+    userResult: "A stable chart data snapshot is created. This avoids later stages reinterpreting the form fields differently.",
+    userAction: "Review the date, time, place, and time confidence. If something is wrong, start a fresh workshop.",
     inputs: ["Birth date, time, place", "Time precision and source", "Gender and relationship status"],
     outputs: ["structured_data.md", "structured_data.json", "run_metrics.json"],
     expected: "Usually seconds. If place resolution fails, fix the city input before continuing."
   },
   reader: {
-    purpose: "Run vedic-reader Calc mode: signal pre-scan, Yoga scan, then 3-5 falsifiable validation anchors.",
+    purpose: "Checks whether the birth time feels plausible before spending time on the full report.",
+    userResult: "You get 3-5 concrete anchors to mark as accurate, inaccurate, or partly accurate.",
+    userAction: "Reply to each anchor. The full report starts only after this feedback is recorded.",
     inputs: ["structured_data.md"],
     outputs: ["reader_prevalidation.md", "user_context.md after your feedback"],
     expected: "Usually a few minutes because this is an LLM reading step."
   },
   p1: {
-    purpose: "Build the identity overview and establish the core chart frame.",
+    purpose: "Builds the first identity frame for the report.",
+    userResult: "The report starts with temperament, chart lord, and core orientation.",
+    userAction: "No action required. Wait for this stage to finish.",
     inputs: ["structured_data.md"],
     outputs: ["p1_overview.md"],
     expected: "First core node; starts after validation feedback is recorded."
   },
   yoga: {
-    purpose: "Pre-scan Yoga and Neecha Bhanga Raja Yoga conditions before individual planet audits.",
+    purpose: "Finds major chart patterns before judging individual planets.",
+    userResult: "Confirmed and rejected pattern signals are carried into later interpretation.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", "resources/yogas.md"],
     outputs: [".runtime/p2/yoga.md", "p2a_planets.md after composition"],
     expected: "Runs in parallel with P1 where dependencies allow."
   },
   p2: {
-    purpose: "Audit all nine planets using the original P1-P12 framework.",
+    purpose: "Scores the nine planetary actors that drive most report sections.",
+    userResult: "Strength, dignity, house role, and constraints are prepared for later synthesis.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", ".runtime/p2/yoga.md"],
     outputs: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
     expected: "Nine independent planet nodes can run in parallel after Yoga pre-scan."
   },
   d9: {
-    purpose: "Audit each planet in D9/Navamsha and carry forward the D1 identity matrix.",
+    purpose: "Checks whether the surface chart promise holds at a deeper Navamsha level.",
+    userResult: "The report can separate visible potential from deeper fulfillment quality.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", "p2a-p2d planet audits"],
     outputs: ["p3a_d9.md"],
     expected: "Nine D9 planet nodes can run in parallel after P2."
   },
   div: {
-    purpose: "Read D10 career, D4 property/comfort, and D5 authority divisions.",
+    purpose: "Adds context for career, home/property, and authority/creative themes.",
+    userResult: "Specialized charts add evidence without overwhelming the main report.",
+    userAction: "No action required.",
     inputs: ["structured_data.md", "p2a-p2d planet audits"],
     outputs: ["p3b_divisional.md"],
     expected: "Three divisional summaries can run in parallel after P2."
   },
   house: {
-    purpose: "Diagnose all 12 houses with lord, tenant, aspect, SAV, division, and Dasha evidence.",
+    purpose: "Reviews the 12 life areas that the final report will synthesize.",
+    userResult: "Money, work, relationships, health, learning, family, reputation, and spiritual areas get evidence.",
+    userAction: "No action required.",
     inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
     outputs: ["p4a_houses.md", "p4b_houses.md"],
     expected: "Twelve house nodes can run in parallel after D9 and divisional summaries."
   },
   dasha: {
-    purpose: "Prepare the Dasha review and Yoga activation reference for life-block synthesis.",
+    purpose: "Builds the timing reference used by the life synthesis.",
+    userResult: "Current and upcoming periods can be tied back to the chart evidence.",
+    userAction: "No action required.",
     inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
     outputs: [".runtime/dasha_review.md"],
     expected: "Runs once D9 and divisional outputs are ready."
   },
   pari: {
-    purpose: "Scan confirmed and excluded Parivartana exchange pairs after house diagnosis.",
+    purpose: "Cross-checks house interactions so the report does not overstate exchange patterns.",
+    userResult: "Confirmed and excluded links are recorded before the final synthesis.",
+    userAction: "No action required.",
     inputs: ["All 12 house diagnosis nodes"],
     outputs: [".runtime/houses/parivartana.md", "p4b_houses.md"],
     expected: "Runs after every house node completes."
   },
   life: {
-    purpose: "Synthesize life domains using prior blind-audit artifacts and user feedback where allowed.",
+    purpose: "Turns the evidence into readable life-domain sections.",
+    userResult: "The report assembles identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths.",
+    userAction: "No action required.",
     inputs: ["p4 outputs", "Dasha review", "user_context.md"],
     outputs: ["p5a_life.md", "p5b_life.md"],
     expected: "Ten life-block nodes can run in parallel after house and Dasha stages."
   },
   appx: {
-    purpose: "Write the technical appendix and final consistency notes.",
+    purpose: "Finalizes the report and keeps technical evidence available at the end.",
+    userResult: "The Report tab becomes available with export-ready markdown sections.",
+    userAction: "Open the Report tab when this completes.",
     inputs: ["All completed core report artifacts"],
     outputs: ["appendix.md"],
     expected: "Final core node."
@@ -330,7 +356,6 @@ export function Session() {
           <BookOpen size={14} /> Report
         </Button>
         <div className="flex-1" />
-        <span className="hidden text-xs tracking-[0.3px] text-muted sm:inline">{id}</span>
       </div>
 
       {error && (
@@ -485,7 +510,11 @@ function WorkshopDetailPanel({
         <h3 className="text-lg font-semibold tracking-normal text-ink">{stage.label}</h3>
         <Badge variant={statusBadgeVariant(status)}>{STATUS_LABELS[status]}</Badge>
       </div>
-      <p className="mb-5 text-[13px] leading-[1.65] text-body">{STAGE_COPY[stage.id]?.purpose}</p>
+      <p className="mb-4 text-[13px] leading-[1.65] text-body">{STAGE_COPY[stage.id]?.purpose}</p>
+      <div className="mb-5 grid gap-2.5">
+        <DetailCallout title="What you get">{STAGE_COPY[stage.id]?.userResult}</DetailCallout>
+        <DetailCallout title="What to do">{STAGE_COPY[stage.id]?.userAction}</DetailCallout>
+      </div>
 
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
@@ -533,11 +562,6 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
           <p className="m-0 text-[13px] leading-[1.7] text-body">{birthInfo.concern}</p>
         </div>
       )}
-      <DetailList title="Outputs" items={STAGE_COPY.src.outputs} />
-      <div className="mt-5 text-xs leading-[1.7] text-muted">
-        This data is the source of structured_data.md. Later stages should read this file instead of
-        reinterpreting the original form fields.
-      </div>
     </>
   );
 }
@@ -567,8 +591,6 @@ function ReaderDetail({
   if (!prevalidation) {
     return (
       <>
-        <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
-        <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
         <div className="my-4">
           <DetailSubtitle>{readerRunning ? "Running now" : "Not started"}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">
@@ -678,25 +700,7 @@ function CoreStageDetail({
         </div>
       )}
 
-      <DetailList title="Inputs" items={copy.inputs} />
-      <DetailList title="Outputs" items={copy.outputs} />
-
-      {nodes.length > 0 && (
-        <div className="my-4">
-          <DetailSubtitle>Node details</DetailSubtitle>
-          <div className="grid gap-1.5">
-            {nodes.slice(0, 8).map((node) => (
-              <div className="flex justify-between gap-2.5 rounded-md border border-gold/25 bg-cream-2 px-2.5 py-2 text-[12.5px]" key={node.id}>
-                <b className="font-semibold text-ink">{node.label}</b>
-                <span className="text-right text-muted">{node.status}{node.durationSeconds ? ` · ${formatDuration(node.durationSeconds)}` : ""}</span>
-              </div>
-            ))}
-            {nodes.length > 8 && <div className="px-1 text-xs text-muted">+{nodes.length - 8} more nodes</div>}
-          </div>
-        </div>
-      )}
-
-      {artifact && <ArtifactExcerpt artifact={artifact} title="Generated preview" />}
+      {artifact && <ArtifactExcerpt artifact={artifact} title="Latest generated draft" />}
     </>
   );
 }
@@ -710,17 +714,11 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DetailList({ title, items }: { title: string; items: string[] }) {
+function DetailCallout({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="my-4">
-      <DetailSubtitle>{title}</DetailSubtitle>
-      <ul className="list-disc pl-4">
-        {items.map((item) => (
-          <li key={item} className="text-[13px] leading-[1.65] text-body marker:text-gold">
-            {item}
-          </li>
-        ))}
-      </ul>
+    <div className="rounded-lg border border-gold/20 bg-cream-2 px-3 py-2.5">
+      <div className="mb-1 text-[10px] uppercase tracking-[1.4px] text-muted">{title}</div>
+      <p className="m-0 text-[12.5px] leading-[1.65] text-body">{children}</p>
     </div>
   );
 }

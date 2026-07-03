@@ -31,18 +31,18 @@ export type StageDef = {
 // batch nodes, mirroring docs/pipeline.md so the graph stays readable while the
 // underlying DAG has ~48 nodes.
 export const WORKSHOP_STAGES: StageDef[] = [
-  { id: "src", label: "Birth Data", sub: "structured_data", seed: true, match: () => false },
-  { id: "reader", label: "Pre-validation", sub: "vedic-reader", match: (id) => id === "reader_prevalidation" },
-  { id: "p1", label: "Identity", sub: "P1", match: (id) => id === "p1" },
-  { id: "yoga", label: "Yoga Pre-scan", sub: "P2 · pre", match: (id) => id === "p2_yoga" },
-  { id: "p2", label: "Planet Audit", sub: "9 planets", match: (id) => id.startsWith("p2_") && id !== "p2_yoga" },
-  { id: "d9", label: "D9 per-planet", sub: "Navamsha", match: (id) => id.startsWith("p3a_d9_") },
-  { id: "div", label: "D10 / D4 / D5", sub: "divisional", match: (id) => id.startsWith("p3b_") },
-  { id: "house", label: "House Diagnosis", sub: "12 houses", match: (id) => id.startsWith("p4_house_") },
-  { id: "dasha", label: "Dasha Review", sub: "Step 4", match: (id) => id === "dasha_review" },
-  { id: "pari", label: "Parivartana", sub: "exchange scan", match: (id) => id === "p4_parivartana" },
-  { id: "life", label: "Life Blocks", sub: "10 domains", match: (id) => id.startsWith("p5_block_") },
-  { id: "appx", label: "Appendix", sub: "technical", match: (id) => id === "appendix" }
+  { id: "src", label: "Birth Details", sub: "chart seed", seed: true, match: () => false },
+  { id: "reader", label: "Time Check", sub: "your feedback", match: (id) => id === "reader_prevalidation" },
+  { id: "p1", label: "Core Identity", sub: "first frame", match: (id) => id === "p1" },
+  { id: "yoga", label: "Major Patterns", sub: "yoga scan", match: (id) => id === "p2_yoga" },
+  { id: "p2", label: "Planet Strengths", sub: "9 planets", match: (id) => id.startsWith("p2_") && id !== "p2_yoga" },
+  { id: "d9", label: "Deeper Promise", sub: "Navamsha", match: (id) => id.startsWith("p3a_d9_") },
+  { id: "div", label: "Life Context", sub: "career/home", match: (id) => id.startsWith("p3b_") },
+  { id: "house", label: "Life Areas", sub: "12 houses", match: (id) => id.startsWith("p4_house_") },
+  { id: "dasha", label: "Timing Map", sub: "Dasha", match: (id) => id === "dasha_review" },
+  { id: "pari", label: "Cross-checks", sub: "exchanges", match: (id) => id === "p4_parivartana" },
+  { id: "life", label: "Life Synthesis", sub: "10 domains", match: (id) => id.startsWith("p5_block_") },
+  { id: "appx", label: "Final Report", sub: "appendix", match: (id) => id === "appendix" }
 ];
 
 export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [

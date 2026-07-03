@@ -1,12 +1,11 @@
 import { FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
-import { format } from "date-fns";
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { PlacePicker } from "../components/PlacePicker";
 import { Button } from "../components/ui/button";
-import { Calendar, CalendarButton } from "../components/ui/calendar";
 import { Card, CardContent } from "../components/ui/card";
+import { DatePicker } from "../components/ui/date-picker";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
@@ -95,6 +94,20 @@ export function Intake() {
     [timePrecision]
   );
 
+  const currentBirth = useMemo(
+    () =>
+      buildBirthInput({
+        birthDate,
+        birthTime,
+        place,
+        timePrecision,
+        gender,
+        relationship,
+        timeSource
+      }),
+    [birthDate, birthTime, gender, place, relationship, timePrecision, timeSource]
+  );
+
   async function onStart(event: FormEvent) {
     event.preventDefault();
     const nextErrors: FormErrors = {};
@@ -114,15 +127,8 @@ export function Intake() {
       return;
     }
 
-    const birth: BirthInput = {
-      birthDate: formatBirthDate(birthDate),
-      birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
-      birthPlace: place,
-      birthTimePrecision: timePrecision,
-      gender: gender || "未提供",
-      relationship: relationship || "未提供",
-      timeSource: timePrecision === "exact" ? timeSource : "未追问"
-    };
+    const birth = currentBirth;
+    if (!birth) return;
 
     setBusy(true);
     setErrors({});
@@ -177,28 +183,17 @@ export function Intake() {
                   hint="Calendar input replaces manual year/month/day selection."
                   error={errors.birthDate}
                 >
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <CalendarButton aria-invalid={Boolean(errors.birthDate)}>
-                        <CalendarDays className="size-4 text-gold-dim" />
-                        {birthDate ? format(birthDate, "MMMM d, yyyy") : <span className="text-muted">Select date</span>}
-                      </CalendarButton>
-                    </PopoverTrigger>
-                    <PopoverContent className="p-2">
-                      <Calendar
-                        mode="single"
-                        selected={birthDate ?? undefined}
-                        onSelect={(date) => {
-                          setBirthDate(date ?? null);
-                          clearError(setErrors, "birthDate");
-                        }}
-                        disabled={{ after: new Date() }}
-                        captionLayout="dropdown"
-                        startMonth={new Date(1900, 0)}
-                        endMonth={new Date()}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <DatePicker
+                    value={birthDate}
+                    invalid={Boolean(errors.birthDate)}
+                    disabled={{ after: new Date() }}
+                    startMonth={new Date(1900, 0)}
+                    endMonth={new Date()}
+                    onChange={(date) => {
+                      setBirthDate(date);
+                      clearError(setErrors, "birthDate");
+                    }}
+                  />
                 </Field>
 
                 <Field
@@ -573,6 +568,39 @@ function clearError(setErrors: (value: SetStateAction<FormErrors>) => void, key:
 function formatBirthDate(date: Date | null): string {
   if (!date) return "";
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function buildBirthInput({
+  birthDate,
+  birthTime,
+  place,
+  timePrecision,
+  gender,
+  relationship,
+  timeSource
+}: {
+  birthDate: Date | null;
+  birthTime: Date | null;
+  place: string;
+  timePrecision: BirthTimePrecision;
+  gender: string;
+  relationship: string;
+  timeSource: string;
+}): BirthInput | null {
+  if (!birthDate) return null;
+  if (!place) return null;
+  if (timePrecision !== "unknown" && !birthTime) return null;
+  if (timePrecision === "exact" && !timeSource) return null;
+
+  return {
+    birthDate: formatBirthDate(birthDate),
+    birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
+    birthPlace: place,
+    birthTimePrecision: timePrecision,
+    gender: gender || "未提供",
+    relationship: relationship || "未提供",
+    timeSource: timePrecision === "exact" ? timeSource : "未追问"
+  };
 }
 
 function formatBirthTime(date: Date | null, precision: BirthTimePrecision): string {
