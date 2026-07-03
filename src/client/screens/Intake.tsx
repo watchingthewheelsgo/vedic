@@ -12,12 +12,6 @@ import { Input } from "../components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { cn } from "../lib/cn";
-import {
-  findRememberedSession,
-  forgetRememberedSession,
-  rememberSessionForBirth,
-  type RememberedSession
-} from "../lib/sessionAccess";
 import type { BirthInput, BirthTimePrecision } from "../../shared/domain";
 
 type SelectOption<T extends string = string> = {
@@ -95,7 +89,6 @@ export function Intake() {
   const [timeSource, setTimeSource] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [busy, setBusy] = useState(false);
-  const [resumeCandidate, setResumeCandidate] = useState<RememberedSession | null>(null);
 
   const precisionOption = useMemo(
     () => TIME_PRECISION_OPTIONS.find((option) => option.value === timePrecision) ?? TIME_PRECISION_OPTIONS[0],
@@ -116,16 +109,8 @@ export function Intake() {
     [birthDate, birthTime, gender, place, relationship, timePrecision, timeSource]
   );
 
-  useEffect(() => {
-    setResumeCandidate(currentBirth ? findRememberedSession(currentBirth) : null);
-  }, [currentBirth]);
-
   async function onStart(event: FormEvent) {
     event.preventDefault();
-    await startSession(false);
-  }
-
-  async function startSession(forceNew: boolean) {
     const nextErrors: FormErrors = {};
 
     if (!birthDate) nextErrors.birthDate = "Select your date of birth.";
@@ -149,22 +134,7 @@ export function Intake() {
     setBusy(true);
     setErrors({});
     try {
-      const remembered = findRememberedSession(birth);
-      if (remembered && !forceNew) {
-        try {
-          await api.getSkillSession(remembered.sessionId);
-          navigate(`/session/${remembered.sessionId}?tab=workshop`, {
-            state: { name, birth }
-          });
-          return;
-        } catch {
-          forgetRememberedSession(birth);
-          setResumeCandidate(null);
-        }
-      }
-
       const session = await api.createSkillSession(birth);
-      rememberSessionForBirth(birth, session.sessionId, session.accessToken);
       navigate(`/session/${session.sessionId}?tab=workshop`, {
         state: { name, birth }
       });
@@ -383,30 +353,8 @@ export function Intake() {
                 </div>
               )}
 
-              {resumeCandidate && (
-                <div className="rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
-                  <div className="font-semibold text-ink">Previous workshop found</div>
-                  <div className="mt-1 text-muted">
-                    Same birth details were used before. Continuing it avoids recalculating finished stages.
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted">{resumeCandidate.birthLabel}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto"
-                      disabled={busy}
-                      onClick={() => void startSession(true)}
-                    >
-                      Start fresh
-                    </Button>
-                  </div>
-                </div>
-              )}
-
               <Button className="mt-2 w-full" size="lg" disabled={busy}>
-                {busy ? "Preparing..." : resumeCandidate ? "Continue Previous Workshop →" : "Continue to Workshop →"}
+                {busy ? "Preparing..." : "Continue to Workshop →"}
               </Button>
             </form>
           </CardContent>

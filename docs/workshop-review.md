@@ -2,117 +2,124 @@
 
 ## Current Findings
 
-The workshop is useful for debugging, but the previous UI exposed too much of the
-internal execution model to a normal user. File names such as
-`structured_data.md`, internal shard paths, node dependencies, and batch timing
-are valid implementation details, but they should not be the main explanation of
-the product flow.
+The workshop should help a user understand what is happening and what they need
+to do next. The previous version exposed too much implementation detail: file
+names, internal batch nodes, dependencies, and timing mechanics were presented
+as if they were product concepts.
 
-The user-facing flow should be:
+The intended user-facing flow is:
 
-1. Confirm birth details and create one private chart workspace.
+1. Confirm birth details and create one chart workspace.
 2. Run a short birth-time plausibility check.
-3. Ask the user to mark the anchors as accurate, inaccurate, or partly accurate.
+3. Ask the user to mark each anchor as accurate, inaccurate, or partly accurate.
 4. Generate the full report in visible stages.
 5. Show the finished report and allow export.
 
 ## What The User Should See
 
-Users should always see:
+Users should see:
 
-- Current step and whether user input is required.
-- Plain-language purpose for the selected stage.
-- What result this stage produces for the report.
-- Whether the system is waiting, running, complete, or failed.
-- The final report preview/export when complete.
+- The selected stage and its plain-language purpose.
+- What the stage produces for the final reading.
+- What action, if any, the user needs to take.
+- Whether the stage is waiting, running, complete, or failed.
+- A readable generated preview when a stage has user-facing content.
 
-Users should see only on demand:
+Users should not see by default:
 
-- Internal artifact names.
-- Core batch node names.
-- Dependency and timing details.
-- Raw generated markdown excerpts.
+- Internal artifact file names.
+- Internal shard paths.
+- Backend batch ids.
+- Dependency lists.
+- Raw node lists.
 
-These details are still useful for support and debugging, so the first version
-keeps them behind a `Technical details` disclosure.
+Those details are still useful for developer debugging, but they should live in
+logs, dev tools, or a later explicit debug mode rather than the normal Workshop
+experience.
 
 ## Data Isolation
 
-Before this change, sessions were already stored in separate directories:
+Current behavior:
 
-```text
-backend/data/sessions/<session_id>/
-```
+- Each session is persisted in its own server-side folder under
+  `backend/data/sessions/<session_id>/`.
+- Artifact writes use safe path resolution, so generated files cannot escape the
+  session folder.
+- Session ids now use `secrets`-based entropy rather than `random`.
 
-Artifact writes also use safe path resolution, so generated files cannot escape
-their own session folder. However, the URL session id effectively acted as the
-only bearer secret.
+This is still not sufficient for a public multi-user product. We should not ship
+URL-only session access as the long-term isolation model.
 
-This version adds a lightweight session access token:
+Recommended account model:
 
-- New sessions get a token stored in `.meta/session.json`.
-- The browser stores that token in `localStorage`.
-- Session reads, skill runs, core job starts, core job polling, synastry subject
-  creation, and feedback submission send `x-session-token`.
-- Token-protected sessions reject requests without the matching token.
-- Older sessions without metadata remain readable for local backward
-  compatibility.
+- Add authenticated users.
+- Store `user_id`/owner metadata for every session.
+- Scope every session read/write/job API by authenticated owner.
+- Keep support/admin access as an explicit audited role, not a fallback path.
+- Keep anonymous/local development sessions only for development mode.
 
-This is not a replacement for real accounts. For production multi-user use, the
-next step should be authenticated users and server-side ownership checks.
+This version intentionally does not add a temporary browser token layer. A
+partial token design would add complexity but still not answer the real product
+need: account-level ownership.
 
 ## Cache And Acceleration
 
-The safest cache is local resume, not shared report reuse. Full generated
-reports may include user feedback and personal concerns, so cross-user reuse is
-not safe by default.
+Yes, caching should be backend-owned.
 
-This version adds:
+Frontend localStorage can remember UI state, but it should not be treated as the
+source of truth for report reuse, privacy, or acceleration. Backend cache is
+where we can enforce ownership, invalidation, and observability.
 
-- Same-browser resume by birth-input fingerprint.
-- A cached workshop prompt on the intake page.
-- `Start fresh` for users who want a new run.
-- Reuse of the backend's existing same-session artifact skip behavior.
+Current acceleration already present:
 
-The backend already skips completed core artifacts inside the same session. This
-means a resumed session can avoid regenerating stages that are already present.
+- Within a single session, completed core artifacts are skipped when the core
+  job sees those files already exist.
+- Active core jobs are de-duplicated per session while they are queued/running.
 
-## Code Changes
+Recommended backend cache layers:
+
+1. Calculation cache
+   - Key: normalized birth input plus calculator version, ayanamsa, ephemeris
+     version, and place/timezone resolver version.
+   - Value: deterministic `structured_data` calculation output.
+   - Safe to reuse across sessions if privacy policy allows server-side storage
+     of birth data; otherwise scope by account.
+
+2. Account-scoped session resume
+   - Key: `user_id` plus normalized birth input plus selected report mode.
+   - Value: previous session id and stage status.
+   - Lets the same user continue a prior workshop without relying on browser
+     localStorage.
+
+3. Report artifact cache
+   - Key must include `user_id`, birth input fingerprint, prompt/skill version,
+     model version, and feedback/context fingerprint.
+   - Do not share full report artifacts across users by default because they can
+     include personal feedback, concerns, and generated interpretation.
+
+4. Job resume cache
+   - Persist job state so a backend process restart can recover or mark
+     incomplete nodes clearly.
+
+## Code Changes In This Version
 
 - `src/client/screens/Session.tsx`
-  - Adds a top workshop overview with current action, data isolation, and speed
-    behavior.
-  - Rewrites stage copy into user-facing language.
-  - Moves internal files and node lists into `Technical details`.
+  - Removes the top overview cards.
+  - Rewrites stage details into user-facing `What you get` / `What to do`
+    language.
+  - Removes normal UI exposure of internal files, inputs, outputs, and node
+    details.
 
 - `src/client/components/PipelineFlow.tsx`
   - Renames graph stages from implementation labels to product-language labels.
 
-- `src/client/lib/sessionAccess.ts`
-  - Adds local resume cache and session token storage.
-
-- `src/client/screens/Intake.tsx`
-  - Reuses matching same-browser sessions by default.
-  - Provides a `Start fresh` option.
-
-- `src/client/api.ts`
-  - Sends `x-session-token` for session-scoped requests.
-
-- `backend/app/services/skill_workspace.py`
-  - Creates and validates per-session access tokens.
-
-- `backend/app/main.py`
-  - Enforces token validation on session-scoped API routes.
-
 - `backend/app/utils/ids.py`
   - Uses `secrets` instead of `random` for session id entropy.
 
-## Remaining Production Gaps
+## Remaining Work
 
-- Add real user accounts and ownership checks before public multi-tenant launch.
-- Move local resume cache into account-scoped server persistence after login.
-- Add a deterministic calculation cache for `structured_data` only; do not share
-  complete report artifacts unless the cache key includes user feedback scope
-  and explicit privacy policy decisions.
-- Add a server-side job resume endpoint for completed or failed jobs after
-  backend process restart.
+- Add real account ownership before public multi-user launch.
+- Move session resume and cache lookup into backend/account state.
+- Add deterministic calculation cache after deciding privacy and retention
+  policy for birth data.
+- Add persisted job recovery for backend restarts.

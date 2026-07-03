@@ -8,19 +8,11 @@ import type {
   SkillSessionResponse,
   SynastryBirthInput
 } from "../shared/domain";
-import { sessionAccessToken } from "./lib/sessionAccess";
 
-async function postJson<TResponse, TBody>(
-  path: string,
-  body: TBody,
-  sessionId?: string
-): Promise<TResponse> {
+async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TResponse> {
   const response = await fetch(path, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...sessionAccessHeaders(sessionId)
-    },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
 
@@ -34,15 +26,8 @@ async function postJson<TResponse, TBody>(
   return (await response.json()) as TResponse;
 }
 
-async function getJson<TResponse>(
-  path: string,
-  signal?: AbortSignal,
-  sessionId?: string
-): Promise<TResponse> {
-  const response = await fetch(path, {
-    signal,
-    headers: sessionAccessHeaders(sessionId)
-  });
+async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<TResponse> {
+  const response = await fetch(path, { signal });
 
   if (!response.ok) {
     const error = (await response.json().catch(() => null)) as
@@ -52,12 +37,6 @@ async function getJson<TResponse>(
   }
 
   return (await response.json()) as TResponse;
-}
-
-function sessionAccessHeaders(sessionId?: string): Record<string, string> {
-  if (!sessionId) return {};
-  const token = sessionAccessToken(sessionId);
-  return token ? { "x-session-token": token } : {};
 }
 
 export const api = {
@@ -83,37 +62,24 @@ export const api = {
     return postJson<SkillSessionResponse, SkillBirthInput>("/api/skill-sessions", input);
   },
   getSkillSession(sessionId: string) {
-    return getJson<SkillSessionResponse>(
-      `/api/skill-sessions/${encodeURIComponent(sessionId)}`,
-      undefined,
-      sessionId
-    );
+    return getJson<SkillSessionResponse>(`/api/skill-sessions/${encodeURIComponent(sessionId)}`);
   },
   createSynastrySubject(input: SynastryBirthInput) {
     return postJson<SkillSessionResponse, SynastryBirthInput>(
       "/api/skill-synastry-subject",
-      input,
-      input.sessionId
+      input
     );
   },
   runSkill(input: SkillRunInput) {
-    return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input, input.sessionId);
+    return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input);
   },
   startCoreJob(input: SkillRunInput) {
-    return postJson<CoreJobResponse, SkillRunInput>("/api/core-jobs", input, input.sessionId);
+    return postJson<CoreJobResponse, SkillRunInput>("/api/core-jobs", input);
   },
-  getCoreJob(jobId: string, sessionId: string) {
-    return getJson<CoreJobResponse>(
-      `/api/core-jobs/${encodeURIComponent(jobId)}`,
-      undefined,
-      sessionId
-    );
+  getCoreJob(jobId: string) {
+    return getJson<CoreJobResponse>(`/api/core-jobs/${encodeURIComponent(jobId)}`);
   },
   recordSkillFeedback(input: SkillFeedbackInput) {
-    return postJson<SkillSessionResponse, SkillFeedbackInput>(
-      "/api/skill-feedback",
-      input,
-      input.sessionId
-    );
+    return postJson<SkillSessionResponse, SkillFeedbackInput>("/api/skill-feedback", input);
   }
 };

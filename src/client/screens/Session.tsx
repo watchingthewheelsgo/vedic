@@ -281,7 +281,7 @@ export function Session() {
     let cancelled = false;
     const timer = window.setInterval(() => {
       api
-        .getCoreJob(jobId, id)
+        .getCoreJob(jobId)
         .then((response) => {
           if (cancelled) return;
           setCoreJob(response);
@@ -296,7 +296,7 @@ export function Session() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [coreJob?.jobId, coreJob?.status, id]);
+  }, [coreJob?.jobId, coreJob?.status]);
 
   function setTab(next: "workshop" | "report") {
     const params = new URLSearchParams(searchParams);
@@ -356,7 +356,6 @@ export function Session() {
           <BookOpen size={14} /> Report
         </Button>
         <div className="flex-1" />
-        <span className="hidden text-xs tracking-[0.3px] text-muted sm:inline">{id}</span>
       </div>
 
       {error && (
@@ -366,45 +365,36 @@ export function Session() {
       )}
 
       {tab === "workshop" ? (
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <WorkshopOverview
-            complete={complete}
-            awaitingValidationFeedback={awaitingValidationFeedback}
-            readerRunning={readerRunning}
-            coreJob={coreJob}
+        <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[340px_1fr]">
+          <WorkshopDetailPanel
+            selectedStageId={selectedStageId}
+            session={session}
             pipelineData={pipelineData}
+            coreJob={coreJob}
+            birthInfo={birthInfo}
+            readerRunning={readerRunning}
+            readerStartedAt={readerStartedAt}
+            now={now}
+            validationFeedback={validationFeedback}
+            submittingFeedback={submittingFeedback}
+            onValidationFeedbackChange={setValidationFeedback}
+            onSubmitFeedback={onSubmitFeedback}
           />
-          <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[340px_1fr]">
-            <WorkshopDetailPanel
-              selectedStageId={selectedStageId}
-              session={session}
-              pipelineData={pipelineData}
-              coreJob={coreJob}
-              birthInfo={birthInfo}
-              readerRunning={readerRunning}
-              readerStartedAt={readerStartedAt}
-              now={now}
-              validationFeedback={validationFeedback}
-              submittingFeedback={submittingFeedback}
-              onValidationFeedbackChange={setValidationFeedback}
-              onSubmitFeedback={onSubmitFeedback}
-            />
-            <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh]">
-              {pipelineData ? (
-                <PipelineFlow
-                  data={pipelineData}
-                  selectedStageId={selectedStageId}
-                  onSelectStage={setSelectedStageId}
-                />
-              ) : (
-                <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
-                  <div className="text-center">
-                    <LoaderCircle className="mx-auto size-7 animate-spin" />
-                    <p className="mt-2.5">Preparing pipeline...</p>
-                  </div>
+          <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh]">
+            {pipelineData ? (
+              <PipelineFlow
+                data={pipelineData}
+                selectedStageId={selectedStageId}
+                onSelectStage={setSelectedStageId}
+              />
+            ) : (
+              <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
+                <div className="text-center">
+                  <LoaderCircle className="mx-auto size-7 animate-spin" />
+                  <p className="mt-2.5">Preparing pipeline...</p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       ) : complete && reportSections.length > 0 ? (
@@ -479,136 +469,6 @@ export function Session() {
       )}
     </div>
   );
-}
-
-function WorkshopOverview({
-  complete,
-  awaitingValidationFeedback,
-  readerRunning,
-  coreJob,
-  pipelineData
-}: {
-  complete: boolean;
-  awaitingValidationFeedback: boolean;
-  readerRunning: boolean;
-  coreJob: CoreJobResponse | null;
-  pipelineData: PipelineData | null;
-}) {
-  const action = workshopAction({
-    complete,
-    awaitingValidationFeedback,
-    readerRunning,
-    coreJob,
-    pipelineData
-  });
-
-  return (
-    <section className="border-b border-gold/25 bg-cream px-5 py-4 sm:px-8">
-      <div className="grid gap-3 lg:grid-cols-[1.25fr_1fr_1fr]">
-        <OverviewBlock
-          label="Current step"
-          title={action.title}
-          body={action.body}
-          badge={pipelineData ? `${pipelineData.percent}%` : "Starting"}
-          badgeVariant={action.variant}
-        />
-        <OverviewBlock
-          label="Data isolation"
-          title="Private session workspace"
-          body="Artifacts are written under one session folder. This browser keeps an access token, so a protected session cannot be opened from the URL alone."
-          badge="Session"
-        />
-        <OverviewBlock
-          label="Speed"
-          title="Resume before rerun"
-          body="The same browser can continue a matching birth input. Within a session, finished core artifacts are skipped instead of regenerated."
-          badge="Local"
-        />
-      </div>
-    </section>
-  );
-}
-
-function OverviewBlock({
-  label,
-  title,
-  body,
-  badge,
-  badgeVariant = "neutral"
-}: {
-  label: string;
-  title: string;
-  body: string;
-  badge: string;
-  badgeVariant?: ComponentProps<typeof Badge>["variant"];
-}) {
-  return (
-    <div className="min-w-0 rounded-lg border border-gold/20 bg-cream-2 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-[10px] uppercase tracking-[1.8px] text-muted">{label}</span>
-        <Badge variant={badgeVariant}>{badge}</Badge>
-      </div>
-      <div className="text-sm font-semibold text-ink">{title}</div>
-      <p className="m-0 mt-1 text-xs leading-[1.6] text-body">{body}</p>
-    </div>
-  );
-}
-
-function workshopAction({
-  complete,
-  awaitingValidationFeedback,
-  readerRunning,
-  coreJob,
-  pipelineData
-}: {
-  complete: boolean;
-  awaitingValidationFeedback: boolean;
-  readerRunning: boolean;
-  coreJob: CoreJobResponse | null;
-  pipelineData: PipelineData | null;
-}): { title: string; body: string; variant: ComponentProps<typeof Badge>["variant"] } {
-  if (complete) {
-    return {
-      title: "Report is ready",
-      body: "Open the Report tab to read or export the completed analysis.",
-      variant: "done"
-    };
-  }
-  if (coreJob?.status === "failed") {
-    return {
-      title: "Generation needs attention",
-      body: coreJob.message || "A report stage failed. Check the selected stage for details.",
-      variant: "error"
-    };
-  }
-  if (awaitingValidationFeedback) {
-    return {
-      title: "Your feedback is needed",
-      body: "Mark each pre-validation anchor as accurate, inaccurate, or partly accurate before the full report starts.",
-      variant: "gold"
-    };
-  }
-  if (readerRunning) {
-    return {
-      title: "Generating time check",
-      body: "The system is producing a few concrete anchors to validate the birth time.",
-      variant: "gold"
-    };
-  }
-  if (coreJob?.status === "running" || coreJob?.status === "queued") {
-    return {
-      title: "Full report is running",
-      body: pipelineData
-        ? `${pipelineData.completed}/${pipelineData.total} stages have completed. You can leave this tab open and watch progress.`
-        : "The report pipeline has started and progress will appear shortly.",
-      variant: "gold"
-    };
-  }
-  return {
-    title: "Preparing workshop",
-    body: "The chart workspace is loading. The next useful step will appear here.",
-    variant: "neutral"
-  };
 }
 
 function WorkshopDetailPanel({
@@ -702,13 +562,6 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
           <p className="m-0 text-[13px] leading-[1.7] text-body">{birthInfo.concern}</p>
         </div>
       )}
-      <TechnicalDetails>
-        <DetailList title="Outputs" items={STAGE_COPY.src.outputs} />
-        <div className="mt-3 text-xs leading-[1.7] text-muted">
-          This data is the source of structured_data.md. Later stages should read this file instead of
-          reinterpreting the original form fields.
-        </div>
-      </TechnicalDetails>
     </>
   );
 }
@@ -746,10 +599,6 @@ function ReaderDetail({
               : STAGE_COPY.reader.expected}
           </p>
         </div>
-        <TechnicalDetails>
-          <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
-          <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
-        </TechnicalDetails>
       </>
     );
   }
@@ -777,10 +626,6 @@ function ReaderDetail({
           </Button>
         </form>
       )}
-      <TechnicalDetails>
-        <DetailList title="Inputs" items={STAGE_COPY.reader.inputs} />
-        <DetailList title="Outputs" items={STAGE_COPY.reader.outputs} />
-      </TechnicalDetails>
     </>
   );
 }
@@ -856,25 +701,6 @@ function CoreStageDetail({
       )}
 
       {artifact && <ArtifactExcerpt artifact={artifact} title="Latest generated draft" />}
-
-      <TechnicalDetails>
-        <DetailList title="Inputs" items={copy.inputs} />
-        <DetailList title="Outputs" items={copy.outputs} />
-        {nodes.length > 0 && (
-          <div className="my-4">
-            <DetailSubtitle>Node details</DetailSubtitle>
-            <div className="grid gap-1.5">
-              {nodes.slice(0, 8).map((node) => (
-                <div className="flex justify-between gap-2.5 rounded-md border border-gold/25 bg-cream-2 px-2.5 py-2 text-[12.5px]" key={node.id}>
-                  <b className="font-semibold text-ink">{node.label}</b>
-                  <span className="text-right text-muted">{node.status}{node.durationSeconds ? ` · ${formatDuration(node.durationSeconds)}` : ""}</span>
-                </div>
-              ))}
-              {nodes.length > 8 && <div className="px-1 text-xs text-muted">+{nodes.length - 8} more nodes</div>}
-            </div>
-          </div>
-        )}
-      </TechnicalDetails>
     </>
   );
 }
@@ -888,38 +714,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DetailList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="my-4">
-      <DetailSubtitle>{title}</DetailSubtitle>
-      <ul className="list-disc pl-4">
-        {items.map((item) => (
-          <li key={item} className="text-[13px] leading-[1.65] text-body marker:text-gold">
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function DetailCallout({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-gold/20 bg-cream-2 px-3 py-2.5">
       <div className="mb-1 text-[10px] uppercase tracking-[1.4px] text-muted">{title}</div>
       <p className="m-0 text-[12.5px] leading-[1.65] text-body">{children}</p>
     </div>
-  );
-}
-
-function TechnicalDetails({ children }: { children: ReactNode }) {
-  return (
-    <details className="my-4 rounded-lg border border-gold/20 bg-cream-2 px-3 py-2.5">
-      <summary className="cursor-pointer text-[11px] uppercase tracking-[1.4px] text-muted">
-        Technical details
-      </summary>
-      <div className="pt-2">{children}</div>
-    </details>
   );
 }
 

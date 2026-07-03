@@ -28,7 +28,6 @@ class SkillRuntime:
 
     async def create_reader_session(self, input_data: SkillBirthInput) -> SkillSessionResponse:
         session_id = self.workspace.create_session()
-        access_token = self.workspace.create_session_access_token(session_id)
         started = datetime.now(timezone.utc)
         calculation = self.calculator.calculate(input_data)
         finished = datetime.now(timezone.utc)
@@ -71,7 +70,6 @@ class SkillRuntime:
             chat_message=chat_message,
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="structured_data.md",
-            access_token=access_token,
         )
 
     def load_session(self, session_id: str) -> SkillSessionResponse:

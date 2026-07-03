@@ -84,7 +84,6 @@ class SkillSessionResponse(ApiModel):
     chat_message: str = Field(alias="chatMessage")
     artifacts: list[SkillArtifact]
     active_artifact: str | None = Field(default=None, alias="activeArtifact")
-    access_token: str | None = Field(default=None, alias="accessToken")
 
 
 class SkillRunInput(ApiModel):
