@@ -6,6 +6,7 @@ from typing import Literal
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.container import get_container
 from app.schemas import (
@@ -103,6 +104,23 @@ async def create_skill_session(input_data: SkillBirthInput) -> SkillSessionRespo
 async def get_skill_session(session_id: str) -> SkillSessionResponse:
     try:
         return get_container().skill_runtime.load_session(session_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/skill-sessions/{session_id}/report.pdf")
+async def download_skill_session_report_pdf(session_id: str) -> FileResponse:
+    try:
+        result = get_container().report_exporter.export_session(session_id)
+        return FileResponse(
+            result.pdf_path,
+            media_type="application/pdf",
+            filename=f"vedic-report-{session_id}.pdf",
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

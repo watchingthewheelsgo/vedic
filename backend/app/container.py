@@ -11,6 +11,7 @@ from app.runtime.preflight import (
 )
 from app.services.core_job_runtime import CoreJobRuntime
 from app.services.place_service import PlaceService
+from app.services.report_exporter import ReportExporter
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
@@ -38,6 +39,7 @@ class AppContainer:
             agent_runtime=self.agent_runtime,
         )
         self.core_job_runtime = CoreJobRuntime(skill_runtime=self.skill_runtime)
+        self.report_exporter = ReportExporter(self.skill_workspace)
 
 
 @lru_cache(maxsize=1)

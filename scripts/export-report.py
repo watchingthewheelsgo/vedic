@@ -10,12 +10,12 @@ from app.settings import get_settings
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Export a Vedic session report to HTML.")
+    parser = argparse.ArgumentParser(description="Export a Vedic session report to HTML and PDF.")
     parser.add_argument("session_id", help="Session id, e.g. skill_mr1dpnm3_fcqxm5vi")
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Target directory. Defaults to backend/data/exports/<session_id>.",
+        help="Target directory. Defaults to backend/data/sessions/<session_id>/exports.",
     )
     args = parser.parse_args()
 
@@ -29,6 +29,7 @@ def main() -> int:
     print(f"session={result.session_id}")
     print(f"sections={result.section_count}")
     print(f"html={result.html_path}")
+    print(f"pdf={result.pdf_path}")
     return 0
 
 

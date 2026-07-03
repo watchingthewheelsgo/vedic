@@ -6,9 +6,28 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 from app.schemas import SkillArtifact
 from app.services.skill_workspace import SkillWorkspace
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.platypus import (
+    ListFlowable,
+    ListItem,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 
 PUBLIC_REPORT_ORDER = [
@@ -31,6 +50,7 @@ PUBLIC_REPORT_ORDER = [
 class ReportSection:
     path: str
     title: str
+    markdown: str
     html: str
     accent: str
 
@@ -63,6 +83,7 @@ class ThemeConfig:
 class ReportExportResult:
     session_id: str
     html_path: Path
+    pdf_path: Path
     section_count: int
 
 
@@ -86,9 +107,7 @@ class ReportExporter:
             raise ValueError("No public report artifacts found for export")
 
         metrics = self._load_metrics(artifacts)
-        target_dir = output_dir or (
-            self.workspace.settings.project_root / "backend" / "data" / "exports" / session_id
-        )
+        target_dir = output_dir or (self.workspace.require_session_dir(session_id) / "exports")
         target_dir.mkdir(parents=True, exist_ok=True)
 
         html_path = target_dir / "report.html"
@@ -101,10 +120,19 @@ class ReportExporter:
             ),
             encoding="utf-8",
         )
+        pdf_path = target_dir / "report.pdf"
+        self._render_pdf(
+            session_id=session_id,
+            sections=sections,
+            metrics=metrics,
+            theme=report_theme,
+            pdf_path=pdf_path,
+        )
 
         return ReportExportResult(
             session_id=session_id,
             html_path=html_path,
+            pdf_path=pdf_path,
             section_count=len(sections),
         )
 
@@ -121,6 +149,7 @@ class ReportExporter:
                 ReportSection(
                     path=path,
                     title=self._section_title(path),
+                    markdown=artifact.content,
                     html=self._markdown_to_html(artifact.content),
                     accent=theme.accent_palette[index % len(theme.accent_palette)],
                 )
@@ -294,6 +323,335 @@ class ReportExporter:
                 index += 1
             blocks.append(f"<p>{self._inline(' '.join(paragraph))}</p>")
         return "\n".join(blocks)
+
+    def _render_pdf(
+        self,
+        *,
+        session_id: str,
+        sections: list[ReportSection],
+        metrics: dict[str, object] | None,
+        theme: ThemeConfig,
+        pdf_path: Path,
+    ) -> None:
+        self._register_pdf_fonts()
+        styles = self._pdf_styles()
+        doc = SimpleDocTemplate(
+            str(pdf_path),
+            pagesize=A4,
+            rightMargin=16 * mm,
+            leftMargin=16 * mm,
+            topMargin=18 * mm,
+            bottomMargin=18 * mm,
+            title=f"{theme.title} - {session_id}",
+            author="VedaLight",
+        )
+        story: list[object] = [
+            Spacer(1, 48),
+            Paragraph(theme.subtitle.upper(), styles["CoverEyebrow"]),
+            Spacer(1, 18),
+            Paragraph(theme.title, styles["CoverTitle"]),
+            Spacer(1, 24),
+            Paragraph(f"Session: {xml_escape(session_id)}", styles["CoverMeta"]),
+            Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["CoverMeta"]),
+            PageBreak(),
+            Paragraph("Contents", styles["H1"]),
+        ]
+        for index, section in enumerate(sections, start=1):
+            story.append(Paragraph(f"{index:02d}. {xml_escape(section.title)}", styles["TocItem"]))
+        if metrics:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(f"Core report status: {xml_escape(str(metrics.get('status') or 'recorded'))}", styles["Muted"]))
+        story.append(PageBreak())
+
+        for index, section in enumerate(sections, start=1):
+            story.append(Paragraph(f"Section {index:02d}", styles["SectionLabel"]))
+            story.append(Paragraph(section.title, styles["H1"]))
+            story.append(Paragraph(xml_escape(section.path), styles["Muted"]))
+            story.append(Spacer(1, 8))
+            story.extend(self._markdown_to_pdf_flowables(section.markdown, styles))
+            if index < len(sections):
+                story.append(PageBreak())
+
+        doc.build(story, onFirstPage=self._pdf_page_footer, onLaterPages=self._pdf_page_footer)
+
+    def _register_pdf_fonts(self) -> None:
+        if "STSong-Light" not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+
+    def _pdf_styles(self) -> dict[str, ParagraphStyle]:
+        base = getSampleStyleSheet()
+        return {
+            "CoverEyebrow": ParagraphStyle(
+                "CoverEyebrow",
+                parent=base["Normal"],
+                fontName="STSong-Light",
+                fontSize=12,
+                leading=16,
+                textColor=colors.HexColor("#9A7A4A"),
+                alignment=TA_CENTER,
+                spaceAfter=6,
+            ),
+            "CoverTitle": ParagraphStyle(
+                "CoverTitle",
+                parent=base["Title"],
+                fontName="STSong-Light",
+                fontSize=34,
+                leading=42,
+                textColor=colors.HexColor("#2C1F0F"),
+                alignment=TA_CENTER,
+            ),
+            "CoverMeta": ParagraphStyle(
+                "CoverMeta",
+                parent=base["Normal"],
+                fontName="STSong-Light",
+                fontSize=10,
+                leading=16,
+                textColor=colors.HexColor("#5A4A35"),
+                alignment=TA_CENTER,
+            ),
+            "H1": ParagraphStyle(
+                "H1",
+                parent=base["Heading1"],
+                fontName="STSong-Light",
+                fontSize=22,
+                leading=28,
+                textColor=colors.HexColor("#2C1F0F"),
+                spaceBefore=8,
+                spaceAfter=10,
+            ),
+            "H2": ParagraphStyle(
+                "H2",
+                parent=base["Heading2"],
+                fontName="STSong-Light",
+                fontSize=16,
+                leading=22,
+                textColor=colors.HexColor("#9A7A4A"),
+                spaceBefore=12,
+                spaceAfter=7,
+            ),
+            "H3": ParagraphStyle(
+                "H3",
+                parent=base["Heading3"],
+                fontName="STSong-Light",
+                fontSize=13,
+                leading=18,
+                textColor=colors.HexColor("#2C1F0F"),
+                spaceBefore=10,
+                spaceAfter=5,
+            ),
+            "Body": ParagraphStyle(
+                "Body",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=9.6,
+                leading=15,
+                textColor=colors.HexColor("#3A2A18"),
+                alignment=TA_LEFT,
+                spaceAfter=6,
+            ),
+            "Muted": ParagraphStyle(
+                "Muted",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=8.5,
+                leading=12,
+                textColor=colors.HexColor("#8A7A65"),
+                spaceAfter=4,
+            ),
+            "Quote": ParagraphStyle(
+                "Quote",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=9,
+                leading=14,
+                leftIndent=8,
+                borderColor=colors.HexColor("#C9A96E"),
+                borderWidth=1,
+                borderPadding=6,
+                backColor=colors.HexColor("#FBF7EE"),
+                textColor=colors.HexColor("#5A4A35"),
+                spaceAfter=7,
+            ),
+            "Code": ParagraphStyle(
+                "Code",
+                parent=base["Code"],
+                fontName="STSong-Light",
+                fontSize=7.6,
+                leading=10,
+                leftIndent=6,
+                rightIndent=6,
+                backColor=colors.HexColor("#F0E8D8"),
+                textColor=colors.HexColor("#2C1F0F"),
+                spaceAfter=7,
+            ),
+            "TableCell": ParagraphStyle(
+                "TableCell",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=6.8,
+                leading=8.4,
+                textColor=colors.HexColor("#2C1F0F"),
+            ),
+            "TableHeader": ParagraphStyle(
+                "TableHeader",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=7,
+                leading=8.8,
+                textColor=colors.white,
+            ),
+            "TocItem": ParagraphStyle(
+                "TocItem",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=11,
+                leading=17,
+                textColor=colors.HexColor("#2C1F0F"),
+                spaceAfter=4,
+            ),
+            "SectionLabel": ParagraphStyle(
+                "SectionLabel",
+                parent=base["BodyText"],
+                fontName="STSong-Light",
+                fontSize=8,
+                leading=11,
+                textColor=colors.HexColor("#9A7A4A"),
+                spaceAfter=2,
+            ),
+        }
+
+    def _markdown_to_pdf_flowables(
+        self,
+        markdown: str,
+        styles: dict[str, ParagraphStyle],
+    ) -> list[object]:
+        flowables: list[object] = []
+        lines = markdown.splitlines()
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            stripped = line.strip()
+            if not stripped or stripped == "---":
+                index += 1
+                continue
+            if stripped.startswith("```"):
+                code_lines: list[str] = []
+                index += 1
+                while index < len(lines) and not lines[index].strip().startswith("```"):
+                    code_lines.append(lines[index])
+                    index += 1
+                flowables.append(Paragraph(self._pdf_code_text("\n".join(code_lines)), styles["Code"]))
+                index += 1
+                continue
+            if self._is_table_start(lines, index):
+                table_lines: list[str] = []
+                while index < len(lines) and lines[index].strip().startswith("|"):
+                    table_lines.append(lines[index])
+                    index += 1
+                table = self._table_to_pdf(table_lines, styles)
+                if table is not None:
+                    flowables.append(table)
+                    flowables.append(Spacer(1, 8))
+                continue
+            heading = re.match(r"^(#{1,4})\s+(.+)$", stripped)
+            if heading:
+                level = len(heading.group(1))
+                style_name = "H1" if level == 1 else "H2" if level == 2 else "H3"
+                flowables.append(Paragraph(self._pdf_inline(heading.group(2)), styles[style_name]))
+                index += 1
+                continue
+            if stripped.startswith(">"):
+                quote_lines: list[str] = []
+                while index < len(lines) and lines[index].strip().startswith(">"):
+                    quote_lines.append(lines[index].strip().lstrip(">").strip())
+                    index += 1
+                flowables.append(Paragraph(self._pdf_inline(" ".join(quote_lines)), styles["Quote"]))
+                continue
+            if re.match(r"^[-*]\s+", stripped):
+                items: list[ListItem] = []
+                while index < len(lines) and re.match(r"^[-*]\s+", lines[index].strip()):
+                    text = re.sub(r"^[-*]\s+", "", lines[index].strip())
+                    items.append(ListItem(Paragraph(self._pdf_inline(text), styles["Body"])))
+                    index += 1
+                flowables.append(ListFlowable(items, bulletType="bullet", start="-", leftIndent=14))
+                continue
+            paragraph: list[str] = [stripped]
+            index += 1
+            while index < len(lines) and lines[index].strip() and not self._starts_block(lines, index):
+                paragraph.append(lines[index].strip())
+                index += 1
+            flowables.append(Paragraph(self._pdf_inline(" ".join(paragraph)), styles["Body"]))
+        return flowables
+
+    def _table_to_pdf(
+        self,
+        lines: list[str],
+        styles: dict[str, ParagraphStyle],
+    ) -> Table | None:
+        rows = [
+            [cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in lines
+        ]
+        if len(rows) < 2:
+            return None
+        head = rows[0]
+        body = rows[2:]
+        column_count = max(len(row) for row in [head, *body])
+        if column_count == 0:
+            return None
+        normalized = [
+            row + [""] * (column_count - len(row))
+            for row in [head, *body]
+        ]
+        data = [
+            [
+                Paragraph(
+                    self._pdf_inline(cell),
+                    styles["TableHeader"] if row_index == 0 else styles["TableCell"],
+                )
+                for cell in row
+            ]
+            for row_index, row in enumerate(normalized)
+        ]
+        available_width = A4[0] - 32 * mm
+        table = Table(
+            data,
+            repeatRows=1,
+            colWidths=[available_width / column_count] * column_count,
+            splitByRow=1,
+        )
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#9A7A4A")),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D6C6A5")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FBF7EE")),
+                ]
+            )
+        )
+        return table
+
+    def _pdf_inline(self, text: str) -> str:
+        escaped = xml_escape(text)
+        escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+        escaped = re.sub(r"`([^`]+)`", '<font name="STSong-Light" color="#9A7A4A">\\1</font>', escaped)
+        return escaped
+
+    def _pdf_code_text(self, text: str) -> str:
+        escaped = xml_escape(text)
+        return escaped.replace("\n", "<br/>")
+
+    def _pdf_page_footer(self, canvas, doc) -> None:
+        canvas.saveState()
+        canvas.setFont("STSong-Light", 8)
+        canvas.setFillColor(colors.HexColor("#8A7A65"))
+        canvas.drawCentredString(A4[0] / 2, 9 * mm, f"VedaLight Report - {doc.page}")
+        canvas.restoreState()
 
     def _is_table_start(self, lines: list[str], index: int) -> bool:
         return (

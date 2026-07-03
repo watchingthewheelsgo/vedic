@@ -34,6 +34,7 @@ export type PipelineNode = {
 
 export type PipelineData = {
   nodes: PipelineNode[];
+  status?: string;
   percent: number;
   completed: number;
   total: number;
@@ -81,6 +82,7 @@ export function getPipelineData(
     const failed = coreJob.progress.failed + readerFailed;
     return {
       nodes,
+      status: coreJob.status,
       percent: total > 0 ? Math.round((completed / total) * 100) : 0,
       completed,
       total,
@@ -91,11 +93,12 @@ export function getPipelineData(
 
   const nodes = runMetrics?.nodes;
   if (nodes && nodes.length > 0) {
+    const persistedFailed = runMetrics?.status === "failed";
     const normalized: PipelineNode[] = nodes.map((node) => ({
       id: node.id,
       label: node.label ?? node.id,
       wave: (node.wave ?? 1) + 1,
-      status: node.status ?? "pending",
+      status: persistedFailed && node.status === "running" ? "pending" : node.status ?? "pending",
       files: node.files ?? [],
       dependencies: node.dependencies ?? [],
       startedAt: node.startedAt ?? null,
@@ -116,6 +119,7 @@ export function getPipelineData(
     const adjustedFailed = failed + (readerNode?.status === "failed" ? 1 : 0);
     return {
       nodes: allNodes,
+      status: runMetrics?.status,
       percent: adjustedTotal > 0 ? Math.round((adjustedCompleted / adjustedTotal) * 100) : 0,
       completed: adjustedCompleted,
       total: adjustedTotal,
@@ -129,6 +133,7 @@ export function getPipelineData(
     const failed = readerNode.status === "failed" ? 1 : 0;
     return {
       nodes: [readerNode],
+      status: readerNode.status,
       percent: completed ? 100 : 0,
       completed,
       total: 1,

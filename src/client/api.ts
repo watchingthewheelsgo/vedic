@@ -39,6 +39,26 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
   return (await response.json()) as TResponse;
 }
 
+async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await fetch(path);
+  if (!response.ok) {
+    const error = (await response.json().catch(() => null)) as
+      | { error?: string; detail?: string }
+      | null;
+    throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export const api = {
   searchPlaces(
     input: {
@@ -81,5 +101,11 @@ export const api = {
   },
   recordSkillFeedback(input: SkillFeedbackInput) {
     return postJson<SkillSessionResponse, SkillFeedbackInput>("/api/skill-feedback", input);
+  },
+  downloadReportPdf(sessionId: string) {
+    return downloadFile(
+      `/api/skill-sessions/${encodeURIComponent(sessionId)}/report.pdf`,
+      `vedic-report-${sessionId}.pdf`
+    );
   }
 };

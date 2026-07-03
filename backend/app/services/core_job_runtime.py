@@ -59,6 +59,10 @@ class CoreJobRuntime:
     """In-memory DAG runner for full vedic-core report generation."""
 
     MAX_CONCURRENCY = 10
+    USER_RUNNING_MESSAGE = "Your full report is being generated. Completed sections are saved automatically."
+    USER_INTERRUPTED_MESSAGE = (
+        "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps."
+    )
 
     def __init__(self, skill_runtime: SkillRuntime) -> None:
         self.skill_runtime = skill_runtime
@@ -132,9 +136,11 @@ class CoreJobRuntime:
                 )
             )
 
+        self._apply_resume_checkpoints(input_data.session_id, nodes)
+
         session = self.skill_runtime.core_progress_response(
             input_data.session_id,
-            "vedic-core 完整报告任务已启动。后台会按原 skill 流程生成文件。",
+            self.USER_RUNNING_MESSAGE,
         )
         return CoreJobState(
             job_id=str(uuid.uuid4()),
@@ -147,11 +153,15 @@ class CoreJobRuntime:
 
     async def _run_job(self, job: CoreJobState) -> None:
         job.status = "running"
-        job.message = "vedic-core 正在运行。"
+        job.message = self.USER_RUNNING_MESSAGE
         job.started_at = _now()
         job.started_perf = time.perf_counter()
         try:
-            pending = {node.id for node in job.nodes}
+            pending = {
+                node.id
+                for node in job.nodes
+                if node.status not in {"completed", "skipped"}
+            }
             while pending:
                 ready = [
                     node
@@ -164,23 +174,29 @@ class CoreJobRuntime:
 
                 for start in range(0, len(ready), self.MAX_CONCURRENCY):
                     group = ready[start : start + self.MAX_CONCURRENCY]
-                    await asyncio.gather(*(self._run_node(job, node) for node in group))
+                    results = await asyncio.gather(
+                        *(self._run_node(job, node) for node in group),
+                        return_exceptions=True,
+                    )
                     for node in group:
                         pending.remove(node.id)
+                    failures = [result for result in results if isinstance(result, Exception)]
+                    if failures:
+                        raise failures[0]
 
             job.status = "completed"
-            job.message = "vedic-core 完整报告已完成。"
+            job.message = "Your full report is ready."
             job.finished_at = _now()
             job.finished_perf = time.perf_counter()
             self._write_metrics(job)
             job.session = self.skill_runtime.core_progress_response(
                 job.session_id,
-                "vedic-core 完整报告已完成。可继续运行 vedic-career、vedic-love，或进行追问。",
+                job.message,
                 stage="core_complete",
             )
         except Exception as exc:
             job.status = "failed"
-            job.message = str(exc) or "vedic-core job failed"
+            job.message = self.USER_INTERRUPTED_MESSAGE
             job.finished_at = _now()
             job.finished_perf = time.perf_counter()
             self._write_metrics(job)
@@ -201,40 +217,33 @@ class CoreJobRuntime:
             skill="vedic-core",
             userMessage=job.user_message,
         )
-        if self.skill_runtime.core_batch_complete(job.session_id, node.batch):
-            node.status = "skipped"
-            node.started_at = node.started_at or _now()
-            node.started_perf = node.started_perf or time.perf_counter()
-            node.finished_at = _now()
-            node.finished_perf = time.perf_counter()
-            job.message = f"{node.label} 已存在，跳过。"
-            job.session = await self.skill_runtime.run_core_batch(
-                input_data,
-                node.batch,
-                batches=job.batches,
-            )
-            return
 
         node.status = "running"
         node.started_at = _now()
         node.started_perf = time.perf_counter()
-        job.message = f"正在生成 {node.label}。"
+        job.message = self.USER_RUNNING_MESSAGE
+        self._write_metrics(job)
         try:
             job.session = await self.skill_runtime.run_core_batch(
                 input_data,
                 node.batch,
                 batches=job.batches,
+                force=True,
             )
+            job.session.chat_message = self.USER_RUNNING_MESSAGE
             node.status = "completed"
             node.finished_at = _now()
             node.finished_perf = time.perf_counter()
-            job.message = f"{node.label} 已完成。"
+            node.error = None
+            job.message = self.USER_RUNNING_MESSAGE
+            self._write_metrics(job)
         except Exception as exc:
             node.status = "failed"
             node.error = str(exc) or "Node failed"
             node.finished_at = _now()
             node.finished_perf = time.perf_counter()
-            job.message = f"{node.label} 失败：{node.error}"
+            job.message = self.USER_INTERRUPTED_MESSAGE
+            self._write_metrics(job)
             raise
 
     def _dependencies_complete(self, job: CoreJobState, node: CoreNodeState) -> bool:
@@ -331,6 +340,40 @@ class CoreJobRuntime:
         except json.JSONDecodeError:
             return {}
         return payload if isinstance(payload, dict) else {}
+
+    def _apply_resume_checkpoints(self, session_id: str, nodes: list[CoreNodeState]) -> None:
+        """Mark previously completed nodes as skipped for a new retry/resume job.
+
+        A file left behind by a failed Claude response is not enough to count as
+        complete when run_metrics.json explicitly says that node failed.
+        """
+
+        session_dir = self.skill_runtime.workspace.session_dir(session_id)
+        existing = {
+            path.relative_to(session_dir).as_posix()
+            for path in session_dir.rglob("*")
+            if path.is_file()
+        }
+        metrics = self._read_existing_metrics(session_id)
+        metric_nodes = {
+            str(item.get("id")): item
+            for item in metrics.get("nodes", [])
+            if isinstance(item, dict) and item.get("id")
+        }
+        has_node_metrics = bool(metric_nodes)
+
+        for node in nodes:
+            files_exist = set(node.files).issubset(existing)
+            resume_valid = self.skill_runtime.core_batch_resume_valid(session_id, node.batch)
+            metric = metric_nodes.get(node.id)
+            metric_status = str(metric.get("status")) if metric else None
+            if files_exist and resume_valid and (
+                metric_status in {"completed", "skipped"} or (metric is None and not has_node_metrics)
+            ):
+                node.status = "skipped"
+                node.started_at = str(metric.get("startedAt")) if metric and metric.get("startedAt") else None
+                node.finished_at = str(metric.get("finishedAt")) if metric and metric.get("finishedAt") else _now()
+                node.error = None
 
     def _wave_metrics(self, job: CoreJobState) -> list[dict[str, object]]:
         waves = sorted({node.wave for node in job.nodes})

@@ -57,6 +57,9 @@ class SkillRuntime:
             )
             + "\n",
         )
+        self.workspace.write_session_manifest(session_id)
+        self.workspace.mark_artifact_checkpoint(session_id, "structured_data.md", producer="calculator")
+        self.workspace.mark_artifact_checkpoint(session_id, "structured_data.json", producer="calculator")
 
         chat_message = (
             "读盘基础数据已生成。\n\n"
@@ -156,10 +159,16 @@ class SkillRuntime:
         )
         parsed = self._parse_artifact_response(result.raw_text)
         for artifact in parsed["artifacts"]:
+            artifact_path = str(artifact["path"])
             self.workspace.write_artifact(
                 input_data.session_id,
-                str(artifact["path"]),
+                artifact_path,
                 str(artifact["content"]),
+            )
+            self.workspace.mark_artifact_checkpoint(
+                input_data.session_id,
+                artifact_path,
+                producer=input_data.skill,
             )
         stage = self._stage_for(input_data.skill)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
@@ -180,6 +189,7 @@ class SkillRuntime:
                 item
                 for item in batches
                 if not set(self.core_batch_files(item)).issubset(existing_paths)
+                or not self.core_batch_resume_valid(input_data.session_id, item)
             ),
             None,
         )
@@ -202,6 +212,17 @@ class SkillRuntime:
         session_dir = self.workspace.require_session_dir(session_id)
         existing_paths = self._session_paths(session_dir)
         return set(self.core_batch_files(batch)).issubset(existing_paths)
+
+    def core_batch_resume_valid(self, session_id: str, batch: dict[str, object]) -> bool:
+        session_dir = self.workspace.require_session_dir(session_id)
+        expected = set(self.core_batch_files(batch))
+        if not expected.issubset(self._session_paths(session_dir)):
+            return False
+        producer = self._batch_producer(batch)
+        return all(
+            self.workspace.artifact_checkpoint_valid(session_id, path, producer=producer)
+            for path in expected
+        )
 
     def core_progress_response(
         self,
@@ -226,12 +247,13 @@ class SkillRuntime:
         batch: dict[str, object],
         *,
         batches: list[dict[str, object]] | None = None,
+        force: bool = False,
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
         batches = batches or self.core_batches(input_data.user_message)
         expected = set(self.core_batch_files(batch))
-        if expected.issubset(self._session_paths(session_dir)):
-            self._compose_core_outputs(session_dir)
+        if not force and self.core_batch_resume_valid(input_data.session_id, batch):
+            self._compose_core_outputs(input_data.session_id, session_dir)
             artifacts = self.workspace.read_artifacts(input_data.session_id)
             return SkillSessionResponse(
                 session_id=input_data.session_id,
@@ -241,6 +263,7 @@ class SkillRuntime:
                 active_artifact=self._active_artifact_for_batch(batch, artifacts),
             )
 
+        self.workspace.assert_no_project_runtime_artifacts()
         result = await self.agent_runtime.run_skill_task(
             input_data.skill,
             str(batch["prompt"]),
@@ -248,6 +271,7 @@ class SkillRuntime:
             skills=[input_data.skill],
             max_turns=self._max_turns_for(input_data.skill),
         )
+        self.workspace.assert_no_project_runtime_artifacts()
         missing = [path for path in expected if not (session_dir / path).exists()]
         if missing:
             raise ValueError(
@@ -255,13 +279,17 @@ class SkillRuntime:
                 + ", ".join(missing)
                 + f"\nAgent output:\n{result.raw_text[:2000]}"
             )
+        producer = self._batch_producer(batch)
+        for path in expected:
+            self.workspace.mark_artifact_checkpoint(
+                input_data.session_id,
+                path,
+                producer=producer,
+            )
 
-        self._compose_core_outputs(session_dir)
+        self._compose_core_outputs(input_data.session_id, session_dir)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
-        completed_paths = self._session_paths(session_dir)
-        core_complete = all(
-            set(self.core_batch_files(item)).issubset(completed_paths) for item in batches
-        )
+        core_complete = all(self.core_batch_resume_valid(input_data.session_id, item) for item in batches)
         next_message = (
             "vedic-core 全部批次已完成。"
             if core_complete
@@ -289,6 +317,7 @@ class SkillRuntime:
             f"_updated_at: {datetime.now(timezone.utc).isoformat()}_\n"
         )
         self.workspace.write_artifact(session_id, "user_context.md", content)
+        self.workspace.mark_artifact_checkpoint(session_id, "user_context.md", producer="vedic-reader-feedback")
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_validation",
@@ -625,6 +654,8 @@ Rules:
 - Each requested file must be complete markdown, not a placeholder and not "see previous".
 - If the requested file is under .runtime/, treat it as an internal shard; do not write the public composed files such as p2a_planets.md, p3a_d9.md, p4a_houses.md, p4b_houses.md, p5a_life.md, or p5b_life.md.
 - Do not create, edit, or rename any file outside the exact requested batch file name(s).
+- All requested paths are relative to the current working directory, which is the only valid user session workspace.
+- Do not read from or write to ../ paths, absolute paths, the project root .runtime directory, or any other session directory.
 - Do not return JSON for this batch. Write the markdown file directly, then state the batch is complete and list the file generated.
 
 User message:
@@ -633,6 +664,9 @@ User message:
     def _batch_files(self, batch: dict[str, object]) -> list[str]:
         return [str(path) for path in batch["files"]]
 
+    def _batch_producer(self, batch: dict[str, object]) -> str:
+        return f"vedic-core:{batch.get('id') or 'unknown'}"
+
     def _session_paths(self, session_dir: Path) -> set[str]:
         return {
             path.relative_to(session_dir).as_posix()
@@ -640,32 +674,32 @@ User message:
             if path.is_file()
         }
 
-    def _compose_core_outputs(self, session_dir: Path) -> None:
+    def _compose_core_outputs(self, session_id: str, session_dir: Path) -> None:
         p2a_parts = [
             session_dir / ".runtime" / "p2" / "yoga.md",
             session_dir / ".runtime" / "p2" / "sun.md",
             session_dir / ".runtime" / "p2" / "moon.md",
         ]
-        self._compose_parts(session_dir / "p2a_planets.md", p2a_parts)
+        self._compose_parts(session_id, session_dir / "p2a_planets.md", p2a_parts, "vedic-core:compose:p2a")
 
         p2b_parts = [
             session_dir / ".runtime" / "p2" / "mars.md",
             session_dir / ".runtime" / "p2" / "mercury.md",
         ]
-        self._compose_parts(session_dir / "p2b_planets.md", p2b_parts)
+        self._compose_parts(session_id, session_dir / "p2b_planets.md", p2b_parts, "vedic-core:compose:p2b")
 
         p2c_parts = [
             session_dir / ".runtime" / "p2" / "jupiter.md",
             session_dir / ".runtime" / "p2" / "venus.md",
         ]
-        self._compose_parts(session_dir / "p2c_planets.md", p2c_parts)
+        self._compose_parts(session_id, session_dir / "p2c_planets.md", p2c_parts, "vedic-core:compose:p2c")
 
         p2d_parts = [
             session_dir / ".runtime" / "p2" / "saturn.md",
             session_dir / ".runtime" / "p2" / "rahu.md",
             session_dir / ".runtime" / "p2" / "ketu.md",
         ]
-        self._compose_parts(session_dir / "p2d_planets.md", p2d_parts)
+        self._compose_parts(session_id, session_dir / "p2d_planets.md", p2d_parts, "vedic-core:compose:p2d")
 
         p3a_parts = [
             session_dir / ".runtime" / "p3" / f"d9_{planet}.md"
@@ -681,20 +715,20 @@ User message:
                 "ketu",
             ]
         ]
-        self._compose_parts(session_dir / "p3a_d9.md", p3a_parts)
+        self._compose_parts(session_id, session_dir / "p3a_d9.md", p3a_parts, "vedic-core:compose:p3a")
 
         p3b_parts = [
             session_dir / ".runtime" / "p3" / "d10.md",
             session_dir / ".runtime" / "p3" / "d4.md",
             session_dir / ".runtime" / "p3" / "d5.md",
         ]
-        self._compose_parts(session_dir / "p3b_divisional.md", p3b_parts)
+        self._compose_parts(session_id, session_dir / "p3b_divisional.md", p3b_parts, "vedic-core:compose:p3b")
 
         p4a_parts = [
             session_dir / ".runtime" / "houses" / f"house_{number:02d}.md"
             for number in range(1, 7)
         ]
-        self._compose_parts(session_dir / "p4a_houses.md", p4a_parts)
+        self._compose_parts(session_id, session_dir / "p4a_houses.md", p4a_parts, "vedic-core:compose:p4a")
 
         p4b_parts = [
             *[
@@ -703,26 +737,55 @@ User message:
             ],
             session_dir / ".runtime" / "houses" / "parivartana.md",
         ]
-        self._compose_parts(session_dir / "p4b_houses.md", p4b_parts)
+        self._compose_parts(session_id, session_dir / "p4b_houses.md", p4b_parts, "vedic-core:compose:p4b")
 
         p5a_parts = [
             session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
             for number in range(1, 6)
         ]
-        self._compose_parts(session_dir / "p5a_life.md", p5a_parts)
+        self._compose_parts(session_id, session_dir / "p5a_life.md", p5a_parts, "vedic-core:compose:p5a")
 
         p5b_parts = [
             session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
             for number in range(6, 11)
         ]
-        self._compose_parts(session_dir / "p5b_life.md", p5b_parts)
+        self._compose_parts(session_id, session_dir / "p5b_life.md", p5b_parts, "vedic-core:compose:p5b")
 
-    def _compose_parts(self, target: Path, parts: list[Path]) -> None:
-        if all(path.exists() for path in parts):
-            target.write_text(
-                "\n\n".join(path.read_text(encoding="utf-8").strip() for path in parts) + "\n",
-                encoding="utf-8",
+    def _compose_parts(
+        self,
+        session_id: str,
+        target: Path,
+        parts: list[Path],
+        producer: str,
+    ) -> None:
+        session_dir = self.workspace.require_session_dir(session_id)
+        if not all(path.exists() for path in parts):
+            return
+        relative_parts = [path.relative_to(session_dir).as_posix() for path in parts]
+        if not all(
+            self.workspace.artifact_checkpoint_valid(
+                session_id,
+                relative_path,
+                producer=self._producer_for_core_file(relative_path),
             )
+            for relative_path in relative_parts
+        ):
+            return
+        target.write_text(
+            "\n\n".join(path.read_text(encoding="utf-8").strip() for path in parts) + "\n",
+            encoding="utf-8",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            target.relative_to(session_dir).as_posix(),
+            producer=producer,
+        )
+
+    def _producer_for_core_file(self, relative_path: str) -> str:
+        for batch in self.core_batches(""):
+            if relative_path in self.core_batch_files(batch):
+                return self._batch_producer(batch)
+        return ""
 
     def _active_artifact_for_batch(self, batch: dict[str, object], artifacts: list[object]) -> str:
         paths = {str(getattr(artifact, "path")) for artifact in artifacts}
