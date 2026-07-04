@@ -127,7 +127,7 @@ export function AdminSessionDetail() {
             onClick={() => navigate(`/session/${encodeURIComponent(id)}`)}
           >
             <ExternalLink size={14} />
-            Open Workshop
+            Open Reading
           </Button>
           <Button size="sm" onClick={() => void downloadPdf()} disabled={exporting}>
             {exporting ? <LoaderCircle className="size-4 animate-spin" /> : <Download size={14} />}
@@ -185,7 +185,7 @@ function SessionOverview({ summary }: { summary: AdminSessionSummary }) {
       <OverviewTile
         label="Progress"
         value={`${summary.progress.percent}%`}
-        detail={`${summary.progress.completed}/${summary.progress.total || 0} nodes`}
+        detail={`${summary.progress.completed}/${summary.progress.total || 0} tasks`}
         icon={<CheckCircle2 size={15} />}
       />
       <OverviewTile
@@ -233,7 +233,7 @@ function RunNodesPanel({ nodes, summary }: { nodes: MetricNode[]; summary: Admin
       <div className="flex items-start justify-between gap-4 border-b border-gold/20 px-4 py-4">
         <div>
           <div className="text-[10px] uppercase tracking-[2.2px] text-gold">Execution</div>
-          <h2 className="mt-1 text-lg font-semibold tracking-normal">Run Nodes</h2>
+          <h2 className="mt-1 text-lg font-semibold tracking-normal">Run Tasks</h2>
         </div>
         <div className="w-[220px] pt-1">
           <div className="mb-1 flex justify-between text-[11px] text-muted">
@@ -260,15 +260,15 @@ function RunNodesPanel({ nodes, summary }: { nodes: MetricNode[]; summary: Admin
 
       {nodes.length === 0 ? (
         <div className="grid min-h-[240px] place-items-center px-6 text-center text-muted">
-          <p>No core run nodes have been written yet.</p>
+          <p>No reading tasks have been written yet.</p>
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-gold/20 bg-cream-2/70 text-[10px] uppercase tracking-[1.8px] text-muted">
-                <th className="px-4 py-3 font-semibold">Node</th>
-                <th className="px-4 py-3 font-semibold">Wave</th>
+                <th className="px-4 py-3 font-semibold">Task</th>
+                <th className="px-4 py-3 font-semibold">Phase</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Duration</th>
                 <th className="px-4 py-3 font-semibold">Files</th>
@@ -395,7 +395,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: AdminArtifactSummary[] }) {
     <section className="rounded-lg border border-gold/25 bg-cream p-4 shadow-[0_18px_48px_rgba(44,31,15,0.07)]">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-[2.2px] text-gold">Artifacts</div>
+          <div className="text-[10px] uppercase tracking-[2.2px] text-gold">Files</div>
           <h3 className="mt-1 text-base font-semibold tracking-normal">Session Files</h3>
         </div>
         <Badge variant="neutral">{artifacts.length}</Badge>

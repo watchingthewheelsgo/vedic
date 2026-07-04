@@ -19,21 +19,21 @@ export const reportOrder = [
 ];
 
 export const reportTitles: Record<string, string> = {
-  "p1_overview.md": "总览",
-  "p2a_planets.md": "行星结构一",
-  "p2b_planets.md": "行星结构二",
-  "p2c_planets.md": "行星结构三",
-  "p2d_planets.md": "行星结构四",
-  "p3a_d9.md": "D9 与分盘",
-  "p3b_divisional.md": "分盘补充",
-  "p4a_houses.md": "宫位主题一",
-  "p4b_houses.md": "宫位主题二",
-  "p5a_life.md": "人生板块一",
-  "p5b_life.md": "人生板块二",
-  "appendix.md": "附录",
-  "career_phase4a.md": "事业",
-  "love_report.md": "关系",
-  "rectification_report.md": "校时"
+  "p1_overview.md": "Core Pattern",
+  "p2a_planets.md": "Planetary Signals - Part 1",
+  "p2b_planets.md": "Planetary Signals - Part 2",
+  "p2c_planets.md": "Planetary Signals - Part 3",
+  "p2d_planets.md": "Planetary Signals - Part 4",
+  "p3a_d9.md": "Deeper Promise (D9)",
+  "p3b_divisional.md": "Supporting Life Context",
+  "p4a_houses.md": "Life Areas - Part 1",
+  "p4b_houses.md": "Life Areas - Part 2",
+  "p5a_life.md": "Life Guidance - Part 1",
+  "p5b_life.md": "Life Guidance - Part 2",
+  "appendix.md": "Reference Notes",
+  "career_phase4a.md": "Career Guidance",
+  "love_report.md": "Relationship Guidance",
+  "rectification_report.md": "Birth Time Review"
 };
 
 export function isReportArtifact(artifact: SkillArtifact) {

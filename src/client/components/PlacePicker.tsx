@@ -91,7 +91,7 @@ export function PlacePicker({
       label="City of birth"
       icon={<MapPin size={16} />}
       error={error}
-      hint="Worldwide search. No match? Paste coordinates: lat=34.05, lon=-118.24, tz=America/Los_Angeles"
+      hint="Search by city name. If your city is missing, exact coordinates are also supported."
     >
       <Popover open={open && (loading || options.length > 0)} onOpenChange={setOpen}>
         <PopoverTrigger asChild>

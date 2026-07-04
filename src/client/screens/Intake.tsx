@@ -33,22 +33,22 @@ const TIME_PRECISION_OPTIONS: Array<SelectOption<BirthTimePrecision>> = [
   {
     value: "exact",
     label: "Exact minute",
-    description: "Best for D9 and time-sensitive divisional analysis"
+    description: "Sharpest reading, especially when the time comes from an official record"
   },
   {
     value: "approximate",
     label: "About +/- 15 minutes",
-    description: "Usable, but validation decides which divisions remain reliable"
+    description: "Usable; timing-sensitive parts will be interpreted with care"
   },
   {
     value: "part_of_day",
     label: "Only know the hour",
-    description: "Minute-level claims will be downgraded"
+    description: "The reading will avoid minute-level claims"
   },
   {
     value: "unknown",
     label: "Unknown",
-    description: "The engine uses noon as a calculation placeholder"
+    description: "Allowed; timing-related sections will be more conservative"
   }
 ];
 
@@ -125,7 +125,7 @@ export function Intake() {
     if (timePrecision === "exact" && !timeSource) {
       nextErrors.timeSource = "Select where this exact time came from.";
     }
-    if (!place) nextErrors.place = "Choose a city from search results, or enter coordinates.";
+    if (!place) nextErrors.place = "Choose a city from search results.";
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -139,12 +139,12 @@ export function Intake() {
     setErrors({});
     try {
       const session = await api.createSkillSession(birth);
-      navigate(`/session/${session.sessionId}?tab=workshop`, {
+      navigate(`/session/${session.sessionId}?tab=reading`, {
         state: { name, birth }
       });
     } catch (caught) {
       setErrors({
-        submit: caught instanceof Error ? caught.message : "Could not start the report."
+        submit: caught instanceof Error ? caught.message : "Could not start the reading."
       });
       setBusy(false);
     }
@@ -165,7 +165,7 @@ export function Intake() {
 
         <div className="mb-12 flex items-start">
           <ProgressStep active label="Personal Info" index={1} />
-          <ProgressStep label="Workshop" index={2} />
+          <ProgressStep label="Reading" index={2} />
           <ProgressStep label="Report" index={3} last />
         </div>
 
@@ -178,8 +178,8 @@ export function Intake() {
               Personal Information
             </h2>
             <p className="mb-9 text-sm text-body">
-              These details calculate your chart and determine how strict the pre-validation should
-              be.
+              These details anchor the reading. If a time or place is uncertain, choose the closest
+              honest option so the reading can stay appropriately careful.
             </p>
           </div>
         </section>
@@ -191,7 +191,7 @@ export function Intake() {
                 <Field
                   label="Date of birth"
                   icon={<CalendarDays size={16} />}
-                  hint="Calendar input replaces manual year/month/day selection."
+                  hint="Use the calendar to select your birth date."
                   error={errors.birthDate}
                 >
                   <DatePicker
@@ -212,7 +212,7 @@ export function Intake() {
                   icon={<Clock3 size={16} />}
                   hint={
                     timePrecision === "unknown"
-                      ? "No time required. The engine uses 12:00 as a placeholder."
+                      ? "No time required. Timing-related guidance will be more conservative."
                       : timePrecision === "part_of_day"
                         ? "Select the closest known hour."
                         : "Minute-level time picker. Use the best source you have."
@@ -267,7 +267,7 @@ export function Intake() {
               {timePrecision === "exact" && (
                 <Field
                   label="Birth time source"
-                  hint="The reader skill converts source quality into effective precision."
+                  hint="This helps the reading decide how much weight to place on time-sensitive details."
                   error={errors.timeSource}
                 >
                   <Select
@@ -293,8 +293,8 @@ export function Intake() {
 
               {timePrecision === "unknown" && (
                 <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
-                  Unknown birth time is allowed, but the next validation step becomes more
-                  important.
+                  Unknown birth time is allowed. The reading will focus on stable chart themes and
+                  treat precise timing with caution.
                 </div>
               )}
 
@@ -311,15 +311,12 @@ export function Intake() {
                 <Input
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder="How should the report address you?"
+                  placeholder="How should the reading address you?"
                 />
               </Field>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <Field
-                  label="Gender"
-                  hint="Used for wording and role interpretation in the report."
-                >
+                <Field label="Gender" hint="Optional. Helps the reading use more natural wording.">
                   <Select value={gender || undefined} onValueChange={setGender}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -336,7 +333,7 @@ export function Intake() {
 
                 <Field
                   label="Relationship status"
-                  hint="Shapes the validation and relationship wording."
+                  hint="Optional. Helps relationship sections use the right framing."
                 >
                   <Select value={relationship || undefined} onValueChange={setRelationship}>
                     <SelectTrigger>
@@ -360,7 +357,7 @@ export function Intake() {
               )}
 
               <Button className="mt-2 w-full" size="lg" disabled={busy}>
-                {busy ? "Preparing..." : "Continue to Workshop →"}
+                {busy ? "Preparing..." : "Continue to Reading →"}
               </Button>
             </form>
           </CardContent>

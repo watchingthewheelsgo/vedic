@@ -27,7 +27,7 @@ import type {
 
 const STATUS_LABELS: Record<AdminSessionStatus, string> = {
   draft: "Draft",
-  validation: "Validation",
+  validation: "Reading check",
   queued: "Queued",
   running: "Running",
   completed: "Completed",
@@ -88,7 +88,7 @@ export function AdminSessions() {
     <div className="min-h-screen bg-cream-2 text-ink">
       <AdminHeader
         title="Sessions"
-        subtitle="Historical and running report sessions"
+        subtitle="Historical and running readings"
         refreshing={refreshing}
         onRefresh={() => void load({ quiet: true })}
       />
@@ -306,7 +306,7 @@ function SessionRow({
       <td className="px-4 py-4 align-top">
         <ProgressMeter session={session} />
         <div className="mt-1 text-xs text-muted">
-          {session.progress.completed}/{session.progress.total || 0} nodes
+          {session.progress.completed}/{session.progress.total || 0} tasks
           {session.durationSeconds ? ` · ${formatDuration(session.durationSeconds)}` : ""}
         </div>
       </td>
@@ -317,7 +317,7 @@ function SessionRow({
       <td className="px-4 py-4 align-top text-xs text-body">
         <div className="flex items-center gap-1">
           <FileText size={13} className="text-gold-dim" />
-          {session.artifactCount} artifacts
+          {session.artifactCount} files
         </div>
         <div className="mt-1 text-muted">{session.exportCount} exports</div>
       </td>

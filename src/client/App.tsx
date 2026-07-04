@@ -89,7 +89,7 @@ function RequireAuth({
           </div>
           <h1 className="mb-3 text-2xl font-semibold tracking-normal">Sign in to continue</h1>
           <p className="mb-5 text-sm leading-[1.7] text-body">
-            Your reports and generated artifacts are private to your account.
+            Your readings and saved files are private to your account.
           </p>
           <div className="flex justify-center gap-2">
             <SignInButton mode="modal">
