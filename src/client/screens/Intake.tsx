@@ -9,7 +9,13 @@ import { DatePicker } from "../components/ui/date-picker";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../components/ui/select";
 import { cn } from "../lib/cn";
 import type { BirthInput, BirthTimePrecision } from "../../shared/domain";
 
@@ -84,7 +90,9 @@ export function Intake() {
   const [busy, setBusy] = useState(false);
 
   const precisionOption = useMemo(
-    () => TIME_PRECISION_OPTIONS.find((option) => option.value === timePrecision) ?? TIME_PRECISION_OPTIONS[0],
+    () =>
+      TIME_PRECISION_OPTIONS.find((option) => option.value === timePrecision) ??
+      TIME_PRECISION_OPTIONS[0],
     [timePrecision]
   );
 
@@ -109,7 +117,9 @@ export function Intake() {
     if (!birthDate) nextErrors.birthDate = "Select your date of birth.";
     if (timePrecision !== "unknown" && !birthTime) {
       nextErrors.birthTime =
-        timePrecision === "part_of_day" ? "Select the closest known birth hour." : "Select your birth time.";
+        timePrecision === "part_of_day"
+          ? "Select the closest known birth hour."
+          : "Select your birth time.";
     }
     if (timePrecision === "exact" && !timeSource) {
       nextErrors.timeSource = "Select where this exact time came from.";
@@ -160,9 +170,12 @@ export function Intake() {
             <UserRound size={18} />
           </div>
           <div>
-            <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">Personal Information</h2>
+            <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">
+              Personal Information
+            </h2>
             <p className="mb-9 text-sm text-body">
-              These details calculate your chart and determine how strict the pre-validation should be.
+              These details calculate your chart and determine how strict the pre-validation should
+              be.
             </p>
           </div>
         </section>
@@ -276,7 +289,8 @@ export function Intake() {
 
               {timePrecision === "unknown" && (
                 <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
-                  Unknown birth time is allowed, but the next validation step becomes more important.
+                  Unknown birth time is allowed, but the next validation step becomes more
+                  important.
                 </div>
               )}
 
@@ -298,7 +312,10 @@ export function Intake() {
               </Field>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Gender" hint="Used for wording and role interpretation in the report.">
+                <Field
+                  label="Gender"
+                  hint="Used for wording and role interpretation in the report."
+                >
                   <Select value={gender || undefined} onValueChange={setGender}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -313,7 +330,10 @@ export function Intake() {
                   </Select>
                 </Field>
 
-                <Field label="Relationship status" hint="Shapes the validation and relationship wording.">
+                <Field
+                  label="Relationship status"
+                  hint="Shapes the validation and relationship wording."
+                >
                   <Select value={relationship || undefined} onValueChange={setRelationship}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -358,7 +378,12 @@ function ProgressStep({
   last?: boolean;
 }) {
   return (
-    <div className={cn("relative flex-1 text-center text-xs tracking-[0.3px]", active ? "text-gold" : "text-muted")}>
+    <div
+      className={cn(
+        "relative flex-1 text-center text-xs tracking-[0.3px]",
+        active ? "text-gold" : "text-muted"
+      )}
+    >
       {!last && <div className="absolute left-[55%] right-[-55%] top-[15px] h-px bg-gold/25" />}
       <div
         className={cn(
@@ -388,7 +413,8 @@ function BirthTimePicker({
   const disabled = precision === "unknown";
   const selectedHour = value?.getHours() ?? null;
   const selectedMinute = value ? normalizeMinuteForPrecision(value.getMinutes(), precision) : null;
-  const minuteOptions = precision === "part_of_day" ? [0] : precision === "approximate" ? QUARTER_MINUTES : ALL_MINUTES;
+  const minuteOptions =
+    precision === "part_of_day" ? [0] : precision === "approximate" ? QUARTER_MINUTES : ALL_MINUTES;
 
   function commit(hour: number, minute: number) {
     onChange(makeTime(hour, normalizeMinuteForPrecision(minute, precision)));
@@ -420,8 +446,17 @@ function BirthTimePicker({
             )}
           >
             <Clock3 className="size-4 shrink-0 text-gold-dim" />
-            <span className={cn("min-w-0 flex-1 text-[15px] font-medium tabular-nums", value ? "text-ink" : "text-muted")}>
-              {disabled ? "Time unknown" : value ? formatTimeLabel(value, precision) : "Select time"}
+            <span
+              className={cn(
+                "min-w-0 flex-1 text-[15px] font-medium tabular-nums",
+                value ? "text-ink" : "text-muted"
+              )}
+            >
+              {disabled
+                ? "Time unknown"
+                : value
+                  ? formatTimeLabel(value, precision)
+                  : "Select time"}
             </span>
           </Button>
         </PopoverTrigger>
@@ -498,11 +533,7 @@ function TimeSelect({
         <SelectContent className="max-h-64">
           {values.map((value) => {
             return (
-              <SelectItem
-                key={value}
-                value={String(value)}
-                className="tabular-nums"
-              >
+              <SelectItem key={value} value={String(value)} className="tabular-nums">
                 {pad(value)}
               </SelectItem>
             );

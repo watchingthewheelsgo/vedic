@@ -7,8 +7,7 @@ const timeoutMs = Number(process.env.VEDIC_WORKFLOW_TIMEOUT_MS ?? 7_200_000);
 const birthInput = {
   birthDate: process.env.VEDIC_TEST_BIRTH_DATE ?? "2002-12-11",
   birthTime: process.env.VEDIC_TEST_BIRTH_TIME ?? "20:47",
-  birthPlace:
-    process.env.VEDIC_TEST_BIRTH_PLACE ?? "lat=25.4333, lon=119.0, tz=Asia/Shanghai",
+  birthPlace: process.env.VEDIC_TEST_BIRTH_PLACE ?? "lat=25.4333, lon=119.0, tz=Asia/Shanghai",
   birthTimePrecision: process.env.VEDIC_TEST_BIRTH_PRECISION ?? "exact",
   gender: process.env.VEDIC_TEST_GENDER ?? "[not-collected]",
   relationship: process.env.VEDIC_TEST_RELATIONSHIP ?? "[not-collected]",

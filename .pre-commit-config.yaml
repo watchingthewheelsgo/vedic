@@ -7,6 +7,18 @@ repos:
         language: system
         pass_filenames: false
 
+      - id: repository-format-check
+        name: Repository format check
+        entry: npm run format:check
+        language: system
+        pass_filenames: false
+
+      - id: frontend-lint
+        name: Frontend lint
+        entry: npm run frontend:lint
+        language: system
+        pass_filenames: false
+
       - id: python-format-check
         name: Python format check
         entry: npm run backend:format:check
@@ -16,6 +28,12 @@ repos:
       - id: python-lint
         name: Python lint
         entry: npm run backend:lint
+        language: system
+        pass_filenames: false
+
+      - id: python-typecheck
+        name: Python type check
+        entry: npm run backend:typecheck
         language: system
         pass_filenames: false
 

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "concurrently -k \"npm:backend:dev\" \"npm:client:dev\"",
     "client:dev": "vite --host 127.0.0.1",
-    "backend:setup": "uv sync --project backend && uv run --no-sync --project backend python scripts/setup-backend-runtime.py",
+    "backend:sync": "uv sync --project backend --all-groups",
+    "backend:setup": "npm run backend:sync && npm run backend:ensure",
     "backend:ensure": "uv run --no-sync --project backend python scripts/setup-backend-runtime.py",
     "backend:config": "uv run --no-sync --project backend python scripts/check-startup-config.py",
     "backend:dev": "npm run backend:ensure && npm run backend:config && uv run --no-sync --project backend uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload --reload-dir backend/app",
@@ -14,7 +15,11 @@
     "backend:format:check": "uv run --no-sync --project backend ruff format --check backend/app scripts backend/tests",
     "backend:lint": "uv run --no-sync --project backend ruff check backend/app scripts backend/tests",
     "backend:check": "uv run --no-sync --project backend python scripts/check-backend-runtime.py && uv run --no-sync --project backend python -m compileall backend/app scripts",
+    "backend:typecheck": "pyright",
     "backend:test": "uv run --no-sync --project backend pytest backend/tests",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
+    "frontend:lint": "eslint src scripts vite.config.ts",
     "report:export": "uv run --project backend python scripts/export-report.py",
     "report:pdf": "node scripts/render-report-pdf.mjs",
     "report:pdf:install": "playwright install chromium",
@@ -22,7 +27,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "tsc --noEmit",
-    "ci": "npm run backend:format:check && npm run backend:lint && npm run check && npm run backend:setup && npm run backend:check && npm run backend:test && npm run build"
+    "ci": "npm run format:check && npm run frontend:lint && npm run backend:format:check && npm run backend:lint && npm run check && npm run backend:sync && npm run backend:ensure && npm run backend:check && npm run backend:typecheck && npm run backend:test && npm run build"
   },
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.18",
@@ -44,14 +49,22 @@
     "tailwindcss": "^4.3.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/dagre": "^0.7.54",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.0.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.4",
+    "pyright": "^1.1.411",
     "tsx": "^4.0.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.62.1",
     "vite": "^7.0.0"
   }
 }

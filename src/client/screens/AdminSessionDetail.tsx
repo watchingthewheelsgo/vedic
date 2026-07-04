@@ -94,7 +94,12 @@ export function AdminSessionDetail() {
     <div className="min-h-screen bg-cream-2 text-ink">
       <header className="border-b border-gold/25 bg-cream/95 px-5 py-4 backdrop-blur-lg sm:px-8">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-3">
-          <Button variant="ghost" size="icon" title="Back to sessions" onClick={() => navigate("/admin/sessions")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Back to sessions"
+            onClick={() => navigate("/admin/sessions")}
+          >
             <ArrowLeft size={17} />
           </Button>
           <div>
@@ -102,11 +107,24 @@ export function AdminSessionDetail() {
             <h1 className="font-mono text-lg font-semibold tracking-normal">{id}</h1>
           </div>
           <div className="flex-1" />
-          <Button variant="outline" size="sm" onClick={() => void load({ quiet: true })} disabled={refreshing}>
-            {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw size={14} />}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load({ quiet: true })}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate(`/session/${encodeURIComponent(id)}`)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/session/${encodeURIComponent(id)}`)}
+          >
             <ExternalLink size={14} />
             Open Workshop
           </Button>
@@ -138,7 +156,11 @@ export function AdminSessionDetail() {
               <RunNodesPanel nodes={nodes} summary={detail.summary} />
               <div className="flex flex-col gap-5">
                 <SubjectPanel summary={detail.summary} />
-                <ExportsPanel exports={detail.exports} sessionId={id} onDownloadPdf={() => void downloadPdf()} />
+                <ExportsPanel
+                  exports={detail.exports}
+                  sessionId={id}
+                  onDownloadPdf={() => void downloadPdf()}
+                />
                 <ArtifactsPanel artifacts={detail.artifacts} />
               </div>
             </div>
@@ -152,11 +174,28 @@ export function AdminSessionDetail() {
 function SessionOverview({ summary }: { summary: AdminSessionSummary }) {
   return (
     <section className="grid gap-3 lg:grid-cols-5">
-      <OverviewTile label="Status" value={<StatusBadge status={summary.status} />} icon={<Activity size={15} />} />
+      <OverviewTile
+        label="Status"
+        value={<StatusBadge status={summary.status} />}
+        icon={<Activity size={15} />}
+      />
       <OverviewTile label="Stage" value={summary.stage} icon={<FileText size={15} />} />
-      <OverviewTile label="Progress" value={`${summary.progress.percent}%`} detail={`${summary.progress.completed}/${summary.progress.total || 0} nodes`} icon={<CheckCircle2 size={15} />} />
-      <OverviewTile label="Duration" value={formatDuration(summary.durationSeconds)} icon={<Timer size={15} />} />
-      <OverviewTile label="Updated" value={formatDateTime(summary.updatedAt)} icon={<RefreshCw size={15} />} />
+      <OverviewTile
+        label="Progress"
+        value={`${summary.progress.percent}%`}
+        detail={`${summary.progress.completed}/${summary.progress.total || 0} nodes`}
+        icon={<CheckCircle2 size={15} />}
+      />
+      <OverviewTile
+        label="Duration"
+        value={formatDuration(summary.durationSeconds)}
+        icon={<Timer size={15} />}
+      />
+      <OverviewTile
+        label="Updated"
+        value={formatDateTime(summary.updatedAt)}
+        icon={<RefreshCw size={15} />}
+      />
     </section>
   );
 }
@@ -201,7 +240,10 @@ function RunNodesPanel({ nodes, summary }: { nodes: MetricNode[]; summary: Admin
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-cream-3">
             <div
-              className={cn("h-full rounded-full", summary.status === "failed" ? "bg-red" : "bg-gold")}
+              className={cn(
+                "h-full rounded-full",
+                summary.status === "failed" ? "bg-red" : "bg-gold"
+              )}
               style={{ width: `${Math.min(100, Math.max(0, summary.progress.percent))}%` }}
             />
           </div>
@@ -249,12 +291,17 @@ function RunNodesPanel({ nodes, summary }: { nodes: MetricNode[]; summary: Admin
                   </td>
                   <td className="px-4 py-3 text-body">
                     {formatDuration(node.durationSeconds)}
-                    <div className="mt-1 text-[11px] text-muted">{formatDateTime(node.finishedAt)}</div>
+                    <div className="mt-1 text-[11px] text-muted">
+                      {formatDateTime(node.finishedAt)}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex max-w-[260px] flex-wrap gap-1.5">
                       {(node.files ?? []).map((file) => (
-                        <span key={file} className="rounded-full border border-gold/20 bg-cream-2 px-2 py-1 font-mono text-[10px] text-body">
+                        <span
+                          key={file}
+                          className="rounded-full border border-gold/20 bg-cream-2 px-2 py-1 font-mono text-[10px] text-body"
+                        >
                           {file}
                         </span>
                       ))}
@@ -315,7 +362,10 @@ function ExportsPanel({
       ) : (
         <div className="grid gap-2">
           {exports.map((item) => (
-            <div key={item.path} className="flex items-center justify-between gap-3 rounded-md bg-cream-2 px-3 py-2">
+            <div
+              key={item.path}
+              className="flex items-center justify-between gap-3 rounded-md bg-cream-2 px-3 py-2"
+            >
               <div className="min-w-0">
                 <div className="truncate font-mono text-xs text-ink">{item.name}</div>
                 <div className="mt-0.5 text-[11px] text-muted">
@@ -350,7 +400,10 @@ function ArtifactsPanel({ artifacts }: { artifacts: AdminArtifactSummary[] }) {
       </div>
       <div className="max-h-[420px] overflow-y-auto">
         {artifacts.map((artifact) => (
-          <div key={artifact.path} className="flex items-center gap-3 border-b border-gold/15 py-2.5 last:border-0">
+          <div
+            key={artifact.path}
+            className="flex items-center gap-3 border-b border-gold/15 py-2.5 last:border-0"
+          >
             <span className="grid size-8 shrink-0 place-items-center rounded-md border border-gold/20 bg-cream-2 text-gold-dim">
               {artifact.kind === "pdf" ? <FileArchive size={15} /> : <FileText size={15} />}
             </span>
@@ -359,7 +412,8 @@ function ArtifactsPanel({ artifacts }: { artifacts: AdminArtifactSummary[] }) {
                 {artifact.path}
               </div>
               <div className="mt-0.5 text-[11px] text-muted">
-                {artifact.kind} · {formatBytes(artifact.sizeBytes)} · {formatDateTime(artifact.updatedAt)}
+                {artifact.kind} · {formatBytes(artifact.sizeBytes)} ·{" "}
+                {formatDateTime(artifact.updatedAt)}
               </div>
             </div>
           </div>

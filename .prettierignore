@@ -1,0 +1,13 @@
+node_modules
+dist
+backend/.venv
+backend/data
+backend/.pytest_cache
+backend/app/calculator/ephe
+backend/**/__pycache__
+output
+tmp
+.runtime
+.ruff_cache
+.playwright-cli
+.claude/skills

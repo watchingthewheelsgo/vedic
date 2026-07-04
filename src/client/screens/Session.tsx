@@ -39,7 +39,12 @@ import {
 } from "../lib/pipeline";
 import { getReportSections, titleForArtifact } from "../lib/report";
 import { cn } from "../lib/cn";
-import type { BirthInput, CoreJobResponse, SkillArtifact, SkillSessionResponse } from "../../shared/domain";
+import type {
+  BirthInput,
+  CoreJobResponse,
+  SkillArtifact,
+  SkillSessionResponse
+} from "../../shared/domain";
 
 type NavState = { name?: string; birth?: BirthInput; concern?: string } | null;
 
@@ -89,16 +94,23 @@ type ResultPreviewSection = {
 const STAGE_COPY: Record<string, StageCopy> = {
   src: {
     purpose: "Locks the personal information that every later reading must use.",
-    userResult: "A stable chart data snapshot is created. This avoids later stages reinterpreting the form fields differently.",
-    userAction: "Review the date, time, place, and time confidence. If something is wrong, start a fresh workshop.",
-    inputs: ["Birth date, time, place", "Time precision and source", "Gender and relationship status"],
+    userResult:
+      "A stable chart data snapshot is created. This avoids later stages reinterpreting the form fields differently.",
+    userAction:
+      "Review the date, time, place, and time confidence. If something is wrong, start a fresh workshop.",
+    inputs: [
+      "Birth date, time, place",
+      "Time precision and source",
+      "Gender and relationship status"
+    ],
     outputs: ["structured_data.md", "structured_data.json", "run_metrics.json"],
     expected: "Usually seconds. If place resolution fails, fix the city input before continuing."
   },
   reader: {
     purpose: "Validates a few concrete chart anchors before spending time on the full report.",
     userResult: "You get 3-5 concrete anchors to mark as accurate, inaccurate, or partly accurate.",
-    userAction: "Answer one anchor at a time. The full report starts only after every anchor has feedback.",
+    userAction:
+      "Answer one anchor at a time. The full report starts only after every anchor has feedback.",
     inputs: ["structured_data.md"],
     outputs: ["reader_prevalidation.md", "user_context.md after your feedback"],
     expected: "Usually a few minutes because this is an LLM reading step."
@@ -145,7 +157,8 @@ const STAGE_COPY: Record<string, StageCopy> = {
   },
   house: {
     purpose: "Reviews the 12 life areas that the final report will synthesize.",
-    userResult: "Money, work, relationships, health, learning, family, reputation, and spiritual areas get evidence.",
+    userResult:
+      "Money, work, relationships, health, learning, family, reputation, and spiritual areas get evidence.",
     userAction: "No action required.",
     inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
     outputs: ["p4a_houses.md", "p4b_houses.md"],
@@ -169,7 +182,8 @@ const STAGE_COPY: Record<string, StageCopy> = {
   },
   life: {
     purpose: "Turns the evidence into readable life-domain sections.",
-    userResult: "The report assembles identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths.",
+    userResult:
+      "The report assembles identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths.",
     userAction: "No action required.",
     inputs: ["p4 outputs", "Dasha review", "user_context.md"],
     outputs: ["p5a_life.md", "p5b_life.md"],
@@ -292,25 +306,29 @@ export function Session() {
   );
   const jobActive = coreJob?.status === "queued" || coreJob?.status === "running";
   const complete = session?.stage === "core_complete" || coreJob?.status === "completed";
-  const coreInterrupted = coreJob?.status === "failed" || (!coreJob && runMetrics?.status === "failed");
+  const coreInterrupted =
+    coreJob?.status === "failed" || (!coreJob && runMetrics?.status === "failed");
   const birthInfo = useMemo(() => resolveBirthInfo(navState, session), [navState, session]);
   const readerPrevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedbackArtifact = findArtifact(session, "user_context.md");
   const awaitingValidationFeedback = Boolean(readerPrevalidation && !feedbackArtifact && !complete);
 
-  const startCoreReport = useCallback(async (options: { resume?: boolean } = {}) => {
-    if (!id || (coreStartedRef.current && !options.resume)) return;
-    coreStartedRef.current = true;
-    setError("");
-    try {
-      const job = await api.startCoreJob({ sessionId: id, skill: "vedic-core", userMessage: "" });
-      setCoreJob(job);
-      if (job.session) setSession(job.session);
-    } catch (caught) {
-      coreStartedRef.current = false;
-      setError(caught instanceof Error ? caught.message : "Could not start the core report.");
-    }
-  }, [id]);
+  const startCoreReport = useCallback(
+    async (options: { resume?: boolean } = {}) => {
+      if (!id || (coreStartedRef.current && !options.resume)) return;
+      coreStartedRef.current = true;
+      setError("");
+      try {
+        const job = await api.startCoreJob({ sessionId: id, skill: "vedic-core", userMessage: "" });
+        setCoreJob(job);
+        if (job.session) setSession(job.session);
+      } catch (caught) {
+        coreStartedRef.current = false;
+        setError(caught instanceof Error ? caught.message : "Could not start the core report.");
+      }
+    },
+    [id]
+  );
 
   const resumeCoreReport = useCallback(async () => {
     coreStartedRef.current = false;
@@ -359,7 +377,8 @@ export function Session() {
           void startReaderValidation();
         }
       } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not load session.");
+        if (!cancelled)
+          setError(caught instanceof Error ? caught.message : "Could not load session.");
       }
     })();
     return () => {
@@ -394,7 +413,8 @@ export function Session() {
           }
         })
         .catch((caught) => {
-          if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not refresh progress.");
+          if (!cancelled)
+            setError(caught instanceof Error ? caught.message : "Could not refresh progress.");
         });
     }, 2500);
     return () => {
@@ -411,7 +431,9 @@ export function Session() {
 
   function scrollToSection(index: number) {
     setActiveSection(index);
-    document.getElementById(`section-${index}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document
+      .getElementById(`section-${index}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function onExport() {
@@ -462,10 +484,20 @@ export function Session() {
         <button className="brand-logo mr-3 border-0 bg-transparent" onClick={() => navigate("/")}>
           Veda<span>Light</span>
         </button>
-        <Button variant="tab" size="sm" data-active={tab === "workshop"} onClick={() => setTab("workshop")}>
+        <Button
+          variant="tab"
+          size="sm"
+          data-active={tab === "workshop"}
+          onClick={() => setTab("workshop")}
+        >
           <Workflow size={14} /> Workshop
         </Button>
-        <Button variant="tab" size="sm" data-active={tab === "report"} onClick={() => setTab("report")}>
+        <Button
+          variant="tab"
+          size="sm"
+          data-active={tab === "report"}
+          onClick={() => setTab("report")}
+        >
           <BookOpen size={14} /> Report
         </Button>
         <div className="flex-1" />
@@ -483,7 +515,6 @@ export function Session() {
             selectedStageId={selectedStageId}
             session={session}
             pipelineData={pipelineData}
-            coreJob={coreJob}
             birthInfo={birthInfo}
             readerRunning={readerRunning}
             readerStartedAt={readerStartedAt}
@@ -518,7 +549,11 @@ export function Session() {
             <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
               <h1 className="text-[28px] font-light tracking-normal">Your Vedic Report</h1>
               <Button onClick={() => void onExport()} disabled={exportingPdf}>
-                {exportingPdf ? <LoaderCircle className="size-4 animate-spin" /> : <Download size={15} />}
+                {exportingPdf ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Download size={15} />
+                )}
                 {exportingPdf ? "Preparing PDF..." : "Download PDF"}
               </Button>
             </div>
@@ -531,7 +566,9 @@ export function Session() {
                 <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
                   Section {String(index + 1).padStart(2, "0")}
                 </div>
-                <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">{titleForArtifact(artifact)}</div>
+                <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">
+                  {titleForArtifact(artifact)}
+                </div>
                 <MarkdownReport content={artifact.content} />
               </section>
             ))}
@@ -547,7 +584,12 @@ export function Session() {
                 )}
                 onClick={() => scrollToSection(index)}
               >
-                <span className={cn("shrink-0 text-[11px] font-bold text-gold", activeSection === index && "text-white")}>
+                <span
+                  className={cn(
+                    "shrink-0 text-[11px] font-bold text-gold",
+                    activeSection === index && "text-white"
+                  )}
+                >
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 {titleForArtifact(artifact)}
@@ -570,11 +612,14 @@ export function Session() {
             </h2>
             <p className="mx-auto mb-6 max-w-[420px] text-sm text-body">
               {coreInterrupted
-                ? coreJob?.message ?? "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps."
+                ? (coreJob?.message ??
+                  "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps.")
                 : awaitingValidationFeedback
                   ? "Reply to the validation anchors in Workshop before the full report starts."
                   : `The full analysis runs stage by stage${
-                      pipelineData ? ` - ${pipelineData.completed}/${pipelineData.total} steps done` : ""
+                      pipelineData
+                        ? ` - ${pipelineData.completed}/${pipelineData.total} steps done`
+                        : ""
                     }. Watch it live in the Workshop tab.`}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
@@ -583,7 +628,10 @@ export function Session() {
                   <RefreshCw size={15} /> Resume generation
                 </Button>
               )}
-              <Button variant={coreInterrupted ? "outline" : "gold"} onClick={() => setTab("workshop")}>
+              <Button
+                variant={coreInterrupted ? "outline" : "gold"}
+                onClick={() => setTab("workshop")}
+              >
                 <Workflow size={15} /> Go to Workshop
               </Button>
             </div>
@@ -598,7 +646,6 @@ function WorkshopDetailPanel({
   selectedStageId,
   session,
   pipelineData,
-  coreJob,
   birthInfo,
   readerRunning,
   readerStartedAt,
@@ -613,7 +660,6 @@ function WorkshopDetailPanel({
   selectedStageId: string;
   session: SkillSessionResponse | null;
   pipelineData: PipelineData | null;
-  coreJob: CoreJobResponse | null;
   birthInfo: BirthInfo;
   readerRunning: boolean;
   readerStartedAt: number | null;
@@ -628,7 +674,7 @@ function WorkshopDetailPanel({
   const stage = WORKSHOP_STAGES.find((item) => item.id === selectedStageId) ?? WORKSHOP_STAGES[0];
   const nodes = pipelineData?.nodes.filter((node) => stage.match(node.id)) ?? [];
   const stageAgg = pipelineData ? aggregateWorkshopStages(pipelineData.nodes)[stage.id] : null;
-  const status = stage.seed ? "done" : stageAgg?.status ?? "pending";
+  const status = stage.seed ? "done" : (stageAgg?.status ?? "pending");
 
   return (
     <aside className="relative border-r border-gold/25 bg-cream px-6 py-7 max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto">
@@ -637,7 +683,9 @@ function WorkshopDetailPanel({
         copy={STAGE_COPY[stage.id]}
         className="absolute right-6 top-7"
       />
-      <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">Workshop detail</div>
+      <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
+        Workshop detail
+      </div>
       <div className="mb-5 flex items-start justify-between gap-3 pr-9">
         <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stage.label}</h3>
         <Badge variant={statusBadgeVariant(status)}>{STATUS_LABELS[status]}</Badge>
@@ -662,8 +710,6 @@ function WorkshopDetailPanel({
           session={session}
           nodes={nodes}
           status={status}
-          coreJob={coreJob}
-          now={now}
           onResumeCoreReport={onResumeCoreReport}
           coreInterrupted={coreInterrupted}
         />
@@ -794,7 +840,10 @@ function ReaderDetail({
     if (activeAnchorIndex >= anchors.length) setActiveAnchorIndex(Math.max(0, anchors.length - 1));
   }, [activeAnchorIndex, anchors.length]);
 
-  function updateAnchorFeedback(anchor: ValidationAnchor, update: Partial<{ answer: ValidationAnswer; note: string }>) {
+  function updateAnchorFeedback(
+    anchor: ValidationAnchor,
+    update: Partial<{ answer: ValidationAnswer; note: string }>
+  ) {
     const nextFeedback = {
       ...anchorFeedback,
       [anchor.index]: {
@@ -834,7 +883,11 @@ function ReaderDetail({
   return (
     <>
       {feedback ? (
-        <ReaderCompletedDetail anchors={anchors} feedback={feedback} recordedFeedback={recordedFeedback} />
+        <ReaderCompletedDetail
+          anchors={anchors}
+          feedback={feedback}
+          recordedFeedback={recordedFeedback}
+        />
       ) : (
         <form className="mt-4 grid gap-4" onSubmit={onSubmitFeedback}>
           <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
@@ -843,7 +896,8 @@ function ReaderDetail({
               Your input is required
             </div>
             <p className="m-0 text-[13px] leading-[1.65] text-body">
-              Answer each validation anchor before the full report starts. These answers calibrate how much confidence the reader should place in your birth time.
+              Answer each validation anchor before the full report starts. These answers calibrate
+              how much confidence the reader should place in your birth time.
             </p>
           </div>
 
@@ -851,7 +905,9 @@ function ReaderDetail({
             <div className="rounded-xl border border-gold/25 bg-cream-2 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[10px] uppercase tracking-[1.8px] text-muted">Validation anchor</div>
+                  <div className="text-[10px] uppercase tracking-[1.8px] text-muted">
+                    Validation anchor
+                  </div>
                   <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
                     Question {activeAnchorIndex + 1} of {anchors.length}
                     {activeAnchor.rationale && (
@@ -887,7 +943,12 @@ function ReaderDetail({
                       onClick={() => updateAnchorFeedback(activeAnchor, { answer: choice.value })}
                     >
                       <span className="block text-sm font-semibold">{choice.label}</span>
-                      <span className={cn("mt-0.5 block text-[12.5px]", selected ? "text-white/80" : "text-muted")}>
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-[12.5px]",
+                          selected ? "text-white/80" : "text-muted"
+                        )}
+                      >
                         {choice.description}
                       </span>
                     </button>
@@ -896,17 +957,27 @@ function ReaderDetail({
               </div>
 
               <label className="mt-4 block">
-                <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">Optional note</span>
+                <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
+                  Optional note
+                </span>
                 <Textarea
                   rows={4}
                   value={anchorFeedback[activeAnchor.index]?.note ?? ""}
-                  onChange={(event) => updateAnchorFeedback(activeAnchor, { note: event.target.value })}
+                  onChange={(event) =>
+                    updateAnchorFeedback(activeAnchor, { note: event.target.value })
+                  }
                   placeholder="Add a correction or example if useful."
                 />
               </label>
 
               <div className="mt-4 flex items-center justify-between gap-3">
-                <Button type="button" variant="ghost" size="sm" disabled={activeAnchorIndex === 0} onClick={movePrev}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={activeAnchorIndex === 0}
+                  onClick={movePrev}
+                >
                   <ChevronLeft size={14} /> Previous
                 </Button>
                 {activeAnchorIndex < anchors.length - 1 ? (
@@ -919,7 +990,9 @@ function ReaderDetail({
                     Next <ChevronRight size={14} />
                   </Button>
                 ) : (
-                  <Button disabled={submittingFeedback || !allAnswered || !validationFeedback.trim()}>
+                  <Button
+                    disabled={submittingFeedback || !allAnswered || !validationFeedback.trim()}
+                  >
                     {submittingFeedback ? "Recording..." : "Record feedback and start report"}
                   </Button>
                 )}
@@ -934,7 +1007,10 @@ function ReaderDetail({
                 onChange={(event) => onValidationFeedbackChange(event.target.value)}
                 placeholder="Reply with what feels accurate, partly accurate, or inaccurate."
               />
-              <Button className="mt-3 w-full" disabled={submittingFeedback || !validationFeedback.trim()}>
+              <Button
+                className="mt-3 w-full"
+                disabled={submittingFeedback || !validationFeedback.trim()}
+              >
                 {submittingFeedback ? "Recording..." : "Record feedback and start report"}
               </Button>
             </div>
@@ -964,7 +1040,8 @@ function ReaderCompletedDetail({
           Validation complete
         </div>
         <p className="m-0 text-[13px] leading-[1.65] text-body">
-          Your feedback has been saved. The full reading can now use these answers as calibration context.
+          Your feedback has been saved. The full reading can now use these answers as calibration
+          context.
         </p>
       </div>
 
@@ -982,7 +1059,9 @@ function ReaderCompletedDetail({
               <div className="rounded-xl border border-gold/25 bg-cream-2 p-4" key={anchor.id}>
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-[1.8px] text-muted">Validation anchor</div>
+                    <div className="text-[10px] uppercase tracking-[1.8px] text-muted">
+                      Validation anchor
+                    </div>
                     <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
                       Question {anchorIndex + 1} of {anchors.length}
                       {anchor.rationale && (
@@ -993,7 +1072,9 @@ function ReaderCompletedDetail({
                       )}
                     </div>
                   </div>
-                  <Badge variant={feedbackBadgeVariant(summary?.answer)}>{summary?.answerLabel ?? "Recorded"}</Badge>
+                  <Badge variant={feedbackBadgeVariant(summary?.answer)}>
+                    {summary?.answerLabel ?? "Recorded"}
+                  </Badge>
                 </div>
 
                 <div className="rounded-lg border border-gold/20 bg-gold/10 px-3.5 py-3 text-[13px] leading-[1.75] text-body">
@@ -1002,7 +1083,9 @@ function ReaderCompletedDetail({
 
                 {summary?.note && (
                   <div className="mt-3 rounded-lg border border-gold/20 bg-cream/80 px-3.5 py-3">
-                    <div className="mb-1 text-[10px] uppercase tracking-[1.4px] text-muted">Your note</div>
+                    <div className="mb-1 text-[10px] uppercase tracking-[1.4px] text-muted">
+                      Your note
+                    </div>
                     <p className="m-0 text-[13px] leading-[1.65] text-body">{summary.note}</p>
                   </div>
                 )}
@@ -1013,14 +1096,18 @@ function ReaderCompletedDetail({
       ) : (
         <div className="rounded-xl border border-gold/25 bg-cream-2 p-4">
           <DetailSubtitle>Recorded feedback</DetailSubtitle>
-          <p className="m-0 text-[13px] leading-[1.65] text-body">{excerpt(feedback.content, 420)}</p>
+          <p className="m-0 text-[13px] leading-[1.65] text-body">
+            {excerpt(feedback.content, 420)}
+          </p>
         </div>
       )}
     </div>
   );
 }
 
-function feedbackBadgeVariant(answer: ValidationFeedbackSummary["answer"] | undefined): ComponentProps<typeof Badge>["variant"] {
+function feedbackBadgeVariant(
+  answer: ValidationFeedbackSummary["answer"] | undefined
+): ComponentProps<typeof Badge>["variant"] {
   if (answer === "accurate") return "done";
   if (answer === "partly") return "gold";
   if (answer === "inaccurate") return "error";
@@ -1040,7 +1127,9 @@ function AnchorRationalePopover({ label, rationale }: { label: string; rationale
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,360px)] p-4" align="start" side="bottom">
-        <div className="mb-2 text-[10px] uppercase tracking-[1.6px] text-gold">Why this was inferred</div>
+        <div className="mb-2 text-[10px] uppercase tracking-[1.6px] text-gold">
+          Why this was inferred
+        </div>
         <p className="m-0 whitespace-pre-wrap text-[13px] leading-[1.7] text-body">{rationale}</p>
       </PopoverContent>
     </Popover>
@@ -1052,8 +1141,6 @@ function CoreStageDetail({
   session,
   nodes,
   status,
-  coreJob,
-  now,
   onResumeCoreReport,
   coreInterrupted
 }: {
@@ -1061,14 +1148,14 @@ function CoreStageDetail({
   session: SkillSessionResponse | null;
   nodes: PipelineNode[];
   status: StageStatus;
-  coreJob: CoreJobResponse | null;
-  now: number;
   onResumeCoreReport: () => Promise<void>;
   coreInterrupted: boolean;
 }) {
   const copy = STAGE_COPY[stageId];
   const runningNodes = nodes.filter((node) => node.status === "running");
-  const completedNodes = nodes.filter((node) => node.status === "completed" || node.status === "skipped");
+  const completedNodes = nodes.filter(
+    (node) => node.status === "completed" || node.status === "skipped"
+  );
   const failedNodes = nodes.filter((node) => node.status === "failed");
   const stageDuration = completedNodes.reduce((sum, node) => sum + (node.durationSeconds ?? 0), 0);
   const artifact = findStageArtifact(session, stageId, nodes);
@@ -1141,7 +1228,14 @@ function StageStatusSummary({
   durationSeconds: number;
   coreInterrupted: boolean;
 }) {
-  const Icon = status === "failed" ? AlertTriangle : status === "running" ? Clock3 : status === "done" ? CheckCircle2 : ListChecks;
+  const Icon =
+    status === "failed"
+      ? AlertTriangle
+      : status === "running"
+        ? Clock3
+        : status === "done"
+          ? CheckCircle2
+          : ListChecks;
   const summary = stageStatusSummary(status, copy, coreInterrupted);
 
   return (
@@ -1251,7 +1345,10 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: StageStatus }) {
   const [expanded, setExpanded] = useState(false);
-  const displayContent = useMemo(() => sanitizeResultContentForDisplay(artifact.content), [artifact.content]);
+  const displayContent = useMemo(
+    () => sanitizeResultContentForDisplay(artifact.content),
+    [artifact.content]
+  );
   const sections = useMemo(() => parseResultPreviewSections(displayContent), [displayContent]);
   const visibleSections = expanded ? sections : sections.slice(0, 3);
   const canExpand = sections.length > 0;
@@ -1270,7 +1367,12 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
           </div>
         </div>
         {canExpand && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded((value) => !value)}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded((value) => !value)}
+          >
             <Eye size={13} /> {expanded ? "Show less" : "Show full"}
           </Button>
         )}
@@ -1297,7 +1399,8 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
           ))}
           {sections.length > visibleSections.length && (
             <div className="py-3 text-[12.5px] text-muted">
-              {sections.length - visibleSections.length} more sections are available in the full result.
+              {sections.length - visibleSections.length} more sections are available in the full
+              result.
             </div>
           )}
         </div>
@@ -1307,7 +1410,11 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
 }
 
 function DetailSubtitle({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("mb-2 text-[11px] uppercase tracking-[1.4px] text-muted", className)}>{children}</div>;
+  return (
+    <div className={cn("mb-2 text-[11px] uppercase tracking-[1.4px] text-muted", className)}>
+      {children}
+    </div>
+  );
 }
 
 function findStageArtifact(
@@ -1372,7 +1479,9 @@ function parseResultPreviewSections(content: string): ResultPreviewSection[] {
   flush();
 
   if (sections.length === 0) {
-    return [{ id: "result-section-1", title: "Overview", body: cleanResultPreviewBody(normalized) }];
+    return [
+      { id: "result-section-1", title: "Overview", body: cleanResultPreviewBody(normalized) }
+    ];
   }
   const readable = sections.filter((section) => stripMarkdownForPreview(section.body).length > 24);
   return (readable.length > 0 ? readable : sections).slice(0, 24);
@@ -1387,11 +1496,7 @@ function cleanResultPreviewBody(content: string) {
 }
 
 function isPreviewMetaLine(line: string) {
-  const normalized = line
-    .trim()
-    .replace(/^>\s*/, "")
-    .replace(/\*\*/g, "")
-    .replace(/`/g, "");
+  const normalized = line.trim().replace(/^>\s*/, "").replace(/\*\*/g, "").replace(/`/g, "");
   if (!normalized || /^---+$/.test(normalized)) return true;
   if (normalized.includes(".runtime/") || normalized.includes("内部shard")) return true;
   if (/^\*.*(数据源|本文件为|交付批次).*\*$/.test(normalized)) return true;
@@ -1499,7 +1604,9 @@ function buildValidationFeedbackMarkdown(
     const entry = feedback[anchor.index];
     const choice = VALIDATION_CHOICES.find((item) => item.value === entry?.answer);
     lines.push(`#### Anchor ${anchor.index}`);
-    lines.push(`- User answer: ${choice?.storedLabel ?? entry?.answer ?? ""} (${choice?.label ?? ""})`);
+    lines.push(
+      `- User answer: ${choice?.storedLabel ?? entry?.answer ?? ""} (${choice?.label ?? ""})`
+    );
     if (entry?.note.trim()) lines.push(`- User note: ${entry.note.trim()}`);
     lines.push(`- Anchor text: ${anchor.statement}`);
     lines.push("");
@@ -1517,7 +1624,8 @@ function parseRecordedValidationFeedback(content: string): Map<number, Validatio
     const block = match[2] ?? "";
     const answerRaw = block.match(/^- User answer:\s*(.+)$/m)?.[1]?.trim() ?? "";
     const note = block.match(/^- User note:\s*([\s\S]*?)(?=\n- User |\n$|$)/m)?.[1]?.trim() ?? "";
-    const anchorText = block.match(/^- Anchor text:\s*([\s\S]*?)(?=\n- User |\n$|$)/m)?.[1]?.trim() ?? "";
+    const anchorText =
+      block.match(/^- Anchor text:\s*([\s\S]*?)(?=\n- User |\n$|$)/m)?.[1]?.trim() ?? "";
     const normalized = normalizeRecordedAnswer(answerRaw);
     if (index > 0) {
       result.set(index, {
@@ -1532,7 +1640,10 @@ function parseRecordedValidationFeedback(content: string): Map<number, Validatio
   return result;
 }
 
-function normalizeRecordedAnswer(raw: string): { answer: ValidationAnswer | "recorded"; label: string } {
+function normalizeRecordedAnswer(raw: string): {
+  answer: ValidationAnswer | "recorded";
+  label: string;
+} {
   if (/Not accurate|不准/i.test(raw)) return { answer: "inaccurate", label: "Not accurate" };
   if (/Partly|部分/i.test(raw)) return { answer: "partly", label: "Partly" };
   if (/Accurate|准/i.test(raw)) return { answer: "accurate", label: "Accurate" };
@@ -1544,20 +1655,6 @@ function formatElapsed(startedAt: number | null, now: number) {
   return formatDuration(Math.max(0, (now - startedAt) / 1000));
 }
 
-function formatElapsedIso(startedAt: string | null | undefined, now: number) {
-  if (!startedAt) return "—";
-  const started = new Date(startedAt).getTime();
-  if (Number.isNaN(started)) return "—";
-  return formatDuration(Math.max(0, (now - started) / 1000));
-}
-
-function formatTimestamp(value: string | null | undefined) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-
 function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | null): BirthInfo {
   if (navState?.birth) {
     return {
@@ -1565,11 +1662,14 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
       time: navState.birth.birthTime || "Unknown (12:00 placeholder)",
       place: navState.birth.birthPlace,
       gender: displayCollected(GENDER_LABELS[navState.birth.gender] ?? navState.birth.gender),
-      relationship: displayCollected(RELATIONSHIP_LABELS[navState.birth.relationship] ?? navState.birth.relationship),
+      relationship: displayCollected(
+        RELATIONSHIP_LABELS[navState.birth.relationship] ?? navState.birth.relationship
+      ),
       timePrecision: displayMappedValue(navState.birth.birthTimePrecision, PRECISION_LABELS),
       timeSource: displayMappedValue(navState.birth.timeSource || "未追问", TIME_SOURCE_LABELS),
       effectivePrecision:
-        navState.birth.birthTimePrecision === "exact" && navState.birth.timeSource === "出生证/医院记录"
+        navState.birth.birthTimePrecision === "exact" &&
+        navState.birth.timeSource === "出生证/医院记录"
           ? "± minute-level"
           : "Adjusted by reader validation",
       concern: navState.concern?.trim() ?? ""
@@ -1598,7 +1698,8 @@ function displayMappedValue(value: string | undefined, labels: Record<string, st
 }
 
 function displayCollected(value: string | undefined) {
-  if (!value || value === "—" || value.includes("not-collected") || value.includes("待填")) return "";
+  if (!value || value === "—" || value.includes("not-collected") || value.includes("待填"))
+    return "";
   return value;
 }
 

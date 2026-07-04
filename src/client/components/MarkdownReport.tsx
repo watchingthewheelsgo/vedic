@@ -156,12 +156,16 @@ function renderInline(text: string): ReactNode[] {
   return parts.map((part, index) => {
     if (part.startsWith("`") && part.endsWith("`")) {
       return (
-        <code key={index} className="rounded bg-cream-3 px-1.5 py-0.5 font-mono text-[0.88em] text-gold-dim">
+        <code
+          key={index}
+          className="rounded bg-cream-3 px-1.5 py-0.5 font-mono text-[0.88em] text-gold-dim"
+        >
           {part.slice(1, -1)}
         </code>
       );
     }
-    if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("**") && part.endsWith("**"))
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
     return <span key={index}>{part}</span>;
   });
 }

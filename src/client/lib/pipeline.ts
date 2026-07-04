@@ -98,7 +98,7 @@ export function getPipelineData(
       id: node.id,
       label: node.label ?? node.id,
       wave: (node.wave ?? 1) + 1,
-      status: persistedFailed && node.status === "running" ? "pending" : node.status ?? "pending",
+      status: persistedFailed && node.status === "running" ? "pending" : (node.status ?? "pending"),
       files: node.files ?? [],
       dependencies: node.dependencies ?? [],
       startedAt: node.startedAt ?? null,
@@ -112,8 +112,7 @@ export function getPipelineData(
       runMetrics?.progress?.completed ??
       normalized.filter((node) => node.status === "completed" || node.status === "skipped").length;
     const failed =
-      runMetrics?.progress?.failed ??
-      normalized.filter((node) => node.status === "failed").length;
+      runMetrics?.progress?.failed ?? normalized.filter((node) => node.status === "failed").length;
     const adjustedTotal = total + (readerNode ? 1 : 0);
     const adjustedCompleted = completed + (readerNode?.status === "completed" ? 1 : 0);
     const adjustedFailed = failed + (readerNode?.status === "failed" ? 1 : 0);

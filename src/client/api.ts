@@ -19,9 +19,10 @@ async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TR
   });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as
-      | { error?: string; detail?: string }
-      | null;
+    const error = (await response.json().catch(() => null)) as {
+      error?: string;
+      detail?: string;
+    } | null;
     throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
   }
 
@@ -32,9 +33,10 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
   const response = await fetch(path, { signal });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as
-      | { error?: string; detail?: string }
-      | null;
+    const error = (await response.json().catch(() => null)) as {
+      error?: string;
+      detail?: string;
+    } | null;
     throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
   }
 
@@ -44,9 +46,10 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
 async function downloadFile(path: string, filename: string): Promise<void> {
   const response = await fetch(path);
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as
-      | { error?: string; detail?: string }
-      | null;
+    const error = (await response.json().catch(() => null)) as {
+      error?: string;
+      detail?: string;
+    } | null;
     throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
   }
 
@@ -90,13 +93,12 @@ export const api = {
     return getJson<AdminSessionListResponse>("/api/admin/sessions");
   },
   getAdminSession(sessionId: string) {
-    return getJson<AdminSessionDetailResponse>(`/api/admin/sessions/${encodeURIComponent(sessionId)}`);
+    return getJson<AdminSessionDetailResponse>(
+      `/api/admin/sessions/${encodeURIComponent(sessionId)}`
+    );
   },
   createSynastrySubject(input: SynastryBirthInput) {
-    return postJson<SkillSessionResponse, SynastryBirthInput>(
-      "/api/skill-synastry-subject",
-      input
-    );
+    return postJson<SkillSessionResponse, SynastryBirthInput>("/api/skill-synastry-subject", input);
   },
   runSkill(input: SkillRunInput) {
     return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input);

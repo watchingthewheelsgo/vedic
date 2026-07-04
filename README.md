@@ -83,11 +83,16 @@ without an LLM, set `VEDIC_AI_MODE=mock`.
 
 ```bash
 npm run ci
+npm run format
+npm run format:check
+npm run frontend:lint
+npm run backend:sync
+npm run backend:setup
 npm run backend:format
 npm run backend:format:check
 npm run backend:lint
+npm run backend:typecheck
 npm run check
-npm run backend:setup
 npm run backend:config
 npm run backend:check
 npm run backend:test
@@ -100,9 +105,9 @@ Install local commit hooks once per checkout:
 uv run --no-sync --project backend pre-commit install
 ```
 
-The configured hook runs staged whitespace checks, Python format/lint checks,
-TypeScript type checks, and backend tests before commits. Pull requests run the
-same core checks in GitHub Actions.
+The configured hook runs staged whitespace checks, Prettier format checks,
+ESLint, Python format/lint/type checks, TypeScript type checks, and backend
+tests before commits. Pull requests run the same core checks in GitHub Actions.
 
 `npm run backend:dev` runs `backend:ensure` before starting uvicorn. The backend
 startup preflight fails fast if calculator dependencies, PyJHora data, bundled

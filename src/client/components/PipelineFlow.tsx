@@ -32,16 +32,31 @@ export type StageDef = {
 // underlying DAG has ~48 nodes.
 export const WORKSHOP_STAGES: StageDef[] = [
   { id: "src", label: "Personal Information", sub: "chart seed", seed: true, match: () => false },
-  { id: "reader", label: "Pre-Reading Validation", sub: "your feedback", match: (id) => id === "reader_prevalidation" },
+  {
+    id: "reader",
+    label: "Pre-Reading Validation",
+    sub: "your feedback",
+    match: (id) => id === "reader_prevalidation"
+  },
   { id: "p1", label: "Core Identity", sub: "first frame", match: (id) => id === "p1" },
   { id: "yoga", label: "Major Patterns", sub: "yoga scan", match: (id) => id === "p2_yoga" },
-  { id: "p2", label: "Planet Strengths", sub: "9 planets", match: (id) => id.startsWith("p2_") && id !== "p2_yoga" },
+  {
+    id: "p2",
+    label: "Planet Strengths",
+    sub: "9 planets",
+    match: (id) => id.startsWith("p2_") && id !== "p2_yoga"
+  },
   { id: "d9", label: "Deeper Promise", sub: "Navamsha", match: (id) => id.startsWith("p3a_d9_") },
   { id: "div", label: "Life Context", sub: "career/home", match: (id) => id.startsWith("p3b_") },
   { id: "house", label: "Life Areas", sub: "12 houses", match: (id) => id.startsWith("p4_house_") },
   { id: "dasha", label: "Timing Map", sub: "Dasha", match: (id) => id === "dasha_review" },
   { id: "pari", label: "Cross-checks", sub: "exchanges", match: (id) => id === "p4_parivartana" },
-  { id: "life", label: "Life Synthesis", sub: "10 domains", match: (id) => id.startsWith("p5_block_") },
+  {
+    id: "life",
+    label: "Life Synthesis",
+    sub: "10 domains",
+    match: (id) => id.startsWith("p5_block_")
+  },
   { id: "appx", label: "Final Report", sub: "appendix", match: (id) => id === "appendix" }
 ];
 
@@ -132,7 +147,8 @@ function nodeStatusClass(status: StageStatus): StageStatus {
 function StageNode({ data }: NodeProps<StageFlowNode>) {
   const statusClass: Record<StageStatus, string> = {
     done: "border-gold bg-linear-to-b from-gold/15 to-night-3 text-gold-light",
-    running: "border-gold bg-night-3 text-white shadow-[0_0_0_1px_var(--color-gold),0_4px_18px_rgba(201,169,110,0.35)]",
+    running:
+      "border-gold bg-night-3 text-white shadow-[0_0_0_1px_var(--color-gold),0_4px_18px_rgba(201,169,110,0.35)]",
     waiting: "border-gold bg-linear-to-b from-gold/10 to-night-3 text-gold-light",
     failed: "border-red bg-night-3 text-cream",
     pending: "border-gold/25 bg-night-3 text-cream opacity-60"
@@ -197,7 +213,12 @@ export function PipelineFlow({
             status: stat.status,
             seed: Boolean(stage.seed),
             selected: selectedStageId === stage.id,
-            badge: stat.status === "waiting" ? "input" : stat.total > 1 ? `${stat.done}/${stat.total}` : ""
+            badge:
+              stat.status === "waiting"
+                ? "input"
+                : stat.total > 1
+                  ? `${stat.done}/${stat.total}`
+                  : ""
           }
         };
       }),

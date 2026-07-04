@@ -1,0 +1,21 @@
+{
+  "include": ["backend/app", "backend/tests", "scripts"],
+  "exclude": ["backend/.venv", "backend/data", "backend/app/calculator/ephe", "**/__pycache__"],
+  "extraPaths": ["backend"],
+  "venvPath": "backend",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportArgumentType": "none",
+  "reportCallIssue": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "reportOptionalCall": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalSubscript": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownVariableType": "none"
+}

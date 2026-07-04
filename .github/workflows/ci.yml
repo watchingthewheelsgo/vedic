@@ -37,7 +37,13 @@ jobs:
         run: npm ci
 
       - name: Install backend dependencies
-        run: uv sync --project backend --all-groups
+        run: npm run backend:sync
+
+      - name: Repository format check
+        run: npm run format:check
+
+      - name: Frontend lint
+        run: npm run frontend:lint
 
       - name: Python format check
         run: npm run backend:format:check
@@ -49,10 +55,13 @@ jobs:
         run: npm run check
 
       - name: Backend runtime setup
-        run: npm run backend:setup
+        run: npm run backend:ensure
 
       - name: Backend runtime check
         run: npm run backend:check
+
+      - name: Python type check
+        run: npm run backend:typecheck
 
       - name: Backend tests
         run: npm run backend:test

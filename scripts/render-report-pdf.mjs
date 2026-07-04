@@ -21,11 +21,13 @@ function readArgs(argv) {
   const input = args.get("input");
   const output = args.get("output");
   if (!input || !output) {
-    throw new Error("Usage: node scripts/render-report-pdf.mjs --input report.html --output report.pdf");
+    throw new Error(
+      "Usage: node scripts/render-report-pdf.mjs --input report.html --output report.pdf"
+    );
   }
   return {
     input: resolve(input),
-    output: resolve(output),
+    output: resolve(output)
   };
 }
 
@@ -61,7 +63,7 @@ async function main() {
   try {
     const page = await browser.newPage({
       viewport: { width: 1240, height: 1754 },
-      deviceScaleFactor: 1,
+      deviceScaleFactor: 1
     });
     await page.emulateMedia({ media: "print" });
     await page.goto(pathToFileURL(input).toString(), { waitUntil: "networkidle" });
@@ -77,8 +79,8 @@ async function main() {
         top: "16mm",
         right: "16mm",
         bottom: "20mm",
-        left: "16mm",
-      },
+        left: "16mm"
+      }
     });
   } finally {
     await browser.close();

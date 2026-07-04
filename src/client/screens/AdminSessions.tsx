@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  Clock3,
   Download,
   Eye,
   FileText,
@@ -101,10 +100,29 @@ export function AdminSessions() {
         )}
 
         <section className="grid gap-3 md:grid-cols-4">
-          <AdminStat label="Total sessions" value={data?.total ?? 0} icon={<ServerCog size={16} />} />
-          <AdminStat label="Running or stalled" value={data?.running ?? 0} icon={<Activity size={16} />} tone="gold" />
-          <AdminStat label="Completed" value={data?.completed ?? 0} icon={<CheckCircle2 size={16} />} tone="green" />
-          <AdminStat label="Failed" value={data?.failed ?? 0} icon={<AlertTriangle size={16} />} tone="red" />
+          <AdminStat
+            label="Total sessions"
+            value={data?.total ?? 0}
+            icon={<ServerCog size={16} />}
+          />
+          <AdminStat
+            label="Running or stalled"
+            value={data?.running ?? 0}
+            icon={<Activity size={16} />}
+            tone="gold"
+          />
+          <AdminStat
+            label="Completed"
+            value={data?.completed ?? 0}
+            icon={<CheckCircle2 size={16} />}
+            tone="green"
+          />
+          <AdminStat
+            label="Failed"
+            value={data?.failed ?? 0}
+            icon={<AlertTriangle size={16} />}
+            tone="red"
+          />
         </section>
 
         <section className="rounded-lg border border-gold/25 bg-cream shadow-[0_18px_48px_rgba(44,31,15,0.07)]">
@@ -154,8 +172,12 @@ export function AdminSessions() {
                     <SessionRow
                       key={session.sessionId}
                       session={session}
-                      onOpen={() => navigate(`/admin/sessions/${encodeURIComponent(session.sessionId)}`)}
-                      onOpenWorkshop={() => navigate(`/session/${encodeURIComponent(session.sessionId)}`)}
+                      onOpen={() =>
+                        navigate(`/admin/sessions/${encodeURIComponent(session.sessionId)}`)
+                      }
+                      onOpenWorkshop={() =>
+                        navigate(`/session/${encodeURIComponent(session.sessionId)}`)
+                      }
                       onDownload={() => void api.downloadReportPdf(session.sessionId)}
                     />
                   ))}
@@ -250,21 +272,33 @@ function SessionRow({
       <td className="px-4 py-4 align-top">
         <StatusBadge status={session.status} />
         {session.activeNode && (
-          <div className="mt-2 max-w-[170px] truncate text-xs text-muted" title={session.activeNode}>
+          <div
+            className="mt-2 max-w-[170px] truncate text-xs text-muted"
+            title={session.activeNode}
+          >
             {session.activeNode}
           </div>
         )}
       </td>
       <td className="px-4 py-4 align-top">
-        <button className="font-mono text-xs font-semibold text-ink hover:text-gold-dim" onClick={onOpen}>
+        <button
+          className="font-mono text-xs font-semibold text-ink hover:text-gold-dim"
+          onClick={onOpen}
+        >
           {session.sessionId}
         </button>
-        {session.jobId && <div className="mt-1 font-mono text-[10px] text-muted">job {session.jobId}</div>}
+        {session.jobId && (
+          <div className="mt-1 font-mono text-[10px] text-muted">job {session.jobId}</div>
+        )}
       </td>
       <td className="px-4 py-4 align-top">
         <div className="font-medium text-ink">{session.subject?.birthPlace ?? "No place"}</div>
         <div className="mt-1 text-xs text-muted">
-          {compact([session.subject?.birthDate, session.subject?.birthTime, session.subject?.timezone])}
+          {compact([
+            session.subject?.birthDate,
+            session.subject?.birthTime,
+            session.subject?.timezone
+          ])}
         </div>
       </td>
       <td className="px-4 py-4 align-top">
@@ -293,7 +327,13 @@ function SessionRow({
           <Button variant="ghost" size="icon" title="Open user session" onClick={onOpenWorkshop}>
             <Activity size={15} />
           </Button>
-          <Button variant="ghost" size="icon" title="Download PDF" onClick={onDownload} disabled={!session.hasPdf}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Download PDF"
+            onClick={onDownload}
+            disabled={!session.hasPdf}
+          >
             <Download size={15} />
           </Button>
         </div>
@@ -307,13 +347,19 @@ function ProgressMeter({ session }: { session: AdminSessionSummary }) {
     <div className="w-[180px]">
       <div className="mb-1 flex items-center justify-between text-[11px] text-muted">
         <span>{session.progress.percent}%</span>
-        {session.progress.failed > 0 && <span className="text-red">{session.progress.failed} failed</span>}
+        {session.progress.failed > 0 && (
+          <span className="text-red">{session.progress.failed} failed</span>
+        )}
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-cream-3">
         <div
           className={cn(
             "h-full rounded-full",
-            session.status === "failed" ? "bg-red" : session.status === "completed" ? "bg-green" : "bg-gold"
+            session.status === "failed"
+              ? "bg-red"
+              : session.status === "completed"
+                ? "bg-green"
+                : "bg-gold"
           )}
           style={{ width: `${Math.min(100, Math.max(0, session.progress.percent))}%` }}
         />

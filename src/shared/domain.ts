@@ -119,13 +119,7 @@ export type CoreJobResponse = {
 };
 
 export type AdminSessionStatus =
-  | "draft"
-  | "validation"
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "stalled";
+  "draft" | "validation" | "queued" | "running" | "completed" | "failed" | "stalled";
 
 export type AdminSessionProgress = {
   total: number;
