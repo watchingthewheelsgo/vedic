@@ -1,4 +1,6 @@
 import type {
+  AdminSessionDetailResponse,
+  AdminSessionListResponse,
   CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
@@ -17,9 +19,10 @@ async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TR
   });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as
-      | { error?: string; detail?: string }
-      | null;
+    const error = (await response.json().catch(() => null)) as {
+      error?: string;
+      detail?: string;
+    } | null;
     throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
   }
 
@@ -30,13 +33,35 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
   const response = await fetch(path, { signal });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as
-      | { error?: string; detail?: string }
-      | null;
+    const error = (await response.json().catch(() => null)) as {
+      error?: string;
+      detail?: string;
+    } | null;
     throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
   }
 
   return (await response.json()) as TResponse;
+}
+
+async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await fetch(path);
+  if (!response.ok) {
+    const error = (await response.json().catch(() => null)) as {
+      error?: string;
+      detail?: string;
+    } | null;
+    throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -64,11 +89,16 @@ export const api = {
   getSkillSession(sessionId: string) {
     return getJson<SkillSessionResponse>(`/api/skill-sessions/${encodeURIComponent(sessionId)}`);
   },
-  createSynastrySubject(input: SynastryBirthInput) {
-    return postJson<SkillSessionResponse, SynastryBirthInput>(
-      "/api/skill-synastry-subject",
-      input
+  listAdminSessions() {
+    return getJson<AdminSessionListResponse>("/api/admin/sessions");
+  },
+  getAdminSession(sessionId: string) {
+    return getJson<AdminSessionDetailResponse>(
+      `/api/admin/sessions/${encodeURIComponent(sessionId)}`
     );
+  },
+  createSynastrySubject(input: SynastryBirthInput) {
+    return postJson<SkillSessionResponse, SynastryBirthInput>("/api/skill-synastry-subject", input);
   },
   runSkill(input: SkillRunInput) {
     return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input);
@@ -81,5 +111,11 @@ export const api = {
   },
   recordSkillFeedback(input: SkillFeedbackInput) {
     return postJson<SkillSessionResponse, SkillFeedbackInput>("/api/skill-feedback", input);
+  },
+  downloadReportPdf(sessionId: string) {
+    return downloadFile(
+      `/api/skill-sessions/${encodeURIComponent(sessionId)}/report.pdf`,
+      `vedic-report-${sessionId}.pdf`
+    );
   }
 };

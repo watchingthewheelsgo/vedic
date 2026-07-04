@@ -23,10 +23,11 @@ Auto-detected file patterns:
 Runtime: backend dependency `markdown` is installed by `npm run backend:setup`.
 """
 
+import argparse
+import glob
 import os
 import re
-import glob
-import argparse
+import sys
 
 try:
     import markdown
@@ -222,106 +223,252 @@ SECTION_REGISTRY = [
     # ── Identity / Overview ──
     # Pro: p0_identity.md (身份定锚)
     # Open source: p1_overview.md (身份概览)
-    (5,  "identity",    "G0", "",     "身份概览",                      "Identity Overview",
-     ["p0_identity.md", "p1_overview.md"]),
-
+    (
+        5,
+        "identity",
+        "G0",
+        "",
+        "身份概览",
+        "Identity Overview",
+        ["p0_identity.md", "p1_overview.md"],
+    ),
     # ── Planets ──
-    (15, "planets_a",   "G1", "A",   "行星审计（日/月）",              "Planets (Sun/Moon)",
-     ["p2a_planets.md"]),
-    (17, "planets_b",   "G1", "B",   "行星审计（火/水）",              "Planets (Mars/Mercury)",
-     ["p2b_planets.md"]),
-    (19, "planets_c",   "G1", "C",   "行星审计（木/金）",              "Planets (Jupiter/Venus)",
-     ["p2c_planets.md"]),
-    (21, "planets_d",   "G1", "D",   "行星审计（土/罗/计 + 总结）",    "Planets (Sa/Ra/Ke + Summary)",
-     ["p2d_planets.md"]),
-    (23, "planets",     "G1", "",    "行星审计（P1-P12）",             "Planetary Audit (P1-P12)",
-     ["02_planets.md", "p2_planets.md", "planets.md"]),
-
+    (15, "planets_a", "G1", "A", "行星审计（日/月）", "Planets (Sun/Moon)", ["p2a_planets.md"]),
+    (17, "planets_b", "G1", "B", "行星审计（火/水）", "Planets (Mars/Mercury)", ["p2b_planets.md"]),
+    (
+        19,
+        "planets_c",
+        "G1",
+        "C",
+        "行星审计（木/金）",
+        "Planets (Jupiter/Venus)",
+        ["p2c_planets.md"],
+    ),
+    (
+        21,
+        "planets_d",
+        "G1",
+        "D",
+        "行星审计（土/罗/计 + 总结）",
+        "Planets (Sa/Ra/Ke + Summary)",
+        ["p2d_planets.md"],
+    ),
+    (
+        23,
+        "planets",
+        "G1",
+        "",
+        "行星审计（P1-P12）",
+        "Planetary Audit (P1-P12)",
+        ["02_planets.md", "p2_planets.md", "planets.md"],
+    ),
     # ── Divisional / D9 / Yogas ──
-    (28, "d9",          "G2", "A",   "D9盘深度审计",                   "D9 Navamsha Analysis",
-     ["p3a_d9.md"]),
-    (30, "divisional",  "G2", "B",   "分盘交叉分析",                   "Divisional Cross-Analysis",
-     ["p3b_divisional.md", "p3_divisional.md", "03_d9.md"]),
-    (32, "yogas",       "G2", "C",   "格局审计",                       "Yoga Audit",
-     ["p3c_yogas.md"]),
-
+    (28, "d9", "G2", "A", "D9盘深度审计", "D9 Navamsha Analysis", ["p3a_d9.md"]),
+    (
+        30,
+        "divisional",
+        "G2",
+        "B",
+        "分盘交叉分析",
+        "Divisional Cross-Analysis",
+        ["p3b_divisional.md", "p3_divisional.md", "03_d9.md"],
+    ),
+    (32, "yogas", "G2", "C", "格局审计", "Yoga Audit", ["p3c_yogas.md"]),
     # ── Houses ──
-    (38, "houses_a",    "G3", "A",   "宫位诊断（1-6宫）",             "House Diagnostics (1-6)",
-     ["p4a_houses.md"]),
-    (40, "houses_b",    "G3", "B",   "宫位诊断（7-12宫）",            "House Diagnostics (7-12)",
-     ["p4b_houses.md"]),
-    (42, "houses",      "G3", "",    "宫位诊断",                       "House Diagnostics",
-     ["04_houses.md", "p4_houses.md", "houses.md"]),
-
+    (38, "houses_a", "G3", "A", "宫位诊断（1-6宫）", "House Diagnostics (1-6)", ["p4a_houses.md"]),
+    (
+        40,
+        "houses_b",
+        "G3",
+        "B",
+        "宫位诊断（7-12宫）",
+        "House Diagnostics (7-12)",
+        ["p4b_houses.md"],
+    ),
+    (
+        42,
+        "houses",
+        "G3",
+        "",
+        "宫位诊断",
+        "House Diagnostics",
+        ["04_houses.md", "p4_houses.md", "houses.md"],
+    ),
     # ── Prediction (Pro only) ──
-    (45, "prediction",  "G4", "",    "动态预测",                       "Dynamic Prediction",
-     ["p5_prediction.md"]),
-    (47, "topics",      "G4", "B",   "专题交叉审计",                   "Cross-Topic Audit",
-     ["p5c_topics.md"]),
-
+    (45, "prediction", "G4", "", "动态预测", "Dynamic Prediction", ["p5_prediction.md"]),
+    (47, "topics", "G4", "B", "专题交叉审计", "Cross-Topic Audit", ["p5c_topics.md"]),
     # ── Life Architecture / Ten Themes ──
-    (50, "life",        "G5", "",    "人生架构总结",                    "Life Architecture",
-     ["p5a_life.md", "p6a_life.md", "05_life.md", "p5_life.md", "life.md"]),
-    (55, "life2",       "G5", "cont","人生架构总结",                    "Life Architecture",
-     ["p5b_life.md", "p6b_life.md", "05b_life.md", "life2.md"]),
-    (57, "blueprint",   "G5", "",    "生命蓝图",                       "Life Blueprint",
-     ["p6c_blueprint.md"]),
-
+    (
+        50,
+        "life",
+        "G5",
+        "",
+        "人生架构总结",
+        "Life Architecture",
+        ["p5a_life.md", "p6a_life.md", "05_life.md", "p5_life.md", "life.md"],
+    ),
+    (
+        55,
+        "life2",
+        "G5",
+        "cont",
+        "人生架构总结",
+        "Life Architecture",
+        ["p5b_life.md", "p6b_life.md", "05b_life.md", "life2.md"],
+    ),
+    (57, "blueprint", "G5", "", "生命蓝图", "Life Blueprint", ["p6c_blueprint.md"]),
     # ── Appendix ──
-    (58, "appendix",    "appendix", "",  "技术附录",                   "Technical Appendix",
-     ["appendix.md"]),
-    (59, "rectify",     "appendix", "",  "时间校准报告",               "Birth Time Rectification",
-     ["rectification_report.md", "rectification_scan.md"]),
-
+    (58, "appendix", "appendix", "", "技术附录", "Technical Appendix", ["appendix.md"]),
+    (
+        59,
+        "rectify",
+        "appendix",
+        "",
+        "时间校准报告",
+        "Birth Time Rectification",
+        ["rectification_report.md", "rectification_scan.md"],
+    ),
     # ── Career ──
     # SKILL outputs: career_phase12.md, career_phase3.md, career_phase4a/4b/4c.md
     # Legacy names: career_part1/2/3.md, career_phase1_2.md
-    (60, "career1",     "G6", "",    "事业 — 画像与叙事",             "Career — Portrait & Narrative",
-     ["career_part1.md", "career_phase12.md", "career_phase1_2.md"]),
-    (65, "career2",     "G6", "cont","事业 — 战略决策",               "Career — Strategy",
-     ["career_part2.md", "career_phase3.md"]),
-    (67, "career3a",    "G6", "cont","事业 — 画像与叙事（精密合成）",  "Career — Precision Synthesis",
-     ["career_phase4a.md"]),
-    (68, "career3b",    "G6", "cont","事业 — 战略决策（终局）",       "Career — Final Strategy",
-     ["career_part3.md", "career_phase4b.md", "career_phase4.md"]),
-    (69, "career3c",    "G6", "cont","事业 — 风险与箴言",             "Career — Risk & Advice",
-     ["career_phase4c.md"]),
-    (70, "career",      "G6", "",    "事业架构",                       "Career Architecture",
-     ["02_career.md", "06_career.md", "career.md"]),
-
+    (
+        60,
+        "career1",
+        "G6",
+        "",
+        "事业 — 画像与叙事",
+        "Career — Portrait & Narrative",
+        ["career_part1.md", "career_phase12.md", "career_phase1_2.md"],
+    ),
+    (
+        65,
+        "career2",
+        "G6",
+        "cont",
+        "事业 — 战略决策",
+        "Career — Strategy",
+        ["career_part2.md", "career_phase3.md"],
+    ),
+    (
+        67,
+        "career3a",
+        "G6",
+        "cont",
+        "事业 — 画像与叙事（精密合成）",
+        "Career — Precision Synthesis",
+        ["career_phase4a.md"],
+    ),
+    (
+        68,
+        "career3b",
+        "G6",
+        "cont",
+        "事业 — 战略决策（终局）",
+        "Career — Final Strategy",
+        ["career_part3.md", "career_phase4b.md", "career_phase4.md"],
+    ),
+    (
+        69,
+        "career3c",
+        "G6",
+        "cont",
+        "事业 — 风险与箴言",
+        "Career — Risk & Advice",
+        ["career_phase4c.md"],
+    ),
+    (
+        70,
+        "career",
+        "G6",
+        "",
+        "事业架构",
+        "Career Architecture",
+        ["02_career.md", "06_career.md", "career.md"],
+    ),
     # ── Love ──
     # SKILL outputs: love_step1.md, love_step2.md, love_step3.md
     # Legacy names: love_part1/2.md
-    (80, "love1",       "G7", "",    "感情 — 体质报告与配偶画像",     "Love — Pattern & Partner Profile",
-     ["love_part1.md", "love_step1.md"]),
-    (85, "love2",       "G7", "cont","感情 — 时间窗口",               "Love — Timing Windows",
-     ["love_step2.md"]),
-    (88, "love3",       "G7", "cont","感情 — 建议与风险",             "Love — Advice & Risk",
-     ["love_part2.md", "love_step3.md"]),
-    (90, "love",        "G7", "",    "感情与婚姻",                     "Love & Marriage",
-     ["03_love.md", "07_love.md", "love.md"]),
-
+    (
+        80,
+        "love1",
+        "G7",
+        "",
+        "感情 — 体质报告与配偶画像",
+        "Love — Pattern & Partner Profile",
+        ["love_part1.md", "love_step1.md"],
+    ),
+    (85, "love2", "G7", "cont", "感情 — 时间窗口", "Love — Timing Windows", ["love_step2.md"]),
+    (
+        88,
+        "love3",
+        "G7",
+        "cont",
+        "感情 — 建议与风险",
+        "Love — Advice & Risk",
+        ["love_part2.md", "love_step3.md"],
+    ),
+    (
+        90,
+        "love",
+        "G7",
+        "",
+        "感情与婚姻",
+        "Love & Marriage",
+        ["03_love.md", "07_love.md", "love.md"],
+    ),
     # ── Q&A (handled separately via glob) ──
-    (100, "qa",         "appendix", "",  "追问答疑",                   "Q&A",
-     []),
+    (100, "qa", "appendix", "", "追问答疑", "Q&A", []),
 ]
 
 
 # ── Part numbering ──
 
-CN_NUMS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
-           "十一", "十二", "十三", "十四", "十五"]
+CN_NUMS = [
+    "一",
+    "二",
+    "三",
+    "四",
+    "五",
+    "六",
+    "七",
+    "八",
+    "九",
+    "十",
+    "十一",
+    "十二",
+    "十三",
+    "十四",
+    "十五",
+]
+
 
 def cn_part_label(n):
     """第一部分, 第二部分, ..."""
-    return f"第{CN_NUMS[n-1]}部分" if 1 <= n <= len(CN_NUMS) else f"第{n}部分"
+    return f"第{CN_NUMS[n - 1]}部分" if 1 <= n <= len(CN_NUMS) else f"第{n}部分"
 
-EN_ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
-            "XI", "XII", "XIII", "XIV", "XV"]
+
+EN_ROMAN = [
+    "I",
+    "II",
+    "III",
+    "IV",
+    "V",
+    "VI",
+    "VII",
+    "VIII",
+    "IX",
+    "X",
+    "XI",
+    "XII",
+    "XIII",
+    "XIV",
+    "XV",
+]
+
 
 def en_part_label(n):
     """Part I, Part II, ..."""
-    return f"Part {EN_ROMAN[n-1]}" if 1 <= n <= len(EN_ROMAN) else f"Part {n}"
+    return f"Part {EN_ROMAN[n - 1]}" if 1 <= n <= len(EN_ROMAN) else f"Part {n}"
 
 
 def make_section_title(group, sub, base_title, part_num, lang):
@@ -352,6 +499,7 @@ def make_section_title(group, sub, base_title, part_num, lang):
 
 # ── File discovery ──
 
+
 def find_files(folder):
     """Auto-detect MD files. Returns dict: key -> (priority, group, sub, cn_title, en_title, content)"""
     found = {}
@@ -372,12 +520,12 @@ def find_files(folder):
 
     # Pass 2: dynamic scan for p*_*.md files not yet matched
     PREFIX_MAP = {
-        "p0": ("G0", "身份定锚",         "Identity"),
-        "p2": ("G1", "行星审计",          "Planetary Audit"),
-        "p3": ("G2", "分盘分析",          "Divisional Analysis"),
-        "p4": ("G3", "宫位诊断",          "House Diagnostics"),
-        "p5": ("G5", "人生架构总结",      "Life Architecture"),
-        "p6": ("G5", "人生架构总结",      "Life Architecture"),
+        "p0": ("G0", "身份定锚", "Identity"),
+        "p2": ("G1", "行星审计", "Planetary Audit"),
+        "p3": ("G2", "分盘分析", "Divisional Analysis"),
+        "p4": ("G3", "宫位诊断", "House Diagnostics"),
+        "p5": ("G5", "人生架构总结", "Life Architecture"),
+        "p6": ("G5", "人生架构总结", "Life Architecture"),
     }
 
     all_md = sorted(glob.glob(os.path.join(folder, "p*_*.md")))
@@ -403,7 +551,14 @@ def find_files(folder):
 
         with open(path, "r", encoding="utf-8") as f:
             sub_label = f"（{sub}）" if sub else ""
-            found[key] = (priority, group, sub, f"{cn_base}{sub_label}", f"{en_base} ({sub})" if sub else en_base, f.read())
+            found[key] = (
+                priority,
+                group,
+                sub,
+                f"{cn_base}{sub_label}",
+                f"{en_base} ({sub})" if sub else en_base,
+                f.read(),
+            )
         print(f"  ✓ {fname} → {key} (dynamic)")
 
     # Pass 3: Q&A glob
@@ -421,7 +576,9 @@ def find_files(folder):
 
 def detect_package(found, lang="cn", brand=None):
     """Detect which skill packages are present."""
-    has_core = any(v[1].startswith("G") for v in found.values() if v[1] in ("G0","G1","G2","G3","G4","G5"))
+    has_core = any(
+        v[1].startswith("G") for v in found.values() if v[1] in ("G0", "G1", "G2", "G3", "G4", "G5")
+    )
     has_career = any(v[1] == "G6" for v in found.values())
     has_love = any(v[1] == "G7" for v in found.values())
     has_qa = "qa" in found
@@ -440,11 +597,16 @@ def detect_package(found, lang="cn", brand=None):
     version = "Pro" if is_pro else "开源版" if lang == "cn" else "Open Source"
 
     parts = []
-    if has_core:    parts.append("核心" if lang == "cn" else "Core")
-    if has_career:  parts.append("事业" if lang == "cn" else "Career")
-    if has_love:    parts.append("感情" if lang == "cn" else "Love")
-    if has_rectify: parts.append("校准" if lang == "cn" else "Rectification")
-    if has_qa:      parts.append("答疑" if lang == "cn" else "Q&A")
+    if has_core:
+        parts.append("核心" if lang == "cn" else "Core")
+    if has_career:
+        parts.append("事业" if lang == "cn" else "Career")
+    if has_love:
+        parts.append("感情" if lang == "cn" else "Love")
+    if has_rectify:
+        parts.append("校准" if lang == "cn" else "Rectification")
+    if has_qa:
+        parts.append("答疑" if lang == "cn" else "Q&A")
 
     pkg = " + ".join(parts)
     if lang == "cn":
@@ -453,6 +615,7 @@ def detect_package(found, lang="cn", brand=None):
 
 
 # ── HTML builders ──
+
 
 def build_cover(name, lagna, gender, status, pkg, desc, lang="cn"):
     top = "DATA-DRIVEN VEDIC ASTROLOGY" if lang == "en" else "数据驱动吠陀占星"
@@ -492,13 +655,19 @@ def build_toc(sections, lang="cn"):
 
 def _fix_table_spacing(text):
     """确保 markdown 表格前有空行，否则解析器会把它当普通文本。"""
-    lines = text.split('\n')
+    lines = text.split("\n")
     fixed = []
     for i, line in enumerate(lines):
-        if line.strip().startswith('|') and i > 0 and fixed and fixed[-1].strip() and not fixed[-1].strip().startswith('|'):
-            fixed.append('')
+        if (
+            line.strip().startswith("|")
+            and i > 0
+            and fixed
+            and fixed[-1].strip()
+            and not fixed[-1].strip().startswith("|")
+        ):
+            fixed.append("")
         fixed.append(line)
-    return '\n'.join(fixed)
+    return "\n".join(fixed)
 
 
 def build_section(num, title, md_text):
@@ -516,6 +685,7 @@ def build_section(num, title, md_text):
 
 # ── Main ──
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Vedic Astrology Report Builder — MD → HTML (v2, auto-detect version)",
@@ -524,7 +694,8 @@ def main():
 Examples:
   python report_builder.py ./client_folder --name "John" --lang en
   python report_builder.py ./analysis --name "测试" --lagna "天蝎座" --lang cn
-        """)
+        """,
+    )
     parser.add_argument("folder", help="Folder with MD files (checks 'parts/' subfolder too)")
     parser.add_argument("--name", default="Client", help="Client name")
     parser.add_argument("--lagna", default="—", help="Ascendant")
@@ -532,10 +703,17 @@ Examples:
     parser.add_argument("--status", default="—", help="Current status")
     parser.add_argument("--lang", default="cn", choices=["cn", "en"], help="Language (default: cn)")
     parser.add_argument("--output", default=None, help="Output HTML path")
-    parser.add_argument("--include", default=None,
-                        help="Comma-separated sections to include: core,career,love,qa,rectify (default: all)")
-    parser.add_argument("--brand", default=None, choices=["pro", "open"],
-                        help="Force brand: 'pro' or 'open' (default: auto-detect)")
+    parser.add_argument(
+        "--include",
+        default=None,
+        help="Comma-separated sections to include: core,career,love,qa,rectify (default: all)",
+    )
+    parser.add_argument(
+        "--brand",
+        default=None,
+        choices=["pro", "open"],
+        help="Force brand: 'pro' or 'open' (default: auto-detect)",
+    )
     args = parser.parse_args()
 
     folder = args.folder.rstrip("/\\")
@@ -558,11 +736,11 @@ Examples:
     if args.include:
         include_set = set(args.include.lower().split(","))
         group_map = {
-            "core":    {"G0", "G1", "G2", "G3", "G4", "G5"},
-            "career":  {"G6"},
-            "love":    {"G7"},
+            "core": {"G0", "G1", "G2", "G3", "G4", "G5"},
+            "career": {"G6"},
+            "love": {"G7"},
             "rectify": set(),  # handled by key name
-            "qa":      set(),  # handled by key name
+            "qa": set(),  # handled by key name
         }
         allowed_groups = set()
         allowed_keys = set()
@@ -577,8 +755,7 @@ Examples:
         # Always include appendix if core is included
         if "core" in include_set:
             allowed_groups.add("appendix")
-        found = {k: v for k, v in found.items()
-                 if v[1] in allowed_groups or k in allowed_keys}
+        found = {k: v for k, v in found.items() if v[1] in allowed_groups or k in allowed_keys}
         print(f"  Filter: --include {args.include} → {len(found)} sections")
 
     lang = args.lang

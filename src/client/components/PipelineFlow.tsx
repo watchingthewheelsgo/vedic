@@ -31,17 +31,32 @@ export type StageDef = {
 // batch nodes, mirroring docs/pipeline.md so the graph stays readable while the
 // underlying DAG has ~48 nodes.
 export const WORKSHOP_STAGES: StageDef[] = [
-  { id: "src", label: "Birth Details", sub: "chart seed", seed: true, match: () => false },
-  { id: "reader", label: "Time Check", sub: "your feedback", match: (id) => id === "reader_prevalidation" },
+  { id: "src", label: "Personal Information", sub: "chart seed", seed: true, match: () => false },
+  {
+    id: "reader",
+    label: "Pre-Reading Validation",
+    sub: "your feedback",
+    match: (id) => id === "reader_prevalidation"
+  },
   { id: "p1", label: "Core Identity", sub: "first frame", match: (id) => id === "p1" },
   { id: "yoga", label: "Major Patterns", sub: "yoga scan", match: (id) => id === "p2_yoga" },
-  { id: "p2", label: "Planet Strengths", sub: "9 planets", match: (id) => id.startsWith("p2_") && id !== "p2_yoga" },
+  {
+    id: "p2",
+    label: "Planet Strengths",
+    sub: "9 planets",
+    match: (id) => id.startsWith("p2_") && id !== "p2_yoga"
+  },
   { id: "d9", label: "Deeper Promise", sub: "Navamsha", match: (id) => id.startsWith("p3a_d9_") },
   { id: "div", label: "Life Context", sub: "career/home", match: (id) => id.startsWith("p3b_") },
   { id: "house", label: "Life Areas", sub: "12 houses", match: (id) => id.startsWith("p4_house_") },
   { id: "dasha", label: "Timing Map", sub: "Dasha", match: (id) => id === "dasha_review" },
   { id: "pari", label: "Cross-checks", sub: "exchanges", match: (id) => id === "p4_parivartana" },
-  { id: "life", label: "Life Synthesis", sub: "10 domains", match: (id) => id.startsWith("p5_block_") },
+  {
+    id: "life",
+    label: "Life Synthesis",
+    sub: "10 domains",
+    match: (id) => id.startsWith("p5_block_")
+  },
   { id: "appx", label: "Final Report", sub: "appendix", match: (id) => id === "appendix" }
 ];
 
@@ -63,8 +78,8 @@ export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
   ["life", "appx"]
 ];
 
-const NODE_W = 186;
-const NODE_H = 56;
+const NODE_W = 210;
+const NODE_H = 68;
 
 const STATUS_STROKE: Record<StageStatus, string> = {
   done: "#C9A96E",
@@ -99,9 +114,9 @@ export function aggregateWorkshopStages(nodes: PipelineNode[]): Record<string, S
     ).length;
     let status: StageStatus = "pending";
     if (total === 0) status = "pending";
+    else if (matched.some((node) => node.status === "failed")) status = "failed";
     else if (matched.some((node) => node.status === "running")) status = "running";
     else if (matched.some((node) => node.status === "waiting")) status = "waiting";
-    else if (matched.some((node) => node.status === "failed")) status = "failed";
     else if (done === total) status = "done";
     result[stage.id] = { status, done, total };
   }
@@ -132,7 +147,8 @@ function nodeStatusClass(status: StageStatus): StageStatus {
 function StageNode({ data }: NodeProps<StageFlowNode>) {
   const statusClass: Record<StageStatus, string> = {
     done: "border-gold bg-linear-to-b from-gold/15 to-night-3 text-gold-light",
-    running: "border-gold bg-night-3 text-white shadow-[0_0_0_1px_var(--color-gold),0_4px_18px_rgba(201,169,110,0.35)]",
+    running:
+      "border-gold bg-night-3 text-white shadow-[0_0_0_1px_var(--color-gold),0_4px_18px_rgba(201,169,110,0.35)]",
     waiting: "border-gold bg-linear-to-b from-gold/10 to-night-3 text-gold-light",
     failed: "border-red bg-night-3 text-cream",
     pending: "border-gold/25 bg-night-3 text-cream opacity-60"
@@ -140,25 +156,27 @@ function StageNode({ data }: NodeProps<StageFlowNode>) {
   return (
     <div
       className={cn(
-        "relative min-h-14 w-[186px] cursor-pointer rounded-lg border-[1.5px] px-3 py-2 font-sans shadow-[0_4px_14px_rgba(0,0,0,0.3)] transition hover:-translate-y-px hover:border-gold/75",
+        "relative min-h-[68px] w-[210px] cursor-pointer rounded-lg border-[1.5px] px-3 py-2.5 font-sans shadow-[0_4px_14px_rgba(0,0,0,0.3)] transition hover:-translate-y-px hover:border-gold/75",
         data.seed ? "border-gold bg-night text-gold" : statusClass[nodeStatusClass(data.status)],
         data.selected && "shadow-[0_0_0_2px_var(--color-gold),0_10px_28px_rgba(201,169,110,0.28)]"
       )}
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
-      <div className="text-sm font-semibold">{data.label}</div>
-      <div className="mt-0.5 text-[11px] text-cream/45">{data.sub}</div>
-      {data.badge && (
-        <span
-          className={cn(
-            "absolute right-3 top-2 rounded-lg bg-gold px-2 py-0.5 text-[10.5px] font-extrabold tabular-nums text-night",
-            data.status === "failed" && "bg-red text-white",
-            data.status === "pending" && "bg-gold/40"
-          )}
-        >
-          {data.badge}
-        </span>
-      )}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 text-[13.5px] font-semibold leading-tight">{data.label}</div>
+        {data.badge && (
+          <span
+            className={cn(
+              "shrink-0 rounded-lg bg-gold px-2 py-0.5 text-[10.5px] font-extrabold tabular-nums leading-5 text-night",
+              data.status === "failed" && "bg-red text-white",
+              data.status === "pending" && "bg-gold/40"
+            )}
+          >
+            {data.badge}
+          </span>
+        )}
+      </div>
+      <div className="mt-1 text-[11px] text-cream/45">{data.sub}</div>
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </div>
   );
@@ -195,7 +213,12 @@ export function PipelineFlow({
             status: stat.status,
             seed: Boolean(stage.seed),
             selected: selectedStageId === stage.id,
-            badge: stat.status === "waiting" ? "input" : stat.total > 1 ? `${stat.done}/${stat.total}` : ""
+            badge:
+              stat.status === "waiting"
+                ? "input"
+                : stat.total > 1
+                  ? `${stat.done}/${stat.total}`
+                  : ""
           }
         };
       }),

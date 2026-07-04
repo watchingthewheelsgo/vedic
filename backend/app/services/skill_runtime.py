@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import SkillBirthInput, SkillRunInput, SkillSessionResponse, SynastryBirthInput
+from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
 from app.tools.registry import BackendToolRunner
@@ -20,10 +21,12 @@ class SkillRuntime:
         calculator: VedicCalculator,
         workspace: SkillWorkspace,
         agent_runtime: ClaudeRuntime,
+        metadata_store: MetadataStore | None = None,
     ) -> None:
         self.calculator = calculator
         self.workspace = workspace
         self.agent_runtime = agent_runtime
+        self.metadata_store = metadata_store
         self.tools = BackendToolRunner(workspace.settings)
 
     async def create_reader_session(self, input_data: SkillBirthInput) -> SkillSessionResponse:
@@ -57,6 +60,14 @@ class SkillRuntime:
             )
             + "\n",
         )
+        self.workspace.write_session_manifest(session_id)
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "structured_data.md", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "structured_data.json", producer="calculator"
+        )
+        await self._sync_metadata(session_id, stage="reader_ready", status="draft")
 
         chat_message = (
             "读盘基础数据已生成。\n\n"
@@ -95,9 +106,7 @@ class SkillRuntime:
             active_artifact=active,
         )
 
-    async def create_synastry_subject(
-        self, input_data: SynastryBirthInput
-    ) -> SkillSessionResponse:
+    async def create_synastry_subject(self, input_data: SynastryBirthInput) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
         if not (session_dir / "structured_data.md").exists():
             raise ValueError("A structured_data.md is required before synastry")
@@ -127,6 +136,7 @@ class SkillRuntime:
             a_label="A",
             b_label=input_data.label or "B",
         ).output
+        await self._sync_metadata(input_data.session_id, stage="synastry_ready", status="draft")
 
         return SkillSessionResponse(
             session_id=input_data.session_id,
@@ -156,12 +166,21 @@ class SkillRuntime:
         )
         parsed = self._parse_artifact_response(result.raw_text)
         for artifact in parsed["artifacts"]:
+            artifact_path = str(artifact["path"])
             self.workspace.write_artifact(
                 input_data.session_id,
-                str(artifact["path"]),
+                artifact_path,
                 str(artifact["content"]),
             )
+            self.workspace.mark_artifact_checkpoint(
+                input_data.session_id,
+                artifact_path,
+                producer=input_data.skill,
+            )
         stage = self._stage_for(input_data.skill)
+        await self._sync_metadata(
+            input_data.session_id, stage=stage, status=self._status_for_stage(stage)
+        )
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         return SkillSessionResponse(
             session_id=input_data.session_id,
@@ -180,6 +199,7 @@ class SkillRuntime:
                 item
                 for item in batches
                 if not set(self.core_batch_files(item)).issubset(existing_paths)
+                or not self.core_batch_resume_valid(input_data.session_id, item)
             ),
             None,
         )
@@ -202,6 +222,17 @@ class SkillRuntime:
         session_dir = self.workspace.require_session_dir(session_id)
         existing_paths = self._session_paths(session_dir)
         return set(self.core_batch_files(batch)).issubset(existing_paths)
+
+    def core_batch_resume_valid(self, session_id: str, batch: dict[str, object]) -> bool:
+        session_dir = self.workspace.require_session_dir(session_id)
+        expected = set(self.core_batch_files(batch))
+        if not expected.issubset(self._session_paths(session_dir)):
+            return False
+        producer = self._batch_producer(batch)
+        return all(
+            self.workspace.artifact_checkpoint_valid(session_id, path, producer=producer)
+            for path in expected
+        )
 
     def core_progress_response(
         self,
@@ -226,12 +257,18 @@ class SkillRuntime:
         batch: dict[str, object],
         *,
         batches: list[dict[str, object]] | None = None,
+        force: bool = False,
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
         batches = batches or self.core_batches(input_data.user_message)
         expected = set(self.core_batch_files(batch))
-        if expected.issubset(self._session_paths(session_dir)):
-            self._compose_core_outputs(session_dir)
+        if not force and self.core_batch_resume_valid(input_data.session_id, batch):
+            self._compose_core_outputs(input_data.session_id, session_dir)
+            await self._sync_metadata(
+                input_data.session_id,
+                stage="core_in_progress",
+                status="running",
+            )
             artifacts = self.workspace.read_artifacts(input_data.session_id)
             return SkillSessionResponse(
                 session_id=input_data.session_id,
@@ -241,6 +278,7 @@ class SkillRuntime:
                 active_artifact=self._active_artifact_for_batch(batch, artifacts),
             )
 
+        self.workspace.assert_no_project_runtime_artifacts()
         result = await self.agent_runtime.run_skill_task(
             input_data.skill,
             str(batch["prompt"]),
@@ -248,6 +286,7 @@ class SkillRuntime:
             skills=[input_data.skill],
             max_turns=self._max_turns_for(input_data.skill),
         )
+        self.workspace.assert_no_project_runtime_artifacts()
         missing = [path for path in expected if not (session_dir / path).exists()]
         if missing:
             raise ValueError(
@@ -255,12 +294,23 @@ class SkillRuntime:
                 + ", ".join(missing)
                 + f"\nAgent output:\n{result.raw_text[:2000]}"
             )
+        producer = self._batch_producer(batch)
+        for path in expected:
+            self.workspace.mark_artifact_checkpoint(
+                input_data.session_id,
+                path,
+                producer=producer,
+            )
 
-        self._compose_core_outputs(session_dir)
+        self._compose_core_outputs(input_data.session_id, session_dir)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
-        completed_paths = self._session_paths(session_dir)
         core_complete = all(
-            set(self.core_batch_files(item)).issubset(completed_paths) for item in batches
+            self.core_batch_resume_valid(input_data.session_id, item) for item in batches
+        )
+        await self._sync_metadata(
+            input_data.session_id,
+            stage="core_complete" if core_complete else "core_in_progress",
+            status="completed" if core_complete else "running",
         )
         next_message = (
             "vedic-core 全部批次已完成。"
@@ -279,7 +329,10 @@ class SkillRuntime:
         self, session_id: str, feedback_markdown: str
     ) -> SkillSessionResponse:
         existing = ""
-        artifacts = {artifact.path: artifact.content for artifact in self.workspace.read_artifacts(session_id)}
+        artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id)
+        }
         if "user_context.md" in artifacts:
             existing = artifacts["user_context.md"].rstrip() + "\n\n"
         content = (
@@ -289,6 +342,10 @@ class SkillRuntime:
             f"_updated_at: {datetime.now(timezone.utc).isoformat()}_\n"
         )
         self.workspace.write_artifact(session_id, "user_context.md", content)
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "user_context.md", producer="vedic-reader-feedback"
+        )
+        await self._sync_metadata(session_id, stage="reader_validation", status="validation")
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_validation",
@@ -298,6 +355,35 @@ class SkillRuntime:
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="user_context.md",
         )
+
+    async def _sync_metadata(
+        self,
+        session_id: str,
+        *,
+        stage: str,
+        status: str,
+    ) -> None:
+        if self.metadata_store is None:
+            return
+        await self.metadata_store.sync_session_from_files(session_id, stage=stage, status=status)
+
+    def _status_for_stage(self, stage: str) -> str:
+        if stage in {
+            "core_complete",
+            "career_complete",
+            "love_complete",
+            "rectifier_complete",
+            "synastry_complete",
+            "qa_complete",
+        }:
+            return "completed"
+        if stage == "reader_validation":
+            return "validation"
+        if stage == "core_in_progress":
+            return "running"
+        if stage == "error":
+            return "failed"
+        return "draft"
 
     def _prompt_for(self, input_data: SkillRunInput) -> str:
         if input_data.skill == "vedic-reader":
@@ -525,16 +611,56 @@ Rules:
         )
 
         life_blocks = [
-            (1, "人格核心", "Use p1_overview.md, p2 Sun/Moon findings, p3a Sun/Moon D9 settlement, Lagna, Moon, Sun, and AK. Write block 1 only."),
-            (2, "财富潜力", "Use house 2 and house 11 diagnoses, D4 data, p2 money-relevant planet audits, and Dasha review. Write block 2 only."),
-            (3, "事业方向", "Use house 10 diagnosis, D10 data, L10/AmK audits, Yoga activation, and Dasha review. Write block 3 only."),
-            (4, "感情/婚姻", "Use house 7 diagnosis, D9, Venus/Jupiter/DK/UL signals, and Dasha review. Write block 4 only."),
-            (5, "健康提醒", "Use house 1 and house 6 diagnoses, Mars/Saturn audits, Maraka context, and Dasha review. Write block 5 only."),
-            (6, "教育/学习", "Use house 4 and house 5 diagnoses, D5 data, Mercury/Jupiter/Moon signals, and Dasha review. Write block 6 only."),
-            (7, "家庭/居住", "Use house 4 and house 9 diagnoses, D4 data, parental/home indicators, and Dasha review. Write block 7 only."),
-            (8, "社交/声誉", "Use AL data from structured_data.md, house 11 diagnosis, relevant p2/p4 signals, and Dasha review. Write block 8 only."),
-            (9, "灵性/成长", "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only."),
-            (10, "赛道优势地图", "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into supported tracks, business/wealth paths, and timing. Write block 10 only."),
+            (
+                1,
+                "人格核心",
+                "Use p1_overview.md, p2 Sun/Moon findings, p3a Sun/Moon D9 settlement, Lagna, Moon, Sun, and AK. Write block 1 only.",
+            ),
+            (
+                2,
+                "财富潜力",
+                "Use house 2 and house 11 diagnoses, D4 data, p2 money-relevant planet audits, and Dasha review. Write block 2 only.",
+            ),
+            (
+                3,
+                "事业方向",
+                "Use house 10 diagnosis, D10 data, L10/AmK audits, Yoga activation, and Dasha review. Write block 3 only.",
+            ),
+            (
+                4,
+                "感情/婚姻",
+                "Use house 7 diagnosis, D9, Venus/Jupiter/DK/UL signals, and Dasha review. Write block 4 only.",
+            ),
+            (
+                5,
+                "健康提醒",
+                "Use house 1 and house 6 diagnoses, Mars/Saturn audits, Maraka context, and Dasha review. Write block 5 only.",
+            ),
+            (
+                6,
+                "教育/学习",
+                "Use house 4 and house 5 diagnoses, D5 data, Mercury/Jupiter/Moon signals, and Dasha review. Write block 6 only.",
+            ),
+            (
+                7,
+                "家庭/居住",
+                "Use house 4 and house 9 diagnoses, D4 data, parental/home indicators, and Dasha review. Write block 7 only.",
+            ),
+            (
+                8,
+                "社交/声誉",
+                "Use AL data from structured_data.md, house 11 diagnosis, relevant p2/p4 signals, and Dasha review. Write block 8 only.",
+            ),
+            (
+                9,
+                "灵性/成长",
+                "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only.",
+            ),
+            (
+                10,
+                "赛道优势地图",
+                "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into supported tracks, business/wealth paths, and timing. Write block 10 only.",
+            ),
         ]
         for number, title, instruction in life_blocks:
             batches.append(
@@ -625,6 +751,8 @@ Rules:
 - Each requested file must be complete markdown, not a placeholder and not "see previous".
 - If the requested file is under .runtime/, treat it as an internal shard; do not write the public composed files such as p2a_planets.md, p3a_d9.md, p4a_houses.md, p4b_houses.md, p5a_life.md, or p5b_life.md.
 - Do not create, edit, or rename any file outside the exact requested batch file name(s).
+- All requested paths are relative to the current working directory, which is the only valid user session workspace.
+- Do not read from or write to ../ paths, absolute paths, the project root .runtime directory, or any other session directory.
 - Do not return JSON for this batch. Write the markdown file directly, then state the batch is complete and list the file generated.
 
 User message:
@@ -633,6 +761,9 @@ User message:
     def _batch_files(self, batch: dict[str, object]) -> list[str]:
         return [str(path) for path in batch["files"]]
 
+    def _batch_producer(self, batch: dict[str, object]) -> str:
+        return f"vedic-core:{batch.get('id') or 'unknown'}"
+
     def _session_paths(self, session_dir: Path) -> set[str]:
         return {
             path.relative_to(session_dir).as_posix()
@@ -640,32 +771,40 @@ User message:
             if path.is_file()
         }
 
-    def _compose_core_outputs(self, session_dir: Path) -> None:
+    def _compose_core_outputs(self, session_id: str, session_dir: Path) -> None:
         p2a_parts = [
             session_dir / ".runtime" / "p2" / "yoga.md",
             session_dir / ".runtime" / "p2" / "sun.md",
             session_dir / ".runtime" / "p2" / "moon.md",
         ]
-        self._compose_parts(session_dir / "p2a_planets.md", p2a_parts)
+        self._compose_parts(
+            session_id, session_dir / "p2a_planets.md", p2a_parts, "vedic-core:compose:p2a"
+        )
 
         p2b_parts = [
             session_dir / ".runtime" / "p2" / "mars.md",
             session_dir / ".runtime" / "p2" / "mercury.md",
         ]
-        self._compose_parts(session_dir / "p2b_planets.md", p2b_parts)
+        self._compose_parts(
+            session_id, session_dir / "p2b_planets.md", p2b_parts, "vedic-core:compose:p2b"
+        )
 
         p2c_parts = [
             session_dir / ".runtime" / "p2" / "jupiter.md",
             session_dir / ".runtime" / "p2" / "venus.md",
         ]
-        self._compose_parts(session_dir / "p2c_planets.md", p2c_parts)
+        self._compose_parts(
+            session_id, session_dir / "p2c_planets.md", p2c_parts, "vedic-core:compose:p2c"
+        )
 
         p2d_parts = [
             session_dir / ".runtime" / "p2" / "saturn.md",
             session_dir / ".runtime" / "p2" / "rahu.md",
             session_dir / ".runtime" / "p2" / "ketu.md",
         ]
-        self._compose_parts(session_dir / "p2d_planets.md", p2d_parts)
+        self._compose_parts(
+            session_id, session_dir / "p2d_planets.md", p2d_parts, "vedic-core:compose:p2d"
+        )
 
         p3a_parts = [
             session_dir / ".runtime" / "p3" / f"d9_{planet}.md"
@@ -681,20 +820,25 @@ User message:
                 "ketu",
             ]
         ]
-        self._compose_parts(session_dir / "p3a_d9.md", p3a_parts)
+        self._compose_parts(
+            session_id, session_dir / "p3a_d9.md", p3a_parts, "vedic-core:compose:p3a"
+        )
 
         p3b_parts = [
             session_dir / ".runtime" / "p3" / "d10.md",
             session_dir / ".runtime" / "p3" / "d4.md",
             session_dir / ".runtime" / "p3" / "d5.md",
         ]
-        self._compose_parts(session_dir / "p3b_divisional.md", p3b_parts)
+        self._compose_parts(
+            session_id, session_dir / "p3b_divisional.md", p3b_parts, "vedic-core:compose:p3b"
+        )
 
         p4a_parts = [
-            session_dir / ".runtime" / "houses" / f"house_{number:02d}.md"
-            for number in range(1, 7)
+            session_dir / ".runtime" / "houses" / f"house_{number:02d}.md" for number in range(1, 7)
         ]
-        self._compose_parts(session_dir / "p4a_houses.md", p4a_parts)
+        self._compose_parts(
+            session_id, session_dir / "p4a_houses.md", p4a_parts, "vedic-core:compose:p4a"
+        )
 
         p4b_parts = [
             *[
@@ -703,26 +847,59 @@ User message:
             ],
             session_dir / ".runtime" / "houses" / "parivartana.md",
         ]
-        self._compose_parts(session_dir / "p4b_houses.md", p4b_parts)
+        self._compose_parts(
+            session_id, session_dir / "p4b_houses.md", p4b_parts, "vedic-core:compose:p4b"
+        )
 
         p5a_parts = [
-            session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
-            for number in range(1, 6)
+            session_dir / ".runtime" / "life" / f"block_{number:02d}.md" for number in range(1, 6)
         ]
-        self._compose_parts(session_dir / "p5a_life.md", p5a_parts)
+        self._compose_parts(
+            session_id, session_dir / "p5a_life.md", p5a_parts, "vedic-core:compose:p5a"
+        )
 
         p5b_parts = [
-            session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
-            for number in range(6, 11)
+            session_dir / ".runtime" / "life" / f"block_{number:02d}.md" for number in range(6, 11)
         ]
-        self._compose_parts(session_dir / "p5b_life.md", p5b_parts)
+        self._compose_parts(
+            session_id, session_dir / "p5b_life.md", p5b_parts, "vedic-core:compose:p5b"
+        )
 
-    def _compose_parts(self, target: Path, parts: list[Path]) -> None:
-        if all(path.exists() for path in parts):
-            target.write_text(
-                "\n\n".join(path.read_text(encoding="utf-8").strip() for path in parts) + "\n",
-                encoding="utf-8",
+    def _compose_parts(
+        self,
+        session_id: str,
+        target: Path,
+        parts: list[Path],
+        producer: str,
+    ) -> None:
+        session_dir = self.workspace.require_session_dir(session_id)
+        if not all(path.exists() for path in parts):
+            return
+        relative_parts = [path.relative_to(session_dir).as_posix() for path in parts]
+        if not all(
+            self.workspace.artifact_checkpoint_valid(
+                session_id,
+                relative_path,
+                producer=self._producer_for_core_file(relative_path),
             )
+            for relative_path in relative_parts
+        ):
+            return
+        target.write_text(
+            "\n\n".join(path.read_text(encoding="utf-8").strip() for path in parts) + "\n",
+            encoding="utf-8",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            target.relative_to(session_dir).as_posix(),
+            producer=producer,
+        )
+
+    def _producer_for_core_file(self, relative_path: str) -> str:
+        for batch in self.core_batches(""):
+            if relative_path in self.core_batch_files(batch):
+                return self._batch_producer(batch)
+        return ""
 
     def _active_artifact_for_batch(self, batch: dict[str, object], artifacts: list[object]) -> str:
         paths = {str(getattr(artifact, "path")) for artifact in artifacts}
@@ -949,6 +1126,10 @@ User message:
         if not isinstance(artifacts, list) or not artifacts:
             raise ValueError("Artifact response missing artifacts")
         for artifact in artifacts:
-            if not isinstance(artifact, dict) or not artifact.get("path") or not artifact.get("content"):
+            if (
+                not isinstance(artifact, dict)
+                or not artifact.get("path")
+                or not artifact.get("content")
+            ):
                 raise ValueError("Artifact response contains an invalid artifact")
         return payload

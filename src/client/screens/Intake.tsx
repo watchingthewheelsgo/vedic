@@ -1,4 +1,4 @@
-import { FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, SetStateAction, useMemo, useState } from "react";
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -9,7 +9,13 @@ import { DatePicker } from "../components/ui/date-picker";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../components/ui/select";
 import { cn } from "../lib/cn";
 import type { BirthInput, BirthTimePrecision } from "../../shared/domain";
 
@@ -67,12 +73,6 @@ const RELATIONSHIP_OPTIONS: SelectOption[] = [
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const ALL_MINUTES = Array.from({ length: 60 }, (_, i) => i);
 const QUARTER_MINUTES = [0, 15, 30, 45];
-const QUICK_TIMES = [
-  { label: "Midnight", hour: 0, minute: 0 },
-  { label: "Morning", hour: 8, minute: 0 },
-  { label: "Noon", hour: 12, minute: 0 },
-  { label: "Evening", hour: 18, minute: 0 }
-];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -90,7 +90,9 @@ export function Intake() {
   const [busy, setBusy] = useState(false);
 
   const precisionOption = useMemo(
-    () => TIME_PRECISION_OPTIONS.find((option) => option.value === timePrecision) ?? TIME_PRECISION_OPTIONS[0],
+    () =>
+      TIME_PRECISION_OPTIONS.find((option) => option.value === timePrecision) ??
+      TIME_PRECISION_OPTIONS[0],
     [timePrecision]
   );
 
@@ -115,7 +117,9 @@ export function Intake() {
     if (!birthDate) nextErrors.birthDate = "Select your date of birth.";
     if (timePrecision !== "unknown" && !birthTime) {
       nextErrors.birthTime =
-        timePrecision === "part_of_day" ? "Select the closest known birth hour." : "Select your birth time.";
+        timePrecision === "part_of_day"
+          ? "Select the closest known birth hour."
+          : "Select your birth time.";
     }
     if (timePrecision === "exact" && !timeSource) {
       nextErrors.timeSource = "Select where this exact time came from.";
@@ -166,9 +170,12 @@ export function Intake() {
             <UserRound size={18} />
           </div>
           <div>
-            <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">Personal Information</h2>
+            <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">
+              Personal Information
+            </h2>
             <p className="mb-9 text-sm text-body">
-              These details calculate your chart and determine how strict the pre-validation should be.
+              These details calculate your chart and determine how strict the pre-validation should
+              be.
             </p>
           </div>
         </section>
@@ -282,7 +289,8 @@ export function Intake() {
 
               {timePrecision === "unknown" && (
                 <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
-                  Unknown birth time is allowed, but the next validation step becomes more important.
+                  Unknown birth time is allowed, but the next validation step becomes more
+                  important.
                 </div>
               )}
 
@@ -304,7 +312,10 @@ export function Intake() {
               </Field>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Gender" hint="Used for wording and role interpretation in the report.">
+                <Field
+                  label="Gender"
+                  hint="Used for wording and role interpretation in the report."
+                >
                   <Select value={gender || undefined} onValueChange={setGender}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -319,7 +330,10 @@ export function Intake() {
                   </Select>
                 </Field>
 
-                <Field label="Relationship status" hint="Shapes the validation and relationship wording.">
+                <Field
+                  label="Relationship status"
+                  hint="Shapes the validation and relationship wording."
+                >
                   <Select value={relationship || undefined} onValueChange={setRelationship}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -364,7 +378,12 @@ function ProgressStep({
   last?: boolean;
 }) {
   return (
-    <div className={cn("relative flex-1 text-center text-xs tracking-[0.3px]", active ? "text-gold" : "text-muted")}>
+    <div
+      className={cn(
+        "relative flex-1 text-center text-xs tracking-[0.3px]",
+        active ? "text-gold" : "text-muted"
+      )}
+    >
       {!last && <div className="absolute left-[55%] right-[-55%] top-[15px] h-px bg-gold/25" />}
       <div
         className={cn(
@@ -394,9 +413,8 @@ function BirthTimePicker({
   const disabled = precision === "unknown";
   const selectedHour = value?.getHours() ?? null;
   const selectedMinute = value ? normalizeMinuteForPrecision(value.getMinutes(), precision) : null;
-  const minuteOptions = precision === "part_of_day" ? [0] : precision === "approximate" ? QUARTER_MINUTES : ALL_MINUTES;
-  const precisionLabel =
-    precision === "part_of_day" ? "Hour only" : precision === "approximate" ? "15 minute step" : "Exact minute";
+  const minuteOptions =
+    precision === "part_of_day" ? [0] : precision === "approximate" ? QUARTER_MINUTES : ALL_MINUTES;
 
   function commit(hour: number, minute: number) {
     onChange(makeTime(hour, normalizeMinuteForPrecision(minute, precision)));
@@ -404,92 +422,75 @@ function BirthTimePicker({
 
   function selectHour(hour: number) {
     commit(hour, selectedMinute ?? 0);
+    if (precision === "part_of_day") setOpen(false);
   }
 
   function selectMinute(minute: number) {
-    commit(selectedHour ?? 8, minute);
+    commit(selectedHour ?? 0, minute);
+    setOpen(false);
   }
 
   return (
-    <div className="space-y-2.5">
+    <div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="lg"
             disabled={disabled}
             aria-invalid={invalid}
             className={cn(
-              "flex h-[52px] w-full items-center gap-3 rounded-[10px] border border-gold/30 bg-white px-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] outline-none transition focus:border-gold focus:ring-4 focus:ring-gold/15 disabled:cursor-not-allowed disabled:opacity-60",
-              invalid && "border-red bg-red/5"
+              "w-full justify-start border-gold/30 bg-white px-4 text-left font-normal text-ink hover:border-gold/50 hover:bg-white data-[state=open]:border-gold data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
+              invalid && "border-red bg-red/5 hover:border-red"
             )}
           >
             <Clock3 className="size-4 shrink-0 text-gold-dim" />
-            <span className={cn("min-w-0 flex-1 text-[15px] font-medium tabular-nums", value ? "text-ink" : "text-muted")}>
-              {disabled ? "Time unknown" : value ? formatTimeLabel(value, precision) : "Select time"}
+            <span
+              className={cn(
+                "min-w-0 flex-1 text-[15px] font-medium tabular-nums",
+                value ? "text-ink" : "text-muted"
+              )}
+            >
+              {disabled
+                ? "Time unknown"
+                : value
+                  ? formatTimeLabel(value, precision)
+                  : "Select time"}
             </span>
-            <span className="shrink-0 text-xs text-muted">{disabled ? "No input" : precisionLabel}</span>
-          </button>
+          </Button>
         </PopoverTrigger>
 
         {!disabled && (
-          <PopoverContent className="w-[min(92vw,360px)] p-3" align="start">
-            <div className="mb-3 rounded-lg border border-gold/20 bg-cream px-3 py-2">
-              <span className="block text-[10px] uppercase tracking-[1.6px] text-muted">Selected birth time</span>
-              <div className="mt-0.5 flex items-end justify-between gap-3">
-                <strong className="text-2xl font-semibold leading-none text-gold-dim tabular-nums">
-                  {value ? formatTimeLabel(value, precision) : "--:--"}
-                </strong>
-                <span className="text-xs text-muted">{precisionLabel}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <TimeOptionList
+          <PopoverContent className="w-[min(92vw,280px)] p-3" align="start">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+              <TimeSelect
                 title="Hour"
                 values={HOURS}
-                selected={selectedHour}
+                value={selectedHour}
+                placeholder="HH"
                 onSelect={selectHour}
               />
-              <TimeOptionList
+              <div className="pb-2 text-sm text-muted">:</div>
+              <TimeSelect
                 title="Minute"
                 values={minuteOptions}
-                selected={selectedMinute}
+                value={precision === "part_of_day" ? 0 : selectedMinute}
+                placeholder="MM"
                 onSelect={selectMinute}
                 disabled={precision === "part_of_day"}
               />
             </div>
 
-            <div className="mt-3 grid grid-cols-4 gap-1.5">
-              {QUICK_TIMES.map((item) => {
-                const selected =
-                  value?.getHours() === item.hour &&
-                  normalizeMinuteForPrecision(value.getMinutes(), precision) === normalizeMinuteForPrecision(item.minute, precision);
-                return (
-                  <button
-                    type="button"
-                    key={item.label}
-                    onClick={() => {
-                      commit(item.hour, item.minute);
-                      setOpen(false);
-                    }}
-                    className={cn(
-                      "rounded-md border px-2 py-1.5 text-left transition",
-                      selected
-                        ? "border-gold bg-gold text-white"
-                        : "border-gold/20 bg-cream text-body hover:border-gold/50 hover:bg-gold/10"
-                    )}
-                  >
-                    <span className="block text-[11px] font-semibold leading-tight">{item.label}</span>
-                    <span className={cn("block text-[11px] tabular-nums", selected ? "text-white/80" : "text-muted")}>
-                      {pad(item.hour)}:{pad(normalizeMinuteForPrecision(item.minute, precision))}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-3 flex items-center justify-between border-t border-gold/15 pt-3">
-              <button type="button" className="text-xs text-muted hover:text-ink" onClick={() => onChange(null)}>
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                className="text-xs text-muted transition hover:text-ink"
+                onClick={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+              >
                 Clear
               </button>
               <Button type="button" size="sm" onClick={() => setOpen(false)}>
@@ -499,59 +500,46 @@ function BirthTimePicker({
           </PopoverContent>
         )}
       </Popover>
-
-      {disabled ? (
-        <div className="rounded-lg border border-gold/20 bg-cream px-3 py-2 text-xs leading-relaxed text-muted">
-          Birth time is intentionally left blank. The engine will use 12:00 only as a calculation placeholder.
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function TimeOptionList({
+function TimeSelect({
   title,
   values,
-  selected,
+  value,
+  placeholder,
   disabled = false,
   onSelect
 }: {
   title: string;
   values: number[];
-  selected: number | null;
+  value: number | null;
+  placeholder: string;
   disabled?: boolean;
   onSelect: (value: number) => void;
 }) {
-  const selectedRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    selectedRef.current?.scrollIntoView({ block: "center" });
-  }, [selected, values]);
-
   return (
     <div>
-      <div className="mb-1.5 text-[10px] uppercase tracking-[1.4px] text-muted">{title}</div>
-      <div className="max-h-36 overflow-y-auto rounded-lg border border-gold/20 bg-white p-1">
-        {values.map((value) => {
-          const active = selected === value;
-          return (
-            <button
-              type="button"
-              key={value}
-              ref={active ? selectedRef : undefined}
-              disabled={disabled}
-              onClick={() => onSelect(value)}
-              className={cn(
-                "flex h-8 w-full items-center justify-center rounded-md text-sm font-medium tabular-nums transition",
-                active ? "bg-gold text-white" : "text-body hover:bg-gold/10 hover:text-ink",
-                disabled && "cursor-not-allowed opacity-60"
-              )}
-            >
-              {pad(value)}
-            </button>
-          );
-        })}
-      </div>
+      <div className="mb-1.5 text-[11px] text-muted">{title}</div>
+      <Select
+        value={value === null ? "" : String(value)}
+        onValueChange={(next) => onSelect(Number(next))}
+        disabled={disabled}
+      >
+        <SelectTrigger className="h-10 rounded-md px-3 text-sm tabular-nums">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent className="max-h-64">
+          {values.map((value) => {
+            return (
+              <SelectItem key={value} value={String(value)} className="tabular-nums">
+                {pad(value)}
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

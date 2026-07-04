@@ -10,7 +10,10 @@ from app.runtime.preflight import (
     validate_startup_configuration,
 )
 from app.services.core_job_runtime import CoreJobRuntime
+from app.services.admin_sessions import AdminSessionsService
+from app.services.metadata_store import MetadataStore
 from app.services.place_service import PlaceService
+from app.services.report_exporter import ReportExporter
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
@@ -31,13 +34,21 @@ class AppContainer:
         self.place_service = PlaceService(settings)
         self.calculator = VedicCalculator(settings, self.place_service)
         self.skill_workspace = SkillWorkspace(settings)
+        self.metadata_store = MetadataStore(self.skill_workspace)
         self.agent_runtime = ClaudeRuntime(settings)
         self.skill_runtime = SkillRuntime(
             calculator=self.calculator,
             workspace=self.skill_workspace,
             agent_runtime=self.agent_runtime,
+            metadata_store=self.metadata_store,
         )
         self.core_job_runtime = CoreJobRuntime(skill_runtime=self.skill_runtime)
+        self.report_exporter = ReportExporter(self.skill_workspace)
+        self.admin_sessions = AdminSessionsService(
+            workspace=self.skill_workspace,
+            skill_runtime=self.skill_runtime,
+            metadata_store=self.metadata_store,
+        )
 
 
 @lru_cache(maxsize=1)

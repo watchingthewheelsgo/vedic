@@ -150,9 +150,7 @@ def _houses(chart: dict[str, Any]) -> dict[str, Any]:
             "occupants": occupants.get(house, []),
             "sav": sav_info.get("value"),
             "aspectedBy": [
-                item
-                for item in chart.get("house_aspects", [])
-                if item.get("target_house") == house
+                item for item in chart.get("house_aspects", []) if item.get("target_house") == house
             ],
         }
     return houses
@@ -176,7 +174,11 @@ def _divisional_charts(chart: dict[str, Any]) -> dict[str, Any]:
 
 def _divisional_body(name: str, value: dict[str, Any], lagna_idx: int | None) -> dict[str, Any]:
     sign_idx = value.get("sign_idx")
-    house = ((sign_idx - lagna_idx) % 12) + 1 if isinstance(sign_idx, int) and isinstance(lagna_idx, int) else None
+    house = (
+        ((sign_idx - lagna_idx) % 12) + 1
+        if isinstance(sign_idx, int) and isinstance(lagna_idx, int)
+        else None
+    )
     return {
         "name": name,
         "sign": value.get("sign"),

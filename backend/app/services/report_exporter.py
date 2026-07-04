@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ PUBLIC_REPORT_ORDER = [
 class ReportSection:
     path: str
     title: str
+    markdown: str
     html: str
     accent: str
 
@@ -63,6 +65,7 @@ class ThemeConfig:
 class ReportExportResult:
     session_id: str
     html_path: Path
+    pdf_path: Path
     section_count: int
 
 
@@ -86,9 +89,7 @@ class ReportExporter:
             raise ValueError("No public report artifacts found for export")
 
         metrics = self._load_metrics(artifacts)
-        target_dir = output_dir or (
-            self.workspace.settings.project_root / "backend" / "data" / "exports" / session_id
-        )
+        target_dir = output_dir or (self.workspace.require_session_dir(session_id) / "exports")
         target_dir.mkdir(parents=True, exist_ok=True)
 
         html_path = target_dir / "report.html"
@@ -101,10 +102,13 @@ class ReportExporter:
             ),
             encoding="utf-8",
         )
+        pdf_path = target_dir / "report.pdf"
+        self._render_pdf_with_playwright(html_path=html_path, pdf_path=pdf_path)
 
         return ReportExportResult(
             session_id=session_id,
             html_path=html_path,
+            pdf_path=pdf_path,
             section_count=len(sections),
         )
 
@@ -121,6 +125,7 @@ class ReportExporter:
                 ReportSection(
                     path=path,
                     title=self._section_title(path),
+                    markdown=artifact.content,
                     html=self._markdown_to_html(artifact.content),
                     accent=theme.accent_palette[index % len(theme.accent_palette)],
                 )
@@ -128,7 +133,9 @@ class ReportExporter:
         return sections
 
     def _load_metrics(self, artifacts: list[SkillArtifact]) -> dict[str, object] | None:
-        metrics = next((artifact for artifact in artifacts if artifact.path == "run_metrics.json"), None)
+        metrics = next(
+            (artifact for artifact in artifacts if artifact.path == "run_metrics.json"), None
+        )
         if metrics is None:
             return None
         try:
@@ -205,15 +212,11 @@ class ReportExporter:
         wave_items = ""
         if isinstance(waves, list):
             wave_items = "\n".join(
-                self._wave_item(wave)
-                for wave in waves
-                if isinstance(wave, dict)
+                self._wave_item(wave) for wave in waves if isinstance(wave, dict)
             )
         calculator = metrics.get("calculator")
         calculator_seconds = (
-            calculator.get("durationSeconds")
-            if isinstance(calculator, dict)
-            else None
+            calculator.get("durationSeconds") if isinstance(calculator, dict) else None
         )
         return f"""
         <section class="metrics">
@@ -285,15 +288,55 @@ class ReportExporter:
                 while index < len(lines) and re.match(r"^[-*]\s+", lines[index].strip()):
                     items.append(re.sub(r"^[-*]\s+", "", lines[index].strip()))
                     index += 1
-                blocks.append("<ul>" + "".join(f"<li>{self._inline(item)}</li>" for item in items) + "</ul>")
+                blocks.append(
+                    "<ul>" + "".join(f"<li>{self._inline(item)}</li>" for item in items) + "</ul>"
+                )
                 continue
             paragraph: list[str] = [stripped]
             index += 1
-            while index < len(lines) and lines[index].strip() and not self._starts_block(lines, index):
+            while (
+                index < len(lines) and lines[index].strip() and not self._starts_block(lines, index)
+            ):
                 paragraph.append(lines[index].strip())
                 index += 1
             blocks.append(f"<p>{self._inline(' '.join(paragraph))}</p>")
         return "\n".join(blocks)
+
+    def _render_pdf_with_playwright(self, *, html_path: Path, pdf_path: Path) -> None:
+        script_path = self.workspace.settings.project_root / "scripts" / "render-report-pdf.mjs"
+        command = [
+            "node",
+            str(script_path),
+            "--input",
+            str(html_path),
+            "--output",
+            str(pdf_path),
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=self.workspace.settings.project_root,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Cannot export PDF because Node.js is not available. Install Node.js and run `npm install`."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                "PDF export timed out while rendering the report with Playwright."
+            ) from exc
+
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                "PDF export failed. Ensure project dependencies are installed with `npm install` "
+                "and Playwright Chromium is available with `npx playwright install chromium`."
+                + (f"\n{detail}" if detail else "")
+            )
 
     def _is_table_start(self, lines: list[str], index: int) -> bool:
         return (
@@ -304,19 +347,24 @@ class ReportExporter:
         )
 
     def _table_to_html(self, lines: list[str]) -> str:
-        rows = [
-            [cell.strip() for cell in line.strip().strip("|").split("|")]
-            for line in lines
-        ]
+        rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
         if len(rows) < 2:
             return ""
         head = rows[0]
         body = rows[2:]
-        thead = "<thead><tr>" + "".join(f"<th>{self._inline(cell)}</th>" for cell in head) + "</tr></thead>"
-        tbody = "<tbody>" + "".join(
-            "<tr>" + "".join(f"<td>{self._inline(cell)}</td>" for cell in row) + "</tr>"
-            for row in body
-        ) + "</tbody>"
+        thead = (
+            "<thead><tr>"
+            + "".join(f"<th>{self._inline(cell)}</th>" for cell in head)
+            + "</tr></thead>"
+        )
+        tbody = (
+            "<tbody>"
+            + "".join(
+                "<tr>" + "".join(f"<td>{self._inline(cell)}</td>" for cell in row) + "</tr>"
+                for row in body
+            )
+            + "</tbody>"
+        )
         return f"<table>{thead}{tbody}</table>"
 
     def _starts_block(self, lines: list[str], index: int) -> bool:
@@ -364,78 +412,211 @@ class ReportExporter:
         return f"{minutes // 60}h {minutes % 60}m"
 
     def _css(self) -> str:
-        # Gold / cream / dark theme aligned with the web app (Downloads/test.html).
         return """
 :root {
-  color: #2C1F0F;
-  background: #F0E8D8;
-  font-family: ui-serif, Georgia, "Times New Roman", "Noto Serif SC", serif;
-  line-height: 1.62;
+  color: #17201f;
+  background: #f6f4ee;
+  font-family: "Iowan Old Style", "Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  line-height: 1.66;
+  font-size: 11pt;
+  letter-spacing: 0;
 }
 * { box-sizing: border-box; }
-body { margin: 0; }
-.report-shell { max-width: 1040px; margin: 0 auto; padding: 36px; }
+html { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+body { margin: 0; background: #f6f4ee; }
+.report-shell { max-width: 980px; margin: 0 auto; padding: 32px; }
 .cover {
-  min-height: 520px;
+  min-height: 760px;
   display: grid;
-  align-content: end;
-  gap: 26px;
-  color: #FAF5EC;
+  align-content: center;
+  gap: 34px;
+  color: #f9f7ef;
   background:
-    linear-gradient(135deg, rgb(15 12 9 / 94%), rgb(42 32 24 / 90%)),
-    radial-gradient(circle at 22% 24%, #C9A96E, transparent 36%);
-  border-radius: 14px;
-  padding: 54px;
-  page-break-after: always;
+    linear-gradient(135deg, rgb(23 32 31 / 98%), rgb(36 55 52 / 96%)),
+    linear-gradient(90deg, rgb(177 142 74 / 62%), transparent 42%);
+  border: 1px solid rgb(185 148 79 / 42%);
+  border-radius: 4px;
+  padding: 58px 62px;
+  break-after: page;
 }
-.eyebrow { margin: 0; color: #EDD9A3; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
-.cover h1 { margin: 0; max-width: 760px; font-size: 64px; line-height: 1.02; letter-spacing: 0; font-weight: 300; }
-.cover h1 strong, .cover h1 b { color: #C9A96E; font-weight: 600; }
-.cover-meta { display: grid; grid-template-columns: 110px 1fr; gap: 8px 18px; max-width: 640px; }
-.cover-meta span { color: rgb(237 217 163 / 65%); font-size: 12px; text-transform: uppercase; }
-.cover-meta strong { color: #fff; font-size: 14px; overflow-wrap: anywhere; }
+.eyebrow {
+  width: fit-content;
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgb(185 148 79 / 80%);
+  color: #d7c28d;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-size: 10pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.cover h1 {
+  margin: 0;
+  max-width: 680px;
+  font-size: 54pt;
+  line-height: 0.98;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.cover h1 strong, .cover h1 b { color: #d8bd78; font-weight: 650; }
+.cover-meta {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px 18px;
+  max-width: 620px;
+  margin-top: 14px;
+  padding-top: 22px;
+  border-top: 1px solid rgb(249 247 239 / 18%);
+}
+.cover-meta span {
+  color: rgb(249 247 239 / 56%);
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8.5pt;
+  text-transform: uppercase;
+}
+.cover-meta strong { color: #fffdf8; font-size: 10pt; font-weight: 500; overflow-wrap: anywhere; }
 .metrics, .toc, .report-section {
-  margin-top: 22px;
-  background: #FAF5EC;
-  border: 1px solid rgba(201,169,110,0.3);
-  border-radius: 12px;
-  box-shadow: 0 12px 34px rgb(44 31 15 / 8%);
+  margin-top: 24px;
+  background: #fffdf8;
+  border: 1px solid rgb(23 32 31 / 12%);
+  border-radius: 4px;
 }
-.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; }
-.metrics > div { padding: 18px; background: #FBF7EE; }
-.metrics span { display: block; color: #8A7A65; font-size: 12px; font-weight: 700; }
-.metrics strong { display: block; margin-top: 5px; color: #9A7A4A; font-size: 22px; }
-.metrics .wave-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; background: #FAF5EC; }
-.wave-row span { padding: 7px 10px; color: #5A4A35; background: #F0E8D8; border-radius: 999px; }
-.wave-row b { margin-left: 6px; color: #9A7A4A; }
-.toc { padding: 24px; }
-.toc h2 { margin: 0 0 14px; font-size: 24px; }
-.toc div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.toc a { color: #2C1F0F; text-decoration: none; padding: 10px 12px; border: 1px solid rgba(201,169,110,0.3); border-radius: 8px; }
-.toc a span { color: #9A7A4A; font-weight: 800; margin-right: 9px; }
-.report-section { padding: 30px; page-break-before: always; }
-.section-header { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; border-bottom: 2px solid var(--accent); }
-.section-header > span { display: grid; place-items: center; width: 48px; height: 48px; color: #fff; background: var(--accent); border-radius: 10px; font-weight: 800; }
-.section-header p { margin: 0; color: #8A7A65; font-size: 12px; font-weight: 700; }
-.section-header h2 { margin: 2px 0 0; font-size: 28px; line-height: 1.2; }
-.markdown-body { margin-top: 24px; }
-.markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5 { color: #2C1F0F; line-height: 1.25; }
-.markdown-body h2 { margin-top: 34px; font-size: 26px; color: #9A7A4A; }
-.markdown-body h3 { margin-top: 28px; font-size: 21px; }
-.markdown-body h4, .markdown-body h5 { margin-top: 22px; font-size: 17px; }
-.markdown-body p { margin: 12px 0; color: #5A4A35; }
-blockquote { margin: 16px 0; padding: 12px 16px; color: #5A4A35; background: rgba(201,169,110,0.09); border-left: 4px solid var(--accent); border-radius: 0 8px 8px 0; }
-pre { overflow: auto; padding: 14px; color: #F0E8D8; background: #1C1610; border-radius: 8px; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .92em; }
-p code { padding: 2px 5px; color: #9A7A4A; background: #F0E8D8; border-radius: 5px; }
-table { width: 100%; margin: 18px 0; border-collapse: collapse; font-size: 13px; }
-th { color: #fff; background: var(--accent); }
-th, td { padding: 8px 9px; border: 1px solid rgba(201,169,110,0.3); vertical-align: top; }
-tr:nth-child(even) td { background: #FBF7EE; }
-@page { size: A4; margin: 16mm 14mm 18mm; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; overflow: hidden; break-after: page; }
+.metrics > div { padding: 17px 18px; border-right: 1px solid rgb(23 32 31 / 10%); }
+.metrics span {
+  display: block;
+  color: #65716f;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8.5pt;
+  font-weight: 700;
+}
+.metrics strong { display: block; margin-top: 5px; color: #1f3d3a; font-size: 18pt; font-weight: 500; }
+.metrics .wave-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid rgb(23 32 31 / 10%); }
+.wave-row span { padding: 5px 8px; color: #465552; background: #f1f4f1; border-radius: 999px; }
+.wave-row b { margin-left: 5px; color: #1f3d3a; }
+.toc { padding: 28px 30px; break-after: page; }
+.toc h2 {
+  margin: 0 0 18px;
+  color: #1f3d3a;
+  font-size: 25pt;
+  font-weight: 430;
+}
+.toc div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.toc a {
+  color: #17201f;
+  text-decoration: none;
+  padding: 8px 0;
+  border-bottom: 1px solid rgb(23 32 31 / 12%);
+  font-size: 10pt;
+}
+.toc a span { display: inline-block; min-width: 28px; color: #b9944f; font-weight: 700; }
+.report-section {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  break-before: page;
+}
+.section-header {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 0 0 15px;
+  border-bottom: 1.5px solid #b9944f;
+}
+.section-header > span {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: #fffdf8;
+  background: #1f3d3a;
+  border-radius: 50%;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-size: 10pt;
+  font-weight: 800;
+}
+.section-header p {
+  margin: 0;
+  color: #65716f;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8pt;
+  font-weight: 700;
+}
+.section-header h2 { margin: 3px 0 0; color: #17201f; font-size: 25pt; line-height: 1.12; font-weight: 430; }
+.markdown-body { margin-top: 18px; }
+.markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5 {
+  color: #17201f;
+  line-height: 1.25;
+  break-after: avoid;
+  letter-spacing: 0;
+}
+.markdown-body h2 {
+  margin: 25px 0 10px;
+  padding-top: 8px;
+  color: #1f3d3a;
+  border-top: 1px solid rgb(185 148 79 / 36%);
+  font-size: 18pt;
+  font-weight: 500;
+}
+.markdown-body h3 { margin: 20px 0 8px; font-size: 14.5pt; font-weight: 560; }
+.markdown-body h4, .markdown-body h5 { margin: 16px 0 6px; font-size: 11.5pt; font-weight: 650; }
+.markdown-body p {
+  margin: 7px 0;
+  color: #273331;
+  font-size: 10pt;
+  line-height: 1.72;
+  orphans: 3;
+  widows: 3;
+}
+blockquote {
+  margin: 13px 0;
+  padding: 10px 13px 10px 15px;
+  color: #243936;
+  background: #eff4f0;
+  border-left: 3px solid #b9944f;
+  break-inside: avoid;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+  padding: 10px 12px;
+  color: #18231f;
+  background: #f1f4f1;
+  border: 1px solid rgb(23 32 31 / 10%);
+  border-radius: 3px;
+  font-size: 8pt;
+  line-height: 1.45;
+  break-inside: avoid;
+}
+code { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.88em; }
+p code { padding: 1px 4px; color: #1f3d3a; background: #eef3ef; border-radius: 3px; }
+table {
+  width: 100%;
+  margin: 13px 0 15px;
+  border-collapse: collapse;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-size: 7.8pt;
+  line-height: 1.38;
+  break-inside: auto;
+}
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th {
+  color: #fffdf8;
+  background: #1f3d3a;
+  font-weight: 700;
+}
+th, td { padding: 5px 6px; border: 1px solid rgb(23 32 31 / 16%); vertical-align: top; }
+td { color: #273331; }
+tr:nth-child(even) td { background: #f7f8f4; }
+@page { size: A4; }
 @media print {
-  body { background: #fff; }
+  body { background: #fffdf8; }
   .report-shell { max-width: none; padding: 0; }
+  .cover { min-height: 247mm; }
   .cover, .metrics, .toc, .report-section { box-shadow: none; }
 }
 """

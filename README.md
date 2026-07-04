@@ -45,12 +45,20 @@ ANTHROPIC_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+DATABASE_URL=sqlite+aiosqlite:///./backend/data/vedic.db
 ```
+
+`DATABASE_URL` defaults to local SQLite. Production can use a normal
+Postgres/Supabase connection string; the backend normalizes it to
+`postgresql+asyncpg://` at startup and stores only metadata in the database.
+Markdown, HTML, and PDF artifacts remain local files under
+`backend/data/sessions/<session_id>/` with their paths indexed in the database.
 
 ## Run
 
 ```bash
 npm install
+npm run report:pdf:install
 npm run backend:setup
 npm run backend:config
 npm run dev
@@ -59,6 +67,8 @@ npm run dev
 Frontend: `http://127.0.0.1:5173/`
 
 Backend: `http://127.0.0.1:8787/`
+
+Admin sessions console: `http://127.0.0.1:5173/admin/sessions`
 
 If port `8787` is already in use, stop the old uvicorn process or run the
 backend on another port with `PORT=8788`.
@@ -72,12 +82,32 @@ without an LLM, set `VEDIC_AI_MODE=mock`.
 ## Checks
 
 ```bash
-npm run check
+npm run ci
+npm run format
+npm run format:check
+npm run frontend:lint
+npm run backend:sync
 npm run backend:setup
+npm run backend:format
+npm run backend:format:check
+npm run backend:lint
+npm run backend:typecheck
+npm run check
 npm run backend:config
 npm run backend:check
+npm run backend:test
 npm run build
 ```
+
+Install local commit hooks once per checkout:
+
+```bash
+uv run --no-sync --project backend pre-commit install
+```
+
+The configured hook runs staged whitespace checks, Prettier format checks,
+ESLint, Python format/lint/type checks, TypeScript type checks, and backend
+tests before commits. Pull requests run the same core checks in GitHub Actions.
 
 `npm run backend:dev` runs `backend:ensure` before starting uvicorn. The backend
 startup preflight fails fast if calculator dependencies, PyJHora data, bundled
@@ -87,24 +117,37 @@ rebuilt.
 
 ## Report Export
 
-Export a completed session's public markdown artifacts into a themed HTML
-report:
+Export a completed session's public markdown artifacts into a themed HTML report
+and a Playwright-rendered PDF:
 
 ```bash
 npm run report:export -- <session_id>
 ```
 
-Output defaults to `backend/data/exports/<session_id>/report.html`.
+Output defaults to:
 
-In-app PDF export is handled in the browser: open the completed report, click
-`Export PDF`, then save from the browser print dialog. This avoids a backend
-PDF endpoint and does not require Python Playwright.
+```text
+backend/data/sessions/<session_id>/exports/report.html
+backend/data/sessions/<session_id>/exports/report.pdf
+```
+
+PDF rendering uses Chromium through Playwright, so fresh machines must run:
+
+```bash
+npm run report:pdf:install
+```
 
 ## API Surface
 
 - `GET /api/health`
 - `GET /api/places`
 - `POST /api/skill-sessions`
+- `GET /api/skill-sessions/{session_id}`
+- `GET /api/skill-sessions/{session_id}/report.pdf`
+- `GET /api/admin/sessions`
+- `GET /api/admin/sessions/{session_id}`
+- `POST /api/core-jobs`
+- `GET /api/core-jobs/{job_id}`
 - `POST /api/skill-synastry-subject`
 - `POST /api/skill-runs`
 - `POST /api/skill-feedback`

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     host: str = Field(default="127.0.0.1", alias="HOST")
     port: int = Field(default=8787, alias="PORT")
     reload: bool = Field(default=False, alias="RELOAD")
+    database_url: str = Field(
+        default=f"sqlite+aiosqlite:///{PROJECT_ROOT / 'backend' / 'data' / 'vedic.db'}",
+        alias="DATABASE_URL",
+    )
+    database_echo: bool = Field(default=False, alias="DATABASE_ECHO")
 
     vedic_astro_skills_root: str | None = Field(default=None, alias="VEDIC_ASTRO_SKILLS_ROOT")
     vedic_geonames_path: str | None = Field(default=None, alias="VEDIC_GEONAMES_PATH")

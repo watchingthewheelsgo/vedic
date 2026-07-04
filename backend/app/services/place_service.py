@@ -285,9 +285,7 @@ class PlaceService:
             for _, count, country in items[:limit]
         ]
 
-    def _search_regions(
-        self, country: str | None, query: str, limit: int
-    ) -> list[PlaceOption]:
+    def _search_regions(self, country: str | None, query: str, limit: int) -> list[PlaceOption]:
         if not country:
             return []
         regions = self.region_counts.get(country, {})
@@ -405,7 +403,8 @@ class PlaceService:
         matches = place_name_matches or [
             record
             for record in self.records
-            if query_norm in [self.normalize(item) for item in record.alternate_names.split("|") if item]
+            if query_norm
+            in [self.normalize(item) for item in record.alternate_names.split("|") if item]
         ]
         unique_locations = {
             (
@@ -443,7 +442,9 @@ class PlaceService:
             score = 64
         else:
             return 0
-        if preference.country and self.normalize(record.country) == self.normalize(preference.country):
+        if preference.country and self.normalize(record.country) == self.normalize(
+            preference.country
+        ):
             score += 35
         if preference.state and self.normalize(record.state) == self.normalize(preference.state):
             score += 25

@@ -118,6 +118,78 @@ export type CoreJobResponse = {
   session?: SkillSessionResponse | null;
 };
 
+export type AdminSessionStatus =
+  "draft" | "validation" | "queued" | "running" | "completed" | "failed" | "stalled";
+
+export type AdminSessionProgress = {
+  total: number;
+  completed: number;
+  running: number;
+  failed: number;
+  percent: number;
+};
+
+export type AdminArtifactSummary = {
+  path: string;
+  kind: "markdown" | "json" | "text" | "html" | "pdf" | "other";
+  sizeBytes: number;
+  updatedAt: string;
+};
+
+export type AdminExportSummary = {
+  name: string;
+  path: string;
+  mediaType: string;
+  sizeBytes: number;
+  updatedAt: string;
+};
+
+export type AdminSubjectSummary = {
+  birthDate?: string | null;
+  birthTime?: string | null;
+  birthPlace?: string | null;
+  timePrecision?: string | null;
+  timeSource?: string | null;
+  timezone?: string | null;
+  gender?: string | null;
+  relationship?: string | null;
+};
+
+export type AdminSessionSummary = {
+  sessionId: string;
+  status: AdminSessionStatus;
+  stage: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  subject?: AdminSubjectSummary | null;
+  progress: AdminSessionProgress;
+  artifactCount: number;
+  exportCount: number;
+  hasPdf: boolean;
+  jobId?: string | null;
+  activeNode?: string | null;
+  durationSeconds?: number | null;
+  error?: string | null;
+};
+
+export type AdminSessionListResponse = {
+  sessions: AdminSessionSummary[];
+  total: number;
+  running: number;
+  completed: number;
+  failed: number;
+};
+
+export type AdminSessionDetailResponse = {
+  summary: AdminSessionSummary;
+  session: SkillSessionResponse;
+  artifacts: AdminArtifactSummary[];
+  exports: AdminExportSummary[];
+  runMetrics?: Record<string, unknown> | null;
+  manifest?: Record<string, unknown> | null;
+  activeJob?: CoreJobResponse | null;
+};
+
 export type SkillFeedbackInput = {
   sessionId: string;
   feedbackMarkdown: string;
