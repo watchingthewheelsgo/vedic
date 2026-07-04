@@ -23,7 +23,7 @@ class SkillWorkspace:
         return self.settings.project_root / "backend" / "data" / "sessions"
 
     def create_session(self) -> str:
-        session_id = make_id("skill")
+        session_id = make_id("session")
         self.session_dir(session_id).mkdir(parents=True, exist_ok=False)
         return session_id
 

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session_factory
@@ -43,6 +43,7 @@ class MetadataStore:
         self,
         session_id: str,
         *,
+        owner_user_id: str | None = None,
         stage: str | None = None,
         status: str | None = None,
         active_job_id: str | None = None,
@@ -73,10 +74,15 @@ class MetadataStore:
             if record is None:
                 record = VedicSessionRecord(
                     session_id=session_id,
+                    owner_user_id=owner_user_id,
                     storage_root=str(session_dir),
                     created_at=self._created_at(files, session_dir),
                 )
                 db.add(record)
+            elif owner_user_id:
+                self._assert_record_owner(record.owner_user_id, owner_user_id)
+                if record.owner_user_id is None:
+                    record.owner_user_id = owner_user_id
             record.status = derived_status
             record.stage = derived_stage
             record.storage_backend = "local"
@@ -96,8 +102,10 @@ class MetadataStore:
             record.error = error or self._error(metrics)
             record.updated_at = self._updated_at(files, session_dir)
 
-            await self._replace_artifacts(db, session_id, session_dir, artifacts, checkpoints)
-            await self._replace_exports(db, session_id, session_dir, exports)
+            await self._replace_artifacts(
+                db, session_id, session_dir, artifacts, checkpoints, record.owner_user_id
+            )
+            await self._replace_exports(db, session_id, session_dir, exports, record.owner_user_id)
 
             # Keep progress-derived failed state even when only files exist and
             # the caller did not supply a status.
@@ -109,6 +117,7 @@ class MetadataStore:
         self,
         job: CoreJobResponse,
         *,
+        owner_user_id: str | None = None,
         user_message: str = "",
     ) -> None:
         async with self._session() as db:
@@ -117,10 +126,17 @@ class MetadataStore:
                 record = VedicCoreJobRecord(
                     job_id=job.job_id,
                     session_id=job.session_id,
+                    owner_user_id=owner_user_id,
                     created_at=datetime.now(timezone.utc),
                 )
                 db.add(record)
+            elif owner_user_id:
+                self._assert_record_owner(record.owner_user_id, owner_user_id)
+                if record.owner_user_id is None:
+                    record.owner_user_id = owner_user_id
             record.session_id = job.session_id
+            if owner_user_id:
+                record.owner_user_id = owner_user_id
             record.status = job.status
             record.message = job.message
             record.user_message = user_message
@@ -143,10 +159,13 @@ class MetadataStore:
                     node_record = VedicCoreJobNodeRecord(
                         job_id=job.job_id,
                         session_id=job.session_id,
+                        owner_user_id=owner_user_id,
                         node_id=node.id,
                     )
                     db.add(node_record)
                 node_record.session_id = job.session_id
+                if owner_user_id:
+                    node_record.owner_user_id = owner_user_id
                 node_record.label = node.label
                 node_record.wave = node.wave
                 node_record.status = node.status
@@ -166,38 +185,95 @@ class MetadataStore:
             )
             await db.commit()
 
-    async def list_session_summaries(self) -> list[AdminSessionSummary]:
+    async def list_session_summaries(
+        self, owner_user_id: str | None = None
+    ) -> list[AdminSessionSummary]:
         async with self._session() as db:
-            result = await db.execute(
-                select(VedicSessionRecord).order_by(VedicSessionRecord.updated_at.desc())
-            )
+            query = select(VedicSessionRecord).order_by(VedicSessionRecord.updated_at.desc())
+            if owner_user_id:
+                query = query.where(VedicSessionRecord.owner_user_id == owner_user_id)
+            result = await db.execute(query)
             records = list(result.scalars().all())
             return [self._summary_from_record(record) for record in records]
 
-    async def get_session_summary(self, session_id: str) -> AdminSessionSummary:
+    async def get_session_summary(
+        self, session_id: str, owner_user_id: str | None = None
+    ) -> AdminSessionSummary:
         async with self._session() as db:
             record = await self._get_session_record(db, session_id)
             if record is None:
                 raise LookupError("Skill session not found")
+            if owner_user_id:
+                self._assert_record_owner(record.owner_user_id, owner_user_id)
             return self._summary_from_record(record)
 
-    async def list_artifacts(self, session_id: str) -> list[AdminArtifactSummary]:
+    async def list_artifacts(
+        self, session_id: str, owner_user_id: str | None = None
+    ) -> list[AdminArtifactSummary]:
         async with self._session() as db:
-            result = await db.execute(
+            query = (
                 select(VedicArtifactRecord)
                 .where(VedicArtifactRecord.session_id == session_id)
                 .order_by(VedicArtifactRecord.path.asc())
             )
+            if owner_user_id:
+                query = query.where(VedicArtifactRecord.owner_user_id == owner_user_id)
+            result = await db.execute(query)
             return [self._artifact_summary(record) for record in result.scalars().all()]
 
-    async def list_exports(self, session_id: str) -> list[AdminExportSummary]:
+    async def list_exports(
+        self, session_id: str, owner_user_id: str | None = None
+    ) -> list[AdminExportSummary]:
         async with self._session() as db:
-            result = await db.execute(
+            query = (
                 select(VedicExportRecord)
                 .where(VedicExportRecord.session_id == session_id)
                 .order_by(VedicExportRecord.path.asc())
             )
+            if owner_user_id:
+                query = query.where(VedicExportRecord.owner_user_id == owner_user_id)
+            result = await db.execute(query)
             return [self._export_summary(record) for record in result.scalars().all()]
+
+    async def assert_session_access(self, session_id: str, owner_user_id: str | None) -> None:
+        async with self._session() as db:
+            record = await self._get_session_record(db, session_id)
+            if record is None:
+                raise LookupError("Skill session not found")
+            if owner_user_id is None:
+                return
+            self._assert_record_owner(record.owner_user_id, owner_user_id)
+
+    async def claim_session_owner(
+        self,
+        session_id: str,
+        *,
+        from_owner_user_id: str,
+        to_owner_user_id: str,
+    ) -> None:
+        if not from_owner_user_id or not to_owner_user_id or from_owner_user_id == to_owner_user_id:
+            return
+        async with self._session() as db:
+            record = await self._get_session_record(db, session_id)
+            if record is None:
+                raise LookupError("Skill session not found")
+            if record.owner_user_id == to_owner_user_id:
+                return
+            self._assert_record_owner(record.owner_user_id, from_owner_user_id)
+
+            record.owner_user_id = to_owner_user_id
+            for model in [
+                VedicArtifactRecord,
+                VedicExportRecord,
+                VedicCoreJobRecord,
+                VedicCoreJobNodeRecord,
+            ]:
+                await db.execute(
+                    update(model)
+                    .where(model.session_id == session_id)
+                    .values(owner_user_id=to_owner_user_id)
+                )
+            await db.commit()
 
     def _session(self):
         return get_session_factory()()
@@ -243,6 +319,7 @@ class MetadataStore:
         session_dir: Path,
         artifacts: list[Path],
         checkpoints: dict[str, dict[str, Any]],
+        owner_user_id: str | None,
     ) -> None:
         await db.execute(
             delete(VedicArtifactRecord).where(VedicArtifactRecord.session_id == session_id)
@@ -253,6 +330,7 @@ class MetadataStore:
             db.add(
                 VedicArtifactRecord(
                     session_id=session_id,
+                    owner_user_id=owner_user_id,
                     path=relative,
                     kind=self._kind(path),
                     media_type=self._media_type(path),
@@ -277,6 +355,7 @@ class MetadataStore:
         session_id: str,
         session_dir: Path,
         exports: list[Path],
+        owner_user_id: str | None,
     ) -> None:
         await db.execute(
             delete(VedicExportRecord).where(VedicExportRecord.session_id == session_id)
@@ -286,6 +365,7 @@ class MetadataStore:
             db.add(
                 VedicExportRecord(
                     session_id=session_id,
+                    owner_user_id=owner_user_id,
                     name=path.name,
                     path=relative,
                     media_type=self._media_type(path),
@@ -500,6 +580,14 @@ class MetadataStore:
         if suffix == ".txt":
             return "text/plain"
         return "application/octet-stream"
+
+    def _assert_record_owner(
+        self, record_owner_user_id: str | None, owner_user_id: str | None
+    ) -> None:
+        if owner_user_id is None:
+            return
+        if record_owner_user_id != owner_user_id:
+            raise PermissionError("Skill session does not belong to the current user")
 
     def _admin_status(self, status: str) -> AdminSessionStatus:
         if status in {"draft", "validation", "queued", "running", "completed", "failed", "stalled"}:

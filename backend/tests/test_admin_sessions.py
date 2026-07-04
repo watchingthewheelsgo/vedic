@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from app.db.engine import close_db, init_db, normalize_database_url
 from app.schemas import SkillSessionResponse
 from app.services.admin_sessions import AdminSessionsService
@@ -109,3 +111,78 @@ def test_plain_postgres_url_uses_asyncpg_and_ssl() -> None:
     assert url.drivername == "postgresql+asyncpg"
     assert url.host == "db.example.supabase.co"
     assert url.query["ssl"] == "require"
+
+
+def test_metadata_store_filters_sessions_by_owner(tmp_path: Path) -> None:
+    async def run() -> None:
+        await init_db(
+            SimpleNamespace(
+                database_url=f"sqlite+aiosqlite:///{tmp_path / 'vedic.db'}",
+                database_echo=False,
+            )
+        )
+        try:
+            workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+            session_a = workspace.create_session()
+            workspace.write_artifact(session_a, "structured_data.md", "# user a\n")
+            session_b = workspace.create_session()
+            workspace.write_artifact(session_b, "structured_data.md", "# user b\n")
+
+            metadata_store = MetadataStore(workspace)
+            await metadata_store.sync_session_from_files(session_a, owner_user_id="user_a")
+            await metadata_store.sync_session_from_files(session_b, owner_user_id="user_b")
+
+            user_a_sessions = await metadata_store.list_session_summaries("user_a")
+            user_b_sessions = await metadata_store.list_session_summaries("user_b")
+            local_sessions = await metadata_store.list_session_summaries()
+
+            assert [item.session_id for item in user_a_sessions] == [session_a]
+            assert [item.session_id for item in user_b_sessions] == [session_b]
+            assert {item.session_id for item in local_sessions} == {session_a, session_b}
+            await metadata_store.assert_session_access(session_a, "user_a")
+            with pytest.raises(PermissionError):
+                await metadata_store.assert_session_access(session_a, "user_b")
+        finally:
+            await close_db()
+
+    asyncio.run(run())
+
+
+def test_metadata_store_claims_anonymous_session_for_clerk_user(tmp_path: Path) -> None:
+    async def run() -> None:
+        await init_db(
+            SimpleNamespace(
+                database_url=f"sqlite+aiosqlite:///{tmp_path / 'vedic.db'}",
+                database_echo=False,
+            )
+        )
+        try:
+            workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+            session_id = workspace.create_session()
+            workspace.write_artifact(session_id, "structured_data.md", "# anonymous\n")
+
+            metadata_store = MetadataStore(workspace)
+            await metadata_store.sync_session_from_files(
+                session_id,
+                owner_user_id="anonym_abc12345",
+            )
+
+            await metadata_store.claim_session_owner(
+                session_id,
+                from_owner_user_id="anonym_abc12345",
+                to_owner_user_id="user_clerk123",
+            )
+
+            assert await metadata_store.list_session_summaries("anonym_abc12345") == []
+            claimed = await metadata_store.list_session_summaries("user_clerk123")
+            assert [item.session_id for item in claimed] == [session_id]
+            with pytest.raises(PermissionError):
+                await metadata_store.claim_session_owner(
+                    session_id,
+                    from_owner_user_id="anonym_other123",
+                    to_owner_user_id="user_other123",
+                )
+        finally:
+            await close_db()
+
+    asyncio.run(run())

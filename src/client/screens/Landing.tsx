@@ -1,3 +1,4 @@
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from "@clerk/clerk-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -63,7 +64,20 @@ export function Landing() {
           <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
             Veda<span>Light</span>
           </button>
-          <Button onClick={start}>Get My Report →</Button>
+          <div className="flex items-center gap-2">
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="ghost">Sign in</Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button>Create account</Button>
+              </SignUpButton>
+            </SignedOut>
+            <SignedIn>
+              <Button onClick={start}>Get My Report →</Button>
+              <UserButton afterSignOutUrl="/" />
+            </SignedIn>
+          </div>
         </div>
       </nav>
 

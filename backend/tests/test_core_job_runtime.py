@@ -119,6 +119,7 @@ class FakeSkillRuntime:
         *,
         batches: list[dict[str, Any]] | None = None,
         force: bool = False,
+        owner_user_id: str | None = None,
     ) -> SkillSessionResponse:
         self.calls.append((str(batch["id"]), force))
         for path in self.core_batch_files(batch):
@@ -247,6 +248,7 @@ def test_failed_parallel_wave_waits_for_siblings_before_checkpoint(tmp_path: Pat
             *,
             batches: list[dict[str, Any]] | None = None,
             force: bool = False,
+            owner_user_id: str | None = None,
         ) -> SkillSessionResponse:
             self.calls.append((str(batch["id"]), force))
             if batch["id"] == "fast_fail":

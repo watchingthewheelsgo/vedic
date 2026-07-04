@@ -25,6 +25,7 @@ class VedicSessionRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     stage: Mapped[str] = mapped_column(String(60), default="draft", index=True)
     storage_backend: Mapped[str] = mapped_column(String(30), default="local")
@@ -56,6 +57,7 @@ class VedicArtifactRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(80), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     path: Mapped[str] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String(30), default="other")
     media_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
@@ -84,6 +86,7 @@ class VedicExportRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(80), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(160))
     path: Mapped[str] = mapped_column(Text)
     media_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
@@ -107,6 +110,7 @@ class VedicCoreJobRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     session_id: Mapped[str] = mapped_column(String(80), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     message: Mapped[str] = mapped_column(Text)
     user_message: Mapped[str] = mapped_column(Text, default="")
@@ -134,6 +138,7 @@ class VedicCoreJobNodeRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(String(80), index=True)
     session_id: Mapped[str] = mapped_column(String(80), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     node_id: Mapped[str] = mapped_column(String(120), index=True)
     label: Mapped[str] = mapped_column(Text)
     wave: Mapped[int] = mapped_column(Integer, default=0)

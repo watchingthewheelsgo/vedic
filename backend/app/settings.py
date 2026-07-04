@@ -30,6 +30,10 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
     database_echo: bool = Field(default=False, alias="DATABASE_ECHO")
+    vedic_auth_mode: str = Field(default="auto", alias="VEDIC_AUTH_MODE")
+    clerk_publishable_key: str = Field(default="", alias="VITE_CLERK_PUBLISHABLE_KEY")
+    clerk_jwt_issuer: str = Field(default="", alias="CLERK_JWT_ISSUER")
+    clerk_jwks_url: str = Field(default="", alias="CLERK_JWKS_URL")
 
     vedic_astro_skills_root: str | None = Field(default=None, alias="VEDIC_ASTRO_SKILLS_ROOT")
     vedic_geonames_path: str | None = Field(default=None, alias="VEDIC_GEONAMES_PATH")
@@ -125,6 +129,36 @@ class Settings(BaseSettings):
             "timeoutMs": self.agent_timeout_ms,
             "skillRuntime": "claude-agent-sdk-python",
         }
+
+    def auth_config_summary(self) -> dict[str, object]:
+        enabled = self.auth_enabled()
+        return {
+            "mode": "clerk" if enabled else "disabled",
+            "publishableKeyConfigured": bool(self.clerk_publishable_key.strip()),
+            "issuerConfigured": bool(self.clerk_jwt_issuer.strip()),
+            "jwksConfigured": bool(self.clerk_jwks_url.strip()),
+        }
+
+    def auth_enabled(self) -> bool:
+        mode = self.vedic_auth_mode.strip().lower()
+        if mode == "disabled":
+            return False
+        if mode == "clerk":
+            return True
+        return bool(
+            self.clerk_publishable_key.strip()
+            or self.clerk_jwt_issuer.strip()
+            or self.clerk_jwks_url.strip()
+        )
+
+    def clerk_effective_jwks_url(self) -> str:
+        explicit = self.clerk_jwks_url.strip()
+        if explicit:
+            return explicit
+        issuer = self.clerk_jwt_issuer.strip().rstrip("/")
+        if not issuer:
+            return ""
+        return f"{issuer}/.well-known/jwks.json"
 
 
 @lru_cache(maxsize=1)

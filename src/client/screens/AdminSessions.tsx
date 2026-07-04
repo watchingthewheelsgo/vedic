@@ -1,3 +1,4 @@
+import { UserButton } from "@clerk/clerk-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -219,6 +220,7 @@ function AdminHeader({
           {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw size={14} />}
           Refresh
         </Button>
+        <UserButton afterSignOutUrl="/" />
       </div>
     </header>
   );

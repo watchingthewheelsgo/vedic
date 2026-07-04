@@ -1,3 +1,4 @@
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from "@clerk/clerk-react";
 import { FormEvent, SetStateAction, useMemo, useState } from "react";
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -152,12 +153,15 @@ export function Intake() {
   return (
     <div className="min-h-screen bg-cream-2 px-5 py-9 sm:px-10 sm:py-14">
       <div className="mx-auto max-w-[760px]">
-        <button
-          className="mb-8 inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
-          onClick={() => navigate("/")}
-        >
-          ← Back
-        </button>
+        <div className="mb-8 flex items-center justify-between gap-3">
+          <button
+            className="inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
+            onClick={() => navigate("/")}
+          >
+            ← Back
+          </button>
+          <IntakeAuthControls />
+        </div>
 
         <div className="mb-12 flex items-start">
           <ProgressStep active label="Personal Info" index={1} />
@@ -362,6 +366,29 @@ export function Intake() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function IntakeAuthControls() {
+  return (
+    <div className="flex items-center gap-2">
+      <SignedOut>
+        <span className="hidden rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold-dim sm:inline-flex">
+          Trial mode
+        </span>
+        <SignInButton mode="modal">
+          <Button variant="ghost" size="sm">
+            Sign in
+          </Button>
+        </SignInButton>
+        <SignUpButton mode="modal">
+          <Button size="sm">Create account</Button>
+        </SignUpButton>
+      </SignedOut>
+      <SignedIn>
+        <UserButton afterSignOutUrl="/" />
+      </SignedIn>
     </div>
   );
 }

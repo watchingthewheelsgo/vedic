@@ -1,3 +1,4 @@
+import { UserButton } from "@clerk/clerk-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -132,6 +133,7 @@ export function AdminSessionDetail() {
             {exporting ? <LoaderCircle className="size-4 animate-spin" /> : <Download size={14} />}
             PDF
           </Button>
+          <UserButton afterSignOutUrl="/" />
         </div>
       </header>
 

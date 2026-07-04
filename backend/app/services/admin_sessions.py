@@ -29,10 +29,11 @@ class AdminSessionsService:
 
     async def list_sessions(
         self,
+        owner_user_id: str | None = None,
         live_jobs: list[CoreJobResponse] | None = None,
     ) -> AdminSessionListResponse:
         live_by_session = self._latest_job_by_session(live_jobs or [])
-        summaries = await self.metadata_store.list_session_summaries()
+        summaries = await self.metadata_store.list_session_summaries(owner_user_id)
         sessions = [
             self._overlay_live_job(item, live_by_session.get(item.session_id)) for item in summaries
         ]
@@ -48,16 +49,17 @@ class AdminSessionsService:
     async def get_session(
         self,
         session_id: str,
+        owner_user_id: str | None = None,
         live_jobs: list[CoreJobResponse] | None = None,
     ) -> AdminSessionDetailResponse:
         self.workspace.require_session_dir(session_id)
         live_job = self._latest_job_by_session(live_jobs or []).get(session_id)
-        summary = await self.metadata_store.get_session_summary(session_id)
+        summary = await self.metadata_store.get_session_summary(session_id, owner_user_id)
         return AdminSessionDetailResponse(
             summary=self._overlay_live_job(summary, live_job),
             session=self.skill_runtime.load_session(session_id),
-            artifacts=await self.metadata_store.list_artifacts(session_id),
-            exports=await self.metadata_store.list_exports(session_id),
+            artifacts=await self.metadata_store.list_artifacts(session_id, owner_user_id),
+            exports=await self.metadata_store.list_exports(session_id, owner_user_id),
             runMetrics=self._read_json_artifact(session_id, "run_metrics.json"),
             manifest=self._read_json_artifact(session_id, ".meta/session.json"),
             activeJob=live_job,

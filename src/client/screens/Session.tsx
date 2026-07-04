@@ -1,3 +1,11 @@
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  useAuth
+} from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -278,6 +286,7 @@ function statusBadgeVariant(status: StageStatus): ComponentProps<typeof Badge>["
 
 export function Session() {
   const { id = "" } = useParams();
+  const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const navState = location.state as NavState;
@@ -451,6 +460,10 @@ export function Session() {
 
   async function onSubmitFeedback(event: FormEvent) {
     event.preventDefault();
+    if (!isSignedIn) {
+      setError("Sign in or create an account to save validation feedback and continue.");
+      return;
+    }
     const feedback = validationFeedback.trim();
     if (!feedback) {
       setError("Please reply to the validation anchors before starting the full report.");
@@ -501,6 +514,7 @@ export function Session() {
           <BookOpen size={14} /> Report
         </Button>
         <div className="flex-1" />
+        <SessionAuthControls />
       </div>
 
       {error && (
@@ -525,6 +539,8 @@ export function Session() {
             onSubmitFeedback={onSubmitFeedback}
             onResumeCoreReport={resumeCoreReport}
             coreInterrupted={coreInterrupted}
+            authLoaded={authLoaded}
+            isSignedIn={Boolean(isSignedIn)}
           />
           <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh] lg:min-h-0 lg:overflow-hidden">
             {pipelineData ? (
@@ -642,6 +658,29 @@ export function Session() {
   );
 }
 
+function SessionAuthControls() {
+  return (
+    <div className="flex items-center gap-2">
+      <SignedOut>
+        <span className="hidden rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold-dim sm:inline-flex">
+          Trial mode
+        </span>
+        <SignInButton mode="modal">
+          <Button variant="ghost" size="sm">
+            Sign in
+          </Button>
+        </SignInButton>
+        <SignUpButton mode="modal">
+          <Button size="sm">Create account</Button>
+        </SignUpButton>
+      </SignedOut>
+      <SignedIn>
+        <UserButton afterSignOutUrl="/" />
+      </SignedIn>
+    </div>
+  );
+}
+
 function WorkshopDetailPanel({
   selectedStageId,
   session,
@@ -655,7 +694,9 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange,
   onSubmitFeedback,
   onResumeCoreReport,
-  coreInterrupted
+  coreInterrupted,
+  authLoaded,
+  isSignedIn
 }: {
   selectedStageId: string;
   session: SkillSessionResponse | null;
@@ -670,6 +711,8 @@ function WorkshopDetailPanel({
   onSubmitFeedback: (event: FormEvent) => void;
   onResumeCoreReport: () => Promise<void>;
   coreInterrupted: boolean;
+  authLoaded: boolean;
+  isSignedIn: boolean;
 }) {
   const stage = WORKSHOP_STAGES.find((item) => item.id === selectedStageId) ?? WORKSHOP_STAGES[0];
   const nodes = pipelineData?.nodes.filter((node) => stage.match(node.id)) ?? [];
@@ -703,6 +746,8 @@ function WorkshopDetailPanel({
           submittingFeedback={submittingFeedback}
           onValidationFeedbackChange={onValidationFeedbackChange}
           onSubmitFeedback={onSubmitFeedback}
+          authLoaded={authLoaded}
+          isSignedIn={isSignedIn}
         />
       ) : (
         <CoreStageDetail
@@ -801,7 +846,9 @@ function ReaderDetail({
   validationFeedback,
   submittingFeedback,
   onValidationFeedbackChange,
-  onSubmitFeedback
+  onSubmitFeedback,
+  authLoaded,
+  isSignedIn
 }: {
   session: SkillSessionResponse | null;
   readerRunning: boolean;
@@ -811,6 +858,8 @@ function ReaderDetail({
   submittingFeedback: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
+  authLoaded: boolean;
+  isSignedIn: boolean;
 }) {
   const prevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedback = findArtifact(session, "user_context.md");
@@ -825,6 +874,7 @@ function ReaderDetail({
   const activeAnchor = anchors[activeAnchorIndex];
   const answeredCount = anchors.filter((anchor) => anchorFeedback[anchor.index]?.answer).length;
   const allAnswered = anchors.length > 0 && answeredCount === anchors.length;
+  const anonymousLocked = authLoaded && !isSignedIn && anchors.length > 1 && activeAnchorIndex > 0;
   const recordedFeedback = useMemo(
     () => parseRecordedValidationFeedback(feedback?.content ?? ""),
     [feedback?.content]
@@ -927,48 +977,56 @@ function ReaderDetail({
                 {activeAnchor.statement}
               </div>
 
-              <div className="mt-4 grid gap-2">
-                {VALIDATION_CHOICES.map((choice) => {
-                  const selected = anchorFeedback[activeAnchor.index]?.answer === choice.value;
-                  return (
-                    <button
-                      type="button"
-                      key={choice.value}
-                      className={cn(
-                        "rounded-lg border px-3.5 py-3 text-left transition",
-                        selected
-                          ? "border-gold bg-gold text-white shadow-sm"
-                          : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
-                      )}
-                      onClick={() => updateAnchorFeedback(activeAnchor, { answer: choice.value })}
-                    >
-                      <span className="block text-sm font-semibold">{choice.label}</span>
-                      <span
-                        className={cn(
-                          "mt-0.5 block text-[12.5px]",
-                          selected ? "text-white/80" : "text-muted"
-                        )}
-                      >
-                        {choice.description}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              {anonymousLocked ? (
+                <AnonymousCheckpointGate questionNumber={activeAnchorIndex + 1} />
+              ) : (
+                <>
+                  <div className="mt-4 grid gap-2">
+                    {VALIDATION_CHOICES.map((choice) => {
+                      const selected = anchorFeedback[activeAnchor.index]?.answer === choice.value;
+                      return (
+                        <button
+                          type="button"
+                          key={choice.value}
+                          className={cn(
+                            "rounded-lg border px-3.5 py-3 text-left transition",
+                            selected
+                              ? "border-gold bg-gold text-white shadow-sm"
+                              : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
+                          )}
+                          onClick={() =>
+                            updateAnchorFeedback(activeAnchor, { answer: choice.value })
+                          }
+                        >
+                          <span className="block text-sm font-semibold">{choice.label}</span>
+                          <span
+                            className={cn(
+                              "mt-0.5 block text-[12.5px]",
+                              selected ? "text-white/80" : "text-muted"
+                            )}
+                          >
+                            {choice.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              <label className="mt-4 block">
-                <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
-                  Optional note
-                </span>
-                <Textarea
-                  rows={4}
-                  value={anchorFeedback[activeAnchor.index]?.note ?? ""}
-                  onChange={(event) =>
-                    updateAnchorFeedback(activeAnchor, { note: event.target.value })
-                  }
-                  placeholder="Add a correction or example if useful."
-                />
-              </label>
+                  <label className="mt-4 block">
+                    <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
+                      Optional note
+                    </span>
+                    <Textarea
+                      rows={4}
+                      value={anchorFeedback[activeAnchor.index]?.note ?? ""}
+                      onChange={(event) =>
+                        updateAnchorFeedback(activeAnchor, { note: event.target.value })
+                      }
+                      placeholder="Add a correction or example if useful."
+                    />
+                  </label>
+                </>
+              )}
 
               <div className="mt-4 flex items-center justify-between gap-3">
                 <Button
@@ -980,7 +1038,7 @@ function ReaderDetail({
                 >
                   <ChevronLeft size={14} /> Previous
                 </Button>
-                {activeAnchorIndex < anchors.length - 1 ? (
+                {anonymousLocked ? null : activeAnchorIndex < anchors.length - 1 ? (
                   <Button
                     type="button"
                     size="sm"
@@ -1101,6 +1159,31 @@ function ReaderCompletedDetail({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function AnonymousCheckpointGate({ questionNumber }: { questionNumber: number }) {
+  return (
+    <div className="mt-4 rounded-xl border border-gold/35 bg-cream px-4 py-4 shadow-[0_18px_42px_rgba(44,31,15,0.08)]">
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-[1.8px] text-gold">
+        Account checkpoint
+      </div>
+      <h4 className="m-0 text-base font-semibold tracking-normal text-ink">
+        Sign in to answer question {questionNumber}
+      </h4>
+      <p className="mb-4 mt-2 text-[13px] leading-[1.7] text-body">
+        Your trial session is active. Create an account to keep this chart, continue validation, and
+        generate the full reading without starting over.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <SignUpButton mode="modal">
+          <Button>Create account</Button>
+        </SignUpButton>
+        <SignInButton mode="modal">
+          <Button variant="outline">Sign in</Button>
+        </SignInButton>
+      </div>
     </div>
   );
 }

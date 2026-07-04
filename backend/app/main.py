@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from app.auth import AuthenticatedUser, require_user, resolve_session_user
 from app.container import get_container
 from app.db.engine import close_db, database_diagnostic_context, init_db
 from app.schemas import (
@@ -74,6 +75,7 @@ async def health() -> dict[str, object]:
             "model": container.startup_config_preflight.model,
         },
         "agent": container.agent_runtime.config_summary(),
+        "auth": settings.auth_config_summary(),
         "database": database_diagnostic_context(settings),
     }
 
@@ -99,60 +101,97 @@ async def places(
 
 
 @app.get("/api/admin/sessions", response_model=AdminSessionListResponse)
-async def list_admin_sessions() -> AdminSessionListResponse:
+async def list_admin_sessions(
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> AdminSessionListResponse:
     try:
         container = get_container()
-        return await container.admin_sessions.list_sessions(container.core_job_runtime.list_jobs())
+        owner_user_id = current_user.owner_user_id
+        return await container.admin_sessions.list_sessions(
+            owner_user_id,
+            container.core_job_runtime.list_jobs(owner_user_id=owner_user_id),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/admin/sessions/{session_id}", response_model=AdminSessionDetailResponse)
-async def get_admin_session(session_id: str) -> AdminSessionDetailResponse:
+async def get_admin_session(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> AdminSessionDetailResponse:
     try:
         container = get_container()
+        owner_user_id = current_user.owner_user_id
         return await container.admin_sessions.get_session(
             session_id,
-            container.core_job_runtime.list_jobs(),
+            owner_user_id,
+            container.core_job_runtime.list_jobs(owner_user_id=owner_user_id),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/skill-sessions", response_model=SkillSessionResponse)
-async def create_skill_session(input_data: SkillBirthInput) -> SkillSessionResponse:
+async def create_skill_session(
+    input_data: SkillBirthInput,
+    current_user: AuthenticatedUser = Depends(resolve_session_user),
+) -> SkillSessionResponse:
     try:
-        return await get_container().skill_runtime.create_reader_session(input_data)
+        return await get_container().skill_runtime.create_reader_session(
+            input_data,
+            owner_user_id=current_user.owner_user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/skill-sessions/{session_id}", response_model=SkillSessionResponse)
-async def get_skill_session(session_id: str) -> SkillSessionResponse:
+async def get_skill_session(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(resolve_session_user),
+) -> SkillSessionResponse:
     try:
-        return get_container().skill_runtime.load_session(session_id)
+        container = get_container()
+        await _claim_or_assert_session_access(container, session_id, current_user)
+        return container.skill_runtime.load_session(session_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/skill-sessions/{session_id}/report.pdf")
-async def download_skill_session_report_pdf(session_id: str) -> FileResponse:
+async def download_skill_session_report_pdf(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> FileResponse:
     try:
         container = get_container()
+        await _claim_or_assert_session_access(container, session_id, current_user)
         result = container.report_exporter.export_session(session_id)
-        await container.metadata_store.sync_session_from_files(session_id)
+        await container.metadata_store.sync_session_from_files(
+            session_id,
+            owner_user_id=current_user.owner_user_id,
+        )
         return FileResponse(
             result.pdf_path,
             media_type="application/pdf",
@@ -162,30 +201,56 @@ async def download_skill_session_report_pdf(session_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/skill-synastry-subject", response_model=SkillSessionResponse)
-async def create_synastry_subject(input_data: SynastryBirthInput) -> SkillSessionResponse:
+async def create_synastry_subject(
+    input_data: SynastryBirthInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> SkillSessionResponse:
     try:
-        return await get_container().skill_runtime.create_synastry_subject(input_data)
+        container = get_container()
+        await _claim_or_assert_session_access(container, input_data.session_id, current_user)
+        return await container.skill_runtime.create_synastry_subject(
+            input_data,
+            owner_user_id=current_user.owner_user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/skill-runs", response_model=SkillSessionResponse)
-async def run_skill(input_data: SkillRunInput) -> SkillSessionResponse:
+async def run_skill(
+    input_data: SkillRunInput,
+    current_user: AuthenticatedUser = Depends(resolve_session_user),
+) -> SkillSessionResponse:
     try:
-        return await get_container().skill_runtime.run_skill(input_data)
+        container = get_container()
+        if input_data.skill != "vedic-reader" and not current_user.is_clerk:
+            raise HTTPException(status_code=401, detail="Sign in to continue")
+        await _claim_or_assert_session_access(container, input_data.session_id, current_user)
+        return await container.skill_runtime.run_skill(
+            input_data,
+            owner_user_id=current_user.owner_user_id,
+        )
+    except HTTPException:
+        raise
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TimeoutError as exc:
         # asyncio.timeout raises a builtin TimeoutError whose str() is empty,
         # which previously surfaced as a 500 with no detail. Report it clearly
@@ -202,40 +267,84 @@ async def run_skill(input_data: SkillRunInput) -> SkillSessionResponse:
 
 
 @app.post("/api/core-jobs", response_model=CoreJobResponse)
-async def start_core_job(input_data: SkillRunInput) -> CoreJobResponse:
+async def start_core_job(
+    input_data: SkillRunInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> CoreJobResponse:
     try:
-        return await get_container().core_job_runtime.start(input_data)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.get("/api/core-jobs/{job_id}", response_model=CoreJobResponse)
-async def get_core_job(job_id: str) -> CoreJobResponse:
-    try:
-        return await get_container().core_job_runtime.get(job_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.post("/api/skill-feedback", response_model=SkillSessionResponse)
-async def record_skill_feedback(input_data: SkillFeedbackInput) -> SkillSessionResponse:
-    try:
-        return await get_container().skill_runtime.record_reader_feedback(
-            input_data.session_id,
-            input_data.feedback_markdown,
+        container = get_container()
+        await _claim_or_assert_session_access(container, input_data.session_id, current_user)
+        return await container.core_job_runtime.start(
+            input_data,
+            owner_user_id=current_user.owner_user_id,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/core-jobs/{job_id}", response_model=CoreJobResponse)
+async def get_core_job(
+    job_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> CoreJobResponse:
+    try:
+        return await get_container().core_job_runtime.get(
+            job_id,
+            owner_user_id=current_user.owner_user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/skill-feedback", response_model=SkillSessionResponse)
+async def record_skill_feedback(
+    input_data: SkillFeedbackInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> SkillSessionResponse:
+    try:
+        container = get_container()
+        await _claim_or_assert_session_access(container, input_data.session_id, current_user)
+        return await container.skill_runtime.record_reader_feedback(
+            input_data.session_id,
+            input_data.feedback_markdown,
+            owner_user_id=current_user.owner_user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+async def _claim_or_assert_session_access(
+    container,
+    session_id: str,
+    current_user: AuthenticatedUser,
+) -> None:
+    if current_user.is_clerk and current_user.anonymous_user_id:
+        try:
+            await container.metadata_store.claim_session_owner(
+                session_id,
+                from_owner_user_id=current_user.anonymous_user_id,
+                to_owner_user_id=current_user.user_id,
+            )
+            return
+        except PermissionError:
+            pass
+    await container.metadata_store.assert_session_access(session_id, current_user.owner_user_id)
 
 
 def start() -> None:
