@@ -11,10 +11,33 @@ import type {
   SynastryBirthInput
 } from "../shared/domain";
 
+type AuthTokenProvider = () => Promise<string | null>;
+type AnonymousIdProvider = () => string | null;
+
+let authTokenProvider: AuthTokenProvider | null = null;
+let anonymousIdProvider: AnonymousIdProvider | null = null;
+
+export function setAuthTokenProvider(provider: AuthTokenProvider | null) {
+  authTokenProvider = provider;
+}
+
+export function setAnonymousIdProvider(provider: AnonymousIdProvider | null) {
+  anonymousIdProvider = provider;
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await authTokenProvider?.();
+  const anonymousId = anonymousIdProvider?.();
+  return {
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(anonymousId ? { "x-vedic-anonymous-id": anonymousId } : {})
+  };
+}
+
 async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TResponse> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(body)
   });
 
@@ -30,7 +53,7 @@ async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TR
 }
 
 async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<TResponse> {
-  const response = await fetch(path, { signal });
+  const response = await fetch(path, { headers: await authHeaders(), signal });
 
   if (!response.ok) {
     const error = (await response.json().catch(() => null)) as {
@@ -44,7 +67,7 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
 }
 
 async function downloadFile(path: string, filename: string): Promise<void> {
-  const response = await fetch(path);
+  const response = await fetch(path, { headers: await authHeaders() });
   if (!response.ok) {
     const error = (await response.json().catch(() => null)) as {
       error?: string;

@@ -1,3 +1,4 @@
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from "@clerk/clerk-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -6,48 +7,48 @@ import { Button } from "../components/ui/button";
 const FEATURES = [
   {
     icon: "◎",
-    title: "Identity Overview",
-    body: "Ascendant (Lagna), chart lord, Moon sign. Understand your core temperament, inner needs, and how the world perceives you."
+    title: "Your Core Pattern",
+    body: "Understand the temperament, inner needs, and recurring pressures that shape how you move through life."
   },
   {
     icon: "⬡",
-    title: "Planetary Audit",
-    body: "All 9 planets analyzed with Shadbala scores and SAV/BAV strength metrics - quantified, not generic."
+    title: "Nine Planetary Signals",
+    body: "Each planetary signal is weighed and translated into plain-language strengths, constraints, and reminders."
   },
   {
     icon: "◈",
-    title: "D9 Navamsha Deep Dive",
-    body: "What D1 promises, D9 reveals. Uncover the deeper quality of each planet - true fulfillment vs. surface expression."
+    title: "Deeper Promise",
+    body: "Navamsha (D9) adds a second lens: what comes naturally, what matures later, and where patience matters."
   },
   {
     icon: "▦",
-    title: "All 12 House Diagnosis",
-    body: "From House 1 (self) to House 12 (spirituality) - career, wealth, family, relationships, health, each fully diagnosed."
+    title: "Life Areas",
+    body: "Career, wealth, family, relationships, health, learning, reputation, and inner growth are read as connected themes."
   },
   {
     icon: "◷",
-    title: "Dasha Timeline",
-    body: "Vimsottari Mahadasha + Antardasha mapping. Know which planetary period governs your life now, and what each phase brings."
+    title: "Timing Guidance",
+    body: "Dasha periods frame the season you are in: what to lean into, what to watch, and where to move carefully."
   },
   {
     icon: "◉",
-    title: "Live Generation Flow",
-    body: "Watch your report build in real time - every analysis stage, dependency, and its progress on an interactive pipeline."
+    title: "Saved Reading Progress",
+    body: "Follow the reading as it is prepared, with simple checkpoints and progress saved along the way."
   }
 ];
 
 const FAQS = [
   {
     q: "How is Vedic Astrology different from Western Astrology?",
-    a: "Vedic Astrology (Jyotish) uses the Sidereal zodiac - aligned with actual star positions - while Western astrology uses the Tropical zodiac. The two differ by ~23°. Vedic emphasizes the Ascendant (Lagna), quantified planetary strength (Shadbala), and the Dasha time-period system for event-level predictions."
+    a: "Vedic Astrology (Jyotish) uses the sidereal zodiac and puts strong weight on the Ascendant (Lagna), planetary strength, and Dasha timing. In VedaLight, those methods are used for reflective guidance, timing awareness, and practical reminders - not fixed answers."
   },
   {
     q: "Do I need my exact birth time?",
-    a: "Yes - birth time is critical for calculating your Ascendant (Lagna), the foundation of the entire chart. A 2-hour difference can shift your Ascendant to a completely different sign. Check your birth certificate or hospital records."
+    a: "The more precise, the better. Exact birth time makes the reading sharper, especially for timing and deeper chart layers. If you only know an approximate time, you can still continue; the reading will treat uncertain areas more carefully."
   },
   {
-    q: "How long does report generation take?",
-    a: "The full report is a multi-stage analysis of ~48 nodes. It runs in a few minutes; you can watch each stage complete live in the Workshop tab."
+    q: "How long does the reading take?",
+    a: "A full reading usually takes several minutes. You can watch the reading progress live, and completed sections are saved as they become ready."
   }
 ];
 
@@ -63,7 +64,20 @@ export function Landing() {
           <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
             Veda<span>Light</span>
           </button>
-          <Button onClick={start}>Get My Report →</Button>
+          <div className="flex items-center gap-2">
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="ghost">Sign in</Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button>Create account</Button>
+              </SignUpButton>
+            </SignedOut>
+            <SignedIn>
+              <Button onClick={start}>Start My Reading →</Button>
+              <UserButton afterSignOutUrl="/" />
+            </SignedIn>
+          </div>
         </div>
       </nav>
 
@@ -72,17 +86,18 @@ export function Landing() {
           Parashari Jyotish · KN Rao School
         </div>
         <h1 className="mb-5 text-[42px] font-light leading-[1.18] tracking-normal text-night sm:text-[52px]">
-          Your Birth Chart,
+          A Private Vedic Reading,
           <br />
-          <strong className="font-semibold text-gold">Decoded with Data</strong>
+          <strong className="font-semibold text-gold">For the Season You Are In</strong>
         </h1>
         <p className="mx-auto mb-10 max-w-[540px] text-[17px] leading-[1.75] text-body">
-          Enter your exact birth time and location. Receive a personalized Vedic Astrology report -
-          quantified, structured, and generated stage by stage before your eyes.
+          Share your birth details. VedaLight prepares a structured Jyotish reading, checks a few
+          lived-experience signals with you, then turns the chart into guidance, cautions, and
+          themes to reflect on.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           <Button size="lg" onClick={start} className="px-9">
-            Get My Report
+            Start My Reading
           </Button>
           <Button
             size="lg"
@@ -96,18 +111,18 @@ export function Landing() {
           </Button>
         </div>
         <div className="mt-14 flex flex-wrap justify-center gap-10 sm:gap-12">
-          <HeroMeta value="41" label="Page Report" />
-          <HeroMeta value="9" label="Planets Analyzed" />
-          <HeroMeta value="12" label="Houses Covered" />
-          <HeroMeta value="D9" label="Navamsha Depth" />
+          <HeroMeta value="41" label="Page Reading" />
+          <HeroMeta value="9" label="Planetary Signals" />
+          <HeroMeta value="12" label="Life Areas" />
+          <HeroMeta value="D9" label="Deeper Lens" />
         </div>
       </section>
 
       <Section
         className="bg-cream-2"
         title="What's Inside"
-        strong="Your Report"
-        subtitle="Every section is data-backed - no generic predictions, only your chart"
+        strong="Your Reading"
+        subtitle="Chart-based guidance without generic horoscope lines or fixed answers"
       >
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature) => (
@@ -126,9 +141,9 @@ export function Landing() {
       <section id="sample" className="bg-night px-6 py-20 text-cream sm:px-10">
         <div className="mx-auto max-w-[1100px]">
           <SectionTitle
-            title="Report"
+            title="Reading"
             strong="Preview"
-            subtitle="Excerpt from Section 01 of a real report"
+            subtitle="Excerpt from Section 01 of a real reading"
             dark
           />
           <div className="relative overflow-hidden rounded-lg border border-gold/20 bg-night-2 p-7 sm:p-10 after:absolute after:right-5 after:top-4 after:text-[10px] after:uppercase after:tracking-[3px] after:text-gold after:opacity-40 after:content-['SAMPLE_EXCERPT']">
@@ -139,10 +154,11 @@ export function Landing() {
               Ascendant &amp; Chart Lord
             </div>
             <p className="mb-6 text-sm leading-[1.9] text-cream/75">
-              Your Ascendant is <strong className="text-gold">Capricorn</strong> at 29°45' - the
-              final degree of Capricorn. Pragmatic, goal-driven, focused on long-term accumulation.
-              Your chart lord is <strong className="text-gold">Saturn</strong>, in its own second
-              home - House 2 Aquarius, in Own Sign dignity, operating at peak efficiency.
+              Your Ascendant is <strong className="text-gold">Capricorn</strong> at 29°45' - a
+              late-degree signal that often seeks structure before trust. Your chart lord is{" "}
+              <strong className="text-gold">Saturn</strong>, strongly placed in the second house:
+              discipline, speech, savings, and long-term family responsibility become recurring
+              themes.
             </p>
             <SampleTable />
             <div className="relative mt-1">
@@ -169,7 +185,7 @@ export function Landing() {
                 </table>
               </div>
               <div className="absolute inset-0 grid place-items-center">
-                <Button onClick={start}>Unlock Full Report →</Button>
+                <Button onClick={start}>Unlock Full Reading →</Button>
               </div>
             </div>
           </div>
@@ -181,12 +197,12 @@ export function Landing() {
           <PriceCard
             name="Essential"
             price="$39"
-            description="Core report for those new to Vedic Astrology"
+            description="A focused private reading for first-time users"
             features={[
-              "Complete report (~30 pages)",
-              "Identity overview + planetary audit",
-              "All 12 house diagnoses",
-              "Dasha timeline"
+              "Complete reading (~30 pages)",
+              "Identity pattern + planetary signals",
+              "All 12 life areas",
+              "Timing guidance"
             ]}
             onClick={start}
           />
@@ -194,13 +210,13 @@ export function Landing() {
             featured
             name="Pro"
             price="$79"
-            description="Full depth for serious seekers"
+            description="Deeper context for serious reflection"
             features={[
-              "Complete report (41 pages)",
+              "Complete reading (41 pages)",
               "Everything in Essential",
-              "D9 Navamsha deep audit",
-              "Divisional cross-analysis (D10/D4/D5)",
-              "Life architecture summary (10 domains)",
+              "D9 deeper-promise reading",
+              "Career, home, and authority context",
+              "Life synthesis across 10 domains",
               "PDF export"
             ]}
             onClick={start}
@@ -301,15 +317,15 @@ function SectionTitle({
 
 function SampleTable() {
   const rows = [
-    ["1", "Moon", "137.8%", "Exalted · Taurus H5 · Emotional anchor"],
-    ["2", "Saturn", "136.6%", "Own Sign · Aquarius H2 · Chart lord at home"],
-    ["3", "Sun", "128.6%", "Neutral · Scorpio H11 · Vargottama"]
+    ["1", "Moon", "High", "Emotional steadiness and creative devotion"],
+    ["2", "Saturn", "High", "Discipline around speech, family, and savings"],
+    ["3", "Sun", "Strong", "Visibility through networks and long-range goals"]
   ];
   return (
     <table className="w-full border-collapse text-[13px]">
       <tbody>
         <tr>
-          {["Rank", "Planet", "Shadbala", "Status"].map((header) => (
+          {["Rank", "Signal", "Weight", "Reading note"].map((header) => (
             <th
               key={header}
               className="bg-gold/10 px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[1px] text-gold"
@@ -362,7 +378,7 @@ function PriceCard({
       <div className="mb-2 text-xs uppercase tracking-[2px] text-muted">{name}</div>
       <div className="mb-1 text-[44px] font-semibold text-ink">
         {price}
-        <span className="text-[15px] font-normal text-muted"> /report</span>
+        <span className="text-[15px] font-normal text-muted"> /reading</span>
       </div>
       <p className="mb-6 border-b border-gold/25 pb-6 text-[13px] text-body">{description}</p>
       <ul className="mb-8 space-y-2">

@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.settings import Settings
@@ -34,6 +35,7 @@ async def init_db(settings: Settings) -> None:
     AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_owner_user_columns)
 
 
 async def close_db() -> None:
@@ -71,6 +73,23 @@ def normalize_database_url(value: str) -> URL:
         url = _normalize_asyncpg_ssl(url)
         url = _normalize_supabase_pooler(url)
     return url
+
+
+def _ensure_owner_user_columns(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    table_names = set(inspector.get_table_names())
+    for table in [
+        "vedic_sessions",
+        "vedic_artifacts",
+        "vedic_exports",
+        "vedic_core_jobs",
+        "vedic_core_job_nodes",
+    ]:
+        if table not in table_names:
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "owner_user_id" not in columns:
+            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN owner_user_id VARCHAR(160)"))
 
 
 def database_diagnostic_context(settings: Settings | None = None) -> dict[str, object]:

@@ -42,6 +42,7 @@ class CoreNodeState:
 class CoreJobState:
     job_id: str
     session_id: str
+    owner_user_id: str | None
     user_message: str
     nodes: list[CoreNodeState]
     batches: list[dict[str, object]]
@@ -70,7 +71,9 @@ class CoreJobRuntime:
         self._active_by_session: dict[str, str] = {}
         self._registry_lock = asyncio.Lock()
 
-    async def start(self, input_data: SkillRunInput) -> CoreJobResponse:
+    async def start(
+        self, input_data: SkillRunInput, *, owner_user_id: str | None = None
+    ) -> CoreJobResponse:
         if input_data.skill != "vedic-core":
             raise ValueError("Core jobs only support vedic-core")
         self.skill_runtime.workspace.require_session_dir(input_data.session_id)
@@ -82,28 +85,36 @@ class CoreJobRuntime:
                 if active_job and active_job.status in {"queued", "running"}:
                     return self._to_response(active_job)
 
-            job = self._create_job(input_data)
+            job = self._create_job(input_data, owner_user_id=owner_user_id)
             self._jobs[job.job_id] = job
             self._active_by_session[job.session_id] = job.job_id
             await self._persist_job_metadata(job)
             job.task = asyncio.create_task(self._run_job(job))
             return self._to_response(job)
 
-    async def get(self, job_id: str) -> CoreJobResponse:
+    async def get(self, job_id: str, *, owner_user_id: str | None = None) -> CoreJobResponse:
         job = self._jobs.get(job_id)
         if job is None:
             raise LookupError(f"Core job not found: {job_id}")
+        if owner_user_id and job.owner_user_id != owner_user_id:
+            raise LookupError(f"Core job not found: {job_id}")
         return self._to_response(job)
 
-    def list_jobs(self) -> list[CoreJobResponse]:
+    def list_jobs(self, *, owner_user_id: str | None = None) -> list[CoreJobResponse]:
         jobs = sorted(
-            self._jobs.values(),
+            (
+                job
+                for job in self._jobs.values()
+                if owner_user_id is None or job.owner_user_id == owner_user_id
+            ),
             key=lambda job: job.started_at or "",
             reverse=True,
         )
         return [self._to_response(job) for job in jobs]
 
-    def _create_job(self, input_data: SkillRunInput) -> CoreJobState:
+    def _create_job(
+        self, input_data: SkillRunInput, *, owner_user_id: str | None = None
+    ) -> CoreJobState:
         batches = self.skill_runtime.core_batches(input_data.user_message)
         batch_ids = [str(batch.get("id") or "") for batch in batches]
         duplicate_ids = sorted({node_id for node_id in batch_ids if batch_ids.count(node_id) > 1})
@@ -156,6 +167,7 @@ class CoreJobRuntime:
         return CoreJobState(
             job_id=str(uuid.uuid4()),
             session_id=input_data.session_id,
+            owner_user_id=owner_user_id,
             user_message=input_data.user_message,
             nodes=nodes,
             batches=batches,
@@ -236,6 +248,7 @@ class CoreJobRuntime:
                 node.batch,
                 batches=job.batches,
                 force=True,
+                owner_user_id=job.owner_user_id,
             )
             job.session.chat_message = self.USER_RUNNING_MESSAGE
             node.status = "completed"
@@ -350,9 +363,14 @@ class CoreJobRuntime:
         response = self._to_response(job)
         running = [node.label for node in response.nodes if node.status == "running"]
         failed = next((node for node in response.nodes if node.status == "failed"), None)
-        await metadata_store.upsert_core_job(response, user_message=job.user_message)
+        await metadata_store.upsert_core_job(
+            response,
+            user_message=job.user_message,
+            owner_user_id=job.owner_user_id,
+        )
         await metadata_store.sync_session_from_files(
             job.session_id,
+            owner_user_id=job.owner_user_id,
             stage="core_complete" if job.status == "completed" else "core_in_progress",
             status=job.status,
             active_job_id=job.job_id,

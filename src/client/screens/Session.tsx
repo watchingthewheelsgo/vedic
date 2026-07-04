@@ -1,3 +1,11 @@
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  useAuth
+} from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -64,8 +72,6 @@ type StageCopy = {
   purpose: string;
   userResult: string;
   userAction: string;
-  inputs: string[];
-  outputs: string[];
   expected: string;
 };
 
@@ -93,110 +99,94 @@ type ResultPreviewSection = {
 
 const STAGE_COPY: Record<string, StageCopy> = {
   src: {
-    purpose: "Locks the personal information that every later reading must use.",
-    userResult:
-      "A stable chart data snapshot is created. This avoids later stages reinterpreting the form fields differently.",
-    userAction:
-      "Review the date, time, place, and time confidence. If something is wrong, start a fresh workshop.",
-    inputs: [
-      "Birth date, time, place",
-      "Time precision and source",
-      "Gender and relationship status"
-    ],
-    outputs: ["structured_data.md", "structured_data.json", "run_metrics.json"],
-    expected: "Usually seconds. If place resolution fails, fix the city input before continuing."
+    purpose: "Keeps your birth details fixed for the rest of the reading.",
+    userResult: "The reading uses one clear set of date, time, place, and time-confidence details.",
+    userAction: "Review the details. If something is wrong, start a fresh reading.",
+    expected: "Usually seconds. If the city cannot be found, choose it again from search."
   },
   reader: {
-    purpose: "Validates a few concrete chart anchors before spending time on the full report.",
-    userResult: "You get 3-5 concrete anchors to mark as accurate, inaccurate, or partly accurate.",
-    userAction:
-      "Answer one anchor at a time. The full report starts only after every anchor has feedback.",
-    inputs: ["structured_data.md"],
-    outputs: ["reader_prevalidation.md", "user_context.md after your feedback"],
-    expected: "Usually a few minutes because this is an LLM reading step."
+    purpose: "Checks a few lived-experience signals before the full reading begins.",
+    userResult: "You get 3-5 short checks to mark as accurate, partly accurate, or inaccurate.",
+    userAction: "Answer one check at a time. The full reading starts after your replies are saved.",
+    expected: "Usually a few minutes while the system prepares your first checks."
   },
   p1: {
-    purpose: "Builds the first identity frame for the report.",
-    userResult: "The report starts with temperament, chart lord, and core orientation.",
+    purpose: "Establishes the first portrait of temperament and life orientation.",
+    userResult: "The reading starts with your core pattern and the tone of the chart.",
     userAction: "No action required. Wait for this stage to finish.",
-    inputs: ["structured_data.md"],
-    outputs: ["p1_overview.md"],
-    expected: "First core node; starts after validation feedback is recorded."
+    expected: "Starts after your first-check replies are saved."
   },
   yoga: {
-    purpose: "Finds major chart patterns before judging individual planets.",
-    userResult: "Confirmed and rejected pattern signals are carried into later interpretation.",
+    purpose: "Looks for major chart patterns that can color the rest of the reading.",
+    userResult: "Strong patterns are carried forward; weak patterns are not overstated.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", "resources/yogas.md"],
-    outputs: [".runtime/p2/yoga.md", "p2a_planets.md after composition"],
-    expected: "Runs in parallel with P1 where dependencies allow."
+    expected: "Runs automatically while other reading sections are prepared."
   },
   p2: {
-    purpose: "Scores the nine planetary actors that drive most report sections.",
-    userResult: "Strength, dignity, house role, and constraints are prepared for later synthesis.",
+    purpose: "Reads the nine planetary signals behind most of the guidance.",
+    userResult: "Strengths, constraints, and recurring pressures are prepared for synthesis.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", ".runtime/p2/yoga.md"],
-    outputs: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
-    expected: "Nine independent planet nodes can run in parallel after Yoga pre-scan."
+    expected: "Several independent signals can be prepared at the same time."
   },
   d9: {
-    purpose: "Checks whether the surface chart promise holds at a deeper Navamsha level.",
-    userResult: "The report can separate visible potential from deeper fulfillment quality.",
+    purpose: "Uses Navamsha (D9) as a deeper lens on promise and fulfillment.",
+    userResult: "The reading can separate visible potential from what tends to mature over time.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", "p2a-p2d planet audits"],
-    outputs: ["p3a_d9.md"],
-    expected: "Nine D9 planet nodes can run in parallel after P2."
+    expected: "Prepared after the main planetary signals are available."
   },
   div: {
-    purpose: "Adds context for career, home/property, and authority/creative themes.",
-    userResult: "Specialized charts add evidence without overwhelming the main report.",
+    purpose: "Adds supporting context for career, home, authority, and creative direction.",
+    userResult: "These supporting lenses add nuance without overwhelming the main reading.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", "p2a-p2d planet audits"],
-    outputs: ["p3b_divisional.md"],
-    expected: "Three divisional summaries can run in parallel after P2."
+    expected: "Prepared after the main planetary signals are available."
   },
   house: {
-    purpose: "Reviews the 12 life areas that the final report will synthesize.",
+    purpose: "Reviews the major life areas the final reading will synthesize.",
     userResult:
-      "Money, work, relationships, health, learning, family, reputation, and spiritual areas get evidence.",
+      "Money, work, relationships, health, learning, family, reputation, and inner growth are covered.",
     userAction: "No action required.",
-    inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
-    outputs: ["p4a_houses.md", "p4b_houses.md"],
-    expected: "Twelve house nodes can run in parallel after D9 and divisional summaries."
+    expected: "Prepared after the deeper and supporting lenses are available."
   },
   dasha: {
-    purpose: "Builds the timing reference used by the life synthesis.",
-    userResult: "Current and upcoming periods can be tied back to the chart evidence.",
+    purpose: "Frames current and upcoming life periods for timing guidance.",
+    userResult: "The reading can connect present themes to the season you are in.",
     userAction: "No action required.",
-    inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
-    outputs: [".runtime/dasha_review.md"],
-    expected: "Runs once D9 and divisional outputs are ready."
+    expected: "Prepared once the deeper and supporting lenses are available."
   },
   pari: {
-    purpose: "Cross-checks house interactions so the report does not overstate exchange patterns.",
-    userResult: "Confirmed and excluded links are recorded before the final synthesis.",
+    purpose: "Cross-checks strong links between life areas so the reading stays balanced.",
+    userResult: "Confirmed links are included; weaker links are kept in proportion.",
     userAction: "No action required.",
-    inputs: ["All 12 house diagnosis nodes"],
-    outputs: [".runtime/houses/parivartana.md", "p4b_houses.md"],
-    expected: "Runs after every house node completes."
+    expected: "Prepared after the life-area review."
   },
   life: {
-    purpose: "Turns the evidence into readable life-domain sections.",
+    purpose: "Turns the chart evidence into readable life-domain guidance.",
     userResult:
-      "The report assembles identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths.",
+      "Identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths are synthesized.",
     userAction: "No action required.",
-    inputs: ["p4 outputs", "Dasha review", "user_context.md"],
-    outputs: ["p5a_life.md", "p5b_life.md"],
-    expected: "Ten life-block nodes can run in parallel after house and Dasha stages."
+    expected: "Several life themes can be prepared at the same time."
   },
   appx: {
-    purpose: "Finalizes the report and keeps technical evidence available at the end.",
-    userResult: "The Report tab becomes available with export-ready markdown sections.",
+    purpose: "Finishes the reading and keeps reference notes available at the end.",
+    userResult: "The Report tab becomes available with export-ready sections.",
     userAction: "Open the Report tab when this completes.",
-    inputs: ["All completed core report artifacts"],
-    outputs: ["appendix.md"],
-    expected: "Final core node."
+    expected: "Final wrap-up."
   }
+};
+
+const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
+  src: ["structured_data.md", "structured_data.json", "run_metrics.json"],
+  reader: ["reader_prevalidation.md", "user_context.md"],
+  p1: ["p1_overview.md"],
+  yoga: [".runtime/p2/yoga.md", "p2a_planets.md"],
+  p2: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
+  d9: ["p3a_d9.md"],
+  div: ["p3b_divisional.md"],
+  house: ["p4a_houses.md", "p4b_houses.md"],
+  dasha: [".runtime/dasha_review.md"],
+  pari: [".runtime/houses/parivartana.md", "p4b_houses.md"],
+  life: ["p5a_life.md", "p5b_life.md"],
+  appx: ["appendix.md"]
 };
 
 const PRECISION_LABELS: Record<string, string> = {
@@ -238,8 +228,8 @@ const EFFECTIVE_PRECISION_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<StageStatus, string> = {
   done: "Done",
   running: "Running",
-  waiting: "Waiting for feedback",
-  failed: "Failed",
+  waiting: "Needs your reply",
+  failed: "Paused",
   pending: "Pending"
 };
 
@@ -253,7 +243,7 @@ const VALIDATION_CHOICES: Array<{
     value: "accurate",
     label: "Accurate",
     storedLabel: "准",
-    description: "This anchor matches my real experience."
+    description: "This check matches my real experience."
   },
   {
     value: "partly",
@@ -265,7 +255,7 @@ const VALIDATION_CHOICES: Array<{
     value: "inaccurate",
     label: "Not accurate",
     storedLabel: "不准",
-    description: "This anchor does not fit my experience."
+    description: "This check does not fit my experience."
   }
 ];
 
@@ -276,13 +266,30 @@ function statusBadgeVariant(status: StageStatus): ComponentProps<typeof Badge>["
   return "neutral";
 }
 
+const READING_INTERRUPTED_MESSAGE =
+  "The reading was interrupted. Completed parts are saved, and resume will continue from the unfinished part.";
+
+const TECHNICAL_ERROR_PATTERN =
+  /(structured_data|reader_prevalidation|user_context|run_metrics|\.md|artifact|agent output|traceback|vedic-core|batch|node|pipeline|skill|expected artifact|AGENT_TIMEOUT_MS|JSON)/i;
+
+function userFacingError(caught: unknown, fallback: string) {
+  return sanitizeUserMessage(caught instanceof Error ? caught.message : "", fallback);
+}
+
+function sanitizeUserMessage(message: string | null | undefined, fallback: string) {
+  const trimmed = (message ?? "").trim();
+  if (!trimmed || TECHNICAL_ERROR_PATTERN.test(trimmed)) return fallback;
+  return trimmed;
+}
+
 export function Session() {
   const { id = "" } = useParams();
+  const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const navState = location.state as NavState;
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "report" ? "report" : "workshop";
+  const tab = searchParams.get("tab") === "report" ? "report" : "reading";
 
   const [session, setSession] = useState<SkillSessionResponse | null>(null);
   const [coreJob, setCoreJob] = useState<CoreJobResponse | null>(null);
@@ -324,7 +331,7 @@ export function Session() {
         if (job.session) setSession(job.session);
       } catch (caught) {
         coreStartedRef.current = false;
-        setError(caught instanceof Error ? caught.message : "Could not start the core report.");
+        setError(userFacingError(caught, "Could not start the reading. Please try again."));
       }
     },
     [id]
@@ -352,7 +359,7 @@ export function Session() {
       setSession(response);
     } catch (caught) {
       readerStartedRef.current = false;
-      setError(caught instanceof Error ? caught.message : "Could not generate pre-validation.");
+      setError(userFacingError(caught, "Could not prepare your first check. Please try again."));
     } finally {
       setReaderRunning(false);
     }
@@ -377,8 +384,7 @@ export function Session() {
           void startReaderValidation();
         }
       } catch (caught) {
-        if (!cancelled)
-          setError(caught instanceof Error ? caught.message : "Could not load session.");
+        if (!cancelled) setError(userFacingError(caught, "Could not load this reading."));
       }
     })();
     return () => {
@@ -409,12 +415,11 @@ export function Session() {
           if (response.session) setSession(response.session);
           if (response.status === "failed") {
             coreStartedRef.current = false;
-            setError(response.message);
+            setError(sanitizeUserMessage(response.message, READING_INTERRUPTED_MESSAGE));
           }
         })
         .catch((caught) => {
-          if (!cancelled)
-            setError(caught instanceof Error ? caught.message : "Could not refresh progress.");
+          if (!cancelled) setError(userFacingError(caught, "Could not refresh reading progress."));
         });
     }, 2500);
     return () => {
@@ -423,7 +428,7 @@ export function Session() {
     };
   }, [coreJob?.jobId, coreJob?.status]);
 
-  function setTab(next: "workshop" | "report") {
+  function setTab(next: "reading" | "report") {
     const params = new URLSearchParams(searchParams);
     params.set("tab", next);
     setSearchParams(params, { replace: true });
@@ -443,7 +448,7 @@ export function Session() {
     try {
       await api.downloadReportPdf(id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not export PDF.");
+      setError(userFacingError(caught, "Could not prepare the PDF. Please try again."));
     } finally {
       setExportingPdf(false);
     }
@@ -451,9 +456,13 @@ export function Session() {
 
   async function onSubmitFeedback(event: FormEvent) {
     event.preventDefault();
+    if (!isSignedIn) {
+      setError("Sign in or create an account to save your replies and continue.");
+      return;
+    }
     const feedback = validationFeedback.trim();
     if (!feedback) {
-      setError("Please reply to the validation anchors before starting the full report.");
+      setError("Please answer the current check before starting the full reading.");
       return;
     }
 
@@ -472,7 +481,7 @@ export function Session() {
       setSession(updated);
       await startCoreReport();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not record validation feedback.");
+      setError(userFacingError(caught, "Could not save your replies. Please try again."));
     } finally {
       setSubmittingFeedback(false);
     }
@@ -487,10 +496,10 @@ export function Session() {
         <Button
           variant="tab"
           size="sm"
-          data-active={tab === "workshop"}
-          onClick={() => setTab("workshop")}
+          data-active={tab === "reading"}
+          onClick={() => setTab("reading")}
         >
-          <Workflow size={14} /> Workshop
+          <Workflow size={14} /> Reading
         </Button>
         <Button
           variant="tab"
@@ -501,6 +510,7 @@ export function Session() {
           <BookOpen size={14} /> Report
         </Button>
         <div className="flex-1" />
+        <SessionAuthControls />
       </div>
 
       {error && (
@@ -509,7 +519,7 @@ export function Session() {
         </div>
       )}
 
-      {tab === "workshop" ? (
+      {tab === "reading" ? (
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(480px,0.95fr)_minmax(420px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]">
           <WorkshopDetailPanel
             selectedStageId={selectedStageId}
@@ -525,6 +535,8 @@ export function Session() {
             onSubmitFeedback={onSubmitFeedback}
             onResumeCoreReport={resumeCoreReport}
             coreInterrupted={coreInterrupted}
+            authLoaded={authLoaded}
+            isSignedIn={Boolean(isSignedIn)}
           />
           <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh] lg:min-h-0 lg:overflow-hidden">
             {pipelineData ? (
@@ -537,7 +549,7 @@ export function Session() {
               <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
                 <div className="text-center">
                   <LoaderCircle className="mx-auto size-7 animate-spin" />
-                  <p className="mt-2.5">Preparing pipeline...</p>
+                  <p className="mt-2.5">Preparing reading map...</p>
                 </div>
               </div>
             )}
@@ -547,7 +559,7 @@ export function Session() {
         <div className="report-doc grid h-[calc(100vh-57px)] grid-cols-1 lg:grid-cols-[1fr_260px]">
           <main className="report-main overflow-y-auto bg-cream px-6 py-9 pb-20 sm:px-11">
             <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
-              <h1 className="text-[28px] font-light tracking-normal">Your Vedic Report</h1>
+              <h1 className="text-[28px] font-light tracking-normal">Your Vedic Reading</h1>
               <Button onClick={() => void onExport()} disabled={exportingPdf}>
                 {exportingPdf ? (
                   <LoaderCircle className="size-4 animate-spin" />
@@ -603,41 +615,63 @@ export function Session() {
             <div className="mx-auto mb-5 size-11 animate-spin rounded-full border-[3px] border-gold/25 border-t-gold" />
             <h2 className="mb-2 text-2xl font-light">
               {coreInterrupted
-                ? "Generation failed"
+                ? "Reading paused"
                 : awaitingValidationFeedback
-                  ? "Pre-validation is ready"
+                  ? "Your first check is ready"
                   : readerRunning
-                    ? "Generating pre-validation"
-                    : "Your report is being generated"}
+                    ? "Preparing your first check"
+                    : "Your reading is being prepared"}
             </h2>
             <p className="mx-auto mb-6 max-w-[420px] text-sm text-body">
               {coreInterrupted
-                ? (coreJob?.message ??
-                  "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps.")
+                ? sanitizeUserMessage(coreJob?.message, READING_INTERRUPTED_MESSAGE)
                 : awaitingValidationFeedback
-                  ? "Reply to the validation anchors in Workshop before the full report starts."
-                  : `The full analysis runs stage by stage${
+                  ? "Answer the short checks in the Reading tab before the full report starts."
+                  : `The reading is being prepared${
                       pipelineData
-                        ? ` - ${pipelineData.completed}/${pipelineData.total} steps done`
+                        ? ` - ${pipelineData.completed}/${pipelineData.total} parts ready`
                         : ""
-                    }. Watch it live in the Workshop tab.`}
+                    }. You can follow the progress in the Reading tab.`}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {coreInterrupted && (
                 <Button onClick={() => void resumeCoreReport()}>
-                  <RefreshCw size={15} /> Resume generation
+                  <RefreshCw size={15} /> Resume reading
                 </Button>
               )}
               <Button
                 variant={coreInterrupted ? "outline" : "gold"}
-                onClick={() => setTab("workshop")}
+                onClick={() => setTab("reading")}
               >
-                <Workflow size={15} /> Go to Workshop
+                <Workflow size={15} /> View reading progress
               </Button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SessionAuthControls() {
+  return (
+    <div className="flex items-center gap-2">
+      <SignedOut>
+        <span className="hidden rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold-dim sm:inline-flex">
+          Trial mode
+        </span>
+        <SignInButton mode="modal">
+          <Button variant="ghost" size="sm">
+            Sign in
+          </Button>
+        </SignInButton>
+        <SignUpButton mode="modal">
+          <Button size="sm">Create account</Button>
+        </SignUpButton>
+      </SignedOut>
+      <SignedIn>
+        <UserButton afterSignOutUrl="/" />
+      </SignedIn>
     </div>
   );
 }
@@ -655,7 +689,9 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange,
   onSubmitFeedback,
   onResumeCoreReport,
-  coreInterrupted
+  coreInterrupted,
+  authLoaded,
+  isSignedIn
 }: {
   selectedStageId: string;
   session: SkillSessionResponse | null;
@@ -670,6 +706,8 @@ function WorkshopDetailPanel({
   onSubmitFeedback: (event: FormEvent) => void;
   onResumeCoreReport: () => Promise<void>;
   coreInterrupted: boolean;
+  authLoaded: boolean;
+  isSignedIn: boolean;
 }) {
   const stage = WORKSHOP_STAGES.find((item) => item.id === selectedStageId) ?? WORKSHOP_STAGES[0];
   const nodes = pipelineData?.nodes.filter((node) => stage.match(node.id)) ?? [];
@@ -684,7 +722,7 @@ function WorkshopDetailPanel({
         className="absolute right-6 top-7"
       />
       <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
-        Workshop detail
+        Reading detail
       </div>
       <div className="mb-5 flex items-start justify-between gap-3 pr-9">
         <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stage.label}</h3>
@@ -703,6 +741,8 @@ function WorkshopDetailPanel({
           submittingFeedback={submittingFeedback}
           onValidationFeedbackChange={onValidationFeedbackChange}
           onSubmitFeedback={onSubmitFeedback}
+          authLoaded={authLoaded}
+          isSignedIn={isSignedIn}
         />
       ) : (
         <CoreStageDetail
@@ -745,15 +785,15 @@ function StageInfoPopover({
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,380px)] p-4" align="end" side="bottom">
         <div className="mb-3">
-          <div className="mb-1 text-[10px] uppercase tracking-[1.8px] text-gold">Stage guide</div>
+          <div className="mb-1 text-[10px] uppercase tracking-[1.8px] text-gold">Reading guide</div>
           <h4 className="m-0 text-base font-semibold text-ink">{stageLabel}</h4>
         </div>
         <div className="grid gap-3 text-[13px] leading-[1.65] text-body">
-          <StageInfoBlock title="What this stage does">{copy.purpose}</StageInfoBlock>
-          <StageInfoBlock title="What you get">{copy.userResult}</StageInfoBlock>
-          <StageInfoBlock title="What you do">{copy.userAction}</StageInfoBlock>
+          <StageInfoBlock title="What this part does">{copy.purpose}</StageInfoBlock>
+          <StageInfoBlock title="What you will see">{copy.userResult}</StageInfoBlock>
+          <StageInfoBlock title="What you need to do">{copy.userAction}</StageInfoBlock>
           <div className="border-t border-gold/20 pt-3">
-            <StageInfoBlock title="Expected timing">{copy.expected}</StageInfoBlock>
+            <StageInfoBlock title="Timing">{copy.expected}</StageInfoBlock>
           </div>
         </div>
       </PopoverContent>
@@ -801,7 +841,9 @@ function ReaderDetail({
   validationFeedback,
   submittingFeedback,
   onValidationFeedbackChange,
-  onSubmitFeedback
+  onSubmitFeedback,
+  authLoaded,
+  isSignedIn
 }: {
   session: SkillSessionResponse | null;
   readerRunning: boolean;
@@ -811,6 +853,8 @@ function ReaderDetail({
   submittingFeedback: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
+  authLoaded: boolean;
+  isSignedIn: boolean;
 }) {
   const prevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedback = findArtifact(session, "user_context.md");
@@ -825,6 +869,7 @@ function ReaderDetail({
   const activeAnchor = anchors[activeAnchorIndex];
   const answeredCount = anchors.filter((anchor) => anchorFeedback[anchor.index]?.answer).length;
   const allAnswered = anchors.length > 0 && answeredCount === anchors.length;
+  const anonymousLocked = authLoaded && !isSignedIn && anchors.length > 1 && activeAnchorIndex > 0;
   const recordedFeedback = useMemo(
     () => parseRecordedValidationFeedback(feedback?.content ?? ""),
     [feedback?.content]
@@ -869,10 +914,10 @@ function ReaderDetail({
     return (
       <>
         <div className="my-4">
-          <DetailSubtitle>{readerRunning ? "Running now" : "Not started"}</DetailSubtitle>
+          <DetailSubtitle>{readerRunning ? "Preparing now" : "Not started"}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">
             {readerRunning
-              ? `Elapsed ${formatElapsed(readerStartedAt, now)}. The LLM is generating validation anchors from structured_data.md.`
+              ? `Elapsed ${formatElapsed(readerStartedAt, now)}. Preparing a few short checks for you to confirm.`
               : STAGE_COPY.reader.expected}
           </p>
         </div>
@@ -896,8 +941,8 @@ function ReaderDetail({
               Your input is required
             </div>
             <p className="m-0 text-[13px] leading-[1.65] text-body">
-              Answer each validation anchor before the full report starts. These answers calibrate
-              how much confidence the reader should place in your birth time.
+              Answer each short check before the full reading starts. Your replies help the reading
+              treat uncertain birth-time details with the right amount of caution.
             </p>
           </div>
 
@@ -906,13 +951,13 @@ function ReaderDetail({
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[10px] uppercase tracking-[1.8px] text-muted">
-                    Validation anchor
+                    Reading check
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
                     Question {activeAnchorIndex + 1} of {anchors.length}
                     {activeAnchor.rationale && (
                       <AnchorRationalePopover
-                        label={`Why question ${activeAnchorIndex + 1} was inferred`}
+                        label={`Why question ${activeAnchorIndex + 1} appears`}
                         rationale={activeAnchor.rationale}
                       />
                     )}
@@ -927,48 +972,56 @@ function ReaderDetail({
                 {activeAnchor.statement}
               </div>
 
-              <div className="mt-4 grid gap-2">
-                {VALIDATION_CHOICES.map((choice) => {
-                  const selected = anchorFeedback[activeAnchor.index]?.answer === choice.value;
-                  return (
-                    <button
-                      type="button"
-                      key={choice.value}
-                      className={cn(
-                        "rounded-lg border px-3.5 py-3 text-left transition",
-                        selected
-                          ? "border-gold bg-gold text-white shadow-sm"
-                          : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
-                      )}
-                      onClick={() => updateAnchorFeedback(activeAnchor, { answer: choice.value })}
-                    >
-                      <span className="block text-sm font-semibold">{choice.label}</span>
-                      <span
-                        className={cn(
-                          "mt-0.5 block text-[12.5px]",
-                          selected ? "text-white/80" : "text-muted"
-                        )}
-                      >
-                        {choice.description}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              {anonymousLocked ? (
+                <AnonymousCheckpointGate questionNumber={activeAnchorIndex + 1} />
+              ) : (
+                <>
+                  <div className="mt-4 grid gap-2">
+                    {VALIDATION_CHOICES.map((choice) => {
+                      const selected = anchorFeedback[activeAnchor.index]?.answer === choice.value;
+                      return (
+                        <button
+                          type="button"
+                          key={choice.value}
+                          className={cn(
+                            "rounded-lg border px-3.5 py-3 text-left transition",
+                            selected
+                              ? "border-gold bg-gold text-white shadow-sm"
+                              : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
+                          )}
+                          onClick={() =>
+                            updateAnchorFeedback(activeAnchor, { answer: choice.value })
+                          }
+                        >
+                          <span className="block text-sm font-semibold">{choice.label}</span>
+                          <span
+                            className={cn(
+                              "mt-0.5 block text-[12.5px]",
+                              selected ? "text-white/80" : "text-muted"
+                            )}
+                          >
+                            {choice.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              <label className="mt-4 block">
-                <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
-                  Optional note
-                </span>
-                <Textarea
-                  rows={4}
-                  value={anchorFeedback[activeAnchor.index]?.note ?? ""}
-                  onChange={(event) =>
-                    updateAnchorFeedback(activeAnchor, { note: event.target.value })
-                  }
-                  placeholder="Add a correction or example if useful."
-                />
-              </label>
+                  <label className="mt-4 block">
+                    <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
+                      Optional note
+                    </span>
+                    <Textarea
+                      rows={4}
+                      value={anchorFeedback[activeAnchor.index]?.note ?? ""}
+                      onChange={(event) =>
+                        updateAnchorFeedback(activeAnchor, { note: event.target.value })
+                      }
+                      placeholder="Add a correction or example if useful."
+                    />
+                  </label>
+                </>
+              )}
 
               <div className="mt-4 flex items-center justify-between gap-3">
                 <Button
@@ -980,7 +1033,7 @@ function ReaderDetail({
                 >
                   <ChevronLeft size={14} /> Previous
                 </Button>
-                {activeAnchorIndex < anchors.length - 1 ? (
+                {anonymousLocked ? null : activeAnchorIndex < anchors.length - 1 ? (
                   <Button
                     type="button"
                     size="sm"
@@ -993,14 +1046,14 @@ function ReaderDetail({
                   <Button
                     disabled={submittingFeedback || !allAnswered || !validationFeedback.trim()}
                   >
-                    {submittingFeedback ? "Recording..." : "Record feedback and start report"}
+                    {submittingFeedback ? "Saving..." : "Save replies and start reading"}
                   </Button>
                 )}
               </div>
             </div>
           ) : (
             <div className="rounded-xl border border-gold/25 bg-cream-2 p-4">
-              <DetailSubtitle>Validation response</DetailSubtitle>
+              <DetailSubtitle>Your response</DetailSubtitle>
               <Textarea
                 rows={7}
                 value={validationFeedback}
@@ -1011,7 +1064,7 @@ function ReaderDetail({
                 className="mt-3 w-full"
                 disabled={submittingFeedback || !validationFeedback.trim()}
               >
-                {submittingFeedback ? "Recording..." : "Record feedback and start report"}
+                {submittingFeedback ? "Saving..." : "Save replies and start reading"}
               </Button>
             </div>
           )}
@@ -1037,17 +1090,16 @@ function ReaderCompletedDetail({
       <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
         <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
           <CheckCircle2 className="size-4" />
-          Validation complete
+          Check complete
         </div>
         <p className="m-0 text-[13px] leading-[1.65] text-body">
-          Your feedback has been saved. The full reading can now use these answers as calibration
-          context.
+          Your replies have been saved. The full reading can now use them as personal context.
         </p>
       </div>
 
       {structuredCount === 0 && (
         <div className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3 text-[13px] leading-[1.65] text-body">
-          Your feedback was saved as general context for the report.
+          Your replies were saved as general context for the reading.
         </div>
       )}
 
@@ -1060,13 +1112,13 @@ function ReaderCompletedDetail({
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-[1.8px] text-muted">
-                      Validation anchor
+                      Reading check
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
                       Question {anchorIndex + 1} of {anchors.length}
                       {anchor.rationale && (
                         <AnchorRationalePopover
-                          label={`Why question ${anchorIndex + 1} was inferred`}
+                          label={`Why question ${anchorIndex + 1} appears`}
                           rationale={anchor.rationale}
                         />
                       )}
@@ -1095,12 +1147,37 @@ function ReaderCompletedDetail({
         </div>
       ) : (
         <div className="rounded-xl border border-gold/25 bg-cream-2 p-4">
-          <DetailSubtitle>Recorded feedback</DetailSubtitle>
+          <DetailSubtitle>Saved replies</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.65] text-body">
             {excerpt(feedback.content, 420)}
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function AnonymousCheckpointGate({ questionNumber }: { questionNumber: number }) {
+  return (
+    <div className="mt-4 rounded-xl border border-gold/35 bg-cream px-4 py-4 shadow-[0_18px_42px_rgba(44,31,15,0.08)]">
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-[1.8px] text-gold">
+        Account checkpoint
+      </div>
+      <h4 className="m-0 text-base font-semibold tracking-normal text-ink">
+        Sign in to answer question {questionNumber}
+      </h4>
+      <p className="mb-4 mt-2 text-[13px] leading-[1.7] text-body">
+        Your trial session is active. Create an account to keep this chart, continue the check, and
+        generate the full reading without starting over.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <SignUpButton mode="modal">
+          <Button>Create account</Button>
+        </SignUpButton>
+        <SignInButton mode="modal">
+          <Button variant="outline">Sign in</Button>
+        </SignInButton>
+      </div>
     </div>
   );
 }
@@ -1128,7 +1205,7 @@ function AnchorRationalePopover({ label, rationale }: { label: string; rationale
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,360px)] p-4" align="start" side="bottom">
         <div className="mb-2 text-[10px] uppercase tracking-[1.6px] text-gold">
-          Why this was inferred
+          Why this question appears
         </div>
         <p className="m-0 whitespace-pre-wrap text-[13px] leading-[1.7] text-body">{rationale}</p>
       </PopoverContent>
@@ -1178,7 +1255,7 @@ function CoreStageDetail({
           <div className="mb-2.5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-[12px] font-semibold text-red">
               <AlertTriangle className="size-4" />
-              Needs attention
+              Reading paused
             </div>
             {coreInterrupted && (
               <Button size="sm" onClick={() => void onResumeCoreReport()}>
@@ -1188,14 +1265,19 @@ function CoreStageDetail({
           </div>
           {coreInterrupted && (
             <p className="m-0 mb-3 text-[13px] leading-[1.7] text-body">
-              Completed sections have been saved. Resume will continue from unfinished steps.
+              Completed sections have been saved. Resume will continue from the unfinished part.
             </p>
           )}
           <div className="grid gap-2 border-t border-red/20 pt-3">
-            {failedNodes.map((node) => (
+            {failedNodes.map((node, index) => (
               <div className="text-[12.5px] leading-[1.6]" key={node.id}>
-                <div className="font-semibold text-ink">{node.label}</div>
-                <div className="mt-0.5 break-words text-red">{node.error || "Failed"}</div>
+                <div className="font-semibold text-ink">Paused part {index + 1}</div>
+                <div className="mt-0.5 break-words text-red">
+                  {sanitizeUserMessage(
+                    node.error,
+                    "This part did not finish. Resume will keep completed sections and retry the unfinished work."
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -1259,7 +1341,7 @@ function StageStatusSummary({
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] uppercase tracking-[1.1px] text-muted">
             {total > 0 && (
               <span className="rounded-full border border-gold/25 bg-cream-2 px-2.5 py-1">
-                {completed}/{total} ready
+                {completed}/{total} parts ready
               </span>
             )}
             {running > 0 && status === "running" && (
@@ -1282,16 +1364,16 @@ function StageStatusSummary({
 function stageStatusSummary(status: StageStatus, copy: StageCopy, coreInterrupted: boolean) {
   if (status === "failed") {
     return {
-      title: "Generation paused",
+      title: "Reading paused",
       body: coreInterrupted
-        ? "Something interrupted this part of the reading. Resume will keep completed content and only retry unfinished work."
-        : "This section needs attention before it can be used in the final report."
+        ? "Something interrupted this part of the reading. Resume will keep completed content and retry only unfinished work."
+        : "This section needs attention before it can be included in the final reading."
     };
   }
   if (status === "done") {
     return {
-      title: "Result is ready",
-      body: "There is nothing you need to do here. This section is saved and will be included in the final report."
+      title: "Section is ready",
+      body: "There is nothing you need to do here. This section is saved and will be included in the final reading."
     };
   }
   if (status === "running") {
@@ -1308,7 +1390,7 @@ function stageStatusSummary(status: StageStatus, copy: StageCopy, coreInterrupte
   }
   return {
     title: "Waiting for earlier sections",
-    body: "No action is needed. This section will start after its source evidence is ready."
+    body: "No action is needed. This section will start after earlier reading context is ready."
   };
 }
 
@@ -1324,10 +1406,10 @@ function EmptyResultState({
   if (status === "done") return null;
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
-      <DetailSubtitle>{status === "running" ? "Result preview" : "Coming next"}</DetailSubtitle>
+      <DetailSubtitle>{status === "running" ? "Preview" : "Coming next"}</DetailSubtitle>
       <p className="m-0 text-[13px] leading-[1.7] text-body">
         {status === "running"
-          ? `A preview will appear here as soon as this section has saved readable output${progress ? ` (${progress} parts ready)` : ""}.`
+          ? `A preview will appear here as soon as this section saves readable content${progress ? ` (${progress} parts ready)` : ""}.`
           : copy.userResult}
       </p>
     </section>
@@ -1352,7 +1434,7 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
   const sections = useMemo(() => parseResultPreviewSections(displayContent), [displayContent]);
   const visibleSections = expanded ? sections : sections.slice(0, 3);
   const canExpand = sections.length > 0;
-  const label = status === "done" ? "Result preview" : "Saved result preview";
+  const label = status === "done" ? "Reading preview" : "Saved preview";
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
@@ -1423,7 +1505,7 @@ function findStageArtifact(
   nodes: PipelineNode[]
 ): SkillArtifact | null {
   const candidates = [
-    ...(STAGE_COPY[stageId]?.outputs ?? []),
+    ...(STAGE_ARTIFACT_CANDIDATES[stageId] ?? []),
     ...nodes.flatMap((node) => node.files)
   ];
   for (const path of candidates) {
@@ -1659,7 +1741,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
   if (navState?.birth) {
     return {
       date: navState.birth.birthDate,
-      time: navState.birth.birthTime || "Unknown (12:00 placeholder)",
+      time: navState.birth.birthTime || "Unknown birth time",
       place: navState.birth.birthPlace,
       gender: displayCollected(GENDER_LABELS[navState.birth.gender] ?? navState.birth.gender),
       relationship: displayCollected(
@@ -1671,7 +1753,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
         navState.birth.birthTimePrecision === "exact" &&
         navState.birth.timeSource === "出生证/医院记录"
           ? "± minute-level"
-          : "Adjusted by reader validation",
+          : "Adjusted by time confidence",
       concern: navState.concern?.trim() ?? ""
     };
   }

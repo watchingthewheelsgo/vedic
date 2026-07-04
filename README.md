@@ -35,10 +35,16 @@ optional second chart
 - `uv`
 - Python 3.11+ for this backend
 - DeepSeek/Anthropic-compatible token in `.env`
+- Clerk publishable key for the React app and a Clerk issuer/JWKS URL for the
+  backend token verifier
 
 Example `.env`:
 
 ```env
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+VEDIC_AUTH_MODE=clerk
+CLERK_JWT_ISSUER=https://your-clerk-domain
+CLERK_JWKS_URL=
 DEEPSEEK_API_KEY=...
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 ANTHROPIC_MODEL=deepseek-v4-pro[1m]
@@ -53,6 +59,25 @@ Postgres/Supabase connection string; the backend normalizes it to
 `postgresql+asyncpg://` at startup and stores only metadata in the database.
 Markdown, HTML, and PDF artifacts remain local files under
 `backend/data/sessions/<session_id>/` with their paths indexed in the database.
+
+## Authentication
+
+The frontend uses `@clerk/clerk-react`. Set `VITE_CLERK_PUBLISHABLE_KEY` in the
+project `.env`; it is safe for the browser. The backend verifies Clerk session
+tokens with the issuer/JWKS settings and stores the Clerk user id as
+`owner_user_id` on session, artifact, export, and job metadata.
+
+For the Clerk CLI project link, run this from the repo root in a normal
+terminal:
+
+```bash
+clerk auth login
+clerk init --app app_3G2qnI6QRzmAOMo7y6RqdOlWUIE
+clerk doctor
+```
+
+For local UI/backend testing without login, set `VEDIC_AUTH_MODE=disabled`.
+That mode disables user-level filtering and should not be used for production.
 
 ## Run
 

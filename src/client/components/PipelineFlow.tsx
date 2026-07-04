@@ -31,33 +31,49 @@ export type StageDef = {
 // batch nodes, mirroring docs/pipeline.md so the graph stays readable while the
 // underlying DAG has ~48 nodes.
 export const WORKSHOP_STAGES: StageDef[] = [
-  { id: "src", label: "Personal Information", sub: "chart seed", seed: true, match: () => false },
+  {
+    id: "src",
+    label: "Personal Information",
+    sub: "birth details",
+    seed: true,
+    match: () => false
+  },
   {
     id: "reader",
-    label: "Pre-Reading Validation",
-    sub: "your feedback",
+    label: "First Check",
+    sub: "your replies",
     match: (id) => id === "reader_prevalidation"
   },
-  { id: "p1", label: "Core Identity", sub: "first frame", match: (id) => id === "p1" },
-  { id: "yoga", label: "Major Patterns", sub: "yoga scan", match: (id) => id === "p2_yoga" },
+  { id: "p1", label: "Core Pattern", sub: "temperament", match: (id) => id === "p1" },
+  { id: "yoga", label: "Major Patterns", sub: "chart themes", match: (id) => id === "p2_yoga" },
   {
     id: "p2",
-    label: "Planet Strengths",
-    sub: "9 planets",
+    label: "Planet Signals",
+    sub: "9 signals",
     match: (id) => id.startsWith("p2_") && id !== "p2_yoga"
   },
-  { id: "d9", label: "Deeper Promise", sub: "Navamsha", match: (id) => id.startsWith("p3a_d9_") },
-  { id: "div", label: "Life Context", sub: "career/home", match: (id) => id.startsWith("p3b_") },
+  { id: "d9", label: "Deeper Promise", sub: "D9 lens", match: (id) => id.startsWith("p3a_d9_") },
+  {
+    id: "div",
+    label: "Life Context",
+    sub: "career and home",
+    match: (id) => id.startsWith("p3b_")
+  },
   { id: "house", label: "Life Areas", sub: "12 houses", match: (id) => id.startsWith("p4_house_") },
-  { id: "dasha", label: "Timing Map", sub: "Dasha", match: (id) => id === "dasha_review" },
-  { id: "pari", label: "Cross-checks", sub: "exchanges", match: (id) => id === "p4_parivartana" },
+  {
+    id: "dasha",
+    label: "Timing Guidance",
+    sub: "life periods",
+    match: (id) => id === "dasha_review"
+  },
+  { id: "pari", label: "Cross-checks", sub: "theme links", match: (id) => id === "p4_parivartana" },
   {
     id: "life",
     label: "Life Synthesis",
     sub: "10 domains",
     match: (id) => id.startsWith("p5_block_")
   },
-  { id: "appx", label: "Final Report", sub: "appendix", match: (id) => id === "appendix" }
+  { id: "appx", label: "Final Reading", sub: "wrap-up", match: (id) => id === "appendix" }
 ];
 
 export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
@@ -215,7 +231,7 @@ export function PipelineFlow({
             selected: selectedStageId === stage.id,
             badge:
               stat.status === "waiting"
-                ? "input"
+                ? "reply"
                 : stat.total > 1
                   ? `${stat.done}/${stat.total}`
                   : ""
@@ -263,7 +279,7 @@ export function PipelineFlow({
         </div>
         <div className="flex justify-between text-xs text-cream/45">
           <span>
-            {data.completed}/{data.total} steps{data.failed > 0 ? ` · ${data.failed} failed` : ""}
+            {data.completed}/{data.total} parts{data.failed > 0 ? ` · ${data.failed} paused` : ""}
           </span>
           <span>{formatDuration(data.durationSeconds)}</span>
         </div>

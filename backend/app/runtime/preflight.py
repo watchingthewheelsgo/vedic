@@ -76,6 +76,22 @@ def validate_startup_configuration(settings: Any) -> StartupConfigPreflightRepor
                 f"Run `uv sync --project backend` or `npm run backend:setup`. ({exc})"
             )
 
+    auth_enabled = bool(settings.auth_enabled()) if hasattr(settings, "auth_enabled") else False
+    if auth_enabled:
+        publishable_key = str(getattr(settings, "clerk_publishable_key", "") or "").strip()
+        issuer = str(getattr(settings, "clerk_jwt_issuer", "") or "").strip()
+        jwks_url = str(getattr(settings, "clerk_jwks_url", "") or "").strip()
+        if not publishable_key:
+            errors.append(
+                "Clerk auth is enabled. Set VITE_CLERK_PUBLISHABLE_KEY so the React app can "
+                "initialize Clerk."
+            )
+        if not issuer and not jwks_url:
+            errors.append(
+                "Clerk auth is enabled. Set CLERK_JWT_ISSUER or CLERK_JWKS_URL "
+                "so the backend can verify Clerk session tokens."
+            )
+
     if errors:
         raise RuntimeError(
             "Backend startup configuration is not ready:\n"
@@ -88,6 +104,8 @@ def validate_startup_configuration(settings: Any) -> StartupConfigPreflightRepor
             + "4. Run `npm run dev` again.\n"
             + "\nFor UI-only local testing without an LLM, set `VEDIC_AI_MODE=mock` in `.env` "
             + "or your shell."
+            + "\nFor local testing without Clerk, set `VEDIC_AUTH_MODE=disabled`; "
+            + "for real auth, set `VEDIC_AUTH_MODE=clerk` and `CLERK_JWT_ISSUER=...`."
         )
 
     env_source = str(env_path) if env_path.exists() else ("process-env" if os.environ else None)

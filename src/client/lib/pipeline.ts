@@ -160,7 +160,7 @@ function readerPipelineNode(
 
   return {
     id: "reader_prevalidation",
-    label: "Reader pre-validation",
+    label: "First Check",
     wave: 1,
     status,
     files: ["reader_prevalidation.md", "user_context.md"],
