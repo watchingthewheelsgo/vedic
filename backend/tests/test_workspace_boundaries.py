@@ -30,7 +30,7 @@ def test_report_export_defaults_to_session_exports_directory(tmp_path: Path) -> 
     def fake_render_pdf(**kwargs) -> None:
         kwargs["pdf_path"].write_text("pdf", encoding="utf-8")
 
-    exporter._render_pdf = fake_render_pdf  # type: ignore[method-assign]
+    exporter._render_pdf_with_playwright = fake_render_pdf  # type: ignore[method-assign]
     result = exporter.export_session(session_id)
 
     session_dir = workspace.session_dir(session_id)

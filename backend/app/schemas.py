@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -138,6 +138,86 @@ class CoreJobResponse(ApiModel):
     waves: list[CoreJobWave] = Field(default_factory=list)
     nodes: list[CoreJobNode]
     session: SkillSessionResponse | None = None
+
+
+AdminSessionStatus = Literal[
+    "draft",
+    "validation",
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "stalled",
+]
+
+
+class AdminSessionProgress(ApiModel):
+    total: int = 0
+    completed: int = 0
+    running: int = 0
+    failed: int = 0
+    percent: int = 0
+
+
+class AdminArtifactSummary(ApiModel):
+    path: str
+    kind: Literal["markdown", "json", "text", "html", "pdf", "other"]
+    size_bytes: int = Field(alias="sizeBytes")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class AdminExportSummary(ApiModel):
+    name: str
+    path: str
+    media_type: str = Field(alias="mediaType")
+    size_bytes: int = Field(alias="sizeBytes")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class AdminSubjectSummary(ApiModel):
+    birth_date: str | None = Field(default=None, alias="birthDate")
+    birth_time: str | None = Field(default=None, alias="birthTime")
+    birth_place: str | None = Field(default=None, alias="birthPlace")
+    time_precision: str | None = Field(default=None, alias="timePrecision")
+    time_source: str | None = Field(default=None, alias="timeSource")
+    timezone: str | None = None
+    gender: str | None = None
+    relationship: str | None = None
+
+
+class AdminSessionSummary(ApiModel):
+    session_id: str = Field(alias="sessionId")
+    status: AdminSessionStatus
+    stage: str
+    created_at: str | None = Field(default=None, alias="createdAt")
+    updated_at: str | None = Field(default=None, alias="updatedAt")
+    subject: AdminSubjectSummary | None = None
+    progress: AdminSessionProgress
+    artifact_count: int = Field(alias="artifactCount")
+    export_count: int = Field(alias="exportCount")
+    has_pdf: bool = Field(alias="hasPdf")
+    job_id: str | None = Field(default=None, alias="jobId")
+    active_node: str | None = Field(default=None, alias="activeNode")
+    duration_seconds: float | None = Field(default=None, alias="durationSeconds")
+    error: str | None = None
+
+
+class AdminSessionListResponse(ApiModel):
+    sessions: list[AdminSessionSummary]
+    total: int
+    running: int
+    completed: int
+    failed: int
+
+
+class AdminSessionDetailResponse(ApiModel):
+    summary: AdminSessionSummary
+    session: SkillSessionResponse
+    artifacts: list[AdminArtifactSummary]
+    exports: list[AdminExportSummary]
+    run_metrics: dict[str, Any] | None = Field(default=None, alias="runMetrics")
+    manifest: dict[str, Any] | None = None
+    active_job: CoreJobResponse | None = Field(default=None, alias="activeJob")
 
 
 class SkillFeedbackInput(ApiModel):

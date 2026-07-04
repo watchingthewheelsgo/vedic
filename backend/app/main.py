@@ -9,7 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.container import get_container
+from app.db.engine import close_db, database_diagnostic_context, init_db
 from app.schemas import (
+    AdminSessionDetailResponse,
+    AdminSessionListResponse,
     CoreJobResponse,
     PlaceSearchResponse,
     SkillBirthInput,
@@ -23,8 +26,14 @@ from app.settings import get_settings
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    get_container()
-    yield
+    settings = get_settings()
+    await init_db(settings)
+    container = get_container()
+    await container.metadata_store.backfill_all_sessions()
+    try:
+        yield
+    finally:
+        await close_db()
 
 
 app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0", lifespan=lifespan)
@@ -65,6 +74,7 @@ async def health() -> dict[str, object]:
             "model": container.startup_config_preflight.model,
         },
         "agent": container.agent_runtime.config_summary(),
+        "database": database_diagnostic_context(settings),
     }
 
 
@@ -84,6 +94,31 @@ async def places(
             region=region,
             limit=limit,
         )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/sessions", response_model=AdminSessionListResponse)
+async def list_admin_sessions() -> AdminSessionListResponse:
+    try:
+        container = get_container()
+        return await container.admin_sessions.list_sessions(container.core_job_runtime.list_jobs())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/sessions/{session_id}", response_model=AdminSessionDetailResponse)
+async def get_admin_session(session_id: str) -> AdminSessionDetailResponse:
+    try:
+        container = get_container()
+        return await container.admin_sessions.get_session(
+            session_id,
+            container.core_job_runtime.list_jobs(),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -115,7 +150,9 @@ async def get_skill_session(session_id: str) -> SkillSessionResponse:
 @app.get("/api/skill-sessions/{session_id}/report.pdf")
 async def download_skill_session_report_pdf(session_id: str) -> FileResponse:
     try:
-        result = get_container().report_exporter.export_session(session_id)
+        container = get_container()
+        result = container.report_exporter.export_session(session_id)
+        await container.metadata_store.sync_session_from_files(session_id)
         return FileResponse(
             result.pdf_path,
             media_type="application/pdf",

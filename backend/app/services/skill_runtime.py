@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import SkillBirthInput, SkillRunInput, SkillSessionResponse, SynastryBirthInput
+from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
 from app.tools.registry import BackendToolRunner
@@ -20,10 +21,12 @@ class SkillRuntime:
         calculator: VedicCalculator,
         workspace: SkillWorkspace,
         agent_runtime: ClaudeRuntime,
+        metadata_store: MetadataStore | None = None,
     ) -> None:
         self.calculator = calculator
         self.workspace = workspace
         self.agent_runtime = agent_runtime
+        self.metadata_store = metadata_store
         self.tools = BackendToolRunner(workspace.settings)
 
     async def create_reader_session(self, input_data: SkillBirthInput) -> SkillSessionResponse:
@@ -60,6 +63,7 @@ class SkillRuntime:
         self.workspace.write_session_manifest(session_id)
         self.workspace.mark_artifact_checkpoint(session_id, "structured_data.md", producer="calculator")
         self.workspace.mark_artifact_checkpoint(session_id, "structured_data.json", producer="calculator")
+        await self._sync_metadata(session_id, stage="reader_ready", status="draft")
 
         chat_message = (
             "读盘基础数据已生成。\n\n"
@@ -130,6 +134,7 @@ class SkillRuntime:
             a_label="A",
             b_label=input_data.label or "B",
         ).output
+        await self._sync_metadata(input_data.session_id, stage="synastry_ready", status="draft")
 
         return SkillSessionResponse(
             session_id=input_data.session_id,
@@ -171,6 +176,7 @@ class SkillRuntime:
                 producer=input_data.skill,
             )
         stage = self._stage_for(input_data.skill)
+        await self._sync_metadata(input_data.session_id, stage=stage, status=self._status_for_stage(stage))
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         return SkillSessionResponse(
             session_id=input_data.session_id,
@@ -254,6 +260,11 @@ class SkillRuntime:
         expected = set(self.core_batch_files(batch))
         if not force and self.core_batch_resume_valid(input_data.session_id, batch):
             self._compose_core_outputs(input_data.session_id, session_dir)
+            await self._sync_metadata(
+                input_data.session_id,
+                stage="core_in_progress",
+                status="running",
+            )
             artifacts = self.workspace.read_artifacts(input_data.session_id)
             return SkillSessionResponse(
                 session_id=input_data.session_id,
@@ -290,6 +301,11 @@ class SkillRuntime:
         self._compose_core_outputs(input_data.session_id, session_dir)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         core_complete = all(self.core_batch_resume_valid(input_data.session_id, item) for item in batches)
+        await self._sync_metadata(
+            input_data.session_id,
+            stage="core_complete" if core_complete else "core_in_progress",
+            status="completed" if core_complete else "running",
+        )
         next_message = (
             "vedic-core 全部批次已完成。"
             if core_complete
@@ -318,6 +334,7 @@ class SkillRuntime:
         )
         self.workspace.write_artifact(session_id, "user_context.md", content)
         self.workspace.mark_artifact_checkpoint(session_id, "user_context.md", producer="vedic-reader-feedback")
+        await self._sync_metadata(session_id, stage="reader_validation", status="validation")
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_validation",
@@ -327,6 +344,28 @@ class SkillRuntime:
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="user_context.md",
         )
+
+    async def _sync_metadata(
+        self,
+        session_id: str,
+        *,
+        stage: str,
+        status: str,
+    ) -> None:
+        if self.metadata_store is None:
+            return
+        await self.metadata_store.sync_session_from_files(session_id, stage=stage, status=status)
+
+    def _status_for_stage(self, stage: str) -> str:
+        if stage in {"core_complete", "career_complete", "love_complete", "rectifier_complete", "synastry_complete", "qa_complete"}:
+            return "completed"
+        if stage == "reader_validation":
+            return "validation"
+        if stage == "core_in_progress":
+            return "running"
+        if stage == "error":
+            return "failed"
+        return "draft"
 
     def _prompt_for(self, input_data: SkillRunInput) -> str:
         if input_data.skill == "vedic-reader":

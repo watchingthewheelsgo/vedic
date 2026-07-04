@@ -85,6 +85,7 @@ class CoreJobRuntime:
             job = self._create_job(input_data)
             self._jobs[job.job_id] = job
             self._active_by_session[job.session_id] = job.job_id
+            await self._persist_job_metadata(job)
             job.task = asyncio.create_task(self._run_job(job))
             return self._to_response(job)
 
@@ -93,6 +94,14 @@ class CoreJobRuntime:
         if job is None:
             raise LookupError(f"Core job not found: {job_id}")
         return self._to_response(job)
+
+    def list_jobs(self) -> list[CoreJobResponse]:
+        jobs = sorted(
+            self._jobs.values(),
+            key=lambda job: job.started_at or "",
+            reverse=True,
+        )
+        return [self._to_response(job) for job in jobs]
 
     def _create_job(self, input_data: SkillRunInput) -> CoreJobState:
         batches = self.skill_runtime.core_batches(input_data.user_message)
@@ -188,7 +197,7 @@ class CoreJobRuntime:
             job.message = "Your full report is ready."
             job.finished_at = _now()
             job.finished_perf = time.perf_counter()
-            self._write_metrics(job)
+            await self._write_metrics(job)
             job.session = self.skill_runtime.core_progress_response(
                 job.session_id,
                 job.message,
@@ -199,7 +208,7 @@ class CoreJobRuntime:
             job.message = self.USER_INTERRUPTED_MESSAGE
             job.finished_at = _now()
             job.finished_perf = time.perf_counter()
-            self._write_metrics(job)
+            await self._write_metrics(job)
             if job.session is None:
                 job.session = self.skill_runtime.core_progress_response(
                     job.session_id,
@@ -222,7 +231,7 @@ class CoreJobRuntime:
         node.started_at = _now()
         node.started_perf = time.perf_counter()
         job.message = self.USER_RUNNING_MESSAGE
-        self._write_metrics(job)
+        await self._write_metrics(job)
         try:
             job.session = await self.skill_runtime.run_core_batch(
                 input_data,
@@ -236,14 +245,14 @@ class CoreJobRuntime:
             node.finished_perf = time.perf_counter()
             node.error = None
             job.message = self.USER_RUNNING_MESSAGE
-            self._write_metrics(job)
+            await self._write_metrics(job)
         except Exception as exc:
             node.status = "failed"
             node.error = str(exc) or "Node failed"
             node.finished_at = _now()
             node.finished_perf = time.perf_counter()
             job.message = self.USER_INTERRUPTED_MESSAGE
-            self._write_metrics(job)
+            await self._write_metrics(job)
             raise
 
     def _dependencies_complete(self, job: CoreJobState, node: CoreNodeState) -> bool:
@@ -290,7 +299,7 @@ class CoreJobRuntime:
             session=job.session,
         )
 
-    def _write_metrics(self, job: CoreJobState) -> None:
+    async def _write_metrics(self, job: CoreJobState) -> None:
         """Persist timing data as a session artifact for test and UI review."""
 
         existing = self._read_existing_metrics(job.session_id)
@@ -329,6 +338,24 @@ class CoreJobRuntime:
             job.session_id,
             "run_metrics.json",
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+        await self._persist_job_metadata(job)
+
+    async def _persist_job_metadata(self, job: CoreJobState) -> None:
+        metadata_store = getattr(self.skill_runtime, "metadata_store", None)
+        if metadata_store is None:
+            return
+        response = self._to_response(job)
+        running = [node.label for node in response.nodes if node.status == "running"]
+        failed = next((node for node in response.nodes if node.status == "failed"), None)
+        await metadata_store.upsert_core_job(response, user_message=job.user_message)
+        await metadata_store.sync_session_from_files(
+            job.session_id,
+            stage="core_complete" if job.status == "completed" else "core_in_progress",
+            status=job.status,
+            active_job_id=job.job_id,
+            active_node=", ".join(running[:3]) if running else failed.label if failed else None,
+            error=failed.error if failed else None,
         )
 
     def _read_existing_metrics(self, session_id: str) -> dict[str, object]:

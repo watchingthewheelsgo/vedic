@@ -1,4 +1,6 @@
 import type {
+  AdminSessionDetailResponse,
+  AdminSessionListResponse,
   CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
@@ -83,6 +85,12 @@ export const api = {
   },
   getSkillSession(sessionId: string) {
     return getJson<SkillSessionResponse>(`/api/skill-sessions/${encodeURIComponent(sessionId)}`);
+  },
+  listAdminSessions() {
+    return getJson<AdminSessionListResponse>("/api/admin/sessions");
+  },
+  getAdminSession(sessionId: string) {
+    return getJson<AdminSessionDetailResponse>(`/api/admin/sessions/${encodeURIComponent(sessionId)}`);
   },
   createSynastrySubject(input: SynastryBirthInput) {
     return postJson<SkillSessionResponse, SynastryBirthInput>(
