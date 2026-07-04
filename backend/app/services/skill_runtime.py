@@ -61,8 +61,12 @@ class SkillRuntime:
             + "\n",
         )
         self.workspace.write_session_manifest(session_id)
-        self.workspace.mark_artifact_checkpoint(session_id, "structured_data.md", producer="calculator")
-        self.workspace.mark_artifact_checkpoint(session_id, "structured_data.json", producer="calculator")
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "structured_data.md", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "structured_data.json", producer="calculator"
+        )
         await self._sync_metadata(session_id, stage="reader_ready", status="draft")
 
         chat_message = (
@@ -102,9 +106,7 @@ class SkillRuntime:
             active_artifact=active,
         )
 
-    async def create_synastry_subject(
-        self, input_data: SynastryBirthInput
-    ) -> SkillSessionResponse:
+    async def create_synastry_subject(self, input_data: SynastryBirthInput) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
         if not (session_dir / "structured_data.md").exists():
             raise ValueError("A structured_data.md is required before synastry")
@@ -176,7 +178,9 @@ class SkillRuntime:
                 producer=input_data.skill,
             )
         stage = self._stage_for(input_data.skill)
-        await self._sync_metadata(input_data.session_id, stage=stage, status=self._status_for_stage(stage))
+        await self._sync_metadata(
+            input_data.session_id, stage=stage, status=self._status_for_stage(stage)
+        )
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         return SkillSessionResponse(
             session_id=input_data.session_id,
@@ -300,7 +304,9 @@ class SkillRuntime:
 
         self._compose_core_outputs(input_data.session_id, session_dir)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
-        core_complete = all(self.core_batch_resume_valid(input_data.session_id, item) for item in batches)
+        core_complete = all(
+            self.core_batch_resume_valid(input_data.session_id, item) for item in batches
+        )
         await self._sync_metadata(
             input_data.session_id,
             stage="core_complete" if core_complete else "core_in_progress",
@@ -323,7 +329,10 @@ class SkillRuntime:
         self, session_id: str, feedback_markdown: str
     ) -> SkillSessionResponse:
         existing = ""
-        artifacts = {artifact.path: artifact.content for artifact in self.workspace.read_artifacts(session_id)}
+        artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id)
+        }
         if "user_context.md" in artifacts:
             existing = artifacts["user_context.md"].rstrip() + "\n\n"
         content = (
@@ -333,7 +342,9 @@ class SkillRuntime:
             f"_updated_at: {datetime.now(timezone.utc).isoformat()}_\n"
         )
         self.workspace.write_artifact(session_id, "user_context.md", content)
-        self.workspace.mark_artifact_checkpoint(session_id, "user_context.md", producer="vedic-reader-feedback")
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "user_context.md", producer="vedic-reader-feedback"
+        )
         await self._sync_metadata(session_id, stage="reader_validation", status="validation")
         return SkillSessionResponse(
             session_id=session_id,
@@ -357,7 +368,14 @@ class SkillRuntime:
         await self.metadata_store.sync_session_from_files(session_id, stage=stage, status=status)
 
     def _status_for_stage(self, stage: str) -> str:
-        if stage in {"core_complete", "career_complete", "love_complete", "rectifier_complete", "synastry_complete", "qa_complete"}:
+        if stage in {
+            "core_complete",
+            "career_complete",
+            "love_complete",
+            "rectifier_complete",
+            "synastry_complete",
+            "qa_complete",
+        }:
             return "completed"
         if stage == "reader_validation":
             return "validation"
@@ -593,16 +611,56 @@ Rules:
         )
 
         life_blocks = [
-            (1, "人格核心", "Use p1_overview.md, p2 Sun/Moon findings, p3a Sun/Moon D9 settlement, Lagna, Moon, Sun, and AK. Write block 1 only."),
-            (2, "财富潜力", "Use house 2 and house 11 diagnoses, D4 data, p2 money-relevant planet audits, and Dasha review. Write block 2 only."),
-            (3, "事业方向", "Use house 10 diagnosis, D10 data, L10/AmK audits, Yoga activation, and Dasha review. Write block 3 only."),
-            (4, "感情/婚姻", "Use house 7 diagnosis, D9, Venus/Jupiter/DK/UL signals, and Dasha review. Write block 4 only."),
-            (5, "健康提醒", "Use house 1 and house 6 diagnoses, Mars/Saturn audits, Maraka context, and Dasha review. Write block 5 only."),
-            (6, "教育/学习", "Use house 4 and house 5 diagnoses, D5 data, Mercury/Jupiter/Moon signals, and Dasha review. Write block 6 only."),
-            (7, "家庭/居住", "Use house 4 and house 9 diagnoses, D4 data, parental/home indicators, and Dasha review. Write block 7 only."),
-            (8, "社交/声誉", "Use AL data from structured_data.md, house 11 diagnosis, relevant p2/p4 signals, and Dasha review. Write block 8 only."),
-            (9, "灵性/成长", "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only."),
-            (10, "赛道优势地图", "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into supported tracks, business/wealth paths, and timing. Write block 10 only."),
+            (
+                1,
+                "人格核心",
+                "Use p1_overview.md, p2 Sun/Moon findings, p3a Sun/Moon D9 settlement, Lagna, Moon, Sun, and AK. Write block 1 only.",
+            ),
+            (
+                2,
+                "财富潜力",
+                "Use house 2 and house 11 diagnoses, D4 data, p2 money-relevant planet audits, and Dasha review. Write block 2 only.",
+            ),
+            (
+                3,
+                "事业方向",
+                "Use house 10 diagnosis, D10 data, L10/AmK audits, Yoga activation, and Dasha review. Write block 3 only.",
+            ),
+            (
+                4,
+                "感情/婚姻",
+                "Use house 7 diagnosis, D9, Venus/Jupiter/DK/UL signals, and Dasha review. Write block 4 only.",
+            ),
+            (
+                5,
+                "健康提醒",
+                "Use house 1 and house 6 diagnoses, Mars/Saturn audits, Maraka context, and Dasha review. Write block 5 only.",
+            ),
+            (
+                6,
+                "教育/学习",
+                "Use house 4 and house 5 diagnoses, D5 data, Mercury/Jupiter/Moon signals, and Dasha review. Write block 6 only.",
+            ),
+            (
+                7,
+                "家庭/居住",
+                "Use house 4 and house 9 diagnoses, D4 data, parental/home indicators, and Dasha review. Write block 7 only.",
+            ),
+            (
+                8,
+                "社交/声誉",
+                "Use AL data from structured_data.md, house 11 diagnosis, relevant p2/p4 signals, and Dasha review. Write block 8 only.",
+            ),
+            (
+                9,
+                "灵性/成长",
+                "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only.",
+            ),
+            (
+                10,
+                "赛道优势地图",
+                "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into supported tracks, business/wealth paths, and timing. Write block 10 only.",
+            ),
         ]
         for number, title, instruction in life_blocks:
             batches.append(
@@ -719,26 +777,34 @@ User message:
             session_dir / ".runtime" / "p2" / "sun.md",
             session_dir / ".runtime" / "p2" / "moon.md",
         ]
-        self._compose_parts(session_id, session_dir / "p2a_planets.md", p2a_parts, "vedic-core:compose:p2a")
+        self._compose_parts(
+            session_id, session_dir / "p2a_planets.md", p2a_parts, "vedic-core:compose:p2a"
+        )
 
         p2b_parts = [
             session_dir / ".runtime" / "p2" / "mars.md",
             session_dir / ".runtime" / "p2" / "mercury.md",
         ]
-        self._compose_parts(session_id, session_dir / "p2b_planets.md", p2b_parts, "vedic-core:compose:p2b")
+        self._compose_parts(
+            session_id, session_dir / "p2b_planets.md", p2b_parts, "vedic-core:compose:p2b"
+        )
 
         p2c_parts = [
             session_dir / ".runtime" / "p2" / "jupiter.md",
             session_dir / ".runtime" / "p2" / "venus.md",
         ]
-        self._compose_parts(session_id, session_dir / "p2c_planets.md", p2c_parts, "vedic-core:compose:p2c")
+        self._compose_parts(
+            session_id, session_dir / "p2c_planets.md", p2c_parts, "vedic-core:compose:p2c"
+        )
 
         p2d_parts = [
             session_dir / ".runtime" / "p2" / "saturn.md",
             session_dir / ".runtime" / "p2" / "rahu.md",
             session_dir / ".runtime" / "p2" / "ketu.md",
         ]
-        self._compose_parts(session_id, session_dir / "p2d_planets.md", p2d_parts, "vedic-core:compose:p2d")
+        self._compose_parts(
+            session_id, session_dir / "p2d_planets.md", p2d_parts, "vedic-core:compose:p2d"
+        )
 
         p3a_parts = [
             session_dir / ".runtime" / "p3" / f"d9_{planet}.md"
@@ -754,20 +820,25 @@ User message:
                 "ketu",
             ]
         ]
-        self._compose_parts(session_id, session_dir / "p3a_d9.md", p3a_parts, "vedic-core:compose:p3a")
+        self._compose_parts(
+            session_id, session_dir / "p3a_d9.md", p3a_parts, "vedic-core:compose:p3a"
+        )
 
         p3b_parts = [
             session_dir / ".runtime" / "p3" / "d10.md",
             session_dir / ".runtime" / "p3" / "d4.md",
             session_dir / ".runtime" / "p3" / "d5.md",
         ]
-        self._compose_parts(session_id, session_dir / "p3b_divisional.md", p3b_parts, "vedic-core:compose:p3b")
+        self._compose_parts(
+            session_id, session_dir / "p3b_divisional.md", p3b_parts, "vedic-core:compose:p3b"
+        )
 
         p4a_parts = [
-            session_dir / ".runtime" / "houses" / f"house_{number:02d}.md"
-            for number in range(1, 7)
+            session_dir / ".runtime" / "houses" / f"house_{number:02d}.md" for number in range(1, 7)
         ]
-        self._compose_parts(session_id, session_dir / "p4a_houses.md", p4a_parts, "vedic-core:compose:p4a")
+        self._compose_parts(
+            session_id, session_dir / "p4a_houses.md", p4a_parts, "vedic-core:compose:p4a"
+        )
 
         p4b_parts = [
             *[
@@ -776,19 +847,23 @@ User message:
             ],
             session_dir / ".runtime" / "houses" / "parivartana.md",
         ]
-        self._compose_parts(session_id, session_dir / "p4b_houses.md", p4b_parts, "vedic-core:compose:p4b")
+        self._compose_parts(
+            session_id, session_dir / "p4b_houses.md", p4b_parts, "vedic-core:compose:p4b"
+        )
 
         p5a_parts = [
-            session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
-            for number in range(1, 6)
+            session_dir / ".runtime" / "life" / f"block_{number:02d}.md" for number in range(1, 6)
         ]
-        self._compose_parts(session_id, session_dir / "p5a_life.md", p5a_parts, "vedic-core:compose:p5a")
+        self._compose_parts(
+            session_id, session_dir / "p5a_life.md", p5a_parts, "vedic-core:compose:p5a"
+        )
 
         p5b_parts = [
-            session_dir / ".runtime" / "life" / f"block_{number:02d}.md"
-            for number in range(6, 11)
+            session_dir / ".runtime" / "life" / f"block_{number:02d}.md" for number in range(6, 11)
         ]
-        self._compose_parts(session_id, session_dir / "p5b_life.md", p5b_parts, "vedic-core:compose:p5b")
+        self._compose_parts(
+            session_id, session_dir / "p5b_life.md", p5b_parts, "vedic-core:compose:p5b"
+        )
 
     def _compose_parts(
         self,
@@ -1051,6 +1126,10 @@ User message:
         if not isinstance(artifacts, list) or not artifacts:
             raise ValueError("Artifact response missing artifacts")
         for artifact in artifacts:
-            if not isinstance(artifact, dict) or not artifact.get("path") or not artifact.get("content"):
+            if (
+                not isinstance(artifact, dict)
+                or not artifact.get("path")
+                or not artifact.get("content")
+            ):
                 raise ValueError("Artifact response contains an invalid artifact")
         return payload

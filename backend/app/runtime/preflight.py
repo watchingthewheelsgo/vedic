@@ -114,9 +114,7 @@ def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:
             continue
         modules[module_name] = module
         versions[module_name] = str(
-            getattr(module, "__version__", None)
-            or getattr(module, "version", None)
-            or "installed"
+            getattr(module, "__version__", None) or getattr(module, "version", None) or "installed"
         )
 
     if missing:

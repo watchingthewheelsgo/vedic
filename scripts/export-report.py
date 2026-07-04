@@ -13,7 +13,9 @@ from app.settings import get_settings
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Export a Vedic session report to HTML and PDF.")
+    parser = argparse.ArgumentParser(
+        description="Export a Vedic session report to HTML and PDF."
+    )
     parser.add_argument("session_id", help="Session id, e.g. skill_mr1dpnm3_fcqxm5vi")
     parser.add_argument(
         "--output-dir",
@@ -29,7 +31,9 @@ async def main() -> int:
     try:
         result = exporter.export_session(
             args.session_id,
-            output_dir=Path(args.output_dir).expanduser().resolve() if args.output_dir else None,
+            output_dir=Path(args.output_dir).expanduser().resolve()
+            if args.output_dir
+            else None,
         )
         await MetadataStore(workspace).sync_session_from_files(args.session_id)
     finally:

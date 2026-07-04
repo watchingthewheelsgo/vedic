@@ -53,8 +53,16 @@ class MetadataStore:
         files = self._session_files(session_dir)
         checkpoints = self._checkpoint_metadata(session_dir)
         metrics = self._read_json(session_dir / "run_metrics.json")
-        exports = [path for path in files if path.relative_to(session_dir).as_posix().startswith("exports/")]
-        artifacts = [path for path in files if not path.relative_to(session_dir).as_posix().startswith(".meta/")]
+        exports = [
+            path
+            for path in files
+            if path.relative_to(session_dir).as_posix().startswith("exports/")
+        ]
+        artifacts = [
+            path
+            for path in files
+            if not path.relative_to(session_dir).as_posix().startswith(".meta/")
+        ]
         subject = self._subject_json(session_dir)
         derived_status = status or self._derive_status(files, metrics)
         derived_stage = stage or self._derive_stage(files, metrics, derived_status)
@@ -209,7 +217,9 @@ class MetadataStore:
         db: AsyncSession,
         job_id: str,
     ) -> VedicCoreJobRecord | None:
-        result = await db.execute(select(VedicCoreJobRecord).where(VedicCoreJobRecord.job_id == job_id))
+        result = await db.execute(
+            select(VedicCoreJobRecord).where(VedicCoreJobRecord.job_id == job_id)
+        )
         return result.scalar_one_or_none()
 
     async def _get_job_node_record(
@@ -234,7 +244,9 @@ class MetadataStore:
         artifacts: list[Path],
         checkpoints: dict[str, dict[str, Any]],
     ) -> None:
-        await db.execute(delete(VedicArtifactRecord).where(VedicArtifactRecord.session_id == session_id))
+        await db.execute(
+            delete(VedicArtifactRecord).where(VedicArtifactRecord.session_id == session_id)
+        )
         for path in artifacts:
             relative = path.relative_to(session_dir).as_posix()
             checkpoint = checkpoints.get(relative, {})
@@ -266,7 +278,9 @@ class MetadataStore:
         session_dir: Path,
         exports: list[Path],
     ) -> None:
-        await db.execute(delete(VedicExportRecord).where(VedicExportRecord.session_id == session_id))
+        await db.execute(
+            delete(VedicExportRecord).where(VedicExportRecord.session_id == session_id)
+        )
         for path in exports:
             relative = path.relative_to(session_dir).as_posix()
             db.add(
@@ -407,10 +421,14 @@ class MetadataStore:
                 if isinstance(node, dict) and str(node.get("status")) in {"completed", "skipped"}
             )
             running = sum(
-                1 for node in nodes if isinstance(node, dict) and str(node.get("status")) == "running"
+                1
+                for node in nodes
+                if isinstance(node, dict) and str(node.get("status")) == "running"
             )
             failed = sum(
-                1 for node in nodes if isinstance(node, dict) and str(node.get("status")) == "failed"
+                1
+                for node in nodes
+                if isinstance(node, dict) and str(node.get("status")) == "failed"
             )
             return AdminSessionProgress(
                 total=total,

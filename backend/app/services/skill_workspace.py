@@ -66,7 +66,9 @@ class SkillWorkspace:
             "structuredDataSha256": self.structured_data_sha256(session_id),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
-        manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
     def mark_artifact_checkpoint(
         self,
@@ -89,7 +91,9 @@ class SkillWorkspace:
             "artifactSha256": self._file_sha256(target),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
-        metadata_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        metadata_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
     def artifact_checkpoint_valid(
         self,
@@ -137,7 +141,9 @@ class SkillWorkspace:
         files = sorted(path for path in runtime_dir.rglob("*") if path.is_file())
         if not files:
             return
-        examples = ", ".join(path.relative_to(self.settings.project_root).as_posix() for path in files[:3])
+        examples = ", ".join(
+            path.relative_to(self.settings.project_root).as_posix() for path in files[:3]
+        )
         raise RuntimeError(
             "Root .runtime contains generated artifacts outside any session. "
             "Move or delete these files before starting the service: "

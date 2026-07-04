@@ -59,10 +59,10 @@ class CoreJobRuntime:
     """In-memory DAG runner for full vedic-core report generation."""
 
     MAX_CONCURRENCY = 10
-    USER_RUNNING_MESSAGE = "Your full report is being generated. Completed sections are saved automatically."
-    USER_INTERRUPTED_MESSAGE = (
-        "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps."
+    USER_RUNNING_MESSAGE = (
+        "Your full report is being generated. Completed sections are saved automatically."
     )
+    USER_INTERRUPTED_MESSAGE = "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps."
 
     def __init__(self, skill_runtime: SkillRuntime) -> None:
         self.skill_runtime = skill_runtime
@@ -108,7 +108,9 @@ class CoreJobRuntime:
         batch_ids = [str(batch.get("id") or "") for batch in batches]
         duplicate_ids = sorted({node_id for node_id in batch_ids if batch_ids.count(node_id) > 1})
         if duplicate_ids:
-            raise RuntimeError(f"vedic-core batch graph has duplicate id(s): {', '.join(duplicate_ids)}")
+            raise RuntimeError(
+                f"vedic-core batch graph has duplicate id(s): {', '.join(duplicate_ids)}"
+            )
 
         known_ids = set(batch_ids)
         missing_dependencies = sorted(
@@ -166,11 +168,7 @@ class CoreJobRuntime:
         job.started_at = _now()
         job.started_perf = time.perf_counter()
         try:
-            pending = {
-                node.id
-                for node in job.nodes
-                if node.status not in {"completed", "skipped"}
-            }
+            pending = {node.id for node in job.nodes if node.status not in {"completed", "skipped"}}
             while pending:
                 ready = [
                     node
@@ -314,7 +312,9 @@ class CoreJobRuntime:
             "durationSeconds": self._duration_seconds(job.started_perf, job.finished_perf),
             "progress": {
                 "total": len(job.nodes),
-                "completed": sum(1 for node in job.nodes if node.status in {"completed", "skipped"}),
+                "completed": sum(
+                    1 for node in job.nodes if node.status in {"completed", "skipped"}
+                ),
                 "failed": sum(1 for node in job.nodes if node.status == "failed"),
             },
             "waves": self._wave_metrics(job),
@@ -328,7 +328,9 @@ class CoreJobRuntime:
                     "status": node.status,
                     "startedAt": node.started_at,
                     "finishedAt": node.finished_at,
-                    "durationSeconds": self._duration_seconds(node.started_perf, node.finished_perf),
+                    "durationSeconds": self._duration_seconds(
+                        node.started_perf, node.finished_perf
+                    ),
                     "error": node.error,
                 }
                 for node in job.nodes
@@ -394,12 +396,21 @@ class CoreJobRuntime:
             resume_valid = self.skill_runtime.core_batch_resume_valid(session_id, node.batch)
             metric = metric_nodes.get(node.id)
             metric_status = str(metric.get("status")) if metric else None
-            if files_exist and resume_valid and (
-                metric_status in {"completed", "skipped"} or (metric is None and not has_node_metrics)
+            if (
+                files_exist
+                and resume_valid
+                and (
+                    metric_status in {"completed", "skipped"}
+                    or (metric is None and not has_node_metrics)
+                )
             ):
                 node.status = "skipped"
-                node.started_at = str(metric.get("startedAt")) if metric and metric.get("startedAt") else None
-                node.finished_at = str(metric.get("finishedAt")) if metric and metric.get("finishedAt") else _now()
+                node.started_at = (
+                    str(metric.get("startedAt")) if metric and metric.get("startedAt") else None
+                )
+                node.finished_at = (
+                    str(metric.get("finishedAt")) if metric and metric.get("finishedAt") else _now()
+                )
                 node.error = None
 
     def _wave_metrics(self, job: CoreJobState) -> list[dict[str, object]]:
@@ -413,7 +424,9 @@ class CoreJobRuntime:
                 {
                     "wave": wave,
                     "total": len(nodes),
-                    "completed": sum(1 for node in nodes if node.status in {"completed", "skipped"}),
+                    "completed": sum(
+                        1 for node in nodes if node.status in {"completed", "skipped"}
+                    ),
                     "running": sum(1 for node in nodes if node.status == "running"),
                     "failed": sum(1 for node in nodes if node.status == "failed"),
                     "durationSeconds": (

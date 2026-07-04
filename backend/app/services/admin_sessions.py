@@ -33,7 +33,9 @@ class AdminSessionsService:
     ) -> AdminSessionListResponse:
         live_by_session = self._latest_job_by_session(live_jobs or [])
         summaries = await self.metadata_store.list_session_summaries()
-        sessions = [self._overlay_live_job(item, live_by_session.get(item.session_id)) for item in summaries]
+        sessions = [
+            self._overlay_live_job(item, live_by_session.get(item.session_id)) for item in summaries
+        ]
         sessions.sort(key=lambda item: item.updated_at or item.created_at or "", reverse=True)
         return AdminSessionListResponse(
             sessions=sessions,
@@ -68,7 +70,9 @@ class AdminSessionsService:
     ) -> AdminSessionSummary:
         if live_job is None:
             return summary
-        active_node = next((node.label for node in live_job.nodes if node.status == "running"), None)
+        active_node = next(
+            (node.label for node in live_job.nodes if node.status == "running"), None
+        )
         failed_node = next((node for node in live_job.nodes if node.status == "failed"), None)
         return summary.model_copy(
             update={
@@ -82,7 +86,8 @@ class AdminSessionsService:
                     percent=live_job.progress.percent,
                 ),
                 "job_id": live_job.job_id,
-                "active_node": active_node or (failed_node.label if failed_node else summary.active_node),
+                "active_node": active_node
+                or (failed_node.label if failed_node else summary.active_node),
                 "duration_seconds": live_job.duration_seconds,
                 "error": failed_node.error if failed_node else summary.error,
             }

@@ -74,7 +74,9 @@ class VedicArtifactRecord(Base):
         index=True,
     )
 
-    __table_args__ = (UniqueConstraint("session_id", "path", name="uq_vedic_artifact_session_path"),)
+    __table_args__ = (
+        UniqueConstraint("session_id", "path", name="uq_vedic_artifact_session_path"),
+    )
 
 
 class VedicExportRecord(Base):

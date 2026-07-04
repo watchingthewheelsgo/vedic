@@ -96,7 +96,9 @@ def run_cmd(
     )
     if result.returncode == 0:
         return True
-    tail = "\n".join(part for part in [result.stdout[-600:], result.stderr[-1200:]] if part)
+    tail = "\n".join(
+        part for part in [result.stdout[-600:], result.stderr[-1200:]] if part
+    )
     log(f"{description} failed\n{tail}", "ERR")
     return False
 
@@ -115,14 +117,18 @@ def ensure_pip(python_exe: Path) -> bool:
     if run_cmd([str(python_exe), "-m", "pip", "--version"], "check pip", timeout=60):
         return True
     log("pip is missing; bootstrapping with ensurepip", "WARN")
-    return run_cmd([str(python_exe), "-m", "ensurepip", "--upgrade"], "bootstrap pip", timeout=120)
+    return run_cmd(
+        [str(python_exe), "-m", "ensurepip", "--upgrade"], "bootstrap pip", timeout=120
+    )
 
 
 def install_packages(python_exe: Path) -> bool:
     if not ensure_pip(python_exe):
         return False
 
-    run_cmd([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"], "upgrade pip")
+    run_cmd(
+        [str(python_exe), "-m", "pip", "install", "--upgrade", "pip"], "upgrade pip"
+    )
     for package, version_spec, extra_args in REQUIRED_PACKAGES:
         spec = f"{package}{version_spec}"
         log(f"Installing {spec} {' '.join(extra_args)}".strip())
@@ -135,11 +141,15 @@ def install_packages(python_exe: Path) -> bool:
 def backend_env() -> dict[str, str]:
     env = os.environ.copy()
     existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = str(BACKEND_DIR) if not existing else f"{BACKEND_DIR}{os.pathsep}{existing}"
+    env["PYTHONPATH"] = (
+        str(BACKEND_DIR) if not existing else f"{BACKEND_DIR}{os.pathsep}{existing}"
+    )
     return env
 
 
-def run_python(python_exe: Path, code: str, *, timeout: int = 90) -> subprocess.CompletedProcess[str]:
+def run_python(
+    python_exe: Path, code: str, *, timeout: int = 90
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(python_exe), "-c", code],
         cwd=PROJECT_ROOT,
@@ -172,15 +182,21 @@ assert total == 337, f"SAV={{total}} != 337"
                 log(line, "OK")
         return True
 
-    output = "\n".join(part for part in [result.stdout[-800:], result.stderr[-1600:]] if part)
+    output = "\n".join(
+        part for part in [result.stdout[-800:], result.stderr[-1600:]] if part
+    )
     log(f"backend runtime validation failed\n{output}", "ERR")
     return False
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare backend calculator runtime")
-    parser.add_argument("--target", type=Path, default=DEFAULT_VENV, help="backend venv path")
-    parser.add_argument("--check-only", action="store_true", help="validate only; do not install")
+    parser.add_argument(
+        "--target", type=Path, default=DEFAULT_VENV, help="backend venv path"
+    )
+    parser.add_argument(
+        "--check-only", action="store_true", help="validate only; do not install"
+    )
     args = parser.parse_args()
 
     venv_dir = args.target.expanduser().resolve()
@@ -201,7 +217,10 @@ def main() -> int:
         return 0
 
     if args.check_only:
-        log("Run `npm run backend:setup` to install missing backend dependencies.", "ERR")
+        log(
+            "Run `npm run backend:setup` to install missing backend dependencies.",
+            "ERR",
+        )
         return 1
 
     if not install_packages(python_exe):

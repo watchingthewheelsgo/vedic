@@ -102,7 +102,9 @@ def test_admin_sessions_lists_database_metadata_and_local_paths(tmp_path: Path) 
 
 
 def test_plain_postgres_url_uses_asyncpg_and_ssl() -> None:
-    url = normalize_database_url("postgresql://postgres:secret@db.example.supabase.co:5432/postgres")
+    url = normalize_database_url(
+        "postgresql://postgres:secret@db.example.supabase.co:5432/postgres"
+    )
 
     assert url.drivername == "postgresql+asyncpg"
     assert url.host == "db.example.supabase.co"

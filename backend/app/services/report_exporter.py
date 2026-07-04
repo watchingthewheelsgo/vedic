@@ -133,7 +133,9 @@ class ReportExporter:
         return sections
 
     def _load_metrics(self, artifacts: list[SkillArtifact]) -> dict[str, object] | None:
-        metrics = next((artifact for artifact in artifacts if artifact.path == "run_metrics.json"), None)
+        metrics = next(
+            (artifact for artifact in artifacts if artifact.path == "run_metrics.json"), None
+        )
         if metrics is None:
             return None
         try:
@@ -210,15 +212,11 @@ class ReportExporter:
         wave_items = ""
         if isinstance(waves, list):
             wave_items = "\n".join(
-                self._wave_item(wave)
-                for wave in waves
-                if isinstance(wave, dict)
+                self._wave_item(wave) for wave in waves if isinstance(wave, dict)
             )
         calculator = metrics.get("calculator")
         calculator_seconds = (
-            calculator.get("durationSeconds")
-            if isinstance(calculator, dict)
-            else None
+            calculator.get("durationSeconds") if isinstance(calculator, dict) else None
         )
         return f"""
         <section class="metrics">
@@ -290,11 +288,15 @@ class ReportExporter:
                 while index < len(lines) and re.match(r"^[-*]\s+", lines[index].strip()):
                     items.append(re.sub(r"^[-*]\s+", "", lines[index].strip()))
                     index += 1
-                blocks.append("<ul>" + "".join(f"<li>{self._inline(item)}</li>" for item in items) + "</ul>")
+                blocks.append(
+                    "<ul>" + "".join(f"<li>{self._inline(item)}</li>" for item in items) + "</ul>"
+                )
                 continue
             paragraph: list[str] = [stripped]
             index += 1
-            while index < len(lines) and lines[index].strip() and not self._starts_block(lines, index):
+            while (
+                index < len(lines) and lines[index].strip() and not self._starts_block(lines, index)
+            ):
                 paragraph.append(lines[index].strip())
                 index += 1
             blocks.append(f"<p>{self._inline(' '.join(paragraph))}</p>")
@@ -324,7 +326,9 @@ class ReportExporter:
                 "Cannot export PDF because Node.js is not available. Install Node.js and run `npm install`."
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise TimeoutError("PDF export timed out while rendering the report with Playwright.") from exc
+            raise TimeoutError(
+                "PDF export timed out while rendering the report with Playwright."
+            ) from exc
 
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
@@ -343,19 +347,24 @@ class ReportExporter:
         )
 
     def _table_to_html(self, lines: list[str]) -> str:
-        rows = [
-            [cell.strip() for cell in line.strip().strip("|").split("|")]
-            for line in lines
-        ]
+        rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
         if len(rows) < 2:
             return ""
         head = rows[0]
         body = rows[2:]
-        thead = "<thead><tr>" + "".join(f"<th>{self._inline(cell)}</th>" for cell in head) + "</tr></thead>"
-        tbody = "<tbody>" + "".join(
-            "<tr>" + "".join(f"<td>{self._inline(cell)}</td>" for cell in row) + "</tr>"
-            for row in body
-        ) + "</tbody>"
+        thead = (
+            "<thead><tr>"
+            + "".join(f"<th>{self._inline(cell)}</th>" for cell in head)
+            + "</tr></thead>"
+        )
+        tbody = (
+            "<tbody>"
+            + "".join(
+                "<tr>" + "".join(f"<td>{self._inline(cell)}</td>" for cell in row) + "</tr>"
+                for row in body
+            )
+            + "</tbody>"
+        )
         return f"<table>{thead}{tbody}</table>"
 
     def _starts_block(self, lines: list[str], index: int) -> bool:

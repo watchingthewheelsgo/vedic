@@ -6,7 +6,16 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass
 from typing import Any
 
-from app.schemas import BirthInput, CalculationSnapshot, ChartFacts, CurrentDasha, Karakas, LagnaFact, PlanetFact, StrengthFact
+from app.schemas import (
+    BirthInput,
+    CalculationSnapshot,
+    ChartFacts,
+    CurrentDasha,
+    Karakas,
+    LagnaFact,
+    PlanetFact,
+    StrengthFact,
+)
 from app.services.place_service import PlaceService, ResolvedPlace
 from app.settings import Settings
 from app.utils.ids import make_id
@@ -103,7 +112,9 @@ class VedicCalculator:
             }
             structured_data = format_structured_data(chart, transit, meta, user_info)
             structured_payload = build_structured_schema(chart, transit, meta, user_info)
-            structured_data_json = json.dumps(structured_payload, ensure_ascii=False, indent=2) + "\n"
+            structured_data_json = (
+                json.dumps(structured_payload, ensure_ascii=False, indent=2) + "\n"
+            )
             sav_total = sum(chart["sav"].get(sign, 0) for sign in SIGNS)
             if sav_total != 337:
                 raise RuntimeError(f"SAV validation failed: {sav_total} != 337")
@@ -209,9 +220,7 @@ class VedicCalculator:
             "time_precision": self._precision_label(intake.birth_time_precision),
             "time_source": intake.time_source,
             "effective_precision": (
-                "±分钟级"
-                if intake.birth_time_precision == "exact"
-                else "按出生时间精度降级解释"
+                "±分钟级" if intake.birth_time_precision == "exact" else "按出生时间精度降级解释"
             ),
             "gender": intake.gender,
             "relationship": intake.relationship,

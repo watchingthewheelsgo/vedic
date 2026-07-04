@@ -7,6 +7,7 @@
 用法: python validate_synastry_data.py <A_structured_data.md> <B_structured_data.md>
 退出码: 0 全通过 / 1 有硬性问题 / 2 参数错误
 """
+
 import os
 import sys
 
@@ -23,9 +24,9 @@ def check_one(c):
     issues.append((n == 9, f"行星完整性 {n}/9"))
     issues.append((c.lagna_idx is not None, f"Lagna 解析 ({c.lagna_sign})"))
     # Ra-Ke 必须对宫（相差 6 星座）
-    ra, ke = c.planets.get('Rahu'), c.planets.get('Ketu')
-    if ra and ke and ra['sidx'] is not None and ke['sidx'] is not None:
-        diff = (ra['sidx'] - ke['sidx']) % 12
+    ra, ke = c.planets.get("Rahu"), c.planets.get("Ketu")
+    if ra and ke and ra["sidx"] is not None and ke["sidx"] is not None:
+        diff = (ra["sidx"] - ke["sidx"]) % 12
         issues.append((diff == 6, f"Ra-Ke 对宫 (相差 {diff} 星座)"))
     else:
         issues.append((False, "Ra-Ke 解析失败"))
@@ -48,7 +49,7 @@ def main():
         sys.exit(2)
 
     ok_all = True
-    for label, path in (('A', sys.argv[1]), ('B', sys.argv[2])):
+    for label, path in (("A", sys.argv[1]), ("B", sys.argv[2])):
         if not os.path.exists(path):
             print(f"❌ 文件不存在: {path}")
             ok_all = False
@@ -63,10 +64,11 @@ def main():
         for w in warns:
             print(f"  ⚠️  {w}")
 
-    print("\n结果:", "✅ 通过，可生成 synastry_data.md"
-          if ok_all else "❌ 存在硬性问题，先修复再合盘")
+    print(
+        "\n结果:", "✅ 通过，可生成 synastry_data.md" if ok_all else "❌ 存在硬性问题，先修复再合盘"
+    )
     sys.exit(0 if ok_all else 1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

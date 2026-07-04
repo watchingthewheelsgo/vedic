@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  checks:
+    name: Code quality and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: uv sync --project backend --all-groups
+
+      - name: Python format check
+        run: npm run backend:format:check
+
+      - name: Python lint
+        run: npm run backend:lint
+
+      - name: TypeScript check
+        run: npm run check
+
+      - name: Backend runtime setup
+        run: npm run backend:setup
+
+      - name: Backend runtime check
+        run: npm run backend:check
+
+      - name: Backend tests
+        run: npm run backend:test
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Git whitespace check
+        run: git diff --check
