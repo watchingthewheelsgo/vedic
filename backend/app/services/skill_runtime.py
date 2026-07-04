@@ -74,10 +74,8 @@ class SkillRuntime:
         )
 
         chat_message = (
-            "读盘基础数据已生成。\n\n"
-            "已生成: structured_data.md\n"
-            "已生成: structured_data.json\n"
-            "下一步按原 vedic-reader 流程运行验前事：点击「运行读盘验前事」。"
+            "Your chart data is ready.\n\n"
+            "Next, the system will prepare a few pre-reading checkpoints for you to confirm."
         )
         return SkillSessionResponse(
             session_id=session_id,
@@ -93,15 +91,15 @@ class SkillRuntime:
         if "appendix.md" in paths and "run_metrics.json" in paths:
             stage = "core_complete"
             active = "run_metrics.json"
-            message = "已载入完整 core 报告和运行耗时统计。"
+            message = "Your full reading is ready."
         elif "structured_data.md" in paths:
             stage = "reader_ready"
             active = "structured_data.md"
-            message = "已载入 structured_data.md。"
+            message = "Your chart data is ready."
         else:
             stage = "reader_ready"
             active = artifacts[0].path if artifacts else None
-            message = "已载入 session。"
+            message = "Your reading session is ready."
         return SkillSessionResponse(
             session_id=session_id,
             stage=stage,
@@ -225,7 +223,7 @@ class SkillRuntime:
             return self.core_progress_response(
                 session_id=input_data.session_id,
                 stage="core_complete",
-                chat_message="vedic-core 已完成。可继续运行 vedic-career、vedic-love，或进行追问。",
+                chat_message="Your full reading is ready.",
             )
 
         return await self.run_core_batch(
@@ -381,9 +379,7 @@ class SkillRuntime:
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_validation",
-            chat_message=(
-                "反馈已写入 user_context.md。按原流程，下一步可以运行 vedic-core 开始完整分析。"
-            ),
+            chat_message="Your feedback has been saved. The full reading can now begin.",
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="user_context.md",
         )

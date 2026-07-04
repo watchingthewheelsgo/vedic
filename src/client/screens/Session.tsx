@@ -72,8 +72,6 @@ type StageCopy = {
   purpose: string;
   userResult: string;
   userAction: string;
-  inputs: string[];
-  outputs: string[];
   expected: string;
 };
 
@@ -106,12 +104,6 @@ const STAGE_COPY: Record<string, StageCopy> = {
       "A stable chart data snapshot is created. This avoids later stages reinterpreting the form fields differently.",
     userAction:
       "Review the date, time, place, and time confidence. If something is wrong, start a fresh workshop.",
-    inputs: [
-      "Birth date, time, place",
-      "Time precision and source",
-      "Gender and relationship status"
-    ],
-    outputs: ["structured_data.md", "structured_data.json", "run_metrics.json"],
     expected: "Usually seconds. If place resolution fails, fix the city input before continuing."
   },
   reader: {
@@ -119,48 +111,36 @@ const STAGE_COPY: Record<string, StageCopy> = {
     userResult: "You get 3-5 concrete anchors to mark as accurate, inaccurate, or partly accurate.",
     userAction:
       "Answer one anchor at a time. The full report starts only after every anchor has feedback.",
-    inputs: ["structured_data.md"],
-    outputs: ["reader_prevalidation.md", "user_context.md after your feedback"],
-    expected: "Usually a few minutes because this is an LLM reading step."
+    expected: "Usually a few minutes while the system prepares chart checkpoints for you to verify."
   },
   p1: {
     purpose: "Builds the first identity frame for the report.",
     userResult: "The report starts with temperament, chart lord, and core orientation.",
     userAction: "No action required. Wait for this stage to finish.",
-    inputs: ["structured_data.md"],
-    outputs: ["p1_overview.md"],
     expected: "First core node; starts after validation feedback is recorded."
   },
   yoga: {
     purpose: "Finds major chart patterns before judging individual planets.",
     userResult: "Confirmed and rejected pattern signals are carried into later interpretation.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", "resources/yogas.md"],
-    outputs: [".runtime/p2/yoga.md", "p2a_planets.md after composition"],
     expected: "Runs in parallel with P1 where dependencies allow."
   },
   p2: {
     purpose: "Scores the nine planetary actors that drive most report sections.",
     userResult: "Strength, dignity, house role, and constraints are prepared for later synthesis.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", ".runtime/p2/yoga.md"],
-    outputs: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
     expected: "Nine independent planet nodes can run in parallel after Yoga pre-scan."
   },
   d9: {
     purpose: "Checks whether the surface chart promise holds at a deeper Navamsha level.",
     userResult: "The report can separate visible potential from deeper fulfillment quality.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", "p2a-p2d planet audits"],
-    outputs: ["p3a_d9.md"],
     expected: "Nine D9 planet nodes can run in parallel after P2."
   },
   div: {
     purpose: "Adds context for career, home/property, and authority/creative themes.",
     userResult: "Specialized charts add evidence without overwhelming the main report.",
     userAction: "No action required.",
-    inputs: ["structured_data.md", "p2a-p2d planet audits"],
-    outputs: ["p3b_divisional.md"],
     expected: "Three divisional summaries can run in parallel after P2."
   },
   house: {
@@ -168,24 +148,18 @@ const STAGE_COPY: Record<string, StageCopy> = {
     userResult:
       "Money, work, relationships, health, learning, family, reputation, and spiritual areas get evidence.",
     userAction: "No action required.",
-    inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
-    outputs: ["p4a_houses.md", "p4b_houses.md"],
     expected: "Twelve house nodes can run in parallel after D9 and divisional summaries."
   },
   dasha: {
     purpose: "Builds the timing reference used by the life synthesis.",
     userResult: "Current and upcoming periods can be tied back to the chart evidence.",
     userAction: "No action required.",
-    inputs: ["p2a-p2d", "p3a_d9.md", "p3b_divisional.md"],
-    outputs: [".runtime/dasha_review.md"],
     expected: "Runs once D9 and divisional outputs are ready."
   },
   pari: {
     purpose: "Cross-checks house interactions so the report does not overstate exchange patterns.",
     userResult: "Confirmed and excluded links are recorded before the final synthesis.",
     userAction: "No action required.",
-    inputs: ["All 12 house diagnosis nodes"],
-    outputs: [".runtime/houses/parivartana.md", "p4b_houses.md"],
     expected: "Runs after every house node completes."
   },
   life: {
@@ -193,18 +167,29 @@ const STAGE_COPY: Record<string, StageCopy> = {
     userResult:
       "The report assembles identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths.",
     userAction: "No action required.",
-    inputs: ["p4 outputs", "Dasha review", "user_context.md"],
-    outputs: ["p5a_life.md", "p5b_life.md"],
     expected: "Ten life-block nodes can run in parallel after house and Dasha stages."
   },
   appx: {
     purpose: "Finalizes the report and keeps technical evidence available at the end.",
     userResult: "The Report tab becomes available with export-ready markdown sections.",
     userAction: "Open the Report tab when this completes.",
-    inputs: ["All completed core report artifacts"],
-    outputs: ["appendix.md"],
     expected: "Final core node."
   }
+};
+
+const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
+  src: ["structured_data.md", "structured_data.json", "run_metrics.json"],
+  reader: ["reader_prevalidation.md", "user_context.md"],
+  p1: ["p1_overview.md"],
+  yoga: [".runtime/p2/yoga.md", "p2a_planets.md"],
+  p2: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
+  d9: ["p3a_d9.md"],
+  div: ["p3b_divisional.md"],
+  house: ["p4a_houses.md", "p4b_houses.md"],
+  dasha: [".runtime/dasha_review.md"],
+  pari: [".runtime/houses/parivartana.md", "p4b_houses.md"],
+  life: ["p5a_life.md", "p5b_life.md"],
+  appx: ["appendix.md"]
 };
 
 const PRECISION_LABELS: Record<string, string> = {
@@ -922,7 +907,7 @@ function ReaderDetail({
           <DetailSubtitle>{readerRunning ? "Running now" : "Not started"}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">
             {readerRunning
-              ? `Elapsed ${formatElapsed(readerStartedAt, now)}. The LLM is generating validation anchors from structured_data.md.`
+              ? `Elapsed ${formatElapsed(readerStartedAt, now)}. Preparing a few chart checkpoints for you to confirm.`
               : STAGE_COPY.reader.expected}
           </p>
         </div>
@@ -1506,7 +1491,7 @@ function findStageArtifact(
   nodes: PipelineNode[]
 ): SkillArtifact | null {
   const candidates = [
-    ...(STAGE_COPY[stageId]?.outputs ?? []),
+    ...(STAGE_ARTIFACT_CANDIDATES[stageId] ?? []),
     ...nodes.flatMap((node) => node.files)
   ];
   for (const path of candidates) {
