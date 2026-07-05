@@ -62,7 +62,7 @@ class SkillRuntime:
             )
             + "\n",
         )
-        self.workspace.write_session_manifest(session_id)
+        self.workspace.write_session_manifest(session_id, locale=input_data.locale)
         self.workspace.mark_artifact_checkpoint(
             session_id, "structured_data.md", producer="calculator"
         )
@@ -208,7 +208,8 @@ class SkillRuntime:
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
-        batches = self.core_batches(input_data.user_message)
+        locale = self._run_locale(input_data)
+        batches = self.core_batches(input_data.user_message, locale)
         existing_paths = self._session_paths(session_dir)
         batch = next(
             (
@@ -230,8 +231,8 @@ class SkillRuntime:
             input_data, batch, batches=batches, owner_user_id=owner_user_id
         )
 
-    def core_batches(self, user_message: str) -> list[dict[str, object]]:
-        return self._core_batches(user_message)
+    def core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
+        return self._core_batches(user_message, locale)
 
     def core_batch_files(self, batch: dict[str, object]) -> list[str]:
         return self._batch_files(batch)
@@ -279,7 +280,8 @@ class SkillRuntime:
         owner_user_id: str | None = None,
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
-        batches = batches or self.core_batches(input_data.user_message)
+        locale = self._run_locale(input_data)
+        batches = batches or self.core_batches(input_data.user_message, locale)
         expected = set(self.core_batch_files(batch))
         if not force and self.core_batch_resume_valid(input_data.session_id, batch):
             self._compose_core_outputs(input_data.session_id, session_dir)
@@ -419,19 +421,43 @@ class SkillRuntime:
             return "failed"
         return "draft"
 
+    def _run_locale(self, input_data: SkillRunInput) -> str:
+        if input_data.locale in {"zh", "en", "ja"}:
+            return input_data.locale
+        return self.workspace.read_session_locale(input_data.session_id)
+
+    def _language_instruction(self, locale: str) -> str:
+        if locale == "zh":
+            return (
+                "Output language: Simplified Chinese. Keep Jyotish/Sanskrit technical terms "
+                "such as Lagna, Dasha, Navamsha, Mahadasha, and Antardasha in English or "
+                "Sanskrit with short Chinese clarification where useful."
+            )
+        if locale == "ja":
+            return (
+                "Output language: Japanese. Keep Jyotish/Sanskrit technical terms such as "
+                "Lagna, Dasha, Navamsha, Mahadasha, and Antardasha in English or Sanskrit "
+                "with short Japanese clarification where useful."
+            )
+        return (
+            "Output language: English. Keep Jyotish/Sanskrit technical terms such as Lagna, "
+            "Dasha, Navamsha, Mahadasha, and Antardasha consistent."
+        )
+
     def _prompt_for(self, input_data: SkillRunInput) -> str:
+        locale = self._run_locale(input_data)
         if input_data.skill == "vedic-reader":
-            return self._reader_prompt(input_data.user_message)
+            return self._reader_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-core":
-            return self._core_prompt(input_data.user_message)
+            return self._core_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-career":
-            return self._career_prompt(input_data.user_message)
+            return self._career_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-love":
-            return self._love_prompt(input_data.user_message)
+            return self._love_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-rectifier":
-            return self._rectifier_prompt(input_data.user_message)
+            return self._rectifier_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-synastry":
-            return self._synastry_prompt(input_data.user_message)
+            return self._synastry_prompt(input_data.user_message, locale)
         raise ValueError(f"Unsupported skill: {input_data.skill}")
 
     def _artifact_prompt_for(self, input_data: SkillRunInput) -> str:
@@ -468,8 +494,9 @@ Rules:
 - Do not include any artifact outside the original skill's expected file set.
 - The JSON wrapper is only for the backend; the user sees the markdown artifacts."""
 
-    def _core_batches(self, user_message: str) -> list[dict[str, object]]:
+    def _core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
         user_line = user_message or "开始分析"
+        language_instruction = self._language_instruction(locale)
         planets = [
             ("sun", "Sun", "太阳"),
             ("moon", "Moon", "月亮"),
@@ -495,6 +522,7 @@ Rules:
                 "p1_overview.md",
                 "Run vedic-core Step 0 and P1 only. Use structured_data.md. Do not use user_context.md in this batch.",
                 user_line,
+                language_instruction=language_instruction,
             ),
             self._core_batch(
                 "p2_yoga",
@@ -504,6 +532,7 @@ Rules:
                 user_line,
                 active="p1_overview.md",
                 progress_message="P2 Yoga/NBRY 预扫描已完成。",
+                language_instruction=language_instruction,
             ),
         ]
 
@@ -526,6 +555,7 @@ Rules:
                     dependencies=["p2_yoga"],
                     active="p1_overview.md",
                     progress_message=f"P2 {planet} 审计已完成。",
+                    language_instruction=language_instruction,
                 )
             )
 
@@ -547,6 +577,7 @@ Rules:
                     dependencies=p2_node_ids,
                     active="p2a_planets.md",
                     progress_message=f"P3A D9 {planet} 审计已完成。",
+                    language_instruction=language_instruction,
                 )
             )
 
@@ -581,6 +612,7 @@ Rules:
                     dependencies=p2_node_ids,
                     active="p2a_planets.md",
                     progress_message=f"{label} 已完成。",
+                    language_instruction=language_instruction,
                 )
             )
 
@@ -603,6 +635,7 @@ Rules:
                     dependencies=p3_done,
                     active="p3a_d9.md",
                     progress_message=f"P4 第{number}宫诊断已完成。",
+                    language_instruction=language_instruction,
                 )
             )
 
@@ -623,6 +656,7 @@ Rules:
                 dependencies=house_node_ids,
                 active="p4a_houses.md",
                 progress_message="P4 Parivartana 互溶扫描已完成。",
+                language_instruction=language_instruction,
             )
         )
 
@@ -641,6 +675,7 @@ Rules:
                 dependencies=p3_done,
                 active="p3a_d9.md",
                 progress_message="Dasha速查与格局激活验证已完成。",
+                language_instruction=language_instruction,
             )
         )
 
@@ -715,6 +750,7 @@ Rules:
                     dependencies=["p4_parivartana", "dasha_review"],
                     active="p4b_houses.md",
                     progress_message=f"P5 板块{number} {title} 已完成。",
+                    language_instruction=language_instruction,
                 )
             )
 
@@ -733,6 +769,7 @@ Rules:
                 dependencies=life_node_ids,
                 active="p5a_life.md",
                 progress_message="Step 5 技术附录已完成。",
+                language_instruction=language_instruction,
             )
         )
 
@@ -749,6 +786,7 @@ Rules:
         dependencies: list[str] | None = None,
         active: str | None = None,
         progress_message: str | None = None,
+        language_instruction: str,
     ) -> dict[str, object]:
         files = [file_name] if isinstance(file_name, str) else file_name
         return {
@@ -763,11 +801,17 @@ Rules:
                 files,
                 instruction,
                 user_message,
+                language_instruction,
             ),
         }
 
     def _core_batch_prompt(
-        self, batch_name: str, files: list[str], instruction: str, user_message: str
+        self,
+        batch_name: str,
+        files: list[str],
+        instruction: str,
+        user_message: str,
+        language_instruction: str,
     ) -> str:
         file_list = ", ".join(files)
         return f"""Run vedic-core exactly as the original skill, but only for this backend batch: {batch_name}.
@@ -780,6 +824,7 @@ Write exactly these batch file names in the current workspace and no others:
 
 Rules:
 - Preserve the original vedic-core phase order, terminology, markdown style, evidence weighting, and QA/report rules.
+- {language_instruction}
 - Use structured_data.md as the calculation source of truth.
 - Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
 - Each requested file must be complete markdown, not a placeholder and not "see previous".
@@ -976,12 +1021,13 @@ User message:
                 selected[path] = content
         return selected
 
-    def _reader_prompt(self, user_message: str) -> str:
+    def _reader_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-reader in Calc mode.
 
 Workspace already contains structured_data.md generated by vedic-calculator.
 
 Follow the original vedic-reader workflow exactly, but because this is a web adapter:
+- {self._language_instruction(locale)}
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
 - Use the provided structured_data.md content.
@@ -1000,12 +1046,13 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 User message:
 {user_message or "开始读盘验前事"}"""
 
-    def _core_prompt(self, user_message: str) -> str:
+    def _core_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-core exactly as the original skill.
 
 Workspace contains structured_data.md and may contain user_context.md / reader_prevalidation.md.
 
 Rules:
+- {self._language_instruction(locale)}
 - Follow vedic-core Step 0 through Step 5.
 - Preserve blind-audit rules: Step 1-3 must not use user_context.md.
 - Write the original expected markdown files: p1_overview.md, p2a_planets.md, p2b_planets.md, p2c_planets.md, p2d_planets.md, p3a_d9.md, p3b_divisional.md, p4a_houses.md, p4b_houses.md, p5a_life.md, p5b_life.md, appendix.md.
@@ -1015,12 +1062,13 @@ Rules:
 User message:
 {user_message or "开始分析"}"""
 
-    def _career_prompt(self, user_message: str) -> str:
+    def _career_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-career exactly as the original skill.
 
 Workspace contains structured_data.md and may contain the core report files.
 
 Rules:
+- {self._language_instruction(locale)}
 - Use only structured_data.md and core report files as allowed by the skill.
 - Follow all four career phases.
 - Write the original expected markdown outputs, including career_phase4a.md, career_phase4b.md, and career_phase4c.md when Phase 4 is reached.
@@ -1030,12 +1078,13 @@ Rules:
 User message:
 {user_message or "分析事业"}"""
 
-    def _love_prompt(self, user_message: str) -> str:
+    def _love_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-love exactly as the original skill.
 
 Workspace contains structured_data.md and may contain the core report files.
 
 Rules:
+- {self._language_instruction(locale)}
 - Use only structured_data.md and allowed report files.
 - Follow the original love timing workflow and output file rules.
 - Chat response should only report progress/completion and file paths.
@@ -1044,12 +1093,13 @@ Rules:
 User message:
 {user_message or "分析感情"}"""
 
-    def _rectifier_prompt(self, user_message: str) -> str:
+    def _rectifier_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-rectifier exactly as the original skill.
 
 Workspace contains structured_data.md and user_context.md if feedback/events exist.
 
 Rules:
+- {self._language_instruction(locale)}
 - This skill is interactive.
 - Write rectification_report.md.
 - If the birth time should be changed, clearly state the candidate time and what needs confirmation.
@@ -1059,7 +1109,7 @@ Rules:
 User message:
 {user_message or "校准时间"}"""
 
-    def _synastry_prompt(self, user_message: str) -> str:
+    def _synastry_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-synastry exactly as the original skill.
 
 Workspace contains A's structured_data.md and a synastry_<B>_<YYYYMMDD> folder with:
@@ -1068,6 +1118,7 @@ Workspace contains A's structured_data.md and a synastry_<B>_<YYYYMMDD> folder w
 - synastry_data.md
 
 Rules:
+- {self._language_instruction(locale)}
 - Do not read user_context.md.
 - Use synastry_data.md as the cross-chart calculation source of truth.
 - If reports/00_signal_triage.md does not exist, run Layer 0.5 only, write reports/00_signal_triage.md, then stop and ask the original intake question:

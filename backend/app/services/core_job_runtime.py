@@ -44,6 +44,7 @@ class CoreJobState:
     session_id: str
     owner_user_id: str | None
     user_message: str
+    locale: str | None
     nodes: list[CoreNodeState]
     batches: list[dict[str, object]]
     status: CoreJobStatus = "queued"
@@ -115,7 +116,10 @@ class CoreJobRuntime:
     def _create_job(
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
     ) -> CoreJobState:
-        batches = self.skill_runtime.core_batches(input_data.user_message)
+        locale = input_data.locale or self.skill_runtime.workspace.read_session_locale(
+            input_data.session_id
+        )
+        batches = self.skill_runtime.core_batches(input_data.user_message, locale)
         batch_ids = [str(batch.get("id") or "") for batch in batches]
         duplicate_ids = sorted({node_id for node_id in batch_ids if batch_ids.count(node_id) > 1})
         if duplicate_ids:
@@ -169,6 +173,7 @@ class CoreJobRuntime:
             session_id=input_data.session_id,
             owner_user_id=owner_user_id,
             user_message=input_data.user_message,
+            locale=locale,
             nodes=nodes,
             batches=batches,
             session=session,
@@ -235,6 +240,7 @@ class CoreJobRuntime:
             sessionId=job.session_id,
             skill="vedic-core",
             userMessage=job.user_message,
+            locale=job.locale,
         )
 
         node.status = "running"

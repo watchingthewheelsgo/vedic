@@ -57,18 +57,31 @@ class SkillWorkspace:
         files.sort(key=lambda path: (self._artifact_rank(path.name), path.name))
         return [self._artifact_from_path(session_dir, path) for path in files]
 
-    def write_session_manifest(self, session_id: str) -> None:
+    def write_session_manifest(self, session_id: str, *, locale: str = "en") -> None:
         session_dir = self.require_session_dir(session_id)
         manifest_path = session_dir / ".meta" / "session.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "sessionId": session_id,
+            "locale": locale,
             "structuredDataSha256": self.structured_data_sha256(session_id),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
         manifest_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
+
+    def read_session_locale(self, session_id: str) -> str:
+        session_dir = self.require_session_dir(session_id)
+        manifest_path = session_dir / ".meta" / "session.json"
+        if not manifest_path.exists():
+            return "en"
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return "en"
+        locale = payload.get("locale") if isinstance(payload, dict) else None
+        return locale if locale in {"zh", "en", "ja"} else "en"
 
     def mark_artifact_checkpoint(
         self,

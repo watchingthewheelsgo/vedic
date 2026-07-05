@@ -1,4 +1,5 @@
 export type BirthTimePrecision = "exact" | "approximate" | "part_of_day" | "unknown";
+export type AppLocale = "zh" | "en" | "ja";
 
 export type PlaceSearchLevel = "country" | "region" | "city";
 
@@ -24,6 +25,7 @@ export type BirthInput = {
   gender: string;
   relationship: string;
   timeSource: string;
+  locale?: AppLocale;
 };
 
 export type SkillBirthInput = BirthInput;
@@ -69,6 +71,7 @@ export type SkillRunInput = {
   sessionId: string;
   skill: SkillName;
   userMessage?: string;
+  locale?: AppLocale;
 };
 
 export type CoreJobStatus = "queued" | "running" | "completed" | "failed";

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LoaderCircle, MapPin, Search } from "lucide-react";
 import { api } from "../api";
+import { useI18n } from "../i18n/provider";
 import { cn } from "../lib/cn";
 import type { PlaceOption } from "../../shared/domain";
 import { Field } from "./ui/field";
@@ -19,6 +20,7 @@ export function PlacePicker({
   onChange: (value: string) => void;
   error?: string;
 }) {
+  const { t } = useI18n();
   const [query, setQuery] = useState(value);
   const [options, setOptions] = useState<PlaceOption[]>([]);
   const [open, setOpen] = useState(false);
@@ -88,10 +90,10 @@ export function PlacePicker({
 
   return (
     <Field
-      label="City of birth"
+      label={t("place.label")}
       icon={<MapPin size={16} />}
       error={error}
-      hint="Search by city name. If your city is missing, exact coordinates are also supported."
+      hint={t("place.hint")}
     >
       <Popover open={open && (loading || options.length > 0)} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -112,7 +114,7 @@ export function PlacePicker({
               }}
               onBlur={() => setFocused(false)}
               onKeyDown={onKeyDown}
-              placeholder="Search city"
+              placeholder={t("place.placeholder")}
               autoComplete="off"
               role="combobox"
               aria-expanded={open && options.length > 0}
@@ -132,9 +134,9 @@ export function PlacePicker({
         >
           <div className="max-h-[300px] overflow-y-auto">
             {loading ? (
-              <div className="px-3 py-6 text-center text-sm text-muted">Searching...</div>
+              <div className="px-3 py-6 text-center text-sm text-muted">{t("place.searching")}</div>
             ) : (
-              <div role="listbox" aria-label="City search results" className="grid gap-1">
+              <div role="listbox" aria-label={t("place.results")} className="grid gap-1">
                 {options.map((option) => (
                   <button
                     type="button"

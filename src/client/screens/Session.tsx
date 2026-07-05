@@ -27,6 +27,7 @@ import {
   Workflow
 } from "lucide-react";
 import { api } from "../api";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import {
   aggregateWorkshopStages,
   PipelineFlow,
@@ -47,6 +48,7 @@ import {
 } from "../lib/pipeline";
 import { getReportSections, titleForArtifact } from "../lib/report";
 import { cn } from "../lib/cn";
+import { useI18n } from "../i18n/provider";
 import type {
   BirthInput,
   CoreJobResponse,
@@ -96,6 +98,8 @@ type ResultPreviewSection = {
   title: string;
   body: string;
 };
+
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 const STAGE_COPY: Record<string, StageCopy> = {
   src: {
@@ -174,6 +178,27 @@ const STAGE_COPY: Record<string, StageCopy> = {
   }
 };
 
+function localizedStageCopy(stageId: string, t: Translate): StageCopy {
+  const fallback = STAGE_COPY[stageId] ?? STAGE_COPY.appx;
+  const fieldKeys: Record<keyof StageCopy, string> = {
+    purpose: "purpose",
+    userResult: "result",
+    userAction: "action",
+    expected: "expected"
+  };
+  const fromKey = (field: keyof StageCopy) => {
+    const key = `stage.copy.${stageId}.${fieldKeys[field]}`;
+    const text = t(key);
+    return text === key ? fallback[field] : text;
+  };
+  return {
+    purpose: fromKey("purpose"),
+    userResult: fromKey("userResult"),
+    userAction: fromKey("userAction"),
+    expected: fromKey("expected")
+  };
+}
+
 const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
   src: ["structured_data.md", "structured_data.json", "run_metrics.json"],
   reader: ["reader_prevalidation.md", "user_context.md"],
@@ -225,37 +250,29 @@ const EFFECTIVE_PRECISION_LABELS: Record<string, string> = {
   按出生时间精度降级解释: "Downgraded by birth-time confidence"
 };
 
-const STATUS_LABELS: Record<StageStatus, string> = {
-  done: "Done",
-  running: "Running",
-  waiting: "Needs your reply",
-  failed: "Paused",
-  pending: "Pending"
-};
-
 const VALIDATION_CHOICES: Array<{
   value: ValidationAnswer;
-  label: string;
+  labelKey: string;
   storedLabel: string;
-  description: string;
+  descriptionKey: string;
 }> = [
   {
     value: "accurate",
-    label: "Accurate",
+    labelKey: "validation.accurate.label",
     storedLabel: "准",
-    description: "This check matches my real experience."
+    descriptionKey: "validation.accurate.description"
   },
   {
     value: "partly",
-    label: "Partly",
+    labelKey: "validation.partly.label",
     storedLabel: "部分准",
-    description: "The direction is right, but the details need correction."
+    descriptionKey: "validation.partly.description"
   },
   {
     value: "inaccurate",
-    label: "Not accurate",
+    labelKey: "validation.inaccurate.label",
     storedLabel: "不准",
-    description: "This check does not fit my experience."
+    descriptionKey: "validation.inaccurate.description"
   }
 ];
 
@@ -286,6 +303,7 @@ export function Session() {
   const { id = "" } = useParams();
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const navigate = useNavigate();
+  const { locale, t } = useI18n();
   const location = useLocation();
   const navState = location.state as NavState;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -326,15 +344,20 @@ export function Session() {
       coreStartedRef.current = true;
       setError("");
       try {
-        const job = await api.startCoreJob({ sessionId: id, skill: "vedic-core", userMessage: "" });
+        const job = await api.startCoreJob({
+          sessionId: id,
+          skill: "vedic-core",
+          userMessage: "",
+          locale
+        });
         setCoreJob(job);
         if (job.session) setSession(job.session);
       } catch (caught) {
         coreStartedRef.current = false;
-        setError(userFacingError(caught, "Could not start the reading. Please try again."));
+        setError(userFacingError(caught, t("session.error.startReading")));
       }
     },
-    [id]
+    [id, locale, t]
   );
 
   const resumeCoreReport = useCallback(async () => {
@@ -354,16 +377,17 @@ export function Session() {
       const response = await api.runSkill({
         sessionId: id,
         skill: "vedic-reader",
-        userMessage: "开始读盘验前事"
+        userMessage: "开始读盘验前事",
+        locale
       });
       setSession(response);
     } catch (caught) {
       readerStartedRef.current = false;
-      setError(userFacingError(caught, "Could not prepare your first check. Please try again."));
+      setError(userFacingError(caught, t("session.error.firstCheck")));
     } finally {
       setReaderRunning(false);
     }
-  }, [id]);
+  }, [id, locale, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -499,7 +523,7 @@ export function Session() {
           data-active={tab === "reading"}
           onClick={() => setTab("reading")}
         >
-          <Workflow size={14} /> Reading
+          <Workflow size={14} /> {t("session.tab.reading")}
         </Button>
         <Button
           variant="tab"
@@ -507,7 +531,7 @@ export function Session() {
           data-active={tab === "report"}
           onClick={() => setTab("report")}
         >
-          <BookOpen size={14} /> Report
+          <BookOpen size={14} /> {t("session.tab.report")}
         </Button>
         <div className="flex-1" />
         <SessionAuthControls />
@@ -549,7 +573,7 @@ export function Session() {
               <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
                 <div className="text-center">
                   <LoaderCircle className="mx-auto size-7 animate-spin" />
-                  <p className="mt-2.5">Preparing reading map...</p>
+                  <p className="mt-2.5">{t("session.map.loading")}</p>
                 </div>
               </div>
             )}
@@ -559,14 +583,16 @@ export function Session() {
         <div className="report-doc grid h-[calc(100vh-57px)] grid-cols-1 lg:grid-cols-[1fr_260px]">
           <main className="report-main overflow-y-auto bg-cream px-6 py-9 pb-20 sm:px-11">
             <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
-              <h1 className="text-[28px] font-light tracking-normal">Your Vedic Reading</h1>
+              <h1 className="text-[28px] font-light tracking-normal">
+                {t("session.report.heading")}
+              </h1>
               <Button onClick={() => void onExport()} disabled={exportingPdf}>
                 {exportingPdf ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : (
                   <Download size={15} />
                 )}
-                {exportingPdf ? "Preparing PDF..." : "Download PDF"}
+                {exportingPdf ? t("session.report.pdfPreparing") : t("session.report.downloadPdf")}
               </Button>
             </div>
             {reportSections.map((artifact, index) => (
@@ -576,17 +602,19 @@ export function Session() {
                 key={artifact.path}
               >
                 <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
-                  Section {String(index + 1).padStart(2, "0")}
+                  {t("session.report.section", { number: String(index + 1).padStart(2, "0") })}
                 </div>
                 <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">
-                  {titleForArtifact(artifact)}
+                  {titleForArtifact(artifact, locale)}
                 </div>
                 <MarkdownReport content={artifact.content} />
               </section>
             ))}
           </main>
           <nav className="report-toc hidden overflow-y-auto border-l border-gold/25 bg-cream-2 px-4 py-6 lg:block">
-            <h4 className="mb-3.5 text-[11px] uppercase tracking-[2px] text-muted">Contents</h4>
+            <h4 className="mb-3.5 text-[11px] uppercase tracking-[2px] text-muted">
+              {t("session.report.contents")}
+            </h4>
             {reportSections.map((artifact, index) => (
               <button
                 key={artifact.path}
@@ -604,7 +632,7 @@ export function Session() {
                 >
                   {String(index + 1).padStart(2, "0")}
                 </span>
-                {titleForArtifact(artifact)}
+                {titleForArtifact(artifact, locale)}
               </button>
             ))}
           </nav>
@@ -615,35 +643,38 @@ export function Session() {
             <div className="mx-auto mb-5 size-11 animate-spin rounded-full border-[3px] border-gold/25 border-t-gold" />
             <h2 className="mb-2 text-2xl font-light">
               {coreInterrupted
-                ? "Reading paused"
+                ? t("session.empty.paused")
                 : awaitingValidationFeedback
-                  ? "Your first check is ready"
+                  ? t("session.empty.firstCheckReady")
                   : readerRunning
-                    ? "Preparing your first check"
-                    : "Your reading is being prepared"}
+                    ? t("session.empty.preparingCheck")
+                    : t("session.empty.preparing")}
             </h2>
             <p className="mx-auto mb-6 max-w-[420px] text-sm text-body">
               {coreInterrupted
-                ? sanitizeUserMessage(coreJob?.message, READING_INTERRUPTED_MESSAGE)
+                ? sanitizeUserMessage(coreJob?.message, t("session.interrupted"))
                 : awaitingValidationFeedback
-                  ? "Answer the short checks in the Reading tab before the full report starts."
-                  : `The reading is being prepared${
-                      pipelineData
-                        ? ` - ${pipelineData.completed}/${pipelineData.total} parts ready`
+                  ? t("session.empty.answerChecks")
+                  : t("session.empty.progress", {
+                      progress: pipelineData
+                        ? t("session.empty.partsReady", {
+                            completed: pipelineData.completed,
+                            total: pipelineData.total
+                          })
                         : ""
-                    }. You can follow the progress in the Reading tab.`}
+                    })}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {coreInterrupted && (
                 <Button onClick={() => void resumeCoreReport()}>
-                  <RefreshCw size={15} /> Resume reading
+                  <RefreshCw size={15} /> {t("session.empty.resume")}
                 </Button>
               )}
               <Button
                 variant={coreInterrupted ? "outline" : "gold"}
                 onClick={() => setTab("reading")}
               >
-                <Workflow size={15} /> View reading progress
+                <Workflow size={15} /> {t("session.empty.viewProgress")}
               </Button>
             </div>
           </div>
@@ -654,19 +685,21 @@ export function Session() {
 }
 
 function SessionAuthControls() {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-2">
+      <LanguageSwitcher />
       <SignedOut>
         <span className="hidden rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold-dim sm:inline-flex">
-          Trial mode
+          {t("common.trialMode")}
         </span>
         <SignInButton mode="modal">
           <Button variant="ghost" size="sm">
-            Sign in
+            {t("common.signIn")}
           </Button>
         </SignInButton>
         <SignUpButton mode="modal">
-          <Button size="sm">Create account</Button>
+          <Button size="sm">{t("common.createAccount")}</Button>
         </SignUpButton>
       </SignedOut>
       <SignedIn>
@@ -709,24 +742,23 @@ function WorkshopDetailPanel({
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
+  const { t } = useI18n();
   const stage = WORKSHOP_STAGES.find((item) => item.id === selectedStageId) ?? WORKSHOP_STAGES[0];
+  const stageLabel = t(`stage.${stage.id}.label`);
+  const copy = localizedStageCopy(stage.id, t);
   const nodes = pipelineData?.nodes.filter((node) => stage.match(node.id)) ?? [];
   const stageAgg = pipelineData ? aggregateWorkshopStages(pipelineData.nodes)[stage.id] : null;
   const status = stage.seed ? "done" : (stageAgg?.status ?? "pending");
 
   return (
     <aside className="relative border-r border-gold/25 bg-cream px-6 py-7 max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto">
-      <StageInfoPopover
-        stageLabel={stage.label}
-        copy={STAGE_COPY[stage.id]}
-        className="absolute right-6 top-7"
-      />
+      <StageInfoPopover stageLabel={stageLabel} copy={copy} className="absolute right-6 top-7" />
       <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
-        Reading detail
+        {t("session.detail.eyebrow")}
       </div>
       <div className="mb-5 flex items-start justify-between gap-3 pr-9">
-        <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stage.label}</h3>
-        <Badge variant={statusBadgeVariant(status)}>{STATUS_LABELS[status]}</Badge>
+        <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stageLabel}</h3>
+        <Badge variant={statusBadgeVariant(status)}>{t(`status.${status}`)}</Badge>
       </div>
 
       {stage.id === "src" ? (
@@ -767,6 +799,7 @@ function StageInfoPopover({
   copy?: StageCopy;
   className?: string;
 }) {
+  const { t } = useI18n();
   if (!copy) return null;
 
   return (
@@ -778,22 +811,24 @@ function StageInfoPopover({
             "grid size-5 shrink-0 place-items-center rounded-full border border-gold/25 bg-cream-2 text-gold-dim transition hover:border-gold hover:bg-gold/10 hover:text-gold focus:outline-none focus:ring-4 focus:ring-gold/15",
             className
           )}
-          aria-label={`About ${stageLabel}`}
+          aria-label={t("session.guide.aria", { stage: stageLabel })}
         >
           <Info className="size-3" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,380px)] p-4" align="end" side="bottom">
         <div className="mb-3">
-          <div className="mb-1 text-[10px] uppercase tracking-[1.8px] text-gold">Reading guide</div>
+          <div className="mb-1 text-[10px] uppercase tracking-[1.8px] text-gold">
+            {t("session.guide.title")}
+          </div>
           <h4 className="m-0 text-base font-semibold text-ink">{stageLabel}</h4>
         </div>
         <div className="grid gap-3 text-[13px] leading-[1.65] text-body">
-          <StageInfoBlock title="What this part does">{copy.purpose}</StageInfoBlock>
-          <StageInfoBlock title="What you will see">{copy.userResult}</StageInfoBlock>
-          <StageInfoBlock title="What you need to do">{copy.userAction}</StageInfoBlock>
+          <StageInfoBlock title={t("session.guide.purpose")}>{copy.purpose}</StageInfoBlock>
+          <StageInfoBlock title={t("session.guide.result")}>{copy.userResult}</StageInfoBlock>
+          <StageInfoBlock title={t("session.guide.action")}>{copy.userAction}</StageInfoBlock>
           <div className="border-t border-gold/20 pt-3">
-            <StageInfoBlock title="Timing">{copy.expected}</StageInfoBlock>
+            <StageInfoBlock title={t("session.guide.timing")}>{copy.expected}</StageInfoBlock>
           </div>
         </div>
       </PopoverContent>
@@ -811,21 +846,24 @@ function StageInfoBlock({ title, children }: { title: string; children: ReactNod
 }
 
 function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
+  const { t } = useI18n();
   return (
     <>
       <div className="my-4">
-        <InfoRow label="Date" value={birthInfo.date} />
-        <InfoRow label="Time" value={birthInfo.time} />
-        <InfoRow label="Place" value={birthInfo.place} />
-        <InfoRow label="Time precision" value={birthInfo.timePrecision} />
-        <InfoRow label="Time source" value={birthInfo.timeSource} />
-        <InfoRow label="Effective precision" value={birthInfo.effectivePrecision} />
-        {birthInfo.gender && <InfoRow label="Gender" value={birthInfo.gender} />}
-        {birthInfo.relationship && <InfoRow label="Relationship" value={birthInfo.relationship} />}
+        <InfoRow label={t("session.birth.date")} value={birthInfo.date} />
+        <InfoRow label={t("session.birth.time")} value={birthInfo.time} />
+        <InfoRow label={t("session.birth.place")} value={birthInfo.place} />
+        <InfoRow label={t("session.birth.precision")} value={birthInfo.timePrecision} />
+        <InfoRow label={t("session.birth.source")} value={birthInfo.timeSource} />
+        <InfoRow label={t("session.birth.effective")} value={birthInfo.effectivePrecision} />
+        {birthInfo.gender && <InfoRow label={t("session.birth.gender")} value={birthInfo.gender} />}
+        {birthInfo.relationship && (
+          <InfoRow label={t("session.birth.relationship")} value={birthInfo.relationship} />
+        )}
       </div>
       {birthInfo.concern && (
         <div className="my-4">
-          <DetailSubtitle>Initial concern</DetailSubtitle>
+          <DetailSubtitle>{t("session.birth.concern")}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">{birthInfo.concern}</p>
         </div>
       )}
@@ -856,6 +894,7 @@ function ReaderDetail({
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
+  const { t } = useI18n();
   const prevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedback = findArtifact(session, "user_context.md");
   const anchors = useMemo(
@@ -914,11 +953,15 @@ function ReaderDetail({
     return (
       <>
         <div className="my-4">
-          <DetailSubtitle>{readerRunning ? "Preparing now" : "Not started"}</DetailSubtitle>
+          <DetailSubtitle>
+            {readerRunning ? t("session.reader.preparingNow") : t("session.reader.notStarted")}
+          </DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">
             {readerRunning
-              ? `Elapsed ${formatElapsed(readerStartedAt, now)}. Preparing a few short checks for you to confirm.`
-              : STAGE_COPY.reader.expected}
+              ? t("session.reader.elapsed", {
+                  duration: formatElapsed(readerStartedAt, now)
+                })
+              : t("stage.copy.reader.expected")}
           </p>
         </div>
       </>
@@ -938,11 +981,10 @@ function ReaderDetail({
           <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
             <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
               <CheckCircle2 className="size-4" />
-              Your input is required
+              {t("session.reader.required")}
             </div>
             <p className="m-0 text-[13px] leading-[1.65] text-body">
-              Answer each short check before the full reading starts. Your replies help the reading
-              treat uncertain birth-time details with the right amount of caution.
+              {t("session.reader.requiredBody")}
             </p>
           </div>
 
@@ -951,20 +993,23 @@ function ReaderDetail({
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[10px] uppercase tracking-[1.8px] text-muted">
-                    Reading check
+                    {t("session.reader.check")}
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
-                    Question {activeAnchorIndex + 1} of {anchors.length}
+                    {t("session.reader.questionOf", {
+                      current: activeAnchorIndex + 1,
+                      total: anchors.length
+                    })}
                     {activeAnchor.rationale && (
                       <AnchorRationalePopover
-                        label={`Why question ${activeAnchorIndex + 1} appears`}
+                        label={t("session.reader.why", { number: activeAnchorIndex + 1 })}
                         rationale={activeAnchor.rationale}
                       />
                     )}
                   </div>
                 </div>
                 <Badge variant="neutral">
-                  {answeredCount}/{anchors.length} answered
+                  {t("session.reader.answered", { answered: answeredCount, total: anchors.length })}
                 </Badge>
               </div>
 
@@ -993,14 +1038,14 @@ function ReaderDetail({
                             updateAnchorFeedback(activeAnchor, { answer: choice.value })
                           }
                         >
-                          <span className="block text-sm font-semibold">{choice.label}</span>
+                          <span className="block text-sm font-semibold">{t(choice.labelKey)}</span>
                           <span
                             className={cn(
                               "mt-0.5 block text-[12.5px]",
                               selected ? "text-white/80" : "text-muted"
                             )}
                           >
-                            {choice.description}
+                            {t(choice.descriptionKey)}
                           </span>
                         </button>
                       );
@@ -1009,7 +1054,7 @@ function ReaderDetail({
 
                   <label className="mt-4 block">
                     <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
-                      Optional note
+                      {t("session.reader.optionalNote")}
                     </span>
                     <Textarea
                       rows={4}
@@ -1017,7 +1062,7 @@ function ReaderDetail({
                       onChange={(event) =>
                         updateAnchorFeedback(activeAnchor, { note: event.target.value })
                       }
-                      placeholder="Add a correction or example if useful."
+                      placeholder={t("session.reader.notePlaceholder")}
                     />
                   </label>
                 </>
@@ -1031,7 +1076,7 @@ function ReaderDetail({
                   disabled={activeAnchorIndex === 0}
                   onClick={movePrev}
                 >
-                  <ChevronLeft size={14} /> Previous
+                  <ChevronLeft size={14} /> {t("session.reader.previous")}
                 </Button>
                 {anonymousLocked ? null : activeAnchorIndex < anchors.length - 1 ? (
                   <Button
@@ -1040,31 +1085,31 @@ function ReaderDetail({
                     disabled={!anchorFeedback[activeAnchor.index]?.answer}
                     onClick={moveNext}
                   >
-                    Next <ChevronRight size={14} />
+                    {t("session.reader.next")} <ChevronRight size={14} />
                   </Button>
                 ) : (
                   <Button
                     disabled={submittingFeedback || !allAnswered || !validationFeedback.trim()}
                   >
-                    {submittingFeedback ? "Saving..." : "Save replies and start reading"}
+                    {submittingFeedback ? t("session.reader.saving") : t("session.reader.save")}
                   </Button>
                 )}
               </div>
             </div>
           ) : (
             <div className="rounded-xl border border-gold/25 bg-cream-2 p-4">
-              <DetailSubtitle>Your response</DetailSubtitle>
+              <DetailSubtitle>{t("session.reader.response")}</DetailSubtitle>
               <Textarea
                 rows={7}
                 value={validationFeedback}
                 onChange={(event) => onValidationFeedbackChange(event.target.value)}
-                placeholder="Reply with what feels accurate, partly accurate, or inaccurate."
+                placeholder={t("session.reader.responsePlaceholder")}
               />
               <Button
                 className="mt-3 w-full"
                 disabled={submittingFeedback || !validationFeedback.trim()}
               >
-                {submittingFeedback ? "Saving..." : "Save replies and start reading"}
+                {submittingFeedback ? t("session.reader.saving") : t("session.reader.save")}
               </Button>
             </div>
           )}
@@ -1083,6 +1128,7 @@ function ReaderCompletedDetail({
   feedback: SkillArtifact;
   recordedFeedback: Map<number, ValidationFeedbackSummary>;
 }) {
+  const { t } = useI18n();
   const structuredCount = recordedFeedback.size;
 
   return (
@@ -1090,16 +1136,16 @@ function ReaderCompletedDetail({
       <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
         <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
           <CheckCircle2 className="size-4" />
-          Check complete
+          {t("session.reader.complete")}
         </div>
         <p className="m-0 text-[13px] leading-[1.65] text-body">
-          Your replies have been saved. The full reading can now use them as personal context.
+          {t("session.reader.completeBody")}
         </p>
       </div>
 
       {structuredCount === 0 && (
         <div className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3 text-[13px] leading-[1.65] text-body">
-          Your replies were saved as general context for the reading.
+          {t("session.reader.generalSaved")}
         </div>
       )}
 
@@ -1112,13 +1158,16 @@ function ReaderCompletedDetail({
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-[1.8px] text-muted">
-                      Reading check
+                      {t("session.reader.check")}
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
-                      Question {anchorIndex + 1} of {anchors.length}
+                      {t("session.reader.questionOf", {
+                        current: anchorIndex + 1,
+                        total: anchors.length
+                      })}
                       {anchor.rationale && (
                         <AnchorRationalePopover
-                          label={`Why question ${anchorIndex + 1} appears`}
+                          label={t("session.reader.why", { number: anchorIndex + 1 })}
                           rationale={anchor.rationale}
                         />
                       )}
@@ -1136,7 +1185,7 @@ function ReaderCompletedDetail({
                 {summary?.note && (
                   <div className="mt-3 rounded-lg border border-gold/20 bg-cream/80 px-3.5 py-3">
                     <div className="mb-1 text-[10px] uppercase tracking-[1.4px] text-muted">
-                      Your note
+                      {t("session.reader.yourNote")}
                     </div>
                     <p className="m-0 text-[13px] leading-[1.65] text-body">{summary.note}</p>
                   </div>
@@ -1147,7 +1196,7 @@ function ReaderCompletedDetail({
         </div>
       ) : (
         <div className="rounded-xl border border-gold/25 bg-cream-2 p-4">
-          <DetailSubtitle>Saved replies</DetailSubtitle>
+          <DetailSubtitle>{t("session.reader.savedReplies")}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.65] text-body">
             {excerpt(feedback.content, 420)}
           </p>
@@ -1158,24 +1207,24 @@ function ReaderCompletedDetail({
 }
 
 function AnonymousCheckpointGate({ questionNumber }: { questionNumber: number }) {
+  const { t } = useI18n();
   return (
     <div className="mt-4 rounded-xl border border-gold/35 bg-cream px-4 py-4 shadow-[0_18px_42px_rgba(44,31,15,0.08)]">
       <div className="mb-1 text-[10px] font-bold uppercase tracking-[1.8px] text-gold">
-        Account checkpoint
+        {t("session.reader.accountCheckpoint")}
       </div>
       <h4 className="m-0 text-base font-semibold tracking-normal text-ink">
-        Sign in to answer question {questionNumber}
+        {t("session.reader.signInQuestion", { number: questionNumber })}
       </h4>
       <p className="mb-4 mt-2 text-[13px] leading-[1.7] text-body">
-        Your trial session is active. Create an account to keep this chart, continue the check, and
-        generate the full reading without starting over.
+        {t("session.reader.signInBody")}
       </p>
       <div className="flex flex-wrap gap-2">
         <SignUpButton mode="modal">
-          <Button>Create account</Button>
+          <Button>{t("common.createAccount")}</Button>
         </SignUpButton>
         <SignInButton mode="modal">
-          <Button variant="outline">Sign in</Button>
+          <Button variant="outline">{t("common.signIn")}</Button>
         </SignInButton>
       </div>
     </div>
@@ -1192,6 +1241,7 @@ function feedbackBadgeVariant(
 }
 
 function AnchorRationalePopover({ label, rationale }: { label: string; rationale: string }) {
+  const { t } = useI18n();
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -1205,7 +1255,7 @@ function AnchorRationalePopover({ label, rationale }: { label: string; rationale
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,360px)] p-4" align="start" side="bottom">
         <div className="mb-2 text-[10px] uppercase tracking-[1.6px] text-gold">
-          Why this question appears
+          {t("session.reader.rationaleTitle")}
         </div>
         <p className="m-0 whitespace-pre-wrap text-[13px] leading-[1.7] text-body">{rationale}</p>
       </PopoverContent>
@@ -1228,7 +1278,8 @@ function CoreStageDetail({
   onResumeCoreReport: () => Promise<void>;
   coreInterrupted: boolean;
 }) {
-  const copy = STAGE_COPY[stageId];
+  const { t } = useI18n();
+  const copy = localizedStageCopy(stageId, t);
   const runningNodes = nodes.filter((node) => node.status === "running");
   const completedNodes = nodes.filter(
     (node) => node.status === "completed" || node.status === "skipped"
@@ -1255,28 +1306,27 @@ function CoreStageDetail({
           <div className="mb-2.5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-[12px] font-semibold text-red">
               <AlertTriangle className="size-4" />
-              Reading paused
+              {t("stage.summary.paused.title")}
             </div>
             {coreInterrupted && (
               <Button size="sm" onClick={() => void onResumeCoreReport()}>
-                <RefreshCw size={13} /> Resume
+                <RefreshCw size={13} /> {t("session.empty.resume")}
               </Button>
             )}
           </div>
           {coreInterrupted && (
             <p className="m-0 mb-3 text-[13px] leading-[1.7] text-body">
-              Completed sections have been saved. Resume will continue from the unfinished part.
+              {t("stage.failed.saved")}
             </p>
           )}
           <div className="grid gap-2 border-t border-red/20 pt-3">
             {failedNodes.map((node, index) => (
               <div className="text-[12.5px] leading-[1.6]" key={node.id}>
-                <div className="font-semibold text-ink">Paused part {index + 1}</div>
+                <div className="font-semibold text-ink">
+                  {t("stage.failed.part", { number: index + 1 })}
+                </div>
                 <div className="mt-0.5 break-words text-red">
-                  {sanitizeUserMessage(
-                    node.error,
-                    "This part did not finish. Resume will keep completed sections and retry the unfinished work."
-                  )}
+                  {sanitizeUserMessage(node.error, t("stage.failed.fallback"))}
                 </div>
               </div>
             ))}
@@ -1310,6 +1360,7 @@ function StageStatusSummary({
   durationSeconds: number;
   coreInterrupted: boolean;
 }) {
+  const { t } = useI18n();
   const Icon =
     status === "failed"
       ? AlertTriangle
@@ -1318,7 +1369,7 @@ function StageStatusSummary({
         : status === "done"
           ? CheckCircle2
           : ListChecks;
-  const summary = stageStatusSummary(status, copy, coreInterrupted);
+  const summary = stageStatusSummary(status, copy, coreInterrupted, t);
 
   return (
     <section className="my-4 border-y border-gold/25 py-4">
@@ -1341,17 +1392,17 @@ function StageStatusSummary({
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] uppercase tracking-[1.1px] text-muted">
             {total > 0 && (
               <span className="rounded-full border border-gold/25 bg-cream-2 px-2.5 py-1">
-                {completed}/{total} parts ready
+                {t("stage.partsReady", { completed, total })}
               </span>
             )}
             {running > 0 && status === "running" && (
               <span className="rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1">
-                {running} active
+                {t("stage.active", { count: running })}
               </span>
             )}
             {durationSeconds > 0 && (
               <span className="rounded-full border border-gold/25 bg-cream-2 px-2.5 py-1">
-                {formatDuration(durationSeconds)} saved
+                {t("stage.savedDuration", { duration: formatDuration(durationSeconds) })}
               </span>
             )}
           </div>
@@ -1361,36 +1412,41 @@ function StageStatusSummary({
   );
 }
 
-function stageStatusSummary(status: StageStatus, copy: StageCopy, coreInterrupted: boolean) {
+function stageStatusSummary(
+  status: StageStatus,
+  copy: StageCopy,
+  coreInterrupted: boolean,
+  t: Translate
+) {
   if (status === "failed") {
     return {
-      title: "Reading paused",
+      title: t("stage.summary.paused.title"),
       body: coreInterrupted
-        ? "Something interrupted this part of the reading. Resume will keep completed content and retry only unfinished work."
-        : "This section needs attention before it can be included in the final reading."
+        ? t("stage.summary.paused.body")
+        : t("stage.summary.paused.bodyAttention")
     };
   }
   if (status === "done") {
     return {
-      title: "Section is ready",
-      body: "There is nothing you need to do here. This section is saved and will be included in the final reading."
+      title: t("stage.summary.done.title"),
+      body: t("stage.summary.done.body")
     };
   }
   if (status === "running") {
     return {
-      title: "Reading in progress",
-      body: "No action is needed. The system is saving each completed part as it becomes available."
+      title: t("stage.summary.running.title"),
+      body: t("stage.summary.running.body")
     };
   }
   if (status === "waiting") {
     return {
-      title: "Waiting for your input",
+      title: t("stage.summary.waiting.title"),
       body: copy.userAction
     };
   }
   return {
-    title: "Waiting for earlier sections",
-    body: "No action is needed. This section will start after earlier reading context is ready."
+    title: t("stage.summary.pending.title"),
+    body: t("stage.summary.pending.body")
   };
 }
 
@@ -1403,13 +1459,20 @@ function EmptyResultState({
   copy: StageCopy;
   progress: string;
 }) {
+  const { t } = useI18n();
   if (status === "done") return null;
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
-      <DetailSubtitle>{status === "running" ? "Preview" : "Coming next"}</DetailSubtitle>
+      <DetailSubtitle>
+        {status === "running" ? t("stage.preview") : t("stage.comingNext")}
+      </DetailSubtitle>
       <p className="m-0 text-[13px] leading-[1.7] text-body">
         {status === "running"
-          ? `A preview will appear here as soon as this section saves readable content${progress ? ` (${progress} parts ready)` : ""}.`
+          ? t("stage.previewWaiting", {
+              progress: progress
+                ? ` (${t("stage.partsReady", { completed: progress.split("/")[0], total: progress.split("/")[1] })})`
+                : ""
+            })
           : copy.userResult}
       </p>
     </section>
@@ -1426,6 +1489,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: StageStatus }) {
+  const { locale, t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const displayContent = useMemo(
     () => sanitizeResultContentForDisplay(artifact.content),
@@ -1434,7 +1498,7 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
   const sections = useMemo(() => parseResultPreviewSections(displayContent), [displayContent]);
   const visibleSections = expanded ? sections : sections.slice(0, 3);
   const canExpand = sections.length > 0;
-  const label = status === "done" ? "Reading preview" : "Saved preview";
+  const label = status === "done" ? t("stage.result.previewReady") : t("stage.result.previewSaved");
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
@@ -1445,7 +1509,9 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
           </div>
           <div className="min-w-0">
             <DetailSubtitle className="mb-1">{label}</DetailSubtitle>
-            <div className="text-sm font-semibold text-ink">{titleForArtifact(artifact)}</div>
+            <div className="text-sm font-semibold text-ink">
+              {titleForArtifact(artifact, locale)}
+            </div>
           </div>
         </div>
         {canExpand && (
@@ -1455,7 +1521,7 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
             size="sm"
             onClick={() => setExpanded((value) => !value)}
           >
-            <Eye size={13} /> {expanded ? "Show less" : "Show full"}
+            <Eye size={13} /> {expanded ? t("stage.result.showLess") : t("stage.result.showFull")}
           </Button>
         )}
       </div>
@@ -1481,8 +1547,7 @@ function ResultPreview({ artifact, status }: { artifact: SkillArtifact; status: 
           ))}
           {sections.length > visibleSections.length && (
             <div className="py-3 text-[12.5px] text-muted">
-              {sections.length - visibleSections.length} more sections are available in the full
-              result.
+              {t("stage.result.more", { count: sections.length - visibleSections.length })}
             </div>
           )}
         </div>
@@ -1687,7 +1752,7 @@ function buildValidationFeedbackMarkdown(
     const choice = VALIDATION_CHOICES.find((item) => item.value === entry?.answer);
     lines.push(`#### Anchor ${anchor.index}`);
     lines.push(
-      `- User answer: ${choice?.storedLabel ?? entry?.answer ?? ""} (${choice?.label ?? ""})`
+      `- User answer: ${choice?.storedLabel ?? entry?.answer ?? ""} (${choice?.value ?? ""})`
     );
     if (entry?.note.trim()) lines.push(`- User note: ${entry.note.trim()}`);
     lines.push(`- Anchor text: ${anchor.statement}`);

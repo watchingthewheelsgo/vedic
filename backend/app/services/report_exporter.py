@@ -27,6 +27,89 @@ PUBLIC_REPORT_ORDER = [
     "appendix.md",
 ]
 
+LOCALE_TAGS = {"zh": "zh-CN", "en": "en-US", "ja": "ja-JP"}
+
+REPORT_COPY = {
+    "en": {
+        "title": "Vedic Report",
+        "subtitle": "Data-Driven Vedic Astrology",
+        "session": "Session",
+        "generated": "Generated",
+        "contents": "Contents",
+        "calculator": "Calculator",
+        "core": "Core report",
+        "status": "Status",
+        "recorded": "recorded",
+        "wave": "Wave",
+        "sections": {
+            "p1_overview.md": "Core Pattern",
+            "p2a_planets.md": "Planetary Signals - Part 1",
+            "p2b_planets.md": "Planetary Signals - Part 2",
+            "p2c_planets.md": "Planetary Signals - Part 3",
+            "p2d_planets.md": "Planetary Signals - Part 4",
+            "p3a_d9.md": "Deeper Promise (D9)",
+            "p3b_divisional.md": "Supporting Life Context",
+            "p4a_houses.md": "Life Areas - Part 1",
+            "p4b_houses.md": "Life Areas - Part 2",
+            "p5a_life.md": "Life Guidance - Part 1",
+            "p5b_life.md": "Life Guidance - Part 2",
+            "appendix.md": "Reference Notes",
+        },
+    },
+    "zh": {
+        "title": "吠陀读盘报告",
+        "subtitle": "基于数据的吠陀占星解读",
+        "session": "会话",
+        "generated": "生成时间",
+        "contents": "目录",
+        "calculator": "计算",
+        "core": "核心报告",
+        "status": "状态",
+        "recorded": "已记录",
+        "wave": "批次",
+        "sections": {
+            "p1_overview.md": "核心模式",
+            "p2a_planets.md": "行星信号一",
+            "p2b_planets.md": "行星信号二",
+            "p2c_planets.md": "行星信号三",
+            "p2d_planets.md": "行星信号四",
+            "p3a_d9.md": "深层潜力（D9）",
+            "p3b_divisional.md": "人生支持语境",
+            "p4a_houses.md": "人生领域一",
+            "p4b_houses.md": "人生领域二",
+            "p5a_life.md": "人生指引一",
+            "p5b_life.md": "人生指引二",
+            "appendix.md": "参考附录",
+        },
+    },
+    "ja": {
+        "title": "ヴェーダ・リーディングレポート",
+        "subtitle": "データに基づくヴェーダ占星術",
+        "session": "セッション",
+        "generated": "生成日時",
+        "contents": "目次",
+        "calculator": "計算",
+        "core": "コアレポート",
+        "status": "状態",
+        "recorded": "記録済み",
+        "wave": "Wave",
+        "sections": {
+            "p1_overview.md": "核となるパターン",
+            "p2a_planets.md": "惑星シグナル 1",
+            "p2b_planets.md": "惑星シグナル 2",
+            "p2c_planets.md": "惑星シグナル 3",
+            "p2d_planets.md": "惑星シグナル 4",
+            "p3a_d9.md": "深い可能性（D9）",
+            "p3b_divisional.md": "人生文脈の補助",
+            "p4a_houses.md": "人生領域 1",
+            "p4b_houses.md": "人生領域 2",
+            "p5a_life.md": "人生ガイダンス 1",
+            "p5b_life.md": "人生ガイダンス 2",
+            "appendix.md": "参考ノート",
+        },
+    },
+}
+
 
 @dataclass(frozen=True)
 class ReportSection:
@@ -45,11 +128,13 @@ class ThemeConfig:
     accent_palette: tuple[str, ...]
 
     @staticmethod
-    def private_advisor() -> "ThemeConfig":
+    def private_advisor(
+        title: str = "Vedic Report", subtitle: str = "Data-Driven Vedic Astrology"
+    ) -> "ThemeConfig":
         return ThemeConfig(
             name="private-advisor",
-            title="Vedic Report",
-            subtitle="Data-Driven Vedic Astrology",
+            title=title,
+            subtitle=subtitle,
             accent_palette=(
                 "#C9A96E",
                 "#9A7A4A",
@@ -83,8 +168,13 @@ class ReportExporter:
         theme: ThemeConfig | None = None,
     ) -> ReportExportResult:
         artifacts = self.workspace.read_artifacts(session_id)
-        report_theme = theme or ThemeConfig.private_advisor()
-        sections = self._collect_sections(artifacts, report_theme)
+        locale = self.workspace.read_session_locale(session_id)
+        copy = REPORT_COPY.get(locale, REPORT_COPY["en"])
+        report_theme = theme or ThemeConfig.private_advisor(
+            title=str(copy["title"]),
+            subtitle=str(copy["subtitle"]),
+        )
+        sections = self._collect_sections(artifacts, report_theme, locale)
         if not sections:
             raise ValueError("No public report artifacts found for export")
 
@@ -99,6 +189,8 @@ class ReportExporter:
                 sections=sections,
                 metrics=metrics,
                 theme=report_theme,
+                locale=locale,
+                copy=copy,
             ),
             encoding="utf-8",
         )
@@ -113,7 +205,7 @@ class ReportExporter:
         )
 
     def _collect_sections(
-        self, artifacts: list[SkillArtifact], theme: ThemeConfig
+        self, artifacts: list[SkillArtifact], theme: ThemeConfig, locale: str
     ) -> list[ReportSection]:
         by_path = {artifact.path: artifact for artifact in artifacts}
         sections: list[ReportSection] = []
@@ -124,7 +216,7 @@ class ReportExporter:
             sections.append(
                 ReportSection(
                     path=path,
-                    title=self._section_title(path),
+                    title=self._section_title(path, locale),
                     markdown=artifact.content,
                     html=self._markdown_to_html(artifact.content),
                     accent=theme.accent_palette[index % len(theme.accent_palette)],
@@ -151,6 +243,8 @@ class ReportExporter:
         sections: list[ReportSection],
         metrics: dict[str, object] | None,
         theme: ThemeConfig,
+        locale: str,
+        copy: dict[str, object],
     ) -> str:
         generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
         section_nav = "\n".join(
@@ -172,9 +266,9 @@ class ReportExporter:
             """
             for index, section in enumerate(sections)
         )
-        metrics_html = self._metrics_html(metrics)
+        metrics_html = self._metrics_html(metrics, copy)
         return f"""<!doctype html>
-<html lang="zh-CN">
+<html lang="{html.escape(LOCALE_TAGS.get(locale, "en-US"))}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -188,15 +282,15 @@ class ReportExporter:
         <p class="eyebrow">{html.escape(theme.subtitle)}</p>
         <h1>{html.escape(theme.title)}</h1>
         <div class="cover-meta">
-          <span>Session</span>
+          <span>{html.escape(str(copy["session"]))}</span>
           <strong>{html.escape(session_id)}</strong>
-          <span>Generated</span>
+          <span>{html.escape(str(copy["generated"]))}</span>
           <strong>{html.escape(generated_at)}</strong>
         </div>
       </section>
       {metrics_html}
       <nav class="toc">
-        <h2>Contents</h2>
+        <h2>{html.escape(str(copy["contents"]))}</h2>
         <div>{section_nav}</div>
       </nav>
       {body}
@@ -205,14 +299,14 @@ class ReportExporter:
 </html>
 """
 
-    def _metrics_html(self, metrics: dict[str, object] | None) -> str:
+    def _metrics_html(self, metrics: dict[str, object] | None, copy: dict[str, object]) -> str:
         if not metrics:
             return ""
         waves = metrics.get("waves")
         wave_items = ""
         if isinstance(waves, list):
             wave_items = "\n".join(
-                self._wave_item(wave) for wave in waves if isinstance(wave, dict)
+                self._wave_item(wave, str(copy["wave"])) for wave in waves if isinstance(wave, dict)
             )
         calculator = metrics.get("calculator")
         calculator_seconds = (
@@ -221,25 +315,25 @@ class ReportExporter:
         return f"""
         <section class="metrics">
           <div>
-            <span>Calculator</span>
+            <span>{html.escape(str(copy["calculator"]))}</span>
             <strong>{self._duration(calculator_seconds)}</strong>
           </div>
           <div>
-            <span>Core report</span>
+            <span>{html.escape(str(copy["core"]))}</span>
             <strong>{self._duration(metrics.get("durationSeconds"))}</strong>
           </div>
           <div>
-            <span>Status</span>
-            <strong>{html.escape(str(metrics.get("status") or "recorded"))}</strong>
+            <span>{html.escape(str(copy["status"]))}</span>
+            <strong>{html.escape(str(metrics.get("status") or copy["recorded"]))}</strong>
           </div>
           <div class="wave-row">{wave_items}</div>
         </section>
         """
 
-    def _wave_item(self, wave: dict[str, object]) -> str:
+    def _wave_item(self, wave: dict[str, object], label: str) -> str:
         return (
             "<span>"
-            f"Wave {html.escape(str(wave.get('wave')))} "
+            f"{html.escape(label)} {html.escape(str(wave.get('wave')))} "
             f"<b>{self._duration(wave.get('durationSeconds'))}</b>"
             "</span>"
         )
@@ -383,21 +477,11 @@ class ReportExporter:
         escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
         return escaped
 
-    def _section_title(self, path: str) -> str:
-        return {
-            "p1_overview.md": "Identity Overview",
-            "p2a_planets.md": "Planet Audit A",
-            "p2b_planets.md": "Planet Audit B",
-            "p2c_planets.md": "Planet Audit C",
-            "p2d_planets.md": "Planet Audit D",
-            "p3a_d9.md": "D9 Settlement",
-            "p3b_divisional.md": "Divisional Charts",
-            "p4a_houses.md": "House Diagnostics A",
-            "p4b_houses.md": "House Diagnostics B",
-            "p5a_life.md": "Life Synthesis A",
-            "p5b_life.md": "Life Synthesis B",
-            "appendix.md": "Technical Appendix",
-        }.get(path, path)
+    def _section_title(self, path: str, locale: str = "en") -> str:
+        sections = REPORT_COPY.get(locale, REPORT_COPY["en"])["sections"]
+        if isinstance(sections, dict):
+            return str(sections.get(path, path))
+        return path
 
     def _duration(self, value: object) -> str:
         if not isinstance(value, int | float):
