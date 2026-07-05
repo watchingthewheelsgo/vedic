@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/clerk-react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
+import { AppI18nProvider, useI18n } from "./i18n/provider";
 import "./styles.css";
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
@@ -38,29 +39,31 @@ const clerkAppearance = {
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {clerkPublishableKey ? (
-      <ClerkProvider publishableKey={clerkPublishableKey} appearance={clerkAppearance}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </ClerkProvider>
-    ) : (
-      <MissingClerkConfig />
-    )}
+    <AppI18nProvider>
+      {clerkPublishableKey ? (
+        <ClerkProvider publishableKey={clerkPublishableKey} appearance={clerkAppearance}>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ClerkProvider>
+      ) : (
+        <MissingClerkConfig />
+      )}
+    </AppI18nProvider>
   </React.StrictMode>
 );
 
 function MissingClerkConfig() {
+  const { t } = useI18n();
   return (
     <div className="grid min-h-screen place-items-center bg-cream px-6 text-ink">
       <div className="max-w-[520px] rounded-lg border border-gold/25 bg-cream-2 p-6 shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
-        <div className="mb-2 text-[10px] uppercase tracking-[2px] text-gold">Clerk setup</div>
-        <h1 className="mb-3 text-2xl font-semibold tracking-normal">
-          Missing Clerk publishable key
-        </h1>
+        <div className="mb-2 text-[10px] uppercase tracking-[2px] text-gold">
+          {t("clerk.missingEyebrow")}
+        </div>
+        <h1 className="mb-3 text-2xl font-semibold tracking-normal">{t("clerk.missingTitle")}</h1>
         <p className="text-sm leading-[1.7] text-body">
-          Set <code>VITE_CLERK_PUBLISHABLE_KEY</code> in your local env, then restart the Vite dev
-          server.
+          {t("clerk.missingBody", { key: "VITE_CLERK_PUBLISHABLE_KEY" })}
         </p>
       </div>
     </div>

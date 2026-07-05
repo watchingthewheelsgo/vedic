@@ -13,9 +13,12 @@ import type {
 
 type AuthTokenProvider = () => Promise<string | null>;
 type AnonymousIdProvider = () => string | null;
+type AuthFailureHandler = (failure: { status: number; detail: string }) => void | Promise<void>;
+const AUTH_EXPIRED_MESSAGE = "Your session expired. Please sign in again.";
 
 let authTokenProvider: AuthTokenProvider | null = null;
 let anonymousIdProvider: AnonymousIdProvider | null = null;
+let authFailureHandler: AuthFailureHandler | null = null;
 
 export function setAuthTokenProvider(provider: AuthTokenProvider | null) {
   authTokenProvider = provider;
@@ -25,13 +28,53 @@ export function setAnonymousIdProvider(provider: AnonymousIdProvider | null) {
   anonymousIdProvider = provider;
 }
 
+export function setAuthFailureHandler(handler: AuthFailureHandler | null) {
+  authFailureHandler = handler;
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
-  const token = await authTokenProvider?.();
+  let token: string | null | undefined = null;
+  try {
+    token = await authTokenProvider?.();
+  } catch {
+    await notifyAuthFailure(401, AUTH_EXPIRED_MESSAGE);
+  }
   const anonymousId = anonymousIdProvider?.();
   return {
     ...(token ? { authorization: `Bearer ${token}` } : {}),
     ...(anonymousId ? { "x-vedic-anonymous-id": anonymousId } : {})
   };
+}
+
+function isAuthFailure(status: number, detail: string) {
+  if (status !== 401) return false;
+  return [
+    "Invalid Clerk session token",
+    "Clerk session token is missing a subject",
+    "Expected Bearer token",
+    AUTH_EXPIRED_MESSAGE
+  ].includes(detail);
+}
+
+async function notifyAuthFailure(status: number, detail: string) {
+  try {
+    await authFailureHandler?.({ status, detail });
+  } catch {
+    // Do not mask the original API failure if sign-out cleanup itself fails.
+  }
+}
+
+async function throwApiError(response: Response): Promise<never> {
+  const error = (await response.json().catch(() => null)) as {
+    error?: string;
+    detail?: string;
+  } | null;
+  const detail = error?.detail ?? error?.error ?? `Request failed: ${response.status}`;
+  if (isAuthFailure(response.status, detail)) {
+    await notifyAuthFailure(response.status, detail);
+    throw new Error(AUTH_EXPIRED_MESSAGE);
+  }
+  throw new Error(detail);
 }
 
 async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TResponse> {
@@ -42,11 +85,7 @@ async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TR
   });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as {
-      error?: string;
-      detail?: string;
-    } | null;
-    throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
+    await throwApiError(response);
   }
 
   return (await response.json()) as TResponse;
@@ -56,11 +95,7 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
   const response = await fetch(path, { headers: await authHeaders(), signal });
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as {
-      error?: string;
-      detail?: string;
-    } | null;
-    throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
+    await throwApiError(response);
   }
 
   return (await response.json()) as TResponse;
@@ -69,11 +104,7 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
 async function downloadFile(path: string, filename: string): Promise<void> {
   const response = await fetch(path, { headers: await authHeaders() });
   if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as {
-      error?: string;
-      detail?: string;
-    } | null;
-    throw new Error(error?.detail ?? error?.error ?? `Request failed: ${response.status}`);
+    await throwApiError(response);
   }
 
   const blob = await response.blob();

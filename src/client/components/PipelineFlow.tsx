@@ -16,6 +16,7 @@ import dagre from "dagre";
 import "@xyflow/react/dist/style.css";
 import { formatDuration, type PipelineData, type PipelineNode } from "../lib/pipeline";
 import { cn } from "../lib/cn";
+import { useI18n } from "../i18n/provider";
 
 export type StageStatus = "done" | "running" | "waiting" | "failed" | "pending";
 
@@ -209,6 +210,7 @@ export function PipelineFlow({
   selectedStageId?: string;
   onSelectStage?: (stageId: string) => void;
 }) {
+  const { t } = useI18n();
   const positions = useMemo(() => computeLayout(), []);
   const agg = useMemo(() => aggregateWorkshopStages(data.nodes), [data.nodes]);
 
@@ -224,21 +226,21 @@ export function PipelineFlow({
           height: NODE_H,
           draggable: false,
           data: {
-            label: stage.label,
-            sub: stage.sub,
+            label: t(`stage.${stage.id}.label`),
+            sub: t(`stage.${stage.id}.sub`),
             status: stat.status,
             seed: Boolean(stage.seed),
             selected: selectedStageId === stage.id,
             badge:
               stat.status === "waiting"
-                ? "reply"
+                ? t("status.waiting").toLowerCase()
                 : stat.total > 1
                   ? `${stat.done}/${stat.total}`
                   : ""
           }
         };
       }),
-    [agg, positions, selectedStageId]
+    [agg, positions, selectedStageId, t]
   );
 
   const edges = useMemo<Edge[]>(

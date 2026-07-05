@@ -1,8 +1,9 @@
-import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { SignInButton, SignUpButton, useAuth, useClerk } from "@clerk/clerk-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { setAnonymousIdProvider, setAuthTokenProvider } from "./api";
+import { setAnonymousIdProvider, setAuthFailureHandler, setAuthTokenProvider } from "./api";
 import { Button } from "./components/ui/button";
+import { useI18n } from "./i18n/provider";
 import { Landing } from "./screens/Landing";
 import { Intake } from "./screens/Intake";
 import { Session } from "./screens/Session";
@@ -11,12 +12,33 @@ import { AdminSessionDetail } from "./screens/AdminSessionDetail";
 
 export function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { signOut } = useClerk();
+  const { t } = useI18n();
   const anonymousId = useMemo(() => ensureAnonymousId(), []);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
-    setAuthTokenProvider(() => getToken());
+    setAuthTokenProvider(async () => {
+      if (!isLoaded || !isSignedIn) return null;
+      const token = await getToken();
+      if (!token) throw new Error("Clerk session token is unavailable");
+      return token;
+    });
     return () => setAuthTokenProvider(null);
-  }, [getToken]);
+  }, [getToken, isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    setAuthFailureHandler(async () => {
+      if (!isLoaded || !isSignedIn) return;
+      setSessionExpired(true);
+      await signOut();
+    });
+    return () => setAuthFailureHandler(null);
+  }, [isLoaded, isSignedIn, signOut]);
+
+  useEffect(() => {
+    if (isSignedIn) setSessionExpired(false);
+  }, [isSignedIn]);
 
   useEffect(() => {
     setAnonymousIdProvider(() => anonymousId);
@@ -24,29 +46,49 @@ export function App() {
   }, [anonymousId]);
 
   return (
-    <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/new" element={<Intake />} />
-      <Route path="/session/:id" element={<Session />} />
-      <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
-      <Route
-        path="/admin/sessions"
-        element={
-          <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-            <AdminSessions />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/admin/sessions/:id"
-        element={
-          <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-            <AdminSessionDetail />
-          </RequireAuth>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      {sessionExpired && (
+        <div className="fixed inset-x-4 top-4 z-[90] mx-auto flex max-w-[720px] flex-col gap-3 rounded-lg border border-gold/30 bg-cream px-4 py-3 text-ink shadow-[0_18px_48px_rgba(44,31,15,0.16)] sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold">{t("auth.sessionExpiredTitle")}</div>
+            <div className="mt-0.5 text-xs leading-relaxed text-body">
+              {t("auth.sessionExpiredBody")}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <SignInButton mode="modal">
+              <Button size="sm">{t("auth.signInAgain")}</Button>
+            </SignInButton>
+            <Button size="sm" variant="ghost" onClick={() => setSessionExpired(false)}>
+              {t("common.dismiss")}
+            </Button>
+          </div>
+        </div>
+      )}
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/new" element={<Intake />} />
+        <Route path="/session/:id" element={<Session />} />
+        <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
+        <Route
+          path="/admin/sessions"
+          element={
+            <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+              <AdminSessions />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/sessions/:id"
+          element={
+            <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+              <AdminSessionDetail />
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 
@@ -72,10 +114,12 @@ function RequireAuth({
   isLoaded: boolean;
   isSignedIn: boolean;
 }) {
+  const { t } = useI18n();
+
   if (!isLoaded) {
     return (
       <div className="grid min-h-screen place-items-center bg-cream px-6 text-muted">
-        Loading account...
+        {t("auth.loading")}
       </div>
     );
   }
@@ -85,18 +129,16 @@ function RequireAuth({
       <div className="grid min-h-screen place-items-center bg-cream px-6 text-ink">
         <div className="max-w-[460px] rounded-lg border border-gold/25 bg-cream-2 p-6 text-center shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
           <div className="mb-2 text-[10px] uppercase tracking-[2px] text-gold">
-            Account required
+            {t("auth.requiredEyebrow")}
           </div>
-          <h1 className="mb-3 text-2xl font-semibold tracking-normal">Sign in to continue</h1>
-          <p className="mb-5 text-sm leading-[1.7] text-body">
-            Your readings and saved files are private to your account.
-          </p>
+          <h1 className="mb-3 text-2xl font-semibold tracking-normal">{t("auth.requiredTitle")}</h1>
+          <p className="mb-5 text-sm leading-[1.7] text-body">{t("auth.requiredBody")}</p>
           <div className="flex justify-center gap-2">
             <SignInButton mode="modal">
-              <Button>Sign in</Button>
+              <Button>{t("common.signIn")}</Button>
             </SignInButton>
             <SignUpButton mode="modal">
-              <Button variant="outline">Create account</Button>
+              <Button variant="outline">{t("common.createAccount")}</Button>
             </SignUpButton>
           </div>
         </div>

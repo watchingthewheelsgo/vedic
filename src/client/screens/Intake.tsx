@@ -3,6 +3,7 @@ import { FormEvent, SetStateAction, useMemo, useState } from "react";
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { PlacePicker } from "../components/PlacePicker";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -18,12 +19,12 @@ import {
   SelectValue
 } from "../components/ui/select";
 import { cn } from "../lib/cn";
-import type { BirthInput, BirthTimePrecision } from "../../shared/domain";
+import { useI18n } from "../i18n/provider";
+import type { AppLocale, BirthInput, BirthTimePrecision } from "../../shared/domain";
 
 type SelectOption<T extends string = string> = {
   value: T;
-  label: string;
-  description?: string;
+  labelKey: string;
 };
 
 type FieldKey = "birthDate" | "birthTime" | "timeSource" | "place" | "submit";
@@ -32,43 +33,39 @@ type FormErrors = Partial<Record<FieldKey, string>>;
 const TIME_PRECISION_OPTIONS: Array<SelectOption<BirthTimePrecision>> = [
   {
     value: "exact",
-    label: "Exact minute",
-    description: "Sharpest reading, especially when the time comes from an official record"
+    labelKey: "intake.precision.exact.label"
   },
   {
     value: "approximate",
-    label: "About +/- 15 minutes",
-    description: "Usable; timing-sensitive parts will be interpreted with care"
+    labelKey: "intake.precision.approximate.label"
   },
   {
     value: "part_of_day",
-    label: "Only know the hour",
-    description: "The reading will avoid minute-level claims"
+    labelKey: "intake.precision.part_of_day.label"
   },
   {
     value: "unknown",
-    label: "Unknown",
-    description: "Allowed; timing-related sections will be more conservative"
+    labelKey: "intake.precision.unknown.label"
   }
 ];
 
 const TIME_SOURCE_OPTIONS: SelectOption[] = [
-  { value: "出生证/医院记录", label: "Birth certificate / hospital record" },
-  { value: "家人明确记忆", label: "Clear family memory" },
-  { value: "家人大概回忆", label: "Approximate family memory" }
+  { value: "出生证/医院记录", labelKey: "intake.source.certificate" },
+  { value: "家人明确记忆", labelKey: "intake.source.familyClear" },
+  { value: "家人大概回忆", labelKey: "intake.source.familyApprox" }
 ];
 
 const GENDER_OPTIONS: SelectOption[] = [
-  { value: "女", label: "Female" },
-  { value: "男", label: "Male" },
-  { value: "未提供", label: "Prefer not to say" }
+  { value: "女", labelKey: "intake.gender.female" },
+  { value: "男", labelKey: "intake.gender.male" },
+  { value: "未提供", labelKey: "common.notProvided" }
 ];
 
 const RELATIONSHIP_OPTIONS: SelectOption[] = [
-  { value: "单身", label: "Single" },
-  { value: "恋爱中", label: "Dating / in a relationship" },
-  { value: "已婚", label: "Married" },
-  { value: "未提供", label: "Prefer not to say" }
+  { value: "单身", labelKey: "intake.relationship.single" },
+  { value: "恋爱中", labelKey: "intake.relationship.dating" },
+  { value: "已婚", labelKey: "intake.relationship.married" },
+  { value: "未提供", labelKey: "common.notProvided" }
 ];
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -79,6 +76,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 export function Intake() {
   const navigate = useNavigate();
+  const { locale, t } = useI18n();
   const [birthDate, setBirthDate] = useState<Date | null>(null);
   const [birthTime, setBirthTime] = useState<Date | null>(null);
   const [place, setPlace] = useState("");
@@ -106,26 +104,25 @@ export function Intake() {
         timePrecision,
         gender,
         relationship,
-        timeSource
+        timeSource,
+        locale
       }),
-    [birthDate, birthTime, gender, place, relationship, timePrecision, timeSource]
+    [birthDate, birthTime, gender, locale, place, relationship, timePrecision, timeSource]
   );
 
   async function onStart(event: FormEvent) {
     event.preventDefault();
     const nextErrors: FormErrors = {};
 
-    if (!birthDate) nextErrors.birthDate = "Select your date of birth.";
+    if (!birthDate) nextErrors.birthDate = t("intake.error.birthDate");
     if (timePrecision !== "unknown" && !birthTime) {
       nextErrors.birthTime =
-        timePrecision === "part_of_day"
-          ? "Select the closest known birth hour."
-          : "Select your birth time.";
+        timePrecision === "part_of_day" ? t("intake.error.birthHour") : t("intake.error.birthTime");
     }
     if (timePrecision === "exact" && !timeSource) {
-      nextErrors.timeSource = "Select where this exact time came from.";
+      nextErrors.timeSource = t("intake.error.timeSource");
     }
-    if (!place) nextErrors.place = "Choose a city from search results.";
+    if (!place) nextErrors.place = t("intake.error.place");
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -144,243 +141,251 @@ export function Intake() {
       });
     } catch (caught) {
       setErrors({
-        submit: caught instanceof Error ? caught.message : "Could not start the reading."
+        submit: caught instanceof Error ? caught.message : t("intake.error.start")
       });
       setBusy(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-cream-2 px-5 py-9 sm:px-10 sm:py-14">
-      <div className="mx-auto max-w-[760px]">
-        <div className="mb-8 flex items-center justify-between gap-3">
-          <button
-            className="inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
-            onClick={() => navigate("/")}
-          >
-            ← Back
+    <div className="min-h-screen bg-cream-2">
+      <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-6 backdrop-blur-xl sm:px-10">
+        <div className="mx-auto flex h-16 max-w-[1100px] items-center justify-between">
+          <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
+            Veda<span>Light</span>
           </button>
           <IntakeAuthControls />
         </div>
+      </nav>
 
-        <div className="mb-12 flex items-start">
-          <ProgressStep active label="Personal Info" index={1} />
-          <ProgressStep label="Reading" index={2} />
-          <ProgressStep label="Report" index={3} last />
-        </div>
-
-        <section className="mb-6 flex items-start gap-3.5">
-          <div className="grid size-[38px] shrink-0 place-items-center rounded-[10px] bg-night text-gold shadow-[0_10px_24px_rgba(15,12,9,0.12)]">
-            <UserRound size={18} />
+      <main className="px-5 py-9 sm:px-10 sm:py-14">
+        <div className="mx-auto max-w-[760px]">
+          <div className="mb-8 flex items-center justify-start">
+            <button
+              className="inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
+              onClick={() => navigate("/")}
+            >
+              ← {t("common.back")}
+            </button>
           </div>
-          <div>
-            <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">
-              Personal Information
-            </h2>
-            <p className="mb-9 text-sm text-body">
-              These details anchor the reading. If a time or place is uncertain, choose the closest
-              honest option so the reading can stay appropriately careful.
-            </p>
+
+          <div className="mb-12 flex items-start">
+            <ProgressStep active label={t("intake.step.personal")} index={1} />
+            <ProgressStep label={t("intake.step.reading")} index={2} />
+            <ProgressStep label={t("intake.step.report")} index={3} last />
           </div>
-        </section>
 
-        <Card>
-          <CardContent className="p-5 sm:p-6">
-            <form onSubmit={onStart} noValidate>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field
-                  label="Date of birth"
-                  icon={<CalendarDays size={16} />}
-                  hint="Use the calendar to select your birth date."
-                  error={errors.birthDate}
-                >
-                  <DatePicker
-                    value={birthDate}
-                    invalid={Boolean(errors.birthDate)}
-                    disabled={{ after: new Date() }}
-                    startMonth={new Date(1900, 0)}
-                    endMonth={new Date()}
-                    onChange={(date) => {
-                      setBirthDate(date);
-                      clearError(setErrors, "birthDate");
-                    }}
-                  />
-                </Field>
+          <section className="mb-6 flex items-start gap-3.5">
+            <div className="grid size-[38px] shrink-0 place-items-center rounded-[10px] bg-night text-gold shadow-[0_10px_24px_rgba(15,12,9,0.12)]">
+              <UserRound size={18} />
+            </div>
+            <div>
+              <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">
+                {t("intake.title")}
+              </h2>
+              <p className="mb-9 text-sm text-body">{t("intake.subtitle")}</p>
+            </div>
+          </section>
 
-                <Field
-                  label="Birth time"
-                  icon={<Clock3 size={16} />}
-                  hint={
-                    timePrecision === "unknown"
-                      ? "No time required. Timing-related guidance will be more conservative."
-                      : timePrecision === "part_of_day"
-                        ? "Select the closest known hour."
-                        : "Minute-level time picker. Use the best source you have."
-                  }
-                  error={errors.birthTime}
-                >
-                  <BirthTimePicker
-                    value={birthTime}
-                    precision={timePrecision}
-                    invalid={Boolean(errors.birthTime)}
-                    onChange={(date) => {
-                      setBirthTime(date);
-                      clearError(setErrors, "birthTime");
-                    }}
-                  />
-                </Field>
-              </div>
+          <Card>
+            <CardContent className="p-5 sm:p-6">
+              <form onSubmit={onStart} noValidate>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field
+                    label={t("intake.date.label")}
+                    icon={<CalendarDays size={16} />}
+                    hint={t("intake.date.hint")}
+                    error={errors.birthDate}
+                  >
+                    <DatePicker
+                      value={birthDate}
+                      invalid={Boolean(errors.birthDate)}
+                      disabled={{ after: new Date() }}
+                      startMonth={new Date(1900, 0)}
+                      endMonth={new Date()}
+                      onChange={(date) => {
+                        setBirthDate(date);
+                        clearError(setErrors, "birthDate");
+                      }}
+                    />
+                  </Field>
 
-              <Field
-                label="Birth time confidence"
-                icon={<ShieldCheck size={16} />}
-                hint={precisionOption.description}
-              >
-                <Select
-                  value={timePrecision}
-                  onValueChange={(value) => {
-                    const next = value as BirthTimePrecision;
-                    setTimePrecision(next);
-                    setBirthTime((current) => normalizeTimeForPrecision(current, next));
-                    if (next !== "exact") {
-                      setTimeSource("");
-                      clearError(setErrors, "timeSource");
+                  <Field
+                    label={t("intake.time.label")}
+                    icon={<Clock3 size={16} />}
+                    hint={
+                      timePrecision === "unknown"
+                        ? t("intake.time.hint.unknown")
+                        : timePrecision === "part_of_day"
+                          ? t("intake.time.hint.partOfDay")
+                          : t("intake.time.hint.default")
                     }
-                    if (next === "unknown") {
-                      clearError(setErrors, "birthTime");
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select confidence" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TIME_PRECISION_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+                    error={errors.birthTime}
+                  >
+                    <BirthTimePicker
+                      value={birthTime}
+                      precision={timePrecision}
+                      invalid={Boolean(errors.birthTime)}
+                      onChange={(date) => {
+                        setBirthTime(date);
+                        clearError(setErrors, "birthTime");
+                      }}
+                    />
+                  </Field>
+                </div>
 
-              {timePrecision === "exact" && (
                 <Field
-                  label="Birth time source"
-                  hint="This helps the reading decide how much weight to place on time-sensitive details."
-                  error={errors.timeSource}
+                  label={t("intake.precision.label")}
+                  icon={<ShieldCheck size={16} />}
+                  hint={t(`intake.precision.${precisionOption.value}.description`)}
                 >
                   <Select
-                    value={timeSource || undefined}
+                    value={timePrecision}
                     onValueChange={(value) => {
-                      setTimeSource(value);
-                      clearError(setErrors, "timeSource");
+                      const next = value as BirthTimePrecision;
+                      setTimePrecision(next);
+                      setBirthTime((current) => normalizeTimeForPrecision(current, next));
+                      if (next !== "exact") {
+                        setTimeSource("");
+                        clearError(setErrors, "timeSource");
+                      }
+                      if (next === "unknown") {
+                        clearError(setErrors, "birthTime");
+                      }
                     }}
                   >
-                    <SelectTrigger aria-invalid={Boolean(errors.timeSource)}>
-                      <SelectValue placeholder="Select source" />
+                    <SelectTrigger>
+                      <SelectValue placeholder={t("intake.precision.placeholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      {TIME_SOURCE_OPTIONS.map((option) => (
+                      {TIME_PRECISION_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
-                          {option.label}
+                          {t(option.labelKey)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </Field>
-              )}
 
-              {timePrecision === "unknown" && (
-                <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
-                  Unknown birth time is allowed. The reading will focus on stable chart themes and
-                  treat precise timing with caution.
-                </div>
-              )}
+                {timePrecision === "exact" && (
+                  <Field
+                    label={t("intake.source.label")}
+                    hint={t("intake.source.hint")}
+                    error={errors.timeSource}
+                  >
+                    <Select
+                      value={timeSource || undefined}
+                      onValueChange={(value) => {
+                        setTimeSource(value);
+                        clearError(setErrors, "timeSource");
+                      }}
+                    >
+                      <SelectTrigger aria-invalid={Boolean(errors.timeSource)}>
+                        <SelectValue placeholder={t("intake.source.placeholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TIME_SOURCE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(option.labelKey)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
 
-              <PlacePicker
-                value={place}
-                onChange={(value) => {
-                  setPlace(value);
-                  if (value) clearError(setErrors, "place");
-                }}
-                error={errors.place}
-              />
+                {timePrecision === "unknown" && (
+                  <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
+                    {t("intake.unknownNotice")}
+                  </div>
+                )}
 
-              <Field label="Name" hint="Optional. Used only to address you in the experience.">
-                <Input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="How should the reading address you?"
+                <PlacePicker
+                  value={place}
+                  onChange={(value) => {
+                    setPlace(value);
+                    if (value) clearError(setErrors, "place");
+                  }}
+                  error={errors.place}
                 />
-              </Field>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Gender" hint="Optional. Helps the reading use more natural wording.">
-                  <Select value={gender || undefined} onValueChange={setGender}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {GENDER_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <Field label={t("intake.name.label")} hint={t("intake.name.hint")}>
+                  <Input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder={t("intake.name.placeholder")}
+                  />
                 </Field>
 
-                <Field
-                  label="Relationship status"
-                  hint="Optional. Helps relationship sections use the right framing."
-                >
-                  <Select value={relationship || undefined} onValueChange={setRelationship}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {RELATIONSHIP_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={t("intake.gender.label")} hint={t("intake.gender.hint")}>
+                    <Select value={gender || undefined} onValueChange={setGender}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t("intake.select")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GENDER_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(option.labelKey)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
 
-              {errors.submit && (
-                <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
-                  {errors.submit}
+                  <Field
+                    label={t("intake.relationship.label")}
+                    hint={t("intake.relationship.hint")}
+                  >
+                    <Select value={relationship || undefined} onValueChange={setRelationship}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t("intake.select")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {RELATIONSHIP_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(option.labelKey)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
                 </div>
-              )}
 
-              <Button className="mt-2 w-full" size="lg" disabled={busy}>
-                {busy ? "Preparing..." : "Continue to Reading →"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+                {errors.submit && (
+                  <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
+                    {errors.submit}
+                  </div>
+                )}
+
+                <Button className="mt-2 w-full" size="lg" disabled={busy}>
+                  {busy ? t("intake.submit.busy") : t("intake.submit")}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
     </div>
   );
 }
 
 function IntakeAuthControls() {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-2">
+      <LanguageSwitcher />
       <SignedOut>
         <span className="hidden rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold-dim sm:inline-flex">
-          Trial mode
+          {t("common.trialMode")}
         </span>
         <SignInButton mode="modal">
           <Button variant="ghost" size="sm">
-            Sign in
+            {t("common.signIn")}
           </Button>
         </SignInButton>
         <SignUpButton mode="modal">
-          <Button size="sm">Create account</Button>
+          <Button size="sm">{t("common.createAccount")}</Button>
         </SignUpButton>
       </SignedOut>
       <SignedIn>
@@ -433,6 +438,7 @@ function BirthTimePicker({
   invalid: boolean;
   onChange: (date: Date | null) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const disabled = precision === "unknown";
   const selectedHour = value?.getHours() ?? null;
@@ -477,10 +483,10 @@ function BirthTimePicker({
               )}
             >
               {disabled
-                ? "Time unknown"
+                ? t("common.timeUnknown")
                 : value
                   ? formatTimeLabel(value, precision)
-                  : "Select time"}
+                  : t("intake.time.select")}
             </span>
           </Button>
         </PopoverTrigger>
@@ -489,7 +495,7 @@ function BirthTimePicker({
           <PopoverContent className="w-[min(92vw,280px)] p-3" align="start">
             <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
               <TimeSelect
-                title="Hour"
+                title={t("time.hour")}
                 values={HOURS}
                 value={selectedHour}
                 placeholder="HH"
@@ -497,7 +503,7 @@ function BirthTimePicker({
               />
               <div className="pb-2 text-sm text-muted">:</div>
               <TimeSelect
-                title="Minute"
+                title={t("time.minute")}
                 values={minuteOptions}
                 value={precision === "part_of_day" ? 0 : selectedMinute}
                 placeholder="MM"
@@ -515,10 +521,10 @@ function BirthTimePicker({
                   setOpen(false);
                 }}
               >
-                Clear
+                {t("common.clear")}
               </button>
               <Button type="button" size="sm" onClick={() => setOpen(false)}>
-                Done
+                {t("common.done")}
               </Button>
             </div>
           </PopoverContent>
@@ -589,7 +595,8 @@ function buildBirthInput({
   timePrecision,
   gender,
   relationship,
-  timeSource
+  timeSource,
+  locale
 }: {
   birthDate: Date | null;
   birthTime: Date | null;
@@ -598,6 +605,7 @@ function buildBirthInput({
   gender: string;
   relationship: string;
   timeSource: string;
+  locale: AppLocale;
 }): BirthInput | null {
   if (!birthDate) return null;
   if (!place) return null;
@@ -611,7 +619,8 @@ function buildBirthInput({
     birthTimePrecision: timePrecision,
     gender: gender || "未提供",
     relationship: relationship || "未提供",
-    timeSource: timePrecision === "exact" ? timeSource : "未追问"
+    timeSource: timePrecision === "exact" ? timeSource : "未追问",
+    locale
   };
 }
 

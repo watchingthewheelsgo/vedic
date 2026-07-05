@@ -73,6 +73,10 @@ class FakeWorkspace:
         self.require_session_dir(session_id)
         return []
 
+    def read_session_locale(self, session_id: str) -> str:
+        self.require_session_dir(session_id)
+        return "en"
+
 
 class FakeSkillRuntime:
     def __init__(self, workspace: FakeWorkspace, batches: list[dict[str, Any]]) -> None:
@@ -80,7 +84,7 @@ class FakeSkillRuntime:
         self.batches = batches
         self.calls: list[tuple[str, bool]] = []
 
-    def core_batches(self, user_message: str) -> list[dict[str, Any]]:
+    def core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, Any]]:
         return self.batches
 
     def core_batch_files(self, batch: dict[str, Any]) -> list[str]:

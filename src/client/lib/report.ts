@@ -1,4 +1,5 @@
 import type { SkillArtifact, SkillSessionResponse } from "../../shared/domain";
+import { messages, reportTitleKeys, type LocaleCode } from "../i18n/messages";
 
 export const reportOrder = [
   "p1_overview.md",
@@ -67,8 +68,10 @@ export function reportRank(path: string) {
   return 100 + path.localeCompare("");
 }
 
-export function titleForArtifact(artifact: SkillArtifact) {
+export function titleForArtifact(artifact: SkillArtifact, locale: LocaleCode = "en") {
   const basename = artifact.path.split("/").pop() ?? artifact.path;
+  const key = reportTitleKeys[basename];
+  if (key) return messages[locale]?.[key] ?? messages.en[key] ?? reportTitles[basename] ?? basename;
   if (reportTitles[basename]) return reportTitles[basename];
   if (artifact.title && artifact.title !== artifact.path) return artifact.title;
   return basename.replace(/\.md$/, "").replace(/[_-]+/g, " ");

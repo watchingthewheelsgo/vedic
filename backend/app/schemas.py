@@ -11,6 +11,7 @@ class ApiModel(BaseModel):
 
 
 BirthTimePrecision = Literal["exact", "approximate", "part_of_day", "unknown"]
+AppLocale = Literal["zh", "en", "ja"]
 SkillName = Literal[
     "vedic-reader",
     "vedic-core",
@@ -29,6 +30,7 @@ class BirthInput(ApiModel):
     gender: str = Field(default="[待填]", max_length=80)
     relationship: str = Field(default="[待填]", max_length=120)
     time_source: str = Field(default="未追问", alias="timeSource", max_length=120)
+    locale: AppLocale = "en"
 
 
 class SkillBirthInput(BirthInput):
@@ -90,6 +92,7 @@ class SkillRunInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
     skill: SkillName
     user_message: str = Field(default="", alias="userMessage", max_length=4000)
+    locale: AppLocale | None = None
 
 
 CoreJobStatus = Literal["queued", "running", "completed", "failed"]
