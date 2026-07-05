@@ -7,11 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.db.engine import close_db, init_db, normalize_database_url
+from app.db.engine import close_db, database_diagnostic_context, init_db, normalize_database_url
 from app.schemas import SkillSessionResponse
 from app.services.admin_sessions import AdminSessionsService
 from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
+from app.settings import Settings
 
 
 class FakeSkillRuntime:
@@ -105,12 +106,45 @@ def test_admin_sessions_lists_database_metadata_and_local_paths(tmp_path: Path) 
 
 def test_plain_postgres_url_uses_asyncpg_and_ssl() -> None:
     url = normalize_database_url(
-        "postgresql://postgres:secret@db.example.supabase.co:5432/postgres"
+        "postgresql://postgres:dummy-password@db.example.supabase.co:5432/postgres"
     )
 
     assert url.drivername == "postgresql+asyncpg"
     assert url.host == "db.example.supabase.co"
     assert url.query["ssl"] == "require"
+
+
+def test_supabase_project_ref_and_password_build_direct_database_url() -> None:
+    settings = Settings(
+        _env_file=None,
+        SUPABASE_PROJECT_REF="pkjtffyirhjpfpbyrfmu",
+        SUPABASE_DB_PASSWORD="dummy password",
+    )
+
+    context = database_diagnostic_context(settings)
+
+    assert settings.resolved_database_url() == (
+        "postgresql://postgres:dummy%20password@"
+        "db.pkjtffyirhjpfpbyrfmu.supabase.co:5432/postgres?sslmode=require"
+    )
+    assert context["source"] == "supabase"
+    assert context["driver"] == "postgresql+asyncpg"
+    assert context["host"] == "db.pkjtffyirhjpfpbyrfmu.supabase.co"
+    assert context["supabaseDirect"] is True
+
+
+def test_supabase_settings_take_over_example_sqlite_database_url() -> None:
+    settings = Settings(
+        _env_file=None,
+        DATABASE_URL="sqlite+aiosqlite:///./backend/data/vedic.db",
+        SUPABASE_PROJECT_REF="pkjtffyirhjpfpbyrfmu",
+        SUPABASE_DB_PASSWORD="dummy-password",
+    )
+
+    assert settings.database_source() == "supabase"
+    assert normalize_database_url(settings.resolved_database_url()).host == (
+        "db.pkjtffyirhjpfpbyrfmu.supabase.co"
+    )
 
 
 def test_metadata_store_filters_sessions_by_owner(tmp_path: Path) -> None:

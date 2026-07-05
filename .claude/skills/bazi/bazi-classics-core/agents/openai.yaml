@@ -1,0 +1,8 @@
+interface:
+  display_name: "Bazi Classics Core"
+  short_description: "Generate BaZi reports from three classics"
+  brand_color: "#7A4E1D"
+  default_prompt: "Use $bazi-classics-core to generate a professional BaZi report from structured chart data."
+
+policy:
+  allow_implicit_invocation: true

@@ -478,20 +478,47 @@ class PlaceService:
             return f"Etc/GMT{int(-offset):+d}"
         raise RuntimeError("timezonefinder failed and GeoNames offset is not a whole hour")
 
+    def _timezone_for_coordinates(self, lat: float, lon: float) -> str:
+        try:
+            from timezonefinder import TimezoneFinder  # type: ignore
+
+            timezone = TimezoneFinder().timezone_at(lat=lat, lng=lon)
+            if timezone:
+                return timezone
+        except Exception as exc:
+            raise RuntimeError("timezonefinder is required for direct coordinates") from exc
+        raise ValueError("无法根据这个经纬度识别时区，请检查坐标是否位于有效陆地区域。")
+
     def _parse_inline_coordinates(self, value: str) -> ResolvedPlace | None:
-        match = re.search(
-            r"lat\s*[:=]\s*(-?\d+(?:\.\d+)?)\s*,?\s*"
-            r"lon\s*[:=]\s*(-?\d+(?:\.\d+)?)\s*,?\s*"
-            r"tz\s*[:=]\s*([A-Za-z_/-]+)",
+        number_pattern = r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))"
+        lat_match = re.search(rf"(?:lat|latitude|纬度|緯度)\s*[:=]\s*{number_pattern}", value, re.I)
+        lon_match = re.search(
+            rf"(?:lon|lng|longitude|经度|經度|経度)\s*[:=]\s*{number_pattern}",
             value,
+            re.I,
         )
-        if not match:
+        if not lat_match and not lon_match:
             return None
+        if not lat_match or not lon_match:
+            raise ValueError("经纬度格式不完整，请同时填写纬度和经度。")
+
+        lat = float(lat_match.group(1))
+        lon = float(lon_match.group(1))
+        if not -90 <= lat <= 90:
+            raise ValueError("纬度必须在 -90 到 90 之间。")
+        if not -180 <= lon <= 180:
+            raise ValueError("经度必须在 -180 到 180 之间。")
+
+        timezone_match = re.search(r"\btz\s*[:=]\s*([A-Za-z_/-]+)", value)
+        timezone = (
+            timezone_match.group(1) if timezone_match else self._timezone_for_coordinates(lat, lon)
+        )
+
         return ResolvedPlace(
             label=value,
-            lat=float(match.group(1)),
-            lon=float(match.group(2)),
-            timezone=match.group(3),
+            lat=lat,
+            lon=lon,
+            timezone=timezone,
             source="inline-coordinates",
             matched=None,
         )

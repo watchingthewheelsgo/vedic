@@ -117,9 +117,12 @@ type StageData = {
 };
 type StageFlowNode = Node<StageData, "stage">;
 
-export function aggregateWorkshopStages(nodes: PipelineNode[]): Record<string, StageAgg> {
+export function aggregateWorkshopStages(
+  nodes: PipelineNode[],
+  stages: StageDef[] = WORKSHOP_STAGES
+): Record<string, StageAgg> {
   const result: Record<string, StageAgg> = {};
-  for (const stage of WORKSHOP_STAGES) {
+  for (const stage of stages) {
     if (stage.seed) {
       result[stage.id] = { status: "done", done: 0, total: 0 };
       continue;
@@ -142,15 +145,18 @@ export function aggregateWorkshopStages(nodes: PipelineNode[]): Record<string, S
 
 // Deterministic top-to-bottom layout via dagre. Graph shape is fixed, so
 // positions compute once; only node data (status/badge) changes on poll.
-function computeLayout(): Record<string, { x: number; y: number }> {
+function computeLayout(
+  stages: StageDef[],
+  edges: Array<[string, string]>
+): Record<string, { x: number; y: number }> {
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 52, marginx: 24, marginy: 24 });
   graph.setDefaultEdgeLabel(() => ({}));
-  for (const stage of WORKSHOP_STAGES) graph.setNode(stage.id, { width: NODE_W, height: NODE_H });
-  for (const [source, target] of WORKSHOP_STAGE_EDGES) graph.setEdge(source, target);
+  for (const stage of stages) graph.setNode(stage.id, { width: NODE_W, height: NODE_H });
+  for (const [source, target] of edges) graph.setEdge(source, target);
   dagre.layout(graph);
   const positions: Record<string, { x: number; y: number }> = {};
-  for (const stage of WORKSHOP_STAGES) {
+  for (const stage of stages) {
     const node = graph.node(stage.id);
     positions[stage.id] = { x: node.x - NODE_W / 2, y: node.y - NODE_H / 2 };
   }
@@ -204,20 +210,28 @@ const nodeTypes = { stage: StageNode };
 export function PipelineFlow({
   data,
   selectedStageId = "src",
-  onSelectStage
+  onSelectStage,
+  stages = WORKSHOP_STAGES,
+  edges = WORKSHOP_STAGE_EDGES
 }: {
   data: PipelineData;
   selectedStageId?: string;
   onSelectStage?: (stageId: string) => void;
+  stages?: StageDef[];
+  edges?: Array<[string, string]>;
 }) {
   const { t } = useI18n();
-  const positions = useMemo(() => computeLayout(), []);
-  const agg = useMemo(() => aggregateWorkshopStages(data.nodes), [data.nodes]);
+  const positions = useMemo(() => computeLayout(stages, edges), [edges, stages]);
+  const agg = useMemo(() => aggregateWorkshopStages(data.nodes, stages), [data.nodes, stages]);
 
   const nodes = useMemo<StageFlowNode[]>(
     () =>
-      WORKSHOP_STAGES.map((stage) => {
+      stages.map((stage) => {
         const stat = agg[stage.id];
+        const labelKey = `stage.${stage.id}.label`;
+        const subKey = `stage.${stage.id}.sub`;
+        const label = t(labelKey);
+        const sub = t(subKey);
         return {
           id: stage.id,
           type: "stage",
@@ -226,8 +240,8 @@ export function PipelineFlow({
           height: NODE_H,
           draggable: false,
           data: {
-            label: t(`stage.${stage.id}.label`),
-            sub: t(`stage.${stage.id}.sub`),
+            label: label === labelKey ? stage.label : label,
+            sub: sub === subKey ? stage.sub : sub,
             status: stat.status,
             seed: Boolean(stage.seed),
             selected: selectedStageId === stage.id,
@@ -240,12 +254,12 @@ export function PipelineFlow({
           }
         };
       }),
-    [agg, positions, selectedStageId, t]
+    [agg, positions, selectedStageId, stages, t]
   );
 
-  const edges = useMemo<Edge[]>(
+  const flowEdges = useMemo<Edge[]>(
     () =>
-      WORKSHOP_STAGE_EDGES.map(([source, target]) => {
+      edges.map(([source, target]) => {
         const running = agg[target]?.status === "running" || agg[target]?.status === "waiting";
         const stroke = running ? STATUS_STROKE.running : STATUS_STROKE.pending;
         return {
@@ -257,7 +271,7 @@ export function PipelineFlow({
           style: { stroke, strokeWidth: running ? 2 : 1.5 }
         };
       }),
-    [agg]
+    [agg, edges]
   );
 
   return (
@@ -289,7 +303,7 @@ export function PipelineFlow({
       <div className="flow-canvas relative min-h-0 flex-1">
         <ReactFlow
           nodes={nodes}
-          edges={edges}
+          edges={flowEdges}
           nodeTypes={nodeTypes}
           onNodeClick={(_, node) => onSelectStage?.(node.id)}
           fitView

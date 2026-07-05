@@ -18,7 +18,7 @@ async def init_db(settings: Settings) -> None:
     global engine, AsyncSessionLocal
     from app.db.models import Base
 
-    db_url = normalize_database_url(settings.database_url)
+    db_url = normalize_database_url(_resolve_database_url(settings))
     if db_url.get_backend_name() == "sqlite":
         db_path = db_url.database
         if db_path:
@@ -94,7 +94,7 @@ def _ensure_owner_user_columns(sync_conn) -> None:
 
 def database_diagnostic_context(settings: Settings | None = None) -> dict[str, object]:
     try:
-        db_url = normalize_database_url(settings.database_url if settings else "")
+        db_url = normalize_database_url(_resolve_database_url(settings) if settings else "")
     except Exception as exc:
         return {
             "initialized": AsyncSessionLocal is not None,
@@ -106,6 +106,7 @@ def database_diagnostic_context(settings: Settings | None = None) -> dict[str, o
     host = db_url.host or "local"
     return {
         "initialized": AsyncSessionLocal is not None,
+        "source": _database_source(settings),
         "driver": db_url.drivername,
         "host": host,
         "port": db_url.port,
@@ -114,6 +115,22 @@ def database_diagnostic_context(settings: Settings | None = None) -> dict[str, o
         "supabasePooler": host.endswith(".pooler.supabase.com"),
         "supabaseDirect": host.startswith("db.") and host.endswith(".supabase.co"),
     }
+
+
+def _resolve_database_url(settings: Settings) -> str:
+    resolver = getattr(settings, "resolved_database_url", None)
+    if callable(resolver):
+        return str(resolver())
+    return str(settings.database_url)
+
+
+def _database_source(settings: Settings | None) -> str:
+    if not settings:
+        return "unknown"
+    resolver = getattr(settings, "database_source", None)
+    if callable(resolver):
+        return str(resolver())
+    return "database_url"
 
 
 def _normalize_asyncpg_ssl(url: URL) -> URL:

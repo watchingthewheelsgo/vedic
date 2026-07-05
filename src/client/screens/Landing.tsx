@@ -1,6 +1,7 @@
-import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/clerk-react";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { AccountCenter } from "../components/AccountCenter";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { Button } from "../components/ui/button";
 import { useI18n } from "../i18n/provider";
@@ -42,7 +43,7 @@ export function Landing() {
             </SignedOut>
             <SignedIn>
               <Button onClick={start}>{t("landing.nav.reportArrow")}</Button>
-              <UserButton afterSignOutUrl="/" />
+              <AccountCenter />
             </SignedIn>
           </div>
         </div>

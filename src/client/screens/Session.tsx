@@ -1,11 +1,4 @@
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-  useAuth
-} from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -27,11 +20,14 @@ import {
   Workflow
 } from "lucide-react";
 import { api } from "../api";
+import { AccountCenter } from "../components/AccountCenter";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import {
   aggregateWorkshopStages,
   PipelineFlow,
   WORKSHOP_STAGES,
+  WORKSHOP_STAGE_EDGES,
+  type StageDef,
   type StageStatus
 } from "../components/PipelineFlow";
 import { MarkdownReport } from "../components/MarkdownReport";
@@ -175,6 +171,19 @@ const STAGE_COPY: Record<string, StageCopy> = {
     userResult: "The Report tab becomes available with export-ready sections.",
     userAction: "Open the Report tab when this completes.",
     expected: "Final wrap-up."
+  },
+  bazi_chart: {
+    purpose:
+      "Calculates the four pillars, ten gods, hidden stems, solar-term boundaries, and luck cycles.",
+    userResult: "A structured BaZi chart workspace is saved before any interpretation begins.",
+    userAction: "Review the chart facts, then generate the classical report when ready.",
+    expected: "Usually seconds."
+  },
+  bazi_report: {
+    purpose: "Turns the chart facts into a classical BaZi report using the repo-local skill.",
+    userResult: "The Report tab becomes available with BaZi sections and timing notes.",
+    userAction: "Sign in if needed, then generate the report.",
+    expected: "Usually several minutes."
   }
 };
 
@@ -211,8 +220,44 @@ const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
   dasha: [".runtime/dasha_review.md"],
   pari: [".runtime/houses/parivartana.md", "p4b_houses.md"],
   life: ["p5a_life.md", "p5b_life.md"],
-  appx: ["appendix.md"]
+  appx: ["appendix.md"],
+  bazi_chart: ["bazi_structured_data.md", "bazi_report_context.md", "bazi_structured_data.json"],
+  bazi_report: [
+    "bazi_life_report.md",
+    "bazi_overview.md",
+    "bazi_classics_audit.md",
+    "bazi_timing_report.md",
+    "bazi_data_audit.md",
+    "bazi_appendix.md"
+  ]
 };
+
+const BAZI_WORKSHOP_STAGES: StageDef[] = [
+  {
+    id: "src",
+    label: "Birth Details",
+    sub: "intake",
+    seed: true,
+    match: () => false
+  },
+  {
+    id: "bazi_chart",
+    label: "BaZi Chart Facts",
+    sub: "four pillars",
+    match: (id) => id === "bazi_chart"
+  },
+  {
+    id: "bazi_report",
+    label: "Classical Report",
+    sub: "three classics",
+    match: (id) => id === "bazi_report"
+  }
+];
+
+const BAZI_WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
+  ["src", "bazi_chart"],
+  ["bazi_chart", "bazi_report"]
+];
 
 const PRECISION_LABELS: Record<string, string> = {
   exact: "Exact minute",
@@ -319,28 +364,59 @@ export function Session() {
   const [validationFeedback, setValidationFeedback] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [baziRunning, setBaziRunning] = useState(false);
   const [now, setNow] = useState(Date.now());
   const coreStartedRef = useRef(false);
   const readerStartedRef = useRef(false);
+  const baziStartedRef = useRef(false);
 
+  const baziMode = useMemo(() => isBaziSession(session), [session]);
   const reportSections = useMemo(() => getReportSections(session), [session]);
   const runMetrics = useMemo(() => parseRunMetrics(session), [session]);
-  const pipelineData = useMemo(
-    () => getPipelineData(coreJob, runMetrics, { session, readerRunning }),
-    [coreJob, runMetrics, session, readerRunning]
+  const baziPipelineData = useMemo(
+    () => getBaziPipelineData(session, baziRunning),
+    [baziRunning, session]
   );
-  const jobActive = coreJob?.status === "queued" || coreJob?.status === "running";
-  const complete = session?.stage === "core_complete" || coreJob?.status === "completed";
+  const pipelineData = useMemo(
+    () =>
+      baziMode
+        ? baziPipelineData
+        : getPipelineData(coreJob, runMetrics, { session, readerRunning }),
+    [baziMode, baziPipelineData, coreJob, runMetrics, session, readerRunning]
+  );
+  const pipelineStages = baziMode ? BAZI_WORKSHOP_STAGES : WORKSHOP_STAGES;
+  const pipelineEdges = baziMode ? BAZI_WORKSHOP_STAGE_EDGES : WORKSHOP_STAGE_EDGES;
+  const jobActive = !baziMode && (coreJob?.status === "queued" || coreJob?.status === "running");
+  const complete = baziMode
+    ? session?.stage === "bazi_complete"
+    : session?.stage === "core_complete" || coreJob?.status === "completed";
   const coreInterrupted =
-    coreJob?.status === "failed" || (!coreJob && runMetrics?.status === "failed");
+    !baziMode && (coreJob?.status === "failed" || (!coreJob && runMetrics?.status === "failed"));
   const birthInfo = useMemo(() => resolveBirthInfo(navState, session), [navState, session]);
   const readerPrevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedbackArtifact = findArtifact(session, "user_context.md");
   const awaitingValidationFeedback = Boolean(readerPrevalidation && !feedbackArtifact && !complete);
 
+  const setTab = useCallback(
+    (next: "reading" | "report") => {
+      const params = new URLSearchParams(searchParams);
+      params.set("tab", next);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
   const startCoreReport = useCallback(
     async (options: { resume?: boolean } = {}) => {
       if (!id || (coreStartedRef.current && !options.resume)) return;
+      if (!authLoaded) {
+        setError("Account status is still loading. Please try again in a moment.");
+        return;
+      }
+      if (!isSignedIn) {
+        setError("Sign in or create an account to start the full reading.");
+        return;
+      }
       coreStartedRef.current = true;
       setError("");
       try {
@@ -357,7 +433,7 @@ export function Session() {
         setError(userFacingError(caught, t("session.error.startReading")));
       }
     },
-    [id, locale, t]
+    [authLoaded, id, isSignedIn, locale, t]
   );
 
   const resumeCoreReport = useCallback(async () => {
@@ -377,7 +453,7 @@ export function Session() {
       const response = await api.runSkill({
         sessionId: id,
         skill: "vedic-reader",
-        userMessage: "开始读盘验前事",
+        userMessage: "",
         locale
       });
       setSession(response);
@@ -389,6 +465,37 @@ export function Session() {
     }
   }, [id, locale, t]);
 
+  const startBaziReport = useCallback(async () => {
+    if (!id || baziStartedRef.current) return;
+    if (!authLoaded) {
+      setError("Account status is still loading. Please try again in a moment.");
+      return;
+    }
+    if (!isSignedIn) {
+      setError("Sign in or create an account to generate the BaZi classical report.");
+      return;
+    }
+    baziStartedRef.current = true;
+    setError("");
+    setBaziRunning(true);
+    setSelectedStageId("bazi_report");
+    try {
+      const response = await api.runSkill({
+        sessionId: id,
+        skill: "bazi-classics-core",
+        userMessage: "生成八字经典报告",
+        locale
+      });
+      setSession(response);
+      setTab("report");
+    } catch (caught) {
+      baziStartedRef.current = false;
+      setError(userFacingError(caught, "Could not generate the BaZi report. Please try again."));
+    } finally {
+      setBaziRunning(false);
+    }
+  }, [authLoaded, id, isSignedIn, locale, setTab]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -396,6 +503,10 @@ export function Session() {
         const loaded = await api.getSkillSession(id);
         if (cancelled) return;
         setSession(loaded);
+        if (isBaziSession(loaded)) {
+          setSelectedStageId(loaded.stage === "bazi_complete" ? "bazi_report" : "bazi_chart");
+          return;
+        }
         if (loaded.stage === "core_complete") return;
 
         const hasFeedback = Boolean(findArtifact(loaded, "user_context.md"));
@@ -452,12 +563,6 @@ export function Session() {
     };
   }, [coreJob?.jobId, coreJob?.status]);
 
-  function setTab(next: "reading" | "report") {
-    const params = new URLSearchParams(searchParams);
-    params.set("tab", next);
-    setSearchParams(params, { replace: true });
-  }
-
   function scrollToSection(index: number) {
     setActiveSection(index);
     document
@@ -480,6 +585,10 @@ export function Session() {
 
   async function onSubmitFeedback(event: FormEvent) {
     event.preventDefault();
+    if (!authLoaded) {
+      setError("Account status is still loading. Please try again in a moment.");
+      return;
+    }
     if (!isSignedIn) {
       setError("Sign in or create an account to save your replies and continue.");
       return;
@@ -547,6 +656,8 @@ export function Session() {
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(480px,0.95fr)_minmax(420px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]">
           <WorkshopDetailPanel
             selectedStageId={selectedStageId}
+            stages={pipelineStages}
+            baziMode={baziMode}
             session={session}
             pipelineData={pipelineData}
             birthInfo={birthInfo}
@@ -558,7 +669,9 @@ export function Session() {
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
             onResumeCoreReport={resumeCoreReport}
+            onStartBaziReport={startBaziReport}
             coreInterrupted={coreInterrupted}
+            baziRunning={baziRunning}
             authLoaded={authLoaded}
             isSignedIn={Boolean(isSignedIn)}
           />
@@ -568,6 +681,8 @@ export function Session() {
                 data={pipelineData}
                 selectedStageId={selectedStageId}
                 onSelectStage={setSelectedStageId}
+                stages={pipelineStages}
+                edges={pipelineEdges}
               />
             ) : (
               <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
@@ -584,7 +699,7 @@ export function Session() {
           <main className="report-main overflow-y-auto bg-cream px-6 py-9 pb-20 sm:px-11">
             <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
               <h1 className="text-[28px] font-light tracking-normal">
-                {t("session.report.heading")}
+                {baziMode ? "Your BaZi Report" : t("session.report.heading")}
               </h1>
               <Button onClick={() => void onExport()} disabled={exportingPdf}>
                 {exportingPdf ? (
@@ -642,29 +757,48 @@ export function Session() {
           <div>
             <div className="mx-auto mb-5 size-11 animate-spin rounded-full border-[3px] border-gold/25 border-t-gold" />
             <h2 className="mb-2 text-2xl font-light">
-              {coreInterrupted
-                ? t("session.empty.paused")
-                : awaitingValidationFeedback
-                  ? t("session.empty.firstCheckReady")
-                  : readerRunning
-                    ? t("session.empty.preparingCheck")
-                    : t("session.empty.preparing")}
+              {baziMode
+                ? baziRunning
+                  ? "Generating BaZi report"
+                  : "BaZi chart facts are ready"
+                : coreInterrupted
+                  ? t("session.empty.paused")
+                  : awaitingValidationFeedback
+                    ? t("session.empty.firstCheckReady")
+                    : readerRunning
+                      ? t("session.empty.preparingCheck")
+                      : t("session.empty.preparing")}
             </h2>
             <p className="mx-auto mb-6 max-w-[420px] text-sm text-body">
-              {coreInterrupted
-                ? sanitizeUserMessage(coreJob?.message, t("session.interrupted"))
-                : awaitingValidationFeedback
-                  ? t("session.empty.answerChecks")
-                  : t("session.empty.progress", {
-                      progress: pipelineData
-                        ? t("session.empty.partsReady", {
-                            completed: pipelineData.completed,
-                            total: pipelineData.total
-                          })
-                        : ""
-                    })}
+              {baziMode
+                ? "Review the chart workspace in the Reading tab, then generate the classical report when ready."
+                : coreInterrupted
+                  ? sanitizeUserMessage(coreJob?.message, t("session.interrupted"))
+                  : awaitingValidationFeedback
+                    ? t("session.empty.answerChecks")
+                    : t("session.empty.progress", {
+                        progress: pipelineData
+                          ? t("session.empty.partsReady", {
+                              completed: pipelineData.completed,
+                              total: pipelineData.total
+                            })
+                          : ""
+                      })}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
+              {baziMode && !complete && (
+                <Button
+                  disabled={baziRunning || !authLoaded || !isSignedIn}
+                  onClick={() => void startBaziReport()}
+                >
+                  {baziRunning ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : (
+                    <BookOpen size={15} />
+                  )}
+                  {baziRunning ? "Generating..." : "Generate Classical Report"}
+                </Button>
+              )}
               {coreInterrupted && (
                 <Button onClick={() => void resumeCoreReport()}>
                   <RefreshCw size={15} /> {t("session.empty.resume")}
@@ -703,7 +837,7 @@ function SessionAuthControls() {
         </SignUpButton>
       </SignedOut>
       <SignedIn>
-        <UserButton afterSignOutUrl="/" />
+        <AccountCenter compact />
       </SignedIn>
     </div>
   );
@@ -711,6 +845,8 @@ function SessionAuthControls() {
 
 function WorkshopDetailPanel({
   selectedStageId,
+  stages,
+  baziMode,
   session,
   pipelineData,
   birthInfo,
@@ -722,11 +858,15 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange,
   onSubmitFeedback,
   onResumeCoreReport,
+  onStartBaziReport,
   coreInterrupted,
+  baziRunning,
   authLoaded,
   isSignedIn
 }: {
   selectedStageId: string;
+  stages: StageDef[];
+  baziMode: boolean;
   session: SkillSessionResponse | null;
   pipelineData: PipelineData | null;
   birthInfo: BirthInfo;
@@ -738,16 +878,20 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onResumeCoreReport: () => Promise<void>;
+  onStartBaziReport: () => Promise<void>;
   coreInterrupted: boolean;
+  baziRunning: boolean;
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
   const { t } = useI18n();
-  const stage = WORKSHOP_STAGES.find((item) => item.id === selectedStageId) ?? WORKSHOP_STAGES[0];
-  const stageLabel = t(`stage.${stage.id}.label`);
+  const stage = stages.find((item) => item.id === selectedStageId) ?? stages[0];
+  const stageLabel = stageLabelFor(stage, t);
   const copy = localizedStageCopy(stage.id, t);
   const nodes = pipelineData?.nodes.filter((node) => stage.match(node.id)) ?? [];
-  const stageAgg = pipelineData ? aggregateWorkshopStages(pipelineData.nodes)[stage.id] : null;
+  const stageAgg = pipelineData
+    ? aggregateWorkshopStages(pipelineData.nodes, stages)[stage.id]
+    : null;
   const status = stage.seed ? "done" : (stageAgg?.status ?? "pending");
 
   return (
@@ -763,6 +907,17 @@ function WorkshopDetailPanel({
 
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
+      ) : baziMode ? (
+        <BaziStageDetail
+          stageId={stage.id}
+          session={session}
+          nodes={nodes}
+          status={status}
+          baziRunning={baziRunning}
+          onStartBaziReport={onStartBaziReport}
+          authLoaded={authLoaded}
+          isSignedIn={isSignedIn}
+        />
       ) : stage.id === "reader" ? (
         <ReaderDetail
           session={session}
@@ -787,6 +942,82 @@ function WorkshopDetailPanel({
         />
       )}
     </aside>
+  );
+}
+
+function BaziStageDetail({
+  stageId,
+  session,
+  nodes,
+  status,
+  baziRunning,
+  onStartBaziReport,
+  authLoaded,
+  isSignedIn
+}: {
+  stageId: string;
+  session: SkillSessionResponse | null;
+  nodes: PipelineNode[];
+  status: StageStatus;
+  baziRunning: boolean;
+  onStartBaziReport: () => Promise<void>;
+  authLoaded: boolean;
+  isSignedIn: boolean;
+}) {
+  const { t } = useI18n();
+  const copy = localizedStageCopy(stageId, t);
+  const completedNodes = nodes.filter((node) => node.status === "completed");
+  const runningNodes = nodes.filter((node) => node.status === "running");
+  const artifact = findStageArtifact(session, stageId, nodes);
+  const canGenerate = stageId === "bazi_report" && status !== "done";
+
+  return (
+    <>
+      <StageStatusSummary
+        status={status}
+        copy={copy}
+        completed={completedNodes.length}
+        total={nodes.length}
+        running={runningNodes.length}
+        durationSeconds={completedNodes.reduce((sum, node) => sum + (node.durationSeconds ?? 0), 0)}
+        coreInterrupted={false}
+      />
+
+      {canGenerate && (
+        <div className="my-5 rounded-xl border border-gold/30 bg-gold/10 px-4 py-3">
+          <DetailSubtitle>Classical report</DetailSubtitle>
+          <p className="m-0 mb-3 text-[13px] leading-[1.7] text-body">
+            Generate the BaZi report from the chart facts using the repo-local three-classics skill.
+          </p>
+          <Button
+            className="w-full"
+            disabled={baziRunning || !authLoaded || !isSignedIn}
+            onClick={() => void onStartBaziReport()}
+          >
+            {baziRunning ? (
+              <>
+                <LoaderCircle className="size-4 animate-spin" /> Generating...
+              </>
+            ) : (
+              <>
+                <BookOpen size={15} /> Generate Classical Report
+              </>
+            )}
+          </Button>
+          {authLoaded && !isSignedIn && (
+            <p className="m-0 mt-2 text-[12.5px] leading-relaxed text-muted">
+              Sign in from the top-right account controls to run the report generator.
+            </p>
+          )}
+        </div>
+      )}
+
+      {artifact ? (
+        <ResultPreview artifact={artifact} status={status} />
+      ) : (
+        <EmptyResultState status={status} copy={copy} progress="" />
+      )}
+    </>
   );
 }
 
@@ -1089,7 +1320,13 @@ function ReaderDetail({
                   </Button>
                 ) : (
                   <Button
-                    disabled={submittingFeedback || !allAnswered || !validationFeedback.trim()}
+                    disabled={
+                      submittingFeedback ||
+                      !authLoaded ||
+                      !isSignedIn ||
+                      !allAnswered ||
+                      !validationFeedback.trim()
+                    }
                   >
                     {submittingFeedback ? t("session.reader.saving") : t("session.reader.save")}
                   </Button>
@@ -1107,7 +1344,9 @@ function ReaderDetail({
               />
               <Button
                 className="mt-3 w-full"
-                disabled={submittingFeedback || !validationFeedback.trim()}
+                disabled={
+                  submittingFeedback || !authLoaded || !isSignedIn || !validationFeedback.trim()
+                }
               >
                 {submittingFeedback ? t("session.reader.saving") : t("session.reader.save")}
               </Button>
@@ -1584,6 +1823,77 @@ function findArtifact(session: SkillSessionResponse | null, path: string): Skill
   return session?.artifacts.find((artifact) => artifact.path === path) ?? null;
 }
 
+function isBaziSession(session: SkillSessionResponse | null) {
+  return Boolean(
+    session?.stage.startsWith("bazi_") ||
+    session?.artifacts.some((artifact) => artifact.path.startsWith("bazi_"))
+  );
+}
+
+function getBaziPipelineData(
+  session: SkillSessionResponse | null,
+  running: boolean
+): PipelineData | null {
+  if (!session || !isBaziSession(session)) return null;
+  const hasChart = Boolean(findArtifact(session, "bazi_structured_data.md"));
+  const hasReport = Boolean(findArtifact(session, "bazi_life_report.md"));
+  const chartStatus = hasChart ? "completed" : "pending";
+  const reportStatus = hasReport
+    ? "completed"
+    : running
+      ? "running"
+      : hasChart
+        ? "waiting"
+        : "pending";
+  const nodes: PipelineNode[] = [
+    {
+      id: "bazi_chart",
+      label: "BaZi Chart Facts",
+      wave: 0,
+      status: chartStatus,
+      files: ["bazi_structured_data.md", "bazi_structured_data.json", "bazi_report_context.md"],
+      dependencies: [],
+      finishedAt: findArtifact(session, "bazi_structured_data.md")?.updatedAt ?? null,
+      durationSeconds: null,
+      error: null
+    },
+    {
+      id: "bazi_report",
+      label: "Classical BaZi Report",
+      wave: 1,
+      status: reportStatus,
+      files: [
+        "bazi_data_audit.md",
+        "bazi_overview.md",
+        "bazi_classics_audit.md",
+        "bazi_timing_report.md",
+        "bazi_life_report.md",
+        "bazi_appendix.md"
+      ],
+      dependencies: ["bazi_chart"],
+      finishedAt: findArtifact(session, "bazi_life_report.md")?.updatedAt ?? null,
+      durationSeconds: null,
+      error: null
+    }
+  ];
+  const completed = nodes.filter((node) => node.status === "completed").length;
+  return {
+    nodes,
+    status: hasReport ? "completed" : running ? "running" : "waiting",
+    percent: Math.round((completed / nodes.length) * 100),
+    completed,
+    total: nodes.length,
+    failed: 0,
+    durationSeconds: null
+  };
+}
+
+function stageLabelFor(stage: StageDef, t: Translate) {
+  const key = `stage.${stage.id}.label`;
+  const text = t(key);
+  return text === key ? stage.label : text;
+}
+
 function sanitizeResultContentForDisplay(content: string) {
   return content
     .replace(/\r\n/g, "\n")
@@ -1707,7 +2017,9 @@ function parseValidationAnchors(content: string): ValidationAnchor[] {
         }
         if (trimmed.startsWith(">")) {
           inRationale = true;
-          rationaleLines.push(trimmed.replace(/^>\s*/, "").replace(/^推导[:：]\s*/, ""));
+          rationaleLines.push(
+            trimmed.replace(/^>\s*/, "").replace(/^(推导|Derivation|根拠)[:：]\s*/i, "")
+          );
           continue;
         }
         if (inRationale) rationaleLines.push(trimmed);
@@ -1728,6 +2040,7 @@ function stripValidationInstruction(content: string) {
   return content
     .replace(/请逐条回复[:：]?[\s\S]*$/m, "")
     .replace(/Reply to each anchor[:：]?[\s\S]*$/im, "")
+    .replace(/各項目に返信してください[:：]?[\s\S]*$/m, "")
     .trim();
 }
 
@@ -1820,6 +2133,28 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
           ? "± minute-level"
           : "Adjusted by time confidence",
       concern: navState.concern?.trim() ?? ""
+    };
+  }
+
+  const bazi = session?.artifacts.find((a) => a.path === "bazi_structured_data.md")?.content ?? "";
+  if (bazi) {
+    const grabBazi = (label: string) =>
+      bazi.match(new RegExp(`- ${label}:\\s*(.+)`))?.[1]?.trim() ?? "—";
+    const birth = grabBazi("Birth");
+    const birthMatch = birth.match(/^(\d{4}-\d{2}-\d{2})\s+([^ ]+)/);
+    const context =
+      session?.artifacts.find((a) => a.path === "bazi_report_context.md")?.content ?? "";
+    const topic = context.match(/- Topic priority:\s*(.+)/)?.[1]?.trim() ?? "";
+    return {
+      date: birthMatch?.[1] ?? birth,
+      time: birthMatch?.[2] ?? "—",
+      place: grabBazi("Place"),
+      gender: displayCollected(grabBazi("Gender")),
+      relationship: displayCollected(context.match(/- Relationship:\s*(.+)/)?.[1]?.trim()),
+      timePrecision: displayMappedValue(grabBazi("Time precision"), PRECISION_LABELS),
+      timeSource: "BaZi workshop",
+      effectivePrecision: grabBazi("Solar time applied"),
+      concern: topic === "[not provided]" ? "" : topic
     };
   }
 

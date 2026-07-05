@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.agents.claude_runtime import ClaudeRuntime
-from app.schemas import SkillBirthInput, SkillRunInput, SkillSessionResponse, SynastryBirthInput
+from app.schemas import (
+    BaziSessionInput,
+    SkillBirthInput,
+    SkillRunInput,
+    SkillSessionResponse,
+    SynastryBirthInput,
+)
 from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
@@ -14,7 +20,7 @@ from app.tools.registry import BackendToolRunner
 
 
 class SkillRuntime:
-    """Faithful web adapter for the original vedic-astro-skills file workflow."""
+    """Web adapter for repo-local astrology skill file workflows."""
 
     def __init__(
         self,
@@ -85,10 +91,119 @@ class SkillRuntime:
             active_artifact="structured_data.md",
         )
 
+    async def create_bazi_session(
+        self, input_data: BaziSessionInput, *, owner_user_id: str | None = None
+    ) -> SkillSessionResponse:
+        session_id = self.workspace.create_session()
+        session_dir = self.workspace.require_session_dir(session_id)
+        started = datetime.now(timezone.utc)
+        self.tools.calculate_bazi_chart(
+            birth_date=input_data.birth_date,
+            birth_time=input_data.birth_time,
+            birth_place=input_data.birth_place,
+            gender=input_data.gender,
+            current_date=input_data.current_date,
+            out_dir=session_dir,
+            calendar_type=input_data.calendar_type,
+            time_precision=input_data.birth_time_precision,
+            timezone="Asia/Shanghai",
+            audience=input_data.audience,
+            relationship=input_data.relationship,
+            topic=input_data.topic,
+            day_boundary_sect=2,
+            luck_sect=2,
+            solar_time_policy="civil",
+        )
+        finished = datetime.now(timezone.utc)
+        self.workspace.write_artifact(
+            session_id,
+            "run_metrics.json",
+            json.dumps(
+                {
+                    "sessionId": session_id,
+                    "status": "bazi_calculator_complete",
+                    "calculator": {
+                        "startedAt": started.isoformat(),
+                        "finishedAt": finished.isoformat(),
+                        "durationSeconds": round((finished - started).total_seconds(), 3),
+                    },
+                    "waves": [],
+                    "nodes": [
+                        {
+                            "id": "bazi_chart",
+                            "label": "BaZi Chart Facts",
+                            "files": [
+                                "bazi_structured_data.json",
+                                "bazi_structured_data.md",
+                                "bazi_report_context.md",
+                            ],
+                            "dependencies": [],
+                            "wave": 0,
+                            "status": "completed",
+                            "startedAt": started.isoformat(),
+                            "finishedAt": finished.isoformat(),
+                            "durationSeconds": round((finished - started).total_seconds(), 3),
+                        },
+                        {
+                            "id": "bazi_report",
+                            "label": "Classical BaZi Report",
+                            "files": [
+                                "bazi_data_audit.md",
+                                "bazi_overview.md",
+                                "bazi_classics_audit.md",
+                                "bazi_timing_report.md",
+                                "bazi_life_report.md",
+                                "bazi_appendix.md",
+                            ],
+                            "dependencies": ["bazi_chart"],
+                            "wave": 1,
+                            "status": "pending",
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
+        self.workspace.write_session_manifest(session_id, locale=input_data.locale)
+        for artifact_path in [
+            "bazi_structured_data.json",
+            "bazi_structured_data.md",
+            "bazi_report_context.md",
+            "run_metrics.json",
+        ]:
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                artifact_path,
+                producer="bazi-calculator",
+            )
+        await self._sync_metadata(
+            session_id, stage="bazi_ready", status="draft", owner_user_id=owner_user_id
+        )
+
+        return SkillSessionResponse(
+            session_id=session_id,
+            stage="bazi_ready",
+            chat_message=(
+                "BaZi chart facts are ready. Generate the classical report when you are ready."
+            ),
+            artifacts=self.workspace.read_artifacts(session_id),
+            active_artifact="bazi_structured_data.md",
+        )
+
     def load_session(self, session_id: str) -> SkillSessionResponse:
         artifacts = self.workspace.read_artifacts(session_id)
         paths = {artifact.path for artifact in artifacts}
-        if "appendix.md" in paths and "run_metrics.json" in paths:
+        if "bazi_life_report.md" in paths:
+            stage = "bazi_complete"
+            active = "bazi_life_report.md"
+            message = "Your BaZi classical report is ready."
+        elif "bazi_structured_data.md" in paths:
+            stage = "bazi_ready"
+            active = "bazi_structured_data.md"
+            message = "Your BaZi chart facts are ready."
+        elif "appendix.md" in paths and "run_metrics.json" in paths:
             stage = "core_complete"
             active = "run_metrics.json"
             message = "Your full reading is ready."
@@ -410,6 +525,7 @@ class SkillRuntime:
             "love_complete",
             "rectifier_complete",
             "synastry_complete",
+            "bazi_complete",
             "qa_complete",
         }:
             return "completed"
@@ -444,6 +560,41 @@ class SkillRuntime:
             "Dasha, Navamsha, Mahadasha, and Antardasha consistent."
         )
 
+    def _reader_default_user_message(self, locale: str) -> str:
+        if locale == "zh":
+            return "开始读盘验前事"
+        if locale == "ja":
+            return "事前リーディング確認を開始"
+        return "Begin pre-reading validation"
+
+    def _reader_prevalidation_format_instruction(self, locale: str) -> str:
+        if locale == "zh":
+            return """- Chat response should be only the original short progress / next-step message and ask the user to reply 准 / 不准 / 部分准.
+- reader_prevalidation.md must follow the original Step 5 output template:
+  - Start with: 在进入完整分析之前，我先验证几个时间锚点来确认出生数据的精度——
+  - Output 3 to 5 numbered items only.
+  - Each item uses bold markdown number, e.g. **1.** 推断正文.
+  - Each item is followed by one blank line and a quoted derivation line: > 推导：...
+  - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
+  - End with: 请逐条回复：**准 / 不准 / 部分准**"""
+        if locale == "ja":
+            return """- Chat response should be only the original short progress / next-step message and ask the user to reply 正確 / 不正確 / 一部正確.
+- reader_prevalidation.md must follow the original Step 5 output template:
+  - Start with: 完全な分析に入る前に、出生データの精度を確認するため、いくつかの時間アンカーを検証します——
+  - Output 3 to 5 numbered items only.
+  - Each item uses bold markdown number, e.g. **1.** 推論本文.
+  - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
+  - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
+  - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
+        return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
+- reader_prevalidation.md must follow the original Step 5 output template:
+  - Start with: Before entering the full analysis, I will first validate several timing anchors to check the precision of the birth data—
+  - Output 3 to 5 numbered items only.
+  - Each item uses bold markdown number, e.g. **1.** Inference text.
+  - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...
+  - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
+  - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
+
     def _prompt_for(self, input_data: SkillRunInput) -> str:
         locale = self._run_locale(input_data)
         if input_data.skill == "vedic-reader":
@@ -458,6 +609,10 @@ class SkillRuntime:
             return self._rectifier_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-synastry":
             return self._synastry_prompt(input_data.user_message, locale)
+        if input_data.skill == "bazi-calculator":
+            return self._bazi_calculator_prompt(input_data.user_message, locale)
+        if input_data.skill == "bazi-classics-core":
+            return self._bazi_prompt(input_data.user_message, locale)
         raise ValueError(f"Unsupported skill: {input_data.skill}")
 
     def _artifact_prompt_for(self, input_data: SkillRunInput) -> str:
@@ -1017,6 +1172,10 @@ User message:
                 if path == "structured_data.md" or path.startswith("synastry_"):
                     selected[path] = content
                 continue
+            if skill in {"bazi-calculator", "bazi-classics-core"}:
+                if path.startswith("bazi_"):
+                    selected[path] = content
+                continue
             if "/" not in path:
                 selected[path] = content
         return selected
@@ -1033,18 +1192,11 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - Use the provided structured_data.md content.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
-- Chat response should be only the original short progress / next-step message and ask the user to reply 准 / 不准 / 部分准.
-- reader_prevalidation.md must follow the original Step 5 output template:
-  - Start with: 在进入完整分析之前，我先验证几个时间锚点来确认出生数据的精度——
-  - Output 3 to 5 numbered items only.
-  - Each item uses bold markdown number, e.g. **1.** 推断正文.
-  - Each item is followed by one blank line and a quoted derivation line: > 推导：...
-  - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
-  - End with: 请逐条回复：**准 / 不准 / 部分准**
+{self._reader_prevalidation_format_instruction(locale)}
 - Do not generate core report, career report, love report, daily note, app-specific claims, or JSON.
 
 User message:
-{user_message or "开始读盘验前事"}"""
+{user_message or self._reader_default_user_message(locale)}"""
 
     def _core_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-core exactly as the original skill.
@@ -1134,6 +1286,62 @@ Rules:
 User message:
 {user_message or "开始合盘平扫"}"""
 
+    def _bazi_calculator_prompt(self, user_message: str, locale: str) -> str:
+        return f"""Run bazi-calculator exactly as the repo-local skill.
+
+Rules:
+- {self._bazi_language_instruction(locale)}
+- Extract birth details, report context, and calculation settings from the user message.
+- If birth_date or calendar_type cannot be determined, stop and ask for the missing fields in chatMessage only.
+- If birth_time is missing, use birth_time="" and time_precision="unknown"; preserve the uncertainty warning.
+- If birth_place is missing, use "[not provided]" and state that location/solar-time handling is limited.
+- If current_date is missing, use today's date from the runtime context if available; otherwise ask for it.
+- Call mcp__vedic_backend_tools__bazi_calculate_chart once with emit_artifact_content=true and out_dir="".
+- Do not hand-calculate pillars, solar terms, ten gods, hidden stems, relations, luck cycles, or ages.
+- Parse the tool result JSON and copy the returned artifacts verbatim into output artifacts:
+  bazi_structured_data.json, bazi_structured_data.md, bazi_report_context.md.
+- Chat response should say the BaZi chart data is ready, mention any warning count or key boundary warning, and recommend bazi-classics-core for the classical report.
+- Do not create bazi_life_report.md or any classics interpretation in this skill.
+
+User message:
+{user_message or "计算八字排盘数据"}"""
+
+    def _bazi_prompt(self, user_message: str, locale: str) -> str:
+        return f"""Run bazi-classics-core exactly as the repo-local skill.
+
+Workspace must contain:
+- bazi_structured_data.md or bazi_structured_data.json
+- bazi_report_context.md
+
+Rules:
+- {self._bazi_language_instruction(locale)}
+- Use only the BaZi calculator artifacts as the chart fact source of truth.
+- Do not hand-calculate pillars, luck cycles, solar terms, or ten gods.
+- Follow the skill's three-layer audit: Qiongtong tiaohou, Ziping geju, and Ditiansui qi.
+- Preserve the expected markdown outputs: bazi_data_audit.md, bazi_overview.md, bazi_classics_audit.md, bazi_timing_report.md, bazi_life_report.md, bazi_appendix.md.
+- If required BaZi calculator artifacts are absent, stop with bazi_data_audit.md explaining that the BaZi calculator must run first.
+- Chat response should only report progress/completion and file paths.
+- Do not output app cards, daily notes, deterministic claims, or JSON.
+
+User message:
+{user_message or "生成八字经典报告"}"""
+
+    def _bazi_language_instruction(self, locale: str) -> str:
+        if locale == "zh":
+            return (
+                "Output language: Simplified Chinese. Keep BaZi terms precise and distinguish "
+                "调候用神, 格局用神, 扶抑喜忌, and 通关之神."
+            )
+        if locale == "ja":
+            return (
+                "Output language: Japanese. Keep core BaZi terms in Chinese where precision "
+                "matters, with short Japanese clarification."
+            )
+        return (
+            "Output language: English. Keep BaZi technical terms in pinyin/Chinese with short "
+            "English clarification where useful."
+        )
+
     def _max_turns_for(self, skill: str) -> int:
         return {
             "vedic-reader": 6,
@@ -1144,6 +1352,8 @@ User message:
             "vedic-love": 8,
             "vedic-rectifier": 6,
             "vedic-synastry": 8,
+            "bazi-calculator": 6,
+            "bazi-classics-core": 12,
         }[skill]
 
     def _stage_for(self, skill: str) -> str:
@@ -1154,6 +1364,8 @@ User message:
             "vedic-love": "love_complete",
             "vedic-rectifier": "rectifier_complete",
             "vedic-synastry": "synastry_complete",
+            "bazi-calculator": "bazi_ready",
+            "bazi-classics-core": "bazi_complete",
         }[skill]
 
     def _preferred_artifact(self, skill: str, artifacts: list[object] | None = None) -> str:
@@ -1171,6 +1383,8 @@ User message:
             "vedic-love": "love_report.md",
             "vedic-rectifier": "rectification_report.md",
             "vedic-synastry": "reports/00_signal_triage.md",
+            "bazi-calculator": "bazi_structured_data.md",
+            "bazi-classics-core": "bazi_life_report.md",
         }[skill]
 
     def _synastry_folder(self, label: str) -> str:
