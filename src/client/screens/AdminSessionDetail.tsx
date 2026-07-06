@@ -1,4 +1,3 @@
-import { UserButton } from "@clerk/clerk-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -15,6 +14,7 @@ import {
   Timer
 } from "lucide-react";
 import { api } from "../api";
+import { AccountCenter } from "../components/AccountCenter";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/cn";
@@ -133,7 +133,7 @@ export function AdminSessionDetail() {
             {exporting ? <LoaderCircle className="size-4 animate-spin" /> : <Download size={14} />}
             PDF
           </Button>
-          <UserButton afterSignOutUrl="/" />
+          <AccountCenter />
         </div>
       </header>
 
@@ -158,11 +158,7 @@ export function AdminSessionDetail() {
               <RunNodesPanel nodes={nodes} summary={detail.summary} />
               <div className="flex flex-col gap-5">
                 <SubjectPanel summary={detail.summary} />
-                <ExportsPanel
-                  exports={detail.exports}
-                  sessionId={id}
-                  onDownloadPdf={() => void downloadPdf()}
-                />
+                <ExportsPanel exports={detail.exports} onDownloadPdf={() => void downloadPdf()} />
                 <ArtifactsPanel artifacts={detail.artifacts} />
               </div>
             </div>
@@ -338,11 +334,9 @@ function SubjectPanel({ summary }: { summary: AdminSessionSummary }) {
 
 function ExportsPanel({
   exports,
-  sessionId,
   onDownloadPdf
 }: {
   exports: AdminExportSummary[];
-  sessionId: string;
   onDownloadPdf: () => void;
 }) {
   return (
@@ -375,12 +369,13 @@ function ExportsPanel({
                 </div>
               </div>
               {item.path.endsWith(".pdf") && (
-                <a
+                <button
+                  type="button"
                   className="text-xs font-semibold text-gold-dim hover:text-gold"
-                  href={`/api/skill-sessions/${encodeURIComponent(sessionId)}/report.pdf`}
+                  onClick={onDownloadPdf}
                 >
                   Download
-                </a>
+                </button>
               )}
             </div>
           ))}

@@ -31,7 +31,10 @@
 时间精度: [精确到分钟 / ±15分钟 / ±1小时 / 不确定]
 时间来源: [出生证/医院记录 / 家人明确记忆 / 家人大概回忆 / 未追问]
 有效精度: [±分钟级 / ±5分钟 / ±15分钟 / ±1小时 / 不确定]（经来源修正后）
-验证轨道: [轨道1-标准 / 轨道2-严格 / 轨道3-双Lagna]
+验证轨道: [轨道1-标准 / 轨道2-严格 / 轨道3-边界候选]
+时间风险: [LOW / MEDIUM / HIGH]
+时间可信度: [高 / 中 / 低 / 未验证]
+生时矫正记录: [无 / 候选边界已检查 / 建议完整rectifier / 已完成rectifier]
 读盘方式: [calc engine / JH表格 / 文本度数 / 视觉识别+用户确认]
 Ayanamsa: [True Chitra / 其他]
 Node模式: [Mean Node / True Node]
@@ -41,7 +44,11 @@ Node模式: [Mean Node / True Node]
 
 ```
 性别: [男 / 女]
-感情状态: [单身 / 恋爱中 / 已婚]
+感情状态: [单身 / 恋爱中 / 已婚 / minor跳过]
+盘主当前年龄: [age]
+生命阶段: [child / teen / young_adult / adult / elder]
+叙事档位: [minor_subject / adult_subject / elder_subject]
+表达限制: [例如 no adult present-tense marriage advice / 无]
 ```
 
 > ⚠️ 以下字段**不写入**structured_data.md，写入user_context.md：
@@ -261,7 +268,8 @@ D5  [✅/⚠️] [说明]
 Lagna度数: [deg]° [sign]
 D1边界: [远离/接近]
 D9边界: [远离/接近]
-ABC执行: [未执行 / 已执行 → 结果]
+候选边界矫正: [未执行 / 已执行 → 结果]
+推荐时间区间: [HH:MM-HH:MM / 保留原时间 / 无]
 ```
 
 ## 当前过运位置（Transit Data）

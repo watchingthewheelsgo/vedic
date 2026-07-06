@@ -16,7 +16,13 @@ export const reportOrder = [
   "appendix.md",
   "career_phase4a.md",
   "love_report.md",
-  "rectification_report.md"
+  "rectification_report.md",
+  "bazi_data_audit.md",
+  "bazi_overview.md",
+  "bazi_classics_audit.md",
+  "bazi_timing_report.md",
+  "bazi_life_report.md",
+  "bazi_appendix.md"
 ];
 
 export const reportTitles: Record<string, string> = {
@@ -34,7 +40,13 @@ export const reportTitles: Record<string, string> = {
   "appendix.md": "Reference Notes",
   "career_phase4a.md": "Career Guidance",
   "love_report.md": "Relationship Guidance",
-  "rectification_report.md": "Birth Time Review"
+  "rectification_report.md": "Birth Time Review",
+  "bazi_data_audit.md": "BaZi Data Audit",
+  "bazi_overview.md": "BaZi Overview",
+  "bazi_classics_audit.md": "Classics Audit",
+  "bazi_timing_report.md": "Luck and Timing",
+  "bazi_life_report.md": "BaZi Life Report",
+  "bazi_appendix.md": "BaZi Appendix"
 };
 
 export function isReportArtifact(artifact: SkillArtifact) {
@@ -42,6 +54,8 @@ export function isReportArtifact(artifact: SkillArtifact) {
   if (!path.endsWith(".md")) return false;
   if (
     path === "structured_data.md" ||
+    path === "bazi_structured_data.md" ||
+    path === "bazi_report_context.md" ||
     path === "reader_prevalidation.md" ||
     path === "user_context.md" ||
     path === "intake.md" ||
@@ -55,6 +69,7 @@ export function isReportArtifact(artifact: SkillArtifact) {
     path === "appendix.md" ||
     path.startsWith("career_") ||
     path.startsWith("love_") ||
+    (path.startsWith("bazi_") && path !== "bazi_structured_data.md") ||
     path === "rectification_report.md" ||
     path.includes("/reports/")
   );

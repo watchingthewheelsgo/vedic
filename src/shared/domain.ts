@@ -17,6 +17,61 @@ export type PlaceSearchResponse = {
   options: PlaceOption[];
 };
 
+export type AccountProfileResponse = {
+  userId: string;
+  authMode: string;
+  email?: string | null;
+  role: string;
+  isAdmin: boolean;
+  anonymousUserId?: string | null;
+};
+
+export type BillingPlanKey = "pro_monthly" | "pro_yearly" | "single_report";
+
+export type BillingPlanResponse = {
+  key: BillingPlanKey;
+  name: string;
+  billingPeriod: string;
+  productIdConfigured: boolean;
+};
+
+export type BillingSubscriptionResponse = {
+  planKey: string;
+  status: string;
+  isActive: boolean;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd: boolean;
+  creemCustomerId?: string | null;
+  creemSubscriptionId?: string | null;
+};
+
+export type BillingAccountResponse = {
+  provider: "creem";
+  configured: boolean;
+  testMode: boolean;
+  entitlement: "admin" | "paid" | "free";
+  hasActiveEntitlement: boolean;
+  canManageBilling: boolean;
+  subscription?: BillingSubscriptionResponse | null;
+  plans: BillingPlanResponse[];
+};
+
+export type BillingCheckoutInput = {
+  planKey: BillingPlanKey;
+  successUrl?: string | null;
+};
+
+export type BillingCheckoutResponse = {
+  checkoutUrl: string;
+  checkoutId?: string | null;
+  requestId: string;
+};
+
+export type BillingPortalResponse = {
+  portalUrl: string;
+};
+
 export type BirthInput = {
   birthDate: string;
   birthTime: string;
@@ -30,13 +85,24 @@ export type BirthInput = {
 
 export type SkillBirthInput = BirthInput;
 
+export type BaziCalendarType = "solar" | "lunar";
+
+export type BaziSessionInput = BirthInput & {
+  calendarType: BaziCalendarType;
+  currentDate: string;
+  audience: string;
+  topic: string;
+};
+
 export type SkillName =
   | "vedic-reader"
   | "vedic-core"
   | "vedic-career"
   | "vedic-love"
   | "vedic-rectifier"
-  | "vedic-synastry";
+  | "vedic-synastry"
+  | "bazi-calculator"
+  | "bazi-classics-core";
 
 export type SkillArtifact = {
   path: string;
@@ -56,6 +122,8 @@ export type SkillSessionStage =
   | "rectifier_complete"
   | "synastry_ready"
   | "synastry_complete"
+  | "bazi_ready"
+  | "bazi_complete"
   | "qa_complete"
   | "error";
 

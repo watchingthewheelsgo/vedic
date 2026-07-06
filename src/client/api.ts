@@ -1,6 +1,12 @@
 import type {
+  AccountProfileResponse,
   AdminSessionDetailResponse,
   AdminSessionListResponse,
+  BillingAccountResponse,
+  BillingCheckoutInput,
+  BillingCheckoutResponse,
+  BillingPortalResponse,
+  BaziSessionInput,
   CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
@@ -15,6 +21,7 @@ type AuthTokenProvider = () => Promise<string | null>;
 type AnonymousIdProvider = () => string | null;
 type AuthFailureHandler = (failure: { status: number; detail: string }) => void | Promise<void>;
 const AUTH_EXPIRED_MESSAGE = "Your session expired. Please sign in again.";
+const AUTH_REQUIRED_MESSAGE = "Sign in to continue";
 
 let authTokenProvider: AuthTokenProvider | null = null;
 let anonymousIdProvider: AnonymousIdProvider | null = null;
@@ -32,12 +39,20 @@ export function setAuthFailureHandler(handler: AuthFailureHandler | null) {
   authFailureHandler = handler;
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
+async function authHeaders({
+  requireToken = false
+}: {
+  requireToken?: boolean;
+} = {}): Promise<Record<string, string>> {
   let token: string | null | undefined = null;
+  let tokenError: unknown = null;
   try {
     token = await authTokenProvider?.();
-  } catch {
-    await notifyAuthFailure(401, AUTH_EXPIRED_MESSAGE);
+  } catch (caught) {
+    tokenError = caught;
+  }
+  if (requireToken && !token) {
+    throw new Error(tokenError instanceof Error ? tokenError.message : AUTH_REQUIRED_MESSAGE);
   }
   const anonymousId = anonymousIdProvider?.();
   return {
@@ -77,10 +92,17 @@ async function throwApiError(response: Response): Promise<never> {
   throw new Error(detail);
 }
 
-async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TResponse> {
+async function postJson<TResponse, TBody>(
+  path: string,
+  body: TBody,
+  options: { requireAuth?: boolean } = {}
+): Promise<TResponse> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(await authHeaders()) },
+    headers: {
+      "content-type": "application/json",
+      ...(await authHeaders({ requireToken: options.requireAuth }))
+    },
     body: JSON.stringify(body)
   });
 
@@ -91,8 +113,15 @@ async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TR
   return (await response.json()) as TResponse;
 }
 
-async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<TResponse> {
-  const response = await fetch(path, { headers: await authHeaders(), signal });
+async function getJson<TResponse>(
+  path: string,
+  signal?: AbortSignal,
+  options: { requireAuth?: boolean } = {}
+): Promise<TResponse> {
+  const response = await fetch(path, {
+    headers: await authHeaders({ requireToken: options.requireAuth }),
+    signal
+  });
 
   if (!response.ok) {
     await throwApiError(response);
@@ -102,7 +131,7 @@ async function getJson<TResponse>(path: string, signal?: AbortSignal): Promise<T
 }
 
 async function downloadFile(path: string, filename: string): Promise<void> {
-  const response = await fetch(path, { headers: await authHeaders() });
+  const response = await fetch(path, { headers: await authHeaders({ requireToken: true }) });
   if (!response.ok) {
     await throwApiError(response);
   }
@@ -140,31 +169,77 @@ export const api = {
   createSkillSession(input: SkillBirthInput) {
     return postJson<SkillSessionResponse, SkillBirthInput>("/api/skill-sessions", input);
   },
+  createBaziSession(input: BaziSessionInput) {
+    return postJson<SkillSessionResponse, BaziSessionInput>("/api/bazi-sessions", input);
+  },
+  getMe() {
+    return getJson<AccountProfileResponse>("/api/me", undefined, { requireAuth: true });
+  },
+  getBillingAccount() {
+    return getJson<BillingAccountResponse>("/api/billing/account", undefined, {
+      requireAuth: true
+    });
+  },
+  createBillingCheckout(input: BillingCheckoutInput) {
+    return postJson<BillingCheckoutResponse, BillingCheckoutInput>("/api/billing/checkout", input, {
+      requireAuth: true
+    });
+  },
+  createBillingPortal() {
+    return postJson<BillingPortalResponse, Record<string, never>>(
+      "/api/billing/portal",
+      {},
+      {
+        requireAuth: true
+      }
+    );
+  },
+  listMySessions() {
+    return getJson<AdminSessionListResponse>("/api/me/sessions", undefined, { requireAuth: true });
+  },
   getSkillSession(sessionId: string) {
     return getJson<SkillSessionResponse>(`/api/skill-sessions/${encodeURIComponent(sessionId)}`);
   },
   listAdminSessions() {
-    return getJson<AdminSessionListResponse>("/api/admin/sessions");
+    return getJson<AdminSessionListResponse>("/api/admin/sessions", undefined, {
+      requireAuth: true
+    });
   },
   getAdminSession(sessionId: string) {
     return getJson<AdminSessionDetailResponse>(
-      `/api/admin/sessions/${encodeURIComponent(sessionId)}`
+      `/api/admin/sessions/${encodeURIComponent(sessionId)}`,
+      undefined,
+      { requireAuth: true }
     );
   },
   createSynastrySubject(input: SynastryBirthInput) {
-    return postJson<SkillSessionResponse, SynastryBirthInput>("/api/skill-synastry-subject", input);
+    return postJson<SkillSessionResponse, SynastryBirthInput>(
+      "/api/skill-synastry-subject",
+      input,
+      {
+        requireAuth: true
+      }
+    );
   },
   runSkill(input: SkillRunInput) {
-    return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input);
+    return postJson<SkillSessionResponse, SkillRunInput>("/api/skill-runs", input, {
+      requireAuth: input.skill !== "vedic-reader"
+    });
   },
   startCoreJob(input: SkillRunInput) {
-    return postJson<CoreJobResponse, SkillRunInput>("/api/core-jobs", input);
+    return postJson<CoreJobResponse, SkillRunInput>("/api/core-jobs", input, {
+      requireAuth: true
+    });
   },
   getCoreJob(jobId: string) {
-    return getJson<CoreJobResponse>(`/api/core-jobs/${encodeURIComponent(jobId)}`);
+    return getJson<CoreJobResponse>(`/api/core-jobs/${encodeURIComponent(jobId)}`, undefined, {
+      requireAuth: true
+    });
   },
   recordSkillFeedback(input: SkillFeedbackInput) {
-    return postJson<SkillSessionResponse, SkillFeedbackInput>("/api/skill-feedback", input);
+    return postJson<SkillSessionResponse, SkillFeedbackInput>("/api/skill-feedback", input, {
+      requireAuth: true
+    });
   },
   downloadReportPdf(sessionId: string) {
     return downloadFile(

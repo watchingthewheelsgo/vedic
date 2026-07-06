@@ -68,7 +68,7 @@ class ClaudeRuntime:
             effort=cast(AgentEffort, self._agent_effort()),
             skills=skills,
             system_prompt=(
-                "You are running the original vedic-astro-skills workflow inside a web "
+                "You are running a repo-local astrology skill workflow inside a web "
                 "session workspace. Treat the current working directory as the user's skill "
                 "workspace. Follow the selected skill's file names, phase order, interaction "
                 "rules, and markdown output format. Do not invent app-specific JSON, checkout flows, "
@@ -110,7 +110,7 @@ class ClaudeRuntime:
             effort=cast(AgentEffort, self._agent_effort()),
             skills=skills,
             system_prompt=(
-                "You are adapting the original vedic-astro-skills workflow into file artifacts. "
+                "You are adapting a repo-local astrology skill workflow into file artifacts. "
                 "You may use Read/Glob/Grep to open the selected skill's own resources/*.md files "
                 "when its instructions reference them. After following the skill, return only the "
                 "requested JSON wrapper. Artifact content must preserve the selected skill's markdown "
@@ -155,6 +155,7 @@ class ClaudeRuntime:
             "mcp__vedic_backend_tools__vedic_synastry_build",
             "mcp__vedic_backend_tools__vedic_rectifier_time_scan",
             "mcp__vedic_backend_tools__vedic_report_builder",
+            "mcp__vedic_backend_tools__bazi_calculate_chart",
         ]
 
     def _agent_effort(self) -> AgentEffort:

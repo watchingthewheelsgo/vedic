@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,7 +18,9 @@ class Settings(BaseSettings):
     This backend owns HTTP, workspace state, calculation code, tool scripts,
     dependencies, and agent orchestration. The vendored `.claude/skills`
     directory is only the source of truth for workflow prompts, resources,
-    concepts, and output contracts.
+    concepts, and output contracts. Skills are grouped by first-level
+    methodology category, such as `.claude/skills/vedic` and
+    `.claude/skills/bazi`.
     """
 
     model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", extra="ignore")
@@ -30,10 +33,29 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
     database_echo: bool = Field(default=False, alias="DATABASE_ECHO")
+    supabase_project_ref: str = Field(default="", alias="SUPABASE_PROJECT_REF")
+    supabase_db_password: str = Field(default="", alias="SUPABASE_DB_PASSWORD")
+    supabase_db_user: str = Field(default="postgres", alias="SUPABASE_DB_USER")
+    supabase_db_name: str = Field(default="postgres", alias="SUPABASE_DB_NAME")
+    supabase_db_host: str = Field(default="", alias="SUPABASE_DB_HOST")
+    supabase_db_port: int = Field(default=5432, alias="SUPABASE_DB_PORT")
     vedic_auth_mode: str = Field(default="auto", alias="VEDIC_AUTH_MODE")
     clerk_publishable_key: str = Field(default="", alias="VITE_CLERK_PUBLISHABLE_KEY")
-    clerk_jwt_issuer: str = Field(default="", alias="CLERK_JWT_ISSUER")
-    clerk_jwks_url: str = Field(default="", alias="CLERK_JWKS_URL")
+    clerk_secret_key: str = Field(default="", alias="CLERK_SECRET_KEY")
+    vedic_admin_user_ids: str = Field(default="", alias="VEDIC_ADMIN_USER_IDS")
+    vedic_admin_emails: str = Field(default="", alias="VEDIC_ADMIN_EMAILS")
+
+    creem_api_key: str = Field(default="", alias="CREEM_API_KEY")
+    creem_webhook_secret: str = Field(default="", alias="CREEM_WEBHOOK_SECRET")
+    creem_test_mode: bool = Field(default=True, alias="CREEM_TEST_MODE")
+    creem_api_base_url: str = Field(default="", alias="CREEM_API_BASE_URL")
+    creem_success_url: str = Field(
+        default="http://127.0.0.1:5173/account?billing=success",
+        alias="CREEM_SUCCESS_URL",
+    )
+    creem_product_pro_monthly: str = Field(default="", alias="CREEM_PRODUCT_PRO_MONTHLY")
+    creem_product_pro_yearly: str = Field(default="", alias="CREEM_PRODUCT_PRO_YEARLY")
+    creem_product_single_report: str = Field(default="", alias="CREEM_PRODUCT_SINGLE_REPORT")
 
     vedic_astro_skills_root: str | None = Field(default=None, alias="VEDIC_ASTRO_SKILLS_ROOT")
     vedic_geonames_path: str | None = Field(default=None, alias="VEDIC_GEONAMES_PATH")
@@ -70,6 +92,49 @@ class Settings(BaseSettings):
     @property
     def calculator_root(self) -> Path:
         return self.project_root / "backend" / "app" / "calculator"
+
+    @property
+    def default_database_url(self) -> str:
+        return f"sqlite+aiosqlite:///{self.project_root / 'backend' / 'data' / 'vedic.db'}"
+
+    @property
+    def local_database_urls(self) -> set[str]:
+        return {
+            self.default_database_url,
+            "sqlite+aiosqlite:///./backend/data/vedic.db",
+        }
+
+    def resolved_database_url(self) -> str:
+        """Return the effective DB URL without requiring secrets in DATABASE_URL."""
+
+        if self._has_custom_database_url():
+            return self.database_url
+        if self.supabase_project_ref.strip() and self.supabase_db_password.strip():
+            return self.supabase_database_url()
+        return self.database_url
+
+    def database_source(self) -> str:
+        if self._has_custom_database_url():
+            return "database_url"
+        if self.supabase_project_ref.strip() and self.supabase_db_password.strip():
+            return "supabase"
+        if self.supabase_project_ref.strip():
+            return "local_missing_supabase_password"
+        return "local"
+
+    def _has_custom_database_url(self) -> bool:
+        return bool(self.database_url) and self.database_url not in self.local_database_urls
+
+    def supabase_database_url(self) -> str:
+        project_ref = self.supabase_project_ref.strip()
+        host = self.supabase_db_host.strip() or f"db.{project_ref}.supabase.co"
+        user = quote(self.supabase_db_user.strip() or "postgres", safe="")
+        password = quote(self.supabase_db_password.strip(), safe="")
+        database = quote(self.supabase_db_name.strip() or "postgres", safe="")
+        return (
+            f"postgresql://{user}:{password}@{host}:{self.supabase_db_port}/{database}"
+            "?sslmode=require"
+        )
 
     @property
     def skills_root(self) -> Path:
@@ -135,8 +200,34 @@ class Settings(BaseSettings):
         return {
             "mode": "clerk" if enabled else "disabled",
             "publishableKeyConfigured": bool(self.clerk_publishable_key.strip()),
-            "issuerConfigured": bool(self.clerk_jwt_issuer.strip()),
-            "jwksConfigured": bool(self.clerk_jwks_url.strip()),
+            "secretKeyConfigured": bool(self.clerk_secret_key.strip()),
+            "verifier": self.clerk_verifier_source(),
+        }
+
+    def creem_effective_api_base_url(self) -> str:
+        explicit = self.creem_api_base_url.strip().rstrip("/")
+        if explicit:
+            return explicit
+        return "https://test-api.creem.io" if self.creem_test_mode else "https://api.creem.io"
+
+    def billing_config_summary(self) -> dict[str, object]:
+        plan_ids = self.creem_product_ids_by_plan()
+        return {
+            "provider": "creem",
+            "configured": bool(self.creem_api_key.strip()),
+            "webhookConfigured": bool(self.creem_webhook_secret.strip()),
+            "testMode": self.creem_test_mode,
+            "apiBaseUrl": self.creem_effective_api_base_url(),
+            "plansConfigured": {
+                key: bool(product_id.strip()) for key, product_id in plan_ids.items()
+            },
+        }
+
+    def creem_product_ids_by_plan(self) -> dict[str, str]:
+        return {
+            "pro_monthly": self.creem_product_pro_monthly,
+            "pro_yearly": self.creem_product_pro_yearly,
+            "single_report": self.creem_product_single_report,
         }
 
     def auth_enabled(self) -> bool:
@@ -145,20 +236,23 @@ class Settings(BaseSettings):
             return False
         if mode == "clerk":
             return True
-        return bool(
-            self.clerk_publishable_key.strip()
-            or self.clerk_jwt_issuer.strip()
-            or self.clerk_jwks_url.strip()
-        )
+        return bool(self.clerk_publishable_key.strip() or self.clerk_secret_key.strip())
 
-    def clerk_effective_jwks_url(self) -> str:
-        explicit = self.clerk_jwks_url.strip()
-        if explicit:
-            return explicit
-        issuer = self.clerk_jwt_issuer.strip().rstrip("/")
-        if not issuer:
-            return ""
-        return f"{issuer}/.well-known/jwks.json"
+    def clerk_verifier_source(self) -> str:
+        if self.clerk_secret_key.strip():
+            return "unsigned_jwt_claims_plus_clerk_user_lookup"
+        return "unconfigured"
+
+    def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
+        user_ids = _csv_set(self.vedic_admin_user_ids)
+        emails = _csv_set(self.vedic_admin_emails)
+        if user_id and user_id.lower() in user_ids:
+            return True
+        return bool(email and email.lower() in emails)
+
+
+def _csv_set(value: str) -> set[str]:
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
 
 
 @lru_cache(maxsize=1)

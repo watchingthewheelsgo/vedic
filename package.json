@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"npm:backend:dev\" \"npm:client:dev\"",
+    "dev:payments": "concurrently -k \"npm:backend:dev\" \"npm:client:dev\" \"npm:creem:webhook:tunnel\"",
     "client:dev": "vite --host 127.0.0.1",
+    "creem:webhook:tunnel": "node scripts/dev-creem-webhook-tunnel.mjs",
     "backend:sync": "uv sync --project backend --all-groups",
     "backend:setup": "npm run backend:sync && npm run backend:ensure",
     "backend:ensure": "uv run --no-sync --project backend python scripts/setup-backend-runtime.py",

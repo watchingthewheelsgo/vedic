@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +19,8 @@ SkillName = Literal[
     "vedic-love",
     "vedic-rectifier",
     "vedic-synastry",
+    "bazi-calculator",
+    "bazi-classics-core",
 ]
 
 
@@ -35,6 +37,21 @@ class BirthInput(ApiModel):
 
 class SkillBirthInput(BirthInput):
     pass
+
+
+BaziCalendarType = Literal["solar", "lunar"]
+
+
+class BaziSessionInput(BirthInput):
+    calendar_type: BaziCalendarType = Field(default="solar", alias="calendarType")
+    current_date: str = Field(
+        default_factory=lambda: date.today().isoformat(),
+        alias="currentDate",
+        min_length=8,
+        max_length=20,
+    )
+    audience: str = Field(default="self", max_length=80)
+    topic: str = Field(default="[not provided]", max_length=1000)
 
 
 class SynastryBirthInput(ApiModel):
@@ -60,6 +77,71 @@ class PlaceSearchResponse(ApiModel):
     options: list[PlaceOption]
 
 
+BillingPlanKey = Literal["pro_monthly", "pro_yearly", "single_report"]
+
+
+class BillingPlanResponse(ApiModel):
+    key: BillingPlanKey
+    name: str
+    billing_period: str = Field(alias="billingPeriod")
+    product_id_configured: bool = Field(alias="productIdConfigured")
+
+
+class BillingSubscriptionResponse(ApiModel):
+    plan_key: str = Field(alias="planKey")
+    status: str
+    is_active: bool = Field(alias="isActive")
+    current_period_start: str | None = Field(default=None, alias="currentPeriodStart")
+    current_period_end: str | None = Field(default=None, alias="currentPeriodEnd")
+    cancel_at_period_end: bool = Field(default=False, alias="cancelAtPeriodEnd")
+    creem_customer_id: str | None = Field(default=None, alias="creemCustomerId")
+    creem_subscription_id: str | None = Field(default=None, alias="creemSubscriptionId")
+
+
+class BillingAccountResponse(ApiModel):
+    provider: Literal["creem"] = "creem"
+    configured: bool
+    test_mode: bool = Field(alias="testMode")
+    entitlement: Literal["admin", "paid", "free"]
+    has_active_entitlement: bool = Field(alias="hasActiveEntitlement")
+    can_manage_billing: bool = Field(alias="canManageBilling")
+    subscription: BillingSubscriptionResponse | None = None
+    plans: list[BillingPlanResponse]
+
+
+class BillingCheckoutInput(ApiModel):
+    plan_key: BillingPlanKey = Field(alias="planKey")
+    success_url: str | None = Field(default=None, alias="successUrl", max_length=500)
+
+
+class BillingCheckoutResponse(ApiModel):
+    checkout_url: str = Field(alias="checkoutUrl")
+    checkout_id: str | None = Field(default=None, alias="checkoutId")
+    request_id: str = Field(alias="requestId")
+
+
+class BillingPortalResponse(ApiModel):
+    portal_url: str = Field(alias="portalUrl")
+
+
+class CreemWebhookResponse(ApiModel):
+    ok: bool
+    processed: bool
+    duplicate: bool = False
+    event_id: str | None = Field(default=None, alias="eventId")
+    event_type: str | None = Field(default=None, alias="eventType")
+    owner_user_id: str | None = Field(default=None, alias="ownerUserId")
+
+
+class AccountProfileResponse(ApiModel):
+    user_id: str = Field(alias="userId")
+    auth_mode: str = Field(alias="authMode")
+    email: str | None = None
+    role: str = "user"
+    is_admin: bool = Field(default=False, alias="isAdmin")
+    anonymous_user_id: str | None = Field(default=None, alias="anonymousUserId")
+
+
 class SkillArtifact(ApiModel):
     path: str
     title: str
@@ -80,6 +162,8 @@ class SkillSessionResponse(ApiModel):
         "rectifier_complete",
         "synastry_ready",
         "synastry_complete",
+        "bazi_ready",
+        "bazi_complete",
         "qa_complete",
         "error",
     ]

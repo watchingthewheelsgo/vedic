@@ -38,6 +38,7 @@ REQUIRED_IMPORTS: tuple[tuple[str, str], ...] = (
     ("timezonefinder", "timezonefinder"),
     ("dateutil", "python-dateutil"),
     ("requests", "requests"),
+    ("lunar_python", "lunar-python>=1.4.8"),
 )
 
 
@@ -79,17 +80,16 @@ def validate_startup_configuration(settings: Any) -> StartupConfigPreflightRepor
     auth_enabled = bool(settings.auth_enabled()) if hasattr(settings, "auth_enabled") else False
     if auth_enabled:
         publishable_key = str(getattr(settings, "clerk_publishable_key", "") or "").strip()
-        issuer = str(getattr(settings, "clerk_jwt_issuer", "") or "").strip()
-        jwks_url = str(getattr(settings, "clerk_jwks_url", "") or "").strip()
+        secret_key = str(getattr(settings, "clerk_secret_key", "") or "").strip()
         if not publishable_key:
             errors.append(
                 "Clerk auth is enabled. Set VITE_CLERK_PUBLISHABLE_KEY so the React app can "
                 "initialize Clerk."
             )
-        if not issuer and not jwks_url:
+        if not secret_key:
             errors.append(
-                "Clerk auth is enabled. Set CLERK_JWT_ISSUER or CLERK_JWKS_URL "
-                "so the backend can verify Clerk session tokens."
+                "Clerk auth is enabled. Set CLERK_SECRET_KEY so the backend can verify the "
+                "decoded Clerk user id with Clerk Backend API."
             )
 
     if errors:
@@ -105,7 +105,8 @@ def validate_startup_configuration(settings: Any) -> StartupConfigPreflightRepor
             + "\nFor UI-only local testing without an LLM, set `VEDIC_AI_MODE=mock` in `.env` "
             + "or your shell."
             + "\nFor local testing without Clerk, set `VEDIC_AUTH_MODE=disabled`; "
-            + "for real auth, set `VEDIC_AUTH_MODE=clerk` and `CLERK_JWT_ISSUER=...`."
+            + "for real auth, set `VEDIC_AUTH_MODE=clerk`, `VITE_CLERK_PUBLISHABLE_KEY`, "
+            + "and `CLERK_SECRET_KEY`."
         )
 
     env_source = str(env_path) if env_path.exists() else ("process-env" if os.environ else None)

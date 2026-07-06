@@ -181,7 +181,7 @@ Phase 4 Part 3   → 写入 career_phase4c.md
 **目标:** 识别决定职业上限的格局和天赋星。
 
 **数据引用:**
-- 格局扫描 → structured_data 预分析·吠陀视相关系 + 格局判定规则（参考vedic-core/resources/yogas.md）
+- 格局扫描 → structured_data 预分析·吠陀视相关系 + 格局判定规则（参考 `.claude/skills/vedic/vedic-core/resources/yogas.md`）
 - 强星 → structured_data Shadbala排名（≥150%=强）
 - 变现 → structured_data SAV表（2宫/11宫SAV值）
 
@@ -268,7 +268,7 @@ Phase 4 Part 3   → 写入 career_phase4c.md
 - 步骤B 事业/天赋强度对比
 - 步骤C D9意愿校准: 果实指向名望(1/10宫)/财富(2/11宫)/精神(9/12宫)
 - 步骤D 时间锁: 当前大运给谁供电?
-     → 必须引用vedic-core/resources/house_framework.md的Dasha硬约束
+     → 必须引用 `.claude/skills/vedic/vedic-core/resources/house_framework.md` 的Dasha硬约束
      → 对每个时间节点执行正面条件/负面条件判定
      → 禁止美化凶宫主大运（参考house_framework禁止的推导错误）
      → 时间节点必须带括号标注推导依据：

@@ -23,6 +23,8 @@ description: "吠陀占星核心分析引擎(KN Rao体系)。接收structured_da
 > - **Step 1-3（行星/分盘/宫位审计）**：纯盲审（本节规则）
 > - **Step 4（十大板块）**：可以用已确认事实佐证盘面信号，但禁止反推（见 Step 4 Context 规则）
 > - **QA 阶段**：必须读 user_context.md，伦理红线不可触碰（见 Q&A 模式 section）
+> - **生命阶段上下文**：age/life_stage 不是用户经历，不参与反推盘面；
+>   它只约束盘主生命阶段和明显不适合展开的主题。
 
 1. **禁止读取user_context.md**：Step 1-3期间不得读取用户传记文件。
    你的分析依据是structured_data.md中的行星位置、Dasha、SAV等纯数据。
@@ -64,6 +66,55 @@ description: "吠陀占星核心分析引擎(KN Rao体系)。接收structured_da
    仍以星盘数据为主推导，修正日志辅助判断信号的表达方向。
 
 ---
+
+## ⚠️ 盘主年龄/生命阶段与表达边界（先于Step 0）
+
+开始任何分析前，必须从 `structured_data.md` 的"生命阶段上下文"块或
+`life_stage_context.md` 读取以下字段：
+
+```
+age / life_stage / narrative_profile / 表达限制
+```
+
+如果缺失：
+- 可以从出生日期计算年龄 → 根据年龄自动推导 life_stage 和 narrative_profile
+- 盘主年龄 < 18 → 按 `minor_subject` 写，不得按成人自读继续
+- 盘主年龄 >= 60 → 按 `elder_subject` 写
+- 其余成年人 → 按 `adult_subject` 写
+- 出生日期或时间精度存在明显矛盾 → 停止，返回 vedic-reader 修正基础信息
+
+### 叙事档位规则
+
+```
+adult_subject：
+  - 适用于 young_adult/adult
+  - 可展开事业、财富、关系、选择、时机
+
+minor_subject：
+  - 面向未成年盘主的生命阶段写
+  - 重点写性格底色、成长环境、教育方式、长期潜力
+  - 禁止成人当下事业建议、婚恋建议、财富决策建议
+  - Dasha时间只能写"某年龄段的成长主题/环境变化"，不能写成人化事件结论
+
+elder_subject：
+  - 面向长辈/高龄盘主的生命阶段写
+  - 语气尊重，避免控制型建议
+  - 健康只写提醒与照护方向，不恐吓、不下诊断
+```
+
+### 硬性防错
+
+```
+未成年/minor：
+  - 不写"你现在适合结婚/离婚/找对象"
+  - 不写"你现在适合创业/跳槽/投资"
+  - 不写"你的财富积累方式已经..."
+  - 改写为"长期倾向/成长环境/学习与性格发展/未来潜力"
+
+长辈盘：
+  - 不写恐吓式健康结论
+  - 不写替长辈做重大决定的指令
+```
 
 ## 语言风格
 
@@ -140,6 +191,11 @@ description: "吠陀占星核心分析引擎(KN Rao体系)。接收structured_da
   → 存在 → 读取全部数据，开始Step 1
   → 不存在 → 提示："请先运行vedic-reader读盘。
     说'读盘'或提供星盘PDF即可，也可以直接告诉我出生信息排盘。"
+
+检查生命阶段上下文是否存在：
+  → 存在 → 读取并应用表达边界
+  → 不存在但能从出生日期判断年龄 → 根据年龄自动应用 adult_subject/minor_subject/elder_subject
+  → 出生日期不足以判断年龄 → 停止，要求修正基础出生信息
 ```
 
 读取structured_data.md后，在报告开头写入声明：
@@ -147,6 +203,7 @@ description: "吠陀占星核心分析引擎(KN Rao体系)。接收structured_da
 > 分析范围：[从structured_data读取分盘可信度声明]
 > 出生时间精度：[从structured_data读取]
 > 盘面初验：[从structured_data读取命中率]
+> 盘主阶段：[从生命阶段上下文读取 age / life_stage / narrative_profile]
 ```
 
 ### 报告导读（Step 5完成后）

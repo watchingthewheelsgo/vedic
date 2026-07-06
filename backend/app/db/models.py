@@ -20,6 +20,89 @@ class Base(DeclarativeBase):
     pass
 
 
+class AppUserRecord(Base):
+    __tablename__ = "app_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    clerk_user_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(String(40), default="user", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        onupdate=func.now(),
+        index=True,
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BillingCheckoutRecord(Base):
+    __tablename__ = "billing_checkouts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    checkout_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    plan_key: Mapped[str] = mapped_column(String(80), index=True)
+    creem_product_id: Mapped[str] = mapped_column(String(160), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        onupdate=func.now(),
+        index=True,
+    )
+
+
+class UserSubscriptionRecord(Base):
+    __tablename__ = "user_subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    creem_customer_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    creem_subscription_id: Mapped[str | None] = mapped_column(
+        String(180), nullable=True, unique=True, index=True
+    )
+    creem_product_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    plan_key: Mapped[str] = mapped_column(String(80), default="unknown", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    current_period_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        onupdate=func.now(),
+        index=True,
+    )
+
+
+class BillingEventRecord(Base):
+    __tablename__ = "billing_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    creem_object_id: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    raw_payload: Mapped[dict] = mapped_column(JSON)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+
+
 class VedicSessionRecord(Base):
     __tablename__ = "vedic_sessions"
 

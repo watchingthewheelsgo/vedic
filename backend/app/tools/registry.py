@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -98,6 +99,72 @@ class BackendToolRunner:
             args,
         )
 
+    def calculate_bazi_chart(
+        self,
+        *,
+        birth_date: str,
+        birth_time: str = "",
+        birth_place: str = "[not provided]",
+        gender: str = "未提供",
+        current_date: str = "",
+        out_dir: Path | None = None,
+        calendar_type: str = "solar",
+        time_precision: str = "exact",
+        timezone: str = "Asia/Shanghai",
+        latitude: float | None = None,
+        longitude: float | None = None,
+        audience: str = "self",
+        relationship: str = "[not provided]",
+        topic: str = "[not provided]",
+        day_boundary_sect: int = 2,
+        luck_sect: int = 2,
+        solar_time_policy: str = "civil",
+        emit_artifact_content: bool = False,
+    ) -> ToolRunResult:
+        args = [
+            "--birth-date",
+            birth_date,
+            "--birth-time",
+            birth_time,
+            "--birth-place",
+            birth_place,
+            "--gender",
+            gender,
+            "--calendar-type",
+            calendar_type,
+            "--time-precision",
+            time_precision,
+            "--timezone",
+            timezone,
+            "--current-date",
+            current_date or date.today().isoformat(),
+            "--audience",
+            audience,
+            "--relationship",
+            relationship,
+            "--topic",
+            topic,
+            "--day-boundary-sect",
+            str(day_boundary_sect),
+            "--luck-sect",
+            str(luck_sect),
+            "--solar-time-policy",
+            solar_time_policy,
+        ]
+        if latitude is not None:
+            args.extend(["--latitude", str(latitude)])
+        if longitude is not None:
+            args.extend(["--longitude", str(longitude)])
+        if out_dir is not None:
+            args.extend(["--out-dir", str(out_dir)])
+        if emit_artifact_content:
+            args.append("--emit-artifact-content")
+        return self._run_python_script(
+            "bazi_calculate_chart",
+            self._tool_path("bazi", "calculate_chart.py"),
+            args,
+        )
+
     def sdk_tools(self) -> list[SdkMcpTool[Any]]:
         """Return in-process SDK tools for agent workflows that explicitly need them."""
 
@@ -172,7 +239,55 @@ class BackendToolRunner:
             )
             return _tool_text(result.output)
 
-        return [validate_synastry, build_synastry, time_scan, report_builder]
+        @tool(
+            "bazi_calculate_chart",
+            "Calculate BaZi four pillars, ten gods, relations, major luck, and optional report artifacts.",
+            {
+                "birth_date": str,
+                "birth_time": str,
+                "birth_place": str,
+                "gender": str,
+                "current_date": str,
+                "out_dir": str,
+                "calendar_type": str,
+                "time_precision": str,
+                "timezone": str,
+                "latitude": float,
+                "longitude": float,
+                "audience": str,
+                "relationship": str,
+                "topic": str,
+                "day_boundary_sect": int,
+                "luck_sect": int,
+                "solar_time_policy": str,
+                "emit_artifact_content": bool,
+            },
+        )
+        async def bazi_calculate_chart(args: dict[str, Any]) -> dict[str, Any]:
+            out_dir = args.get("out_dir")
+            result = self.calculate_bazi_chart(
+                birth_date=args["birth_date"],
+                birth_time=args.get("birth_time") or "",
+                birth_place=args.get("birth_place") or "[not provided]",
+                gender=args.get("gender") or "未提供",
+                current_date=args.get("current_date") or "",
+                out_dir=Path(out_dir) if out_dir else None,
+                calendar_type=args.get("calendar_type") or "solar",
+                time_precision=args.get("time_precision") or "exact",
+                timezone=args.get("timezone") or "Asia/Shanghai",
+                latitude=_optional_float(args.get("latitude")),
+                longitude=_optional_float(args.get("longitude")),
+                audience=args.get("audience") or "self",
+                relationship=args.get("relationship") or "[not provided]",
+                topic=args.get("topic") or "[not provided]",
+                day_boundary_sect=int(args.get("day_boundary_sect") or 2),
+                luck_sect=int(args.get("luck_sect") or 2),
+                solar_time_policy=args.get("solar_time_policy") or "civil",
+                emit_artifact_content=bool(args.get("emit_artifact_content")),
+            )
+            return _tool_text(result.output)
+
+        return [validate_synastry, build_synastry, time_scan, report_builder, bazi_calculate_chart]
 
     def _tool_path(self, group: str, filename: str) -> Path:
         return self.settings.project_root / "backend" / "app" / "tools" / group / filename
@@ -195,3 +310,9 @@ class BackendToolRunner:
 
 def _tool_text(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)

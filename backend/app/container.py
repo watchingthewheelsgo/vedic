@@ -11,11 +11,13 @@ from app.runtime.preflight import (
 )
 from app.services.core_job_runtime import CoreJobRuntime
 from app.services.admin_sessions import AdminSessionsService
+from app.services.creem_billing import CreemBillingService
 from app.services.metadata_store import MetadataStore
 from app.services.place_service import PlaceService
 from app.services.report_exporter import ReportExporter
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
+from app.services.user_store import UserStore
 from app.services.vedic_calculator import VedicCalculator
 from app.settings import Settings, get_settings
 
@@ -35,6 +37,8 @@ class AppContainer:
         self.calculator = VedicCalculator(settings, self.place_service)
         self.skill_workspace = SkillWorkspace(settings)
         self.metadata_store = MetadataStore(self.skill_workspace)
+        self.user_store = UserStore()
+        self.billing = CreemBillingService(settings)
         self.agent_runtime = ClaudeRuntime(settings)
         self.skill_runtime = SkillRuntime(
             calculator=self.calculator,

@@ -8,6 +8,8 @@ dependencies = [
     "asyncpg>=0.31.0",
     "claude-agent-sdk>=0.2.87",
     "fastapi>=0.122.0",
+    "httpx>=0.28.1",
+    "lunar-python>=1.4.8",
     "pydantic>=2.12.4",
     "pydantic-settings>=2.13.0",
     "pyjwt[crypto]>=2.10.0",
@@ -38,7 +40,6 @@ select = ["E9", "F821", "F822", "F823"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pre-commit>=4.6.0",
     "pytest>=8.4.0",
     "ruff>=0.15.20",

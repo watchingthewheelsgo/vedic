@@ -1,0 +1,4 @@
+interface:
+  display_name: "BaZi Calculator"
+  short_description: "Calculate BaZi chart facts from birth data"
+  default_prompt: "Use $bazi-calculator to calculate my BaZi chart from birth details."
