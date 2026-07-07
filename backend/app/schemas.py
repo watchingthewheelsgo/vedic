@@ -77,6 +77,26 @@ class PlaceSearchResponse(ApiModel):
     options: list[PlaceOption]
 
 
+class PrecisePlaceOption(ApiModel):
+    id: str
+    label: str
+    address: str | None = None
+    meta: str | None = None
+    source: Literal["geonames-local", "amap", "manual"]
+    accuracy: Literal["city", "poi", "address", "district", "coordinate"]
+    coordinate_system: str = Field(alias="coordinateSystem")
+    latitude: float
+    longitude: float
+    birth_place: str = Field(alias="birthPlace")
+
+
+class PrecisePlaceSearchResponse(ApiModel):
+    options: list[PrecisePlaceOption]
+    local_count: int = Field(default=0, alias="localCount")
+    fallback_source: str | None = Field(default=None, alias="fallbackSource")
+    fallback_enabled: bool = Field(default=False, alias="fallbackEnabled")
+
+
 BillingPlanKey = Literal["pro_monthly", "pro_yearly", "single_report"]
 
 

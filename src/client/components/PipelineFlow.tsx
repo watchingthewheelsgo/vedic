@@ -74,7 +74,12 @@ export const WORKSHOP_STAGES: StageDef[] = [
     sub: "10 domains",
     match: (id) => id.startsWith("p5_block_")
   },
-  { id: "appx", label: "Final Reading", sub: "wrap-up", match: (id) => id === "appendix" }
+  {
+    id: "appx",
+    label: "Final Reading",
+    sub: "wrap-up",
+    match: (id) => id === "appendix" || id === "report_quality_audit"
+  }
 ];
 
 export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [

@@ -23,6 +23,7 @@ from app.schemas import (
     BaziSessionInput,
     CoreJobResponse,
     CreemWebhookResponse,
+    PrecisePlaceSearchResponse,
     PlaceSearchResponse,
     SkillBirthInput,
     SkillFeedbackInput,
@@ -108,6 +109,19 @@ async def places(
             region=region,
             limit=limit,
         )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/precise-places", response_model=PrecisePlaceSearchResponse)
+async def precise_places(
+    q: str = Query(default="", min_length=0, max_length=120),
+    limit: int = Query(default=8, ge=1, le=20),
+) -> PrecisePlaceSearchResponse:
+    try:
+        return get_container().place_service.search_precise(query=q, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

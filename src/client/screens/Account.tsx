@@ -12,12 +12,12 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
-  Sparkles,
-  UserRound
+  Sparkles
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { AccountAvatar } from "../components/AccountAvatar";
 import { AccountCenter } from "../components/AccountCenter";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -150,25 +150,35 @@ export function Account() {
 
       <main className="mx-auto grid w-full max-w-[1180px] gap-5 px-5 py-6 sm:px-8 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-5">
-          <section className="rounded-lg border border-gold/25 bg-cream px-5 py-5 shadow-[0_18px_48px_rgba(44,31,15,0.07)]">
-            <div className="flex items-start gap-4">
-              <Avatar imageUrl={user?.imageUrl} initials={initials} />
+          <section className="relative overflow-hidden rounded-lg border border-gold/20 bg-night px-5 py-5 text-cream shadow-[0_20px_60px_rgba(44,31,15,0.18)]">
+            <div className="pointer-events-none absolute -right-16 -top-20 size-44 rounded-full bg-gold/18 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-20 left-6 size-36 rounded-full bg-green/10 blur-3xl" />
+
+            <div className="relative flex items-start gap-4">
+              <AccountAvatar imageUrl={user?.imageUrl} initials={initials} size="xl" showStatus />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-lg font-semibold tracking-normal">{displayName}</div>
-                <div className="mt-1 truncate text-sm text-muted">{email}</div>
+                <div className="truncate text-lg font-semibold tracking-normal text-cream">
+                  {displayName}
+                </div>
+                <div className="mt-1 truncate text-sm text-cream/55">{email}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge variant="done">{t("account.signedIn")}</Badge>
-                  {profile?.isAdmin && <Badge variant="gold">{t("account.page.adminBadge")}</Badge>}
+                  <Badge variant="gold">{t("account.signedIn")}</Badge>
+                  {profile?.isAdmin && (
+                    <Badge className="border-green/35 bg-green/15 text-green" variant="done">
+                      {t("account.page.adminBadge")}
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
 
-            <div className="mt-5 grid gap-2">
+            <div className="relative mt-5 grid gap-2">
               <AccountAction
                 icon={<Settings size={15} />}
                 title={t("account.manageProfile")}
                 body={t("account.manageProfileBody")}
                 onClick={() => openUserProfile()}
+                dark
               />
               {profile?.isAdmin && (
                 <AccountAction
@@ -176,10 +186,12 @@ export function Account() {
                   title={t("account.page.adminTitle")}
                   body={t("account.page.adminBody")}
                   onClick={() => navigate("/admin/sessions")}
+                  dark
                 />
               )}
               <AccountAction
                 danger
+                dark
                 icon={<LockKeyhole size={15} />}
                 title={t("account.signOut")}
                 body={t("account.page.signOutBody")}
@@ -279,12 +291,14 @@ function AccountAction({
   title,
   body,
   danger = false,
+  dark = false,
   onClick
 }: {
   icon: ReactNode;
   title: string;
   body: string;
   danger?: boolean;
+  dark?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -292,23 +306,40 @@ function AccountAction({
       type="button"
       className={cn(
         "flex w-full items-center gap-3 rounded-md px-3 py-3 text-left transition focus:outline-none focus:ring-4 focus:ring-gold/15",
-        danger ? "hover:bg-red/10" : "hover:bg-gold/10"
+        dark
+          ? danger
+            ? "bg-cream/5 hover:bg-red/15"
+            : "bg-cream/5 hover:bg-cream/10"
+          : danger
+            ? "hover:bg-red/10"
+            : "hover:bg-gold/10"
       )}
       onClick={onClick}
     >
       <span
         className={cn(
           "grid size-8 shrink-0 place-items-center rounded-full border",
-          danger ? "border-red/30 bg-red/10 text-red" : "border-gold/25 bg-cream-2 text-gold-dim"
+          danger
+            ? "border-red/30 bg-red/10 text-red"
+            : dark
+              ? "border-gold/20 bg-gold/10 text-gold"
+              : "border-gold/25 bg-cream-2 text-gold-dim"
         )}
       >
         {icon}
       </span>
       <span className="min-w-0">
-        <span className={cn("block text-sm font-semibold", danger ? "text-red" : "text-ink")}>
+        <span
+          className={cn(
+            "block text-sm font-semibold",
+            danger ? "text-red" : dark ? "text-cream" : "text-ink"
+          )}
+        >
           {title}
         </span>
-        <span className="block text-xs leading-[1.45] text-muted">{body}</span>
+        <span className={cn("block text-xs leading-[1.45]", dark ? "text-cream/55" : "text-muted")}>
+          {body}
+        </span>
       </span>
     </button>
   );
@@ -545,20 +576,6 @@ function EmptyReports({ onStart }: { onStart: () => void }) {
         </Button>
       </div>
     </div>
-  );
-}
-
-function Avatar({ imageUrl, initials }: { imageUrl?: string; initials: string }) {
-  return (
-    <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full border border-gold/35 bg-night text-sm font-semibold uppercase tracking-normal text-gold">
-      {imageUrl ? (
-        <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-      ) : initials ? (
-        initials
-      ) : (
-        <UserRound size={20} />
-      )}
-    </span>
   );
 }
 

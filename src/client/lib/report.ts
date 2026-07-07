@@ -14,6 +14,7 @@ export const reportOrder = [
   "p5a_life.md",
   "p5b_life.md",
   "appendix.md",
+  "report_quality_audit.md",
   "career_phase4a.md",
   "love_report.md",
   "rectification_report.md",
@@ -38,6 +39,7 @@ export const reportTitles: Record<string, string> = {
   "p5a_life.md": "Life Guidance - Part 1",
   "p5b_life.md": "Life Guidance - Part 2",
   "appendix.md": "Reference Notes",
+  "report_quality_audit.md": "Report Quality Audit",
   "career_phase4a.md": "Career Guidance",
   "love_report.md": "Relationship Guidance",
   "rectification_report.md": "Birth Time Review",
@@ -57,6 +59,7 @@ export function isReportArtifact(artifact: SkillArtifact) {
     path === "bazi_structured_data.md" ||
     path === "bazi_report_context.md" ||
     path === "reader_prevalidation.md" ||
+    path === "prevalidation_result.json" ||
     path === "user_context.md" ||
     path === "intake.md" ||
     path.endsWith("structured_data_B.md") ||
@@ -67,6 +70,7 @@ export function isReportArtifact(artifact: SkillArtifact) {
   return (
     path.startsWith("p") ||
     path === "appendix.md" ||
+    path === "report_quality_audit.md" ||
     path.startsWith("career_") ||
     path.startsWith("love_") ||
     (path.startsWith("bazi_") && path !== "bazi_structured_data.md") ||

@@ -303,6 +303,8 @@ class SkillRuntime:
                 artifact_path,
                 producer=input_data.skill,
             )
+        if input_data.skill == "vedic-reader":
+            self._write_prevalidation_result(input_data.session_id)
         stage = self._stage_for(input_data.skill)
         await self._sync_metadata(
             input_data.session_id,
@@ -487,6 +489,7 @@ class SkillRuntime:
         self.workspace.mark_artifact_checkpoint(
             session_id, "user_context.md", producer="vedic-reader-feedback"
         )
+        self._write_prevalidation_result(session_id, feedback_markdown=feedback_markdown)
         await self._sync_metadata(
             session_id,
             stage="reader_validation",
@@ -559,6 +562,234 @@ class SkillRuntime:
             "Output language: English. Keep Jyotish/Sanskrit technical terms such as Lagna, "
             "Dasha, Navamsha, Mahadasha, and Antardasha consistent."
         )
+
+    def _write_prevalidation_result(
+        self, session_id: str, *, feedback_markdown: str | None = None
+    ) -> None:
+        artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id)
+        }
+        prevalidation = artifacts.get("reader_prevalidation.md", "")
+        if not prevalidation.strip():
+            return
+        feedback = (
+            feedback_markdown
+            if feedback_markdown is not None
+            else artifacts.get("user_context.md", "")
+        )
+        result = self._build_prevalidation_result(
+            prevalidation,
+            feedback,
+            artifacts.get("structured_data.json", ""),
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "prevalidation_result.json",
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            "prevalidation_result.json",
+            producer="vedic-reader:prevalidation-result",
+        )
+
+    def _build_prevalidation_result(
+        self,
+        prevalidation_markdown: str,
+        feedback_markdown: str,
+        structured_data_json: str,
+    ) -> dict[str, object]:
+        anchors = self._parse_prevalidation_anchors(prevalidation_markdown)
+        answers = self._parse_prevalidation_feedback(feedback_markdown)
+        subject = self._prevalidation_subject_context(structured_data_json)
+        scored_anchors: list[dict[str, object]] = []
+        total_score = 0.0
+        answered_count = 0
+        for anchor in anchors:
+            answer = answers.get(int(anchor["index"]))
+            score = self._prevalidation_answer_score(answer)
+            if score is not None:
+                total_score += score
+                answered_count += 1
+            scored_anchors.append(
+                {
+                    **anchor,
+                    "answer": answer or "pending",
+                    "score": score,
+                }
+            )
+        max_score = len(anchors)
+        hit_rate = (total_score / max_score) if max_score else None
+        status = (
+            "scored" if answered_count == max_score and max_score > 0 else "waiting_for_feedback"
+        )
+        decision = self._prevalidation_decision(
+            total_score,
+            max_score,
+            status=status,
+            time_reliability=str(subject.get("timeReliability") or "uncertain"),
+        )
+        return {
+            "schemaVersion": "vedic-prevalidation-result/v1",
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "subject": subject,
+            "score": {
+                "answered": answered_count,
+                "total": round(total_score, 2),
+                "max": max_score,
+                "hitRate": round(hit_rate, 4) if hit_rate is not None else None,
+            },
+            "decision": decision,
+            "anchors": scored_anchors,
+        }
+
+    def _parse_prevalidation_anchors(self, content: str) -> list[dict[str, object]]:
+        anchors: list[dict[str, object]] = []
+        pattern = re.compile(
+            r"(?ms)^\*\*(\d+)\.\*\*\s*(.*?)(?=^\*\*\d+\.\*\*|\n请逐条回复|\nReply to each anchor|\Z)"
+        )
+        for match in pattern.finditer(content):
+            index = int(match.group(1))
+            block = match.group(2).strip()
+            rationale_match = re.search(
+                r"(?m)^>\s*(?:推导|Derivation|根拠)\s*[：:]\s*(.+)$",
+                block,
+            )
+            rationale = rationale_match.group(1).strip() if rationale_match else ""
+            statement = re.sub(r"(?m)^>\s*(?:推导|Derivation|根拠)\s*[：:].*$", "", block)
+            statement = self._plain_markdown_text(statement)
+            anchors.append(
+                {
+                    "index": index,
+                    "statement": statement,
+                    "rationale": rationale,
+                }
+            )
+        return anchors
+
+    def _parse_prevalidation_feedback(self, content: str) -> dict[int, str]:
+        answers: dict[int, str] = {}
+        anchor_pattern = re.compile(
+            r"(?ms)^####\s+Anchor\s+(\d+)\s*\n(.*?)(?=^####\s+Anchor\s+\d+\s*\n|\Z)"
+        )
+        for match in anchor_pattern.finditer(content):
+            index = int(match.group(1))
+            block = match.group(2)
+            answer_raw = re.search(r"(?m)^-\s*User answer:\s*(.+)$", block)
+            if answer_raw:
+                answers[index] = self._normalize_prevalidation_answer(answer_raw.group(1))
+        if answers:
+            return answers
+        for line in content.splitlines():
+            match = re.match(r"\s*(?:\*\*)?(\d+)(?:\.\*\*|[.、:：])?\s*(准|部分准|不准)", line)
+            if match:
+                answers[int(match.group(1))] = self._normalize_prevalidation_answer(match.group(2))
+        return answers
+
+    def _normalize_prevalidation_answer(self, raw: str) -> str:
+        value = raw.strip().lower()
+        if "inaccurate" in value or "not accurate" in value or "不准" in raw:
+            return "inaccurate"
+        if "partly" in value or "部分" in raw:
+            return "partly"
+        if "accurate" in value or "准" in raw:
+            return "accurate"
+        return "recorded"
+
+    def _prevalidation_answer_score(self, answer: str | None) -> float | None:
+        if answer == "accurate":
+            return 1.0
+        if answer == "partly":
+            return 0.5
+        if answer == "inaccurate":
+            return 0.0
+        return None
+
+    def _prevalidation_subject_context(self, structured_data_json: str) -> dict[str, object]:
+        try:
+            payload = json.loads(structured_data_json) if structured_data_json.strip() else {}
+        except json.JSONDecodeError:
+            payload = {}
+        subject = payload.get("subject") if isinstance(payload, dict) else {}
+        if not isinstance(subject, dict):
+            subject = {}
+        time_precision = str(subject.get("timePrecision") or "")
+        time_source = str(subject.get("timeSource") or "")
+        reliable_source = bool(
+            re.search(r"出生证|医院|birth certificate|hospital", time_source, re.I)
+        )
+        approximate_source = bool(
+            re.search(r"大概|估计|记忆|回忆|未追问|unknown|approx", time_source, re.I)
+        )
+        time_reliability = (
+            "reliable_exact"
+            if time_precision == "精确到分钟" and reliable_source and not approximate_source
+            else "uncertain"
+        )
+        return {
+            "birthDate": subject.get("birthDate"),
+            "birthTime": subject.get("birthTime"),
+            "birthPlace": subject.get("birthPlace"),
+            "timePrecision": time_precision or None,
+            "timeSource": time_source or None,
+            "timeReliability": time_reliability,
+        }
+
+    def _prevalidation_decision(
+        self,
+        total_score: float,
+        max_score: int,
+        *,
+        status: str,
+        time_reliability: str,
+    ) -> dict[str, object]:
+        if status != "scored" or max_score == 0:
+            return {
+                "nextStep": "await_feedback",
+                "timeConfidence": "pending",
+                "reportAllowed": False,
+                "reason": "Feedback is not complete yet.",
+            }
+        hit_rate = total_score / max_score
+        threshold_high = hit_rate >= 0.8
+        threshold_medium = hit_rate >= 0.6
+        reliable_exact = time_reliability == "reliable_exact"
+        if reliable_exact:
+            return {
+                "nextStep": "report_allowed",
+                "timeConfidence": "high",
+                "reportAllowed": True,
+                "reason": (
+                    "Reliable exact time source. Low prevalidation score is recorded as signal or expression limitation."
+                    if total_score <= 2
+                    else "Reliable exact time source and validation feedback recorded."
+                ),
+            }
+        if threshold_high:
+            return {
+                "nextStep": "report_allowed",
+                "timeConfidence": "high",
+                "reportAllowed": True,
+                "reason": "Uncertain time but validation score is high.",
+            }
+        if threshold_medium:
+            return {
+                "nextStep": "report_allowed_with_limits",
+                "timeConfidence": "medium",
+                "reportAllowed": True,
+                "reason": "Uncertain time with medium validation score; sensitive divisional charts need conservative language.",
+            }
+        return {
+            "nextStep": "boundary_scan_or_rectifier",
+            "timeConfidence": "low",
+            "reportAllowed": False,
+            "reason": "Uncertain time and low validation score; run boundary correction or rectifier before full report.",
+        }
+
+    def _plain_markdown_text(self, value: str) -> str:
+        return value.replace("**", "").replace("`", "").replace("\n", " ").strip()
 
     def _reader_default_user_message(self, locale: str) -> str:
         if locale == "zh":
@@ -644,9 +875,9 @@ Return valid JSON only, no markdown fence:
 }}
 
 Rules:
-- Preserve the selected skill's original output file names and markdown style.
+- Preserve the selected skill's expected output file names and markdown style.
 - Do not omit important sections with phrases like see above.
-- Do not include any artifact outside the original skill's expected file set.
+- Do not include any artifact outside the selected skill's expected file set.
 - The JSON wrapper is only for the backend; the user sees the markdown artifacts."""
 
     def _core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
@@ -725,7 +956,7 @@ Rules:
                         "Use structured_data.md and the completed p2a_planets.md, "
                         "p2b_planets.md, p2c_planets.md, p2d_planets.md artifacts as prior "
                         "blind-audit context. Preserve the D9三条铁律, 身份继承矩阵, "
-                        "D9 quality/兑现率 logic, and the original markdown style. "
+                        "D9 quality/兑现率 logic, and the current concise evidence style. "
                         f"Write only the complete D9 section for {planet}; do not audit other planets."
                     ),
                     user_line,
@@ -877,13 +1108,13 @@ Rules:
             ),
             (
                 9,
-                "灵性/成长",
+                "长期成长",
                 "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only.",
             ),
             (
                 10,
                 "赛道优势地图",
-                "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into supported tracks, business/wealth paths, and timing. Write block 10 only.",
+                "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into capability tracks, business/wealth paths, compounding conditions, and timing. Write block 10 only.",
             ),
         ]
         for number, title, instruction in life_blocks:
@@ -898,7 +1129,10 @@ Rules:
                         "p3b_divisional.md, p4a_houses.md, p4b_houses.md, and "
                         ".runtime/dasha_review.md. Follow the Step 4 context rule: you may use "
                         "confirmed facts only as supporting evidence, never to reverse-infer the "
-                        "chart. No data tables except where the original block explicitly allows it. "
+                        "chart. Write for a human reader using what/why/limit/next-step structure; "
+                        "translate naked technical labels on first use; avoid florid persona, filler, "
+                        "and word-count padding. No data tables except where the original block "
+                        "explicitly allows it. "
                         f"{instruction}"
                     ),
                     user_line,
@@ -924,6 +1158,28 @@ Rules:
                 dependencies=life_node_ids,
                 active="p5a_life.md",
                 progress_message="Step 5 技术附录已完成。",
+                language_instruction=language_instruction,
+            )
+        )
+
+        batches.append(
+            self._core_batch(
+                "report_quality_audit",
+                "Step 6 最终报告质量审计",
+                "report_quality_audit.md",
+                (
+                    "Run the current vedic-core Step 6 final report quality audit only. "
+                    "Read prevalidation_result.json if present, structured_data.md, p5a_life.md, "
+                    "p5b_life.md, and appendix.md. Do not rewrite the report body. Write a clear "
+                    "PASS / NEEDS_REVISION audit with blocking issues, evidence, and exact fixes. "
+                    "Fail the audit if time confidence is inconsistent, missed validation anchors "
+                    "are reinterpreted as hits, child/adult framing is wrong, Dasha ages are incoherent, "
+                    "or the main report contains raw technical-label paragraphs."
+                ),
+                user_line,
+                dependencies=["appendix"],
+                active="report_quality_audit.md",
+                progress_message="Step 6 最终报告质量审计已完成。",
                 language_instruction=language_instruction,
             )
         )
@@ -978,7 +1234,9 @@ Write exactly these batch file names in the current workspace and no others:
 {file_list}
 
 Rules:
-- Preserve the original vedic-core phase order, terminology, markdown style, evidence weighting, and QA/report rules.
+- Preserve the vedic-core phase order, source-of-truth boundaries, evidence weighting, and QA/report rules.
+- Follow the current report quality rules: user-facing life blocks prioritize plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
+- Do not inherit old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - {language_instruction}
 - Use structured_data.md as the calculation source of truth.
 - Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
@@ -1143,6 +1401,7 @@ User message:
         for fallback in [
             "p5a_life.md",
             "p5b_life.md",
+            "report_quality_audit.md",
             "p4b_houses.md",
             "p4a_houses.md",
             "p3a_d9.md",
@@ -1193,7 +1452,9 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
 {self._reader_prevalidation_format_instruction(locale)}
-- Do not generate core report, career report, love report, daily note, app-specific claims, or JSON.
+- Treat pre-validation as a scoring gate, not as performance writing: do not show the internal SOP, do not add full candidate tables, and do not reframe misses as hits.
+- Do not generate core report, career report, love report, daily note, or app-specific claims.
+- The backend will deterministically create prevalidation_result.json from reader_prevalidation.md and user feedback; do not hand-write that artifact.
 
 User message:
 {user_message or self._reader_default_user_message(locale)}"""
@@ -1207,6 +1468,9 @@ Rules:
 - {self._language_instruction(locale)}
 - Follow vedic-core Step 0 through Step 5.
 - Preserve blind-audit rules: Step 1-3 must not use user_context.md.
+- Use prevalidation_result.json, when present, as the structured source for validation score, time confidence, and report gating. Do not reinterpret missed anchors as hits.
+- Follow the current report quality rules: main report sections use plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
+- Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - Write the original expected markdown files: p1_overview.md, p2a_planets.md, p2b_planets.md, p2c_planets.md, p2d_planets.md, p3a_d9.md, p3b_divisional.md, p4a_houses.md, p4b_houses.md, p5a_life.md, p5b_life.md, appendix.md.
 - Chat response should only report completion and available next actions, matching the skill style.
 - Do not compress the report into app-specific sections, claims, daily notes, or JSON.
@@ -1223,6 +1487,7 @@ Rules:
 - {self._language_instruction(locale)}
 - Use only structured_data.md and core report files as allowed by the skill.
 - Follow all four career phases.
+- Follow the current report quality rules: plain career conclusions, concise evidence, limitations/risks, and actionable guidance. Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - Write the original expected markdown outputs, including career_phase4a.md, career_phase4b.md, and career_phase4c.md when Phase 4 is reached.
 - Chat response should only report progress/completion and file paths.
 - Do not output app cards, claims, daily notes, or JSON.
@@ -1239,6 +1504,7 @@ Rules:
 - {self._language_instruction(locale)}
 - Use only structured_data.md and allowed report files.
 - Follow the original love timing workflow and output file rules.
+- Follow the current report quality rules: plain relationship conclusions, concise evidence, limitations/risks, and actionable guidance. Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - Chat response should only report progress/completion and file paths.
 - Do not output app cards, claims, daily notes, or JSON.
 

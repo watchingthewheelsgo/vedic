@@ -152,6 +152,9 @@ function readerPipelineNode(
   const hasStructuredData = artifacts.some((artifact) => artifact.path === "structured_data.md");
   if (!hasStructuredData) return null;
   const prevalidation = artifacts.find((artifact) => artifact.path === "reader_prevalidation.md");
+  const validationResult = artifacts.find(
+    (artifact) => artifact.path === "prevalidation_result.json"
+  );
   const feedback = artifacts.find((artifact) => artifact.path === "user_context.md");
   let status = "pending";
   if (feedback) status = "completed";
@@ -163,10 +166,11 @@ function readerPipelineNode(
     label: "First Check",
     wave: 1,
     status,
-    files: ["reader_prevalidation.md", "user_context.md"],
+    files: ["reader_prevalidation.md", "prevalidation_result.json", "user_context.md"],
     dependencies: ["structured_data.md"],
     startedAt: null,
-    finishedAt: feedback?.updatedAt ?? prevalidation?.updatedAt ?? null,
+    finishedAt:
+      feedback?.updatedAt ?? validationResult?.updatedAt ?? prevalidation?.updatedAt ?? null,
     durationSeconds: null,
     error: null
   };

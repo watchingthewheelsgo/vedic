@@ -10,6 +10,7 @@ import type {
   CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
+  PrecisePlaceSearchResponse,
   SkillBirthInput,
   SkillFeedbackInput,
   SkillRunInput,
@@ -165,6 +166,12 @@ export const api = {
     if (input.region) params.set("region", input.region);
     if (input.limit) params.set("limit", String(input.limit));
     return getJson<PlaceSearchResponse>(`/api/places?${params.toString()}`, signal);
+  },
+  searchPrecisePlaces(input: { q: string; limit?: number }, signal?: AbortSignal) {
+    const params = new URLSearchParams();
+    params.set("q", input.q);
+    if (input.limit) params.set("limit", String(input.limit));
+    return getJson<PrecisePlaceSearchResponse>(`/api/precise-places?${params.toString()}`, signal);
   },
   createSkillSession(input: SkillBirthInput) {
     return postJson<SkillSessionResponse, SkillBirthInput>("/api/skill-sessions", input);

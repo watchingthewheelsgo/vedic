@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     vedic_astro_skills_root: str | None = Field(default=None, alias="VEDIC_ASTRO_SKILLS_ROOT")
     vedic_geonames_path: str | None = Field(default=None, alias="VEDIC_GEONAMES_PATH")
     vedic_ai_mode: str = Field(default="", alias="VEDIC_AI_MODE")
+    amap_web_service_key: str = Field(default="", alias="AMAP_WEB_SERVICE_KEY")
+    amap_place_fallback_enabled: bool = Field(default=False, alias="AMAP_PLACE_FALLBACK_ENABLED")
+    amap_request_timeout_seconds: float = Field(default=2.5, alias="AMAP_REQUEST_TIMEOUT_SECONDS")
 
     anthropic_base_url: str = Field(
         default="https://api.deepseek.com/anthropic", alias="ANTHROPIC_BASE_URL"
