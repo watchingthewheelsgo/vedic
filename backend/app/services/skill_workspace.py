@@ -197,6 +197,7 @@ class SkillWorkspace:
             "structured_data.json",
             "user_context.md",
             "reader_prevalidation.md",
+            "prevalidation_result.json",
             "p1_overview.md",
             "p2a_planets.md",
             "p2b_planets.md",
@@ -209,6 +210,7 @@ class SkillWorkspace:
             "p5a_life.md",
             "p5b_life.md",
             "appendix.md",
+            "report_quality_audit.md",
             "run_metrics.json",
         ]
         return order.index(name) if name in order else 999

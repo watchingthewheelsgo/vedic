@@ -1,9 +1,20 @@
 import { useClerk, useUser } from "@clerk/clerk-react";
-import { FileText, LayoutDashboard, LogOut, Settings, UserRound } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  CreditCard,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  UserRound
+} from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useI18n } from "../i18n/provider";
+import { cn } from "../lib/cn";
+import { AccountAvatar } from "./AccountAvatar";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -47,93 +58,84 @@ export function AccountCenter({ compact = false }: { compact?: boolean }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="group inline-flex h-10 items-center gap-2 rounded-full border border-gold/25 bg-cream-2 px-2.5 text-left text-ink shadow-[0_10px_28px_rgba(44,31,15,0.08)] transition hover:border-gold/45 hover:bg-gold/10 focus:outline-none focus:ring-4 focus:ring-gold/15"
+          className={cn(
+            "group inline-flex h-11 items-center gap-2 rounded-full border border-gold/25 bg-cream px-2.5 text-left text-ink shadow-[0_12px_30px_rgba(44,31,15,0.1)] transition hover:-translate-y-px hover:border-gold/45 hover:bg-cream-2 focus:outline-none focus:ring-4 focus:ring-gold/15",
+            compact ? "pr-2.5" : "pr-3"
+          )}
           aria-label={t("account.open")}
         >
-          <Avatar initials={initials} avatarUrl={avatarUrl} />
+          <AccountAvatar initials={initials} imageUrl={avatarUrl} size="sm" showStatus />
           {!compact && (
             <span className="hidden max-w-[150px] flex-col leading-tight sm:flex">
               <span className="truncate text-xs font-semibold text-ink">{displayName}</span>
               <span className="truncate text-[10.5px] text-muted">{t("account.center")}</span>
             </span>
           )}
+          {!compact && (
+            <ChevronDown
+              size={14}
+              className="hidden text-muted transition group-data-[state=open]:rotate-180 sm:block"
+            />
+          )}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(92vw,340px)] p-0" align="end">
-        <div className="border-b border-gold/20 bg-cream-2 px-4 py-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
+      <PopoverContent className="w-[min(92vw,380px)] overflow-hidden p-0" align="end">
+        <div className="relative overflow-hidden border-b border-gold/20 bg-night px-4 py-4 text-cream">
+          <div className="pointer-events-none absolute -right-14 -top-16 size-36 rounded-full bg-gold/18 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-20 left-8 size-32 rounded-full bg-green/10 blur-3xl" />
+          <div className="relative mb-4 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <Avatar initials={initials} avatarUrl={avatarUrl} large />
+              <AccountAvatar initials={initials} imageUrl={avatarUrl} size="lg" showStatus />
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-ink">{displayName}</div>
-                <div className="mt-0.5 truncate text-xs text-muted">{email}</div>
+                <div className="truncate text-sm font-semibold text-cream">{displayName}</div>
+                <div className="mt-0.5 truncate text-xs text-cream/55">{email}</div>
               </div>
             </div>
-            <Badge variant="done">{t("account.signedIn")}</Badge>
+            <Badge variant="gold">{t("account.signedIn")}</Badge>
           </div>
-          <p className="m-0 text-[12.5px] leading-[1.65] text-body">{t("account.description")}</p>
+          <p className="relative m-0 text-[12.5px] leading-[1.65] text-cream/68">
+            {t("account.description")}
+          </p>
         </div>
 
-        <div className="grid gap-1 p-2">
-          <button
-            type="button"
-            className="flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm text-ink transition hover:bg-gold/10 focus:outline-none focus:ring-4 focus:ring-gold/15"
+        <div className="grid gap-1.5 bg-cream p-2">
+          <AccountMenuAction
+            icon={<UserRound size={17} />}
+            title={t("account.center")}
+            body={t("account.centerBody")}
             onClick={() => navigate("/account")}
-          >
-            <span className="grid size-8 place-items-center rounded-full border border-gold/25 bg-cream text-gold-dim">
-              <UserRound size={15} />
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold">{t("account.center")}</span>
-              <span className="block text-xs text-muted">{t("account.centerBody")}</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            className="flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm text-ink transition hover:bg-gold/10 focus:outline-none focus:ring-4 focus:ring-gold/15"
+          />
+          <AccountMenuAction
+            icon={<BookOpen size={17} />}
+            title={t("account.savedReadings")}
+            body={t("account.savedReadingsBody")}
+            onClick={() => navigate("/account")}
+          />
+          <AccountMenuAction
+            icon={<CreditCard size={17} />}
+            title={t("account.billing.title")}
+            body={t("account.billing.freeBody")}
+            onClick={() => navigate("/account")}
+          />
+          <AccountMenuAction
+            icon={<Settings size={17} />}
+            title={t("account.manageProfile")}
+            body={t("account.manageProfileBody")}
             onClick={() => openUserProfile()}
-          >
-            <span className="grid size-8 place-items-center rounded-full border border-gold/25 bg-cream text-gold-dim">
-              <Settings size={15} />
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold">{t("account.manageProfile")}</span>
-              <span className="block text-xs text-muted">{t("account.manageProfileBody")}</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm text-ink transition hover:bg-gold/10 focus:outline-none focus:ring-4 focus:ring-gold/15"
-            onClick={() => navigate("/account")}
-          >
-            <span className="grid size-8 place-items-center rounded-full border border-gold/25 bg-cream text-gold-dim">
-              <FileText size={15} />
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold">{t("account.savedReadings")}</span>
-              <span className="block text-xs text-muted">{t("account.savedReadingsBody")}</span>
-            </span>
-          </button>
+          />
 
           {isAdmin && (
-            <button
-              type="button"
-              className="flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm text-ink transition hover:bg-gold/10 focus:outline-none focus:ring-4 focus:ring-gold/15"
+            <AccountMenuAction
+              icon={<LayoutDashboard size={17} />}
+              tone="admin"
+              title={t("account.adminConsole")}
+              body={t("account.adminConsoleBody")}
               onClick={() => navigate("/admin/sessions")}
-            >
-              <span className="grid size-8 place-items-center rounded-full border border-gold/25 bg-cream text-gold-dim">
-                <LayoutDashboard size={15} />
-              </span>
-              <span className="min-w-0">
-                <span className="block font-semibold">{t("account.adminConsole")}</span>
-                <span className="block text-xs text-muted">{t("account.adminConsoleBody")}</span>
-              </span>
-            </button>
+            />
           )}
         </div>
 
-        <div className="border-t border-gold/20 p-2">
+        <div className="border-t border-gold/20 bg-cream-2 p-2">
           <Button
             type="button"
             variant="ghost"
@@ -149,28 +151,44 @@ export function AccountCenter({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Avatar({
-  initials,
-  avatarUrl,
-  large = false
+function AccountMenuAction({
+  icon,
+  title,
+  body,
+  tone = "default",
+  onClick
 }: {
-  initials: string;
-  avatarUrl?: string;
-  large?: boolean;
+  icon: ReactNode;
+  title: string;
+  body: string;
+  tone?: "default" | "admin";
+  onClick: () => void;
 }) {
-  const sizeClass = large ? "size-11" : "size-7";
   return (
-    <span
-      className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden rounded-full border border-gold/35 bg-night text-[11px] font-semibold uppercase tracking-normal text-gold`}
+    <button
+      type="button"
+      className="group flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm text-ink transition hover:bg-gold/10 focus:outline-none focus:ring-4 focus:ring-gold/15"
+      onClick={onClick}
     >
-      {avatarUrl ? (
-        <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
-      ) : initials ? (
-        initials
-      ) : (
-        <UserRound size={large ? 17 : 13} />
-      )}
-    </span>
+      <span
+        className={cn(
+          "grid size-9 shrink-0 place-items-center rounded-lg border transition group-hover:scale-[1.03]",
+          tone === "admin"
+            ? "border-green/25 bg-green/10 text-green"
+            : "border-gold/25 bg-cream-2 text-gold-dim"
+        )}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold leading-tight">{title}</span>
+        <span className="mt-0.5 block truncate text-xs leading-[1.45] text-muted">{body}</span>
+      </span>
+      <ChevronRight
+        size={16}
+        className="shrink-0 text-muted transition group-hover:text-gold-dim"
+      />
+    </button>
   );
 }
 

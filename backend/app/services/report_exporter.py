@@ -25,6 +25,7 @@ PUBLIC_REPORT_ORDER = [
     "p5a_life.md",
     "p5b_life.md",
     "appendix.md",
+    "report_quality_audit.md",
 ]
 
 LOCALE_TAGS = {"zh": "zh-CN", "en": "en-US", "ja": "ja-JP"}
@@ -54,6 +55,7 @@ REPORT_COPY = {
             "p5a_life.md": "Life Guidance - Part 1",
             "p5b_life.md": "Life Guidance - Part 2",
             "appendix.md": "Reference Notes",
+            "report_quality_audit.md": "Report Quality Audit",
         },
     },
     "zh": {
@@ -80,6 +82,7 @@ REPORT_COPY = {
             "p5a_life.md": "人生指引一",
             "p5b_life.md": "人生指引二",
             "appendix.md": "参考附录",
+            "report_quality_audit.md": "报告质量审计",
         },
     },
     "ja": {
@@ -106,6 +109,7 @@ REPORT_COPY = {
             "p5a_life.md": "人生ガイダンス 1",
             "p5b_life.md": "人生ガイダンス 2",
             "appendix.md": "参考ノート",
+            "report_quality_audit.md": "レポート品質監査",
         },
     },
 }

@@ -10,6 +10,7 @@ import {
 } from "../lib/coordinates";
 import type { PlaceOption } from "../../shared/domain";
 import { Field } from "./ui/field";
+import { PrecisePlaceDialog } from "./PrecisePlaceDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 type PlaceMode = "city" | "coordinates";
@@ -37,6 +38,7 @@ export function PlacePicker({
   );
   const [options, setOptions] = useState<PlaceOption[]>([]);
   const [open, setOpen] = useState(false);
+  const [preciseOpen, setPreciseOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
 
@@ -112,6 +114,21 @@ export function PlacePicker({
     onChange(validation.ok ? validation.value : "");
   }
 
+  function commitPrecise(option: {
+    label: string;
+    birthPlace: string;
+    latitude: number;
+    longitude: number;
+  }) {
+    setMode("coordinates");
+    setQuery(option.label);
+    setLatitude(formatCoordinateNumber(option.latitude));
+    setLongitude(formatCoordinateNumber(option.longitude));
+    setOptions([]);
+    setOpen(false);
+    onChange(option.birthPlace);
+  }
+
   const coordinateValidation = validateCoordinateParts(latitude, longitude);
   const coordinateError =
     mode === "coordinates" && !coordinateValidation.ok && coordinateValidation.reason !== "empty"
@@ -123,6 +140,8 @@ export function PlacePicker({
       : undefined;
   const committed = mode === "city" && Boolean(value) && query.trim() === value;
   const fieldError = coordinateError ?? error;
+  const selectedPreciseLabel =
+    mode === "coordinates" && value.includes("|") ? value.split("|")[0]?.trim() : "";
 
   return (
     <Field
@@ -152,6 +171,14 @@ export function PlacePicker({
             {t("place.mode.coordinates")}
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setPreciseOpen(true)}
+          className="inline-flex w-fit items-center gap-2 rounded-full border border-gold/25 bg-gold/10 px-3 py-1.5 text-xs font-medium text-gold-dim transition hover:border-gold/60 hover:bg-gold/15 hover:text-gold"
+        >
+          <LocateFixed className="size-3.5" />
+          {t("place.precise.open")}
+        </button>
 
         {mode === "city" ? (
           <Popover open={open && (loading || options.length > 0)} onOpenChange={setOpen}>
@@ -253,7 +280,19 @@ export function PlacePicker({
             </label>
           </div>
         )}
+        {selectedPreciseLabel ? (
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-gold/25 bg-cream px-3 py-1 text-xs text-body">
+            <MapPin className="size-3.5 text-gold-dim" />
+            {selectedPreciseLabel}
+          </div>
+        ) : null}
       </div>
+      <PrecisePlaceDialog
+        open={preciseOpen}
+        initialValue={value || query}
+        onClose={() => setPreciseOpen(false)}
+        onConfirm={commitPrecise}
+      />
     </Field>
   );
 }

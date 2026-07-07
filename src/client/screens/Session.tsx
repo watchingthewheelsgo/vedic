@@ -210,7 +210,7 @@ function localizedStageCopy(stageId: string, t: Translate): StageCopy {
 
 const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
   src: ["structured_data.md", "structured_data.json", "run_metrics.json"],
-  reader: ["reader_prevalidation.md", "user_context.md"],
+  reader: ["reader_prevalidation.md", "prevalidation_result.json", "user_context.md"],
   p1: ["p1_overview.md"],
   yoga: [".runtime/p2/yoga.md", "p2a_planets.md"],
   p2: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
@@ -220,7 +220,7 @@ const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
   dasha: [".runtime/dasha_review.md"],
   pari: [".runtime/houses/parivartana.md", "p4b_houses.md"],
   life: ["p5a_life.md", "p5b_life.md"],
-  appx: ["appendix.md"],
+  appx: ["appendix.md", "report_quality_audit.md"],
   bazi_chart: ["bazi_structured_data.md", "bazi_report_context.md", "bazi_structured_data.json"],
   bazi_report: [
     "bazi_life_report.md",

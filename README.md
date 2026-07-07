@@ -616,6 +616,7 @@ npm run report:pdf:install
 
 - `GET /api/health`
 - `GET /api/places`
+- `GET /api/precise-places`
 - `POST /api/skill-sessions`
 - `GET /api/skill-sessions/{session_id}`
 - `GET /api/skill-sessions/{session_id}/report.pdf`
@@ -626,6 +627,11 @@ npm run report:pdf:install
 - `POST /api/skill-synastry-subject`
 - `POST /api/skill-runs`
 - `POST /api/skill-feedback`
+
+`GET /api/precise-places` searches the local GeoNames city index first. If no
+local city match is found and `AMAP_PLACE_FALLBACK_ENABLED=true` with
+`AMAP_WEB_SERVICE_KEY` set, it falls back to AMap Web Service POI search and
+normalizes returned GCJ-02 coordinates to WGS84 for chart calculation.
 
 ## Alignment Rules
 

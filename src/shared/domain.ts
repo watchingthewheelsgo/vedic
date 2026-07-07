@@ -17,6 +17,30 @@ export type PlaceSearchResponse = {
   options: PlaceOption[];
 };
 
+export type PrecisePlaceAccuracy = "city" | "poi" | "address" | "district" | "coordinate";
+
+export type PrecisePlaceSource = "geonames-local" | "amap" | "manual";
+
+export type PrecisePlaceOption = {
+  id: string;
+  label: string;
+  address?: string | null;
+  meta?: string | null;
+  source: PrecisePlaceSource;
+  accuracy: PrecisePlaceAccuracy;
+  coordinateSystem: string;
+  latitude: number;
+  longitude: number;
+  birthPlace: string;
+};
+
+export type PrecisePlaceSearchResponse = {
+  options: PrecisePlaceOption[];
+  localCount: number;
+  fallbackSource?: string | null;
+  fallbackEnabled: boolean;
+};
+
 export type AccountProfileResponse = {
   userId: string;
   authMode: string;

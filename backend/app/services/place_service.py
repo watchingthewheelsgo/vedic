@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import csv
+import json
+import math
 import re
 import unicodedata
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
-from app.schemas import PlaceOption, PlaceSearchResponse
+from app.schemas import (
+    PlaceOption,
+    PlaceSearchResponse,
+    PrecisePlaceOption,
+    PrecisePlaceSearchResponse,
+)
 from app.settings import Settings
 
 
@@ -219,6 +229,26 @@ class PlaceService:
             return PlaceSearchResponse(options=self._search_cities(country, region, query, limit))
         return PlaceSearchResponse(options=[])
 
+    def search_precise(self, query: str = "", limit: int = 8) -> PrecisePlaceSearchResponse:
+        trimmed = query.strip()
+        limit = max(1, min(20, limit))
+        local_options = self._search_precise_local(trimmed, limit)
+        if local_options:
+            return PrecisePlaceSearchResponse(
+                options=local_options,
+                localCount=len(local_options),
+                fallbackEnabled=self._amap_enabled(),
+            )
+
+        fallback_enabled = self._amap_enabled()
+        fallback_options = self._search_precise_amap(trimmed, limit) if fallback_enabled else []
+        return PrecisePlaceSearchResponse(
+            options=fallback_options,
+            localCount=0,
+            fallbackSource="amap" if fallback_options else None,
+            fallbackEnabled=fallback_enabled,
+        )
+
     def resolve(self, raw_query: str) -> ResolvedPlace:
         trimmed = raw_query.strip()
         inline = self._parse_inline_coordinates(trimmed)
@@ -354,6 +384,209 @@ class PlaceService:
             )
             for _, _, _, record in items[:limit]
         ]
+
+    def _search_precise_local(self, query: str, limit: int) -> list[PrecisePlaceOption]:
+        if len(self.normalize(query)) < 2:
+            return []
+        variants = self._query_variants("city", query)
+        items = []
+        for record in self.records:
+            score = self._label_score(record.place_name, record.search_text, variants)
+            if score <= 0:
+                continue
+            score = score * 10 + self._priority(record.country, self.preferred_countries)
+            items.append((score, record.place_name, record.state, record))
+        items.sort(key=lambda item: (-item[0], item[1], item[2]))
+        return [self._precise_option_from_record(record) for _, _, _, record in items[:limit]]
+
+    def _precise_option_from_record(self, record: PlaceRecord) -> PrecisePlaceOption:
+        label = self._birth_place_value(record)
+        return PrecisePlaceOption(
+            id=(
+                f"geonames:{record.country}:{record.state}:{record.place_name}:"
+                f"{record.latitude}:{record.longitude}"
+            ),
+            label=record.place_name,
+            address=label,
+            meta=f"{record.state}, {record.country}",
+            source="geonames-local",
+            accuracy="city",
+            coordinateSystem="WGS84",
+            latitude=record.latitude,
+            longitude=record.longitude,
+            birthPlace=self._birth_place_with_coordinates(label, record.latitude, record.longitude),
+        )
+
+    def _amap_enabled(self) -> bool:
+        return bool(
+            getattr(self.settings, "amap_place_fallback_enabled", False)
+            and getattr(self.settings, "amap_web_service_key", "").strip()
+        )
+
+    def _search_precise_amap(self, query: str, limit: int) -> list[PrecisePlaceOption]:
+        if not query:
+            return []
+        pois = self._amap_get(
+            "https://restapi.amap.com/v3/place/text",
+            {
+                "keywords": query,
+                "offset": str(limit),
+                "page": "1",
+                "extensions": "base",
+            },
+        ).get("pois", [])
+        options = self._amap_pois_to_options(pois, limit)
+        if options:
+            return options
+
+        tips = self._amap_get(
+            "https://restapi.amap.com/v3/assistant/inputtips",
+            {
+                "keywords": query,
+                "datatype": "all",
+            },
+        ).get("tips", [])
+        return self._amap_tips_to_options(tips, limit)
+
+    def _amap_get(self, url: str, params: dict[str, str]) -> dict[str, object]:
+        key = getattr(self.settings, "amap_web_service_key", "").strip()
+        timeout = float(getattr(self.settings, "amap_request_timeout_seconds", 2.5))
+        query = urlencode({**params, "key": key})
+        with urlopen(f"{url}?{query}", timeout=timeout) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+        if str(payload.get("status")) != "1":
+            info = payload.get("info") or payload.get("infocode") or "AMap request failed"
+            raise RuntimeError(str(info))
+        return payload
+
+    def _amap_pois_to_options(self, pois: object, limit: int) -> list[PrecisePlaceOption]:
+        if not isinstance(pois, list):
+            return []
+        options: list[PrecisePlaceOption] = []
+        for item in pois:
+            if not isinstance(item, dict):
+                continue
+            option = self._amap_item_to_option(item)
+            if option:
+                options.append(option)
+            if len(options) >= limit:
+                break
+        return options
+
+    def _amap_tips_to_options(self, tips: object, limit: int) -> list[PrecisePlaceOption]:
+        if not isinstance(tips, list):
+            return []
+        options: list[PrecisePlaceOption] = []
+        for item in tips:
+            if not isinstance(item, dict):
+                continue
+            option = self._amap_item_to_option(item)
+            if option:
+                options.append(option)
+            if len(options) >= limit:
+                break
+        return options
+
+    def _amap_item_to_option(self, item: dict[str, object]) -> PrecisePlaceOption | None:
+        location = item.get("location")
+        if not isinstance(location, str) or "," not in location:
+            return None
+        try:
+            gcj_lon, gcj_lat = [float(part) for part in location.split(",", 1)]
+        except ValueError:
+            return None
+        lat, lon = self._gcj02_to_wgs84(gcj_lat, gcj_lon)
+        name = self._string_or_empty(item.get("name")) or "AMap result"
+        district = self._string_or_empty(item.get("adname")) or self._string_or_empty(
+            item.get("district")
+        )
+        city = self._string_or_empty(item.get("cityname"))
+        province = self._string_or_empty(item.get("pname"))
+        address = self._string_or_empty(item.get("address"))
+        if address and district and address == district:
+            address = ""
+        meta = ", ".join(part for part in [district, city, province] if part)
+        readable = ", ".join(part for part in [name, district, city, province] if part)
+        accuracy = self._amap_accuracy(item)
+        return PrecisePlaceOption(
+            id=f"amap:{self._string_or_empty(item.get('id')) or location}:{name}",
+            label=name,
+            address=address or readable,
+            meta=meta or address or "AMap",
+            source="amap",
+            accuracy=accuracy,
+            coordinateSystem="WGS84",
+            latitude=lat,
+            longitude=lon,
+            birthPlace=self._birth_place_with_coordinates(readable or name, lat, lon),
+        )
+
+    def _amap_accuracy(self, item: dict[str, object]) -> Literal["poi", "address", "district"]:
+        typecode = self._string_or_empty(item.get("typecode"))
+        if typecode.startswith("1901"):
+            return "district"
+        if self._string_or_empty(item.get("address")):
+            return "address"
+        return "poi"
+
+    def _birth_place_with_coordinates(self, label: str, lat: float, lon: float) -> str:
+        return f"{label} | lat={self._format_coordinate(lat)}, lon={self._format_coordinate(lon)}"
+
+    @staticmethod
+    def _string_or_empty(value: object) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return ""
+
+    @staticmethod
+    def _format_coordinate(value: float) -> str:
+        rounded = round(value, 6)
+        return (
+            str(int(rounded)) if rounded.is_integer() else f"{rounded:.6f}".rstrip("0").rstrip(".")
+        )
+
+    def _gcj02_to_wgs84(self, lat: float, lon: float) -> tuple[float, float]:
+        if self._outside_china(lat, lon):
+            return lat, lon
+        dlat = self._transform_lat(lon - 105.0, lat - 35.0)
+        dlon = self._transform_lon(lon - 105.0, lat - 35.0)
+        radlat = lat / 180.0 * math.pi
+        magic = math.sin(radlat)
+        magic = 1 - 0.00669342162296594323 * magic * magic
+        sqrt_magic = math.sqrt(magic)
+        dlat = (dlat * 180.0) / ((6335552.717000426 / (magic * sqrt_magic)) * math.pi)
+        dlon = (dlon * 180.0) / ((6378245.0 / sqrt_magic) * math.cos(radlat) * math.pi)
+        gcj_lat = lat + dlat
+        gcj_lon = lon + dlon
+        return lat * 2 - gcj_lat, lon * 2 - gcj_lon
+
+    @staticmethod
+    def _outside_china(lat: float, lon: float) -> bool:
+        return lon < 72.004 or lon > 137.8347 or lat < 0.8293 or lat > 55.8271
+
+    @staticmethod
+    def _transform_lat(x: float, y: float) -> float:
+        ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y
+        ret += 0.2 * math.sqrt(abs(x))
+        ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+        ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
+        ret += (
+            (160.0 * math.sin(y / 12.0 * math.pi) + 320 * math.sin(y * math.pi / 30.0)) * 2.0 / 3.0
+        )
+        return ret
+
+    @staticmethod
+    def _transform_lon(x: float, y: float) -> float:
+        ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y
+        ret += 0.1 * math.sqrt(abs(x))
+        ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+        ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
+        ret += (
+            (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi))
+            * 2.0
+            / 3.0
+        )
+        return ret
 
     def _detect_preference(self, raw_query: str) -> PlacePreference:
         normalized = self.normalize(raw_query)
