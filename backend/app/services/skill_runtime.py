@@ -546,6 +546,10 @@ class SkillRuntime:
         )
         if prevalidation_result is not None:
             self._apply_rectification_feedback(session_id, prevalidation_result)
+        decision = (
+            prevalidation_result.get("decision") if isinstance(prevalidation_result, dict) else None
+        )
+        report_allowed = isinstance(decision, dict) and decision.get("reportAllowed") is True
         await self._sync_metadata(
             session_id,
             stage="reader_validation",
@@ -555,7 +559,14 @@ class SkillRuntime:
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_validation",
-            chat_message="Your feedback has been saved. The full reading can now begin.",
+            chat_message=(
+                "Your feedback has been saved. The full reading can now begin."
+                if report_allowed
+                else (
+                    "Your feedback has been saved. The chart still needs more confirmation "
+                    "before the full reading."
+                )
+            ),
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="user_context.md",
         )

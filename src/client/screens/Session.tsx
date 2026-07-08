@@ -566,7 +566,8 @@ export function Session() {
         const hasFeedback = Boolean(findArtifact(loaded, "user_context.md"));
         const hasReader = Boolean(findArtifact(loaded, "reader_prevalidation.md"));
         if (hasFeedback) {
-          void startCoreReport();
+          if (canStartFullReading(loaded)) void startCoreReport();
+          else setSelectedStageId("chart");
         } else if (hasReader) {
           setSelectedStageId("reader");
         } else {
@@ -666,7 +667,8 @@ export function Session() {
         feedbackMarkdown
       });
       setSession(updated);
-      await startCoreReport();
+      if (canStartFullReading(updated)) await startCoreReport();
+      else setSelectedStageId("chart");
     } catch (caught) {
       setError(userFacingError(caught, "Could not save your replies. Please try again."));
     } finally {
@@ -2464,6 +2466,12 @@ function parseJsonArtifact(
   } catch {
     return null;
   }
+}
+
+function canStartFullReading(session: SkillSessionResponse | null): boolean {
+  const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
+  const decision = objectValue(prevalidationResult, "decision");
+  return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
 }
 
 function parseRectificationState(content: string): RectificationState | null {
