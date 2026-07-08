@@ -48,6 +48,11 @@ class ResolvedPlace:
     timezone: str
     source: str
     matched: dict[str, str] | None = None
+    accuracy: str = "city"
+    coordinate_system: str = "WGS84"
+    radius_km: float = 25.0
+    confidence: str = "medium"
+    raw_query: str | None = None
 
 
 class PlaceService:
@@ -292,6 +297,11 @@ class PlaceService:
                 "state": best.state,
                 "country": best.country,
             },
+            accuracy="city",
+            coordinate_system="WGS84",
+            radius_km=self._radius_for_accuracy("city"),
+            confidence=self._confidence_for_accuracy("city"),
+            raw_query=trimmed,
         )
 
     def _search_countries(self, query: str, limit: int) -> list[PlaceOption]:
@@ -414,7 +424,13 @@ class PlaceService:
             coordinateSystem="WGS84",
             latitude=record.latitude,
             longitude=record.longitude,
-            birthPlace=self._birth_place_with_coordinates(label, record.latitude, record.longitude),
+            birthPlace=self._birth_place_with_coordinates(
+                label,
+                record.latitude,
+                record.longitude,
+                source="geonames-local",
+                accuracy="city",
+            ),
         )
 
     def _amap_enabled(self) -> bool:
@@ -518,7 +534,13 @@ class PlaceService:
             coordinateSystem="WGS84",
             latitude=lat,
             longitude=lon,
-            birthPlace=self._birth_place_with_coordinates(readable or name, lat, lon),
+            birthPlace=self._birth_place_with_coordinates(
+                readable or name,
+                lat,
+                lon,
+                source="amap",
+                accuracy=accuracy,
+            ),
         )
 
     def _amap_accuracy(self, item: dict[str, object]) -> Literal["poi", "address", "district"]:
@@ -529,8 +551,24 @@ class PlaceService:
             return "address"
         return "poi"
 
-    def _birth_place_with_coordinates(self, label: str, lat: float, lon: float) -> str:
-        return f"{label} | lat={self._format_coordinate(lat)}, lon={self._format_coordinate(lon)}"
+    def _birth_place_with_coordinates(
+        self,
+        label: str,
+        lat: float,
+        lon: float,
+        *,
+        source: str | None = None,
+        accuracy: str | None = None,
+    ) -> str:
+        parts = [
+            f"lat={self._format_coordinate(lat)}",
+            f"lon={self._format_coordinate(lon)}",
+        ]
+        if source:
+            parts.append(f"source={source}")
+        if accuracy:
+            parts.append(f"accuracy={accuracy}")
+        return f"{label} | {', '.join(parts)}"
 
     @staticmethod
     def _string_or_empty(value: object) -> str:
@@ -746,15 +784,54 @@ class PlaceService:
         timezone = (
             timezone_match.group(1) if timezone_match else self._timezone_for_coordinates(lat, lon)
         )
+        source = self._parse_inline_token(value, ["source", "src"]) or "inline-coordinates"
+        accuracy = self._parse_inline_token(value, ["accuracy", "acc"]) or "coordinate"
+        if accuracy not in {"city", "poi", "address", "district", "coordinate"}:
+            accuracy = "coordinate"
+        coordinate_system = (
+            self._parse_inline_token(value, ["coordinateSystem", "coord", "cs"]) or "WGS84"
+        )
 
+        label = value.split("|", 1)[0].strip() or value
         return ResolvedPlace(
-            label=value,
+            label=label,
             lat=lat,
             lon=lon,
             timezone=timezone,
-            source="inline-coordinates",
+            source=source,
             matched=None,
+            accuracy=accuracy,
+            coordinate_system=coordinate_system,
+            radius_km=self._radius_for_accuracy(accuracy),
+            confidence=self._confidence_for_accuracy(accuracy),
+            raw_query=value,
         )
+
+    @staticmethod
+    def _parse_inline_token(value: str, keys: list[str]) -> str | None:
+        key_pattern = "|".join(re.escape(key) for key in keys)
+        match = re.search(rf"(?:{key_pattern})\s*[:=]\s*([A-Za-z0-9_.-]+)", value, re.I)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _radius_for_accuracy(accuracy: str) -> float:
+        return {
+            "coordinate": 0.25,
+            "poi": 0.3,
+            "address": 0.8,
+            "district": 8.0,
+            "city": 25.0,
+        }.get(accuracy, 25.0)
+
+    @staticmethod
+    def _confidence_for_accuracy(accuracy: str) -> str:
+        return {
+            "coordinate": "high",
+            "poi": "high",
+            "address": "high",
+            "district": "medium",
+            "city": "medium",
+        }.get(accuracy, "low")
 
     def _query_variants(self, level: str, query: str) -> list[str]:
         trimmed = query.strip()

@@ -40,6 +40,12 @@ export const WORKSHOP_STAGES: StageDef[] = [
     match: () => false
   },
   {
+    id: "chart",
+    label: "Chart Facts",
+    sub: "calculator",
+    match: (id) => id === "chart_facts"
+  },
+  {
     id: "reader",
     label: "First Check",
     sub: "your replies",
@@ -83,7 +89,8 @@ export const WORKSHOP_STAGES: StageDef[] = [
 ];
 
 export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
-  ["src", "reader"],
+  ["src", "chart"],
+  ["chart", "reader"],
   ["reader", "p1"],
   ["reader", "yoga"],
   ["p1", "p2"],

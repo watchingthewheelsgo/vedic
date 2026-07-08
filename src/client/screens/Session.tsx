@@ -58,6 +58,8 @@ type BirthInfo = {
   date: string;
   time: string;
   place: string;
+  latitude: string;
+  longitude: string;
   gender: string;
   relationship: string;
   timePrecision: string;
@@ -103,6 +105,12 @@ const STAGE_COPY: Record<string, StageCopy> = {
     userResult: "The reading uses one clear set of date, time, place, and time-confidence details.",
     userAction: "Review the details. If something is wrong, start a fresh reading.",
     expected: "Usually seconds. If the city cannot be found, choose it again from search."
+  },
+  chart: {
+    purpose: "Calculates and saves the chart facts before any LLM interpretation begins.",
+    userResult: "You can inspect the exact structured-data sections used by later stages.",
+    userAction: "Review the chart facts. First Check uses these facts as its source.",
+    expected: "Generated immediately after the birth details are accepted."
   },
   reader: {
     purpose: "Checks a few lived-experience signals before the full reading begins.",
@@ -209,7 +217,14 @@ function localizedStageCopy(stageId: string, t: Translate): StageCopy {
 }
 
 const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
-  src: ["structured_data.md", "structured_data.json", "run_metrics.json"],
+  src: [
+    "structured_data.md",
+    "structured_data.json",
+    "birth_input_context.json",
+    "sensitivity_scan.json",
+    "run_metrics.json"
+  ],
+  chart: ["structured_data.md", "birth_input_context.json", "sensitivity_scan.json"],
   reader: ["reader_prevalidation.md", "prevalidation_result.json", "user_context.md"],
   p1: ["p1_overview.md"],
   yoga: [".runtime/p2/yoga.md", "p2a_planets.md"],
@@ -907,6 +922,8 @@ function WorkshopDetailPanel({
 
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
+      ) : stage.id === "chart" ? (
+        <ChartFactsDetail session={session} status={status} />
       ) : baziMode ? (
         <BaziStageDetail
           stageId={stage.id}
@@ -1084,6 +1101,8 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
         <InfoRow label={t("session.birth.date")} value={birthInfo.date} />
         <InfoRow label={t("session.birth.time")} value={birthInfo.time} />
         <InfoRow label={t("session.birth.place")} value={birthInfo.place} />
+        <InfoRow label={t("session.birth.latitude")} value={birthInfo.latitude} />
+        <InfoRow label={t("session.birth.longitude")} value={birthInfo.longitude} />
         <InfoRow label={t("session.birth.precision")} value={birthInfo.timePrecision} />
         <InfoRow label={t("session.birth.source")} value={birthInfo.timeSource} />
         <InfoRow label={t("session.birth.effective")} value={birthInfo.effectivePrecision} />
@@ -1097,6 +1116,82 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
           <DetailSubtitle>{t("session.birth.concern")}</DetailSubtitle>
           <p className="m-0 text-[13px] leading-[1.7] text-body">{birthInfo.concern}</p>
         </div>
+      )}
+    </>
+  );
+}
+
+function ChartFactsDetail({
+  session,
+  status
+}: {
+  session: SkillSessionResponse | null;
+  status: StageStatus;
+}) {
+  const { t } = useI18n();
+  const copy = localizedStageCopy("chart", t);
+  const structuredData = findArtifact(session, "structured_data.md");
+  const inputContext = findArtifact(session, "birth_input_context.json");
+  const sensitivityScan = findArtifact(session, "sensitivity_scan.json");
+  const sections = useMemo(
+    () => parseChartFactSections(structuredData?.content ?? ""),
+    [structuredData?.content]
+  );
+
+  return (
+    <>
+      <StageStatusSummary
+        status={status}
+        copy={copy}
+        completed={structuredData ? 1 : 0}
+        total={1}
+        running={0}
+        durationSeconds={0}
+        coreInterrupted={false}
+      />
+
+      <section className="my-5 border-t border-gold/25 pt-4">
+        <DetailSubtitle>{t("session.chart.sourceFiles")}</DetailSubtitle>
+        <div className="flex flex-wrap gap-2">
+          {[structuredData?.path, inputContext?.path, sensitivityScan?.path]
+            .filter((path): path is string => Boolean(path))
+            .map((path) => (
+              <span
+                className="rounded-full border border-gold/25 bg-cream-2 px-2.5 py-1 text-[11px] font-medium text-muted"
+                key={path}
+              >
+                {path}
+              </span>
+            ))}
+        </div>
+      </section>
+
+      {sections.length > 0 ? (
+        <section className="my-5 border-t border-gold/25 pt-4">
+          <DetailSubtitle>{t("session.chart.sections")}</DetailSubtitle>
+          <div className="grid gap-3">
+            {sections.map((section, index) => (
+              <article
+                className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3"
+                key={section.id}
+              >
+                <div className="mb-1.5 flex items-baseline gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-[1.4px] text-gold">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <h4 className="m-0 text-sm font-semibold leading-snug text-ink">
+                    {section.title}
+                  </h4>
+                </div>
+                <p className="m-0 whitespace-pre-wrap text-[12.5px] leading-[1.7] text-body">
+                  {excerpt(stripMarkdownForPreview(section.body), 520)}
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <EmptyResultState status={status} copy={copy} progress="" />
       )}
     </>
   );
@@ -1944,6 +2039,40 @@ function parseResultPreviewSections(content: string): ResultPreviewSection[] {
   return (readable.length > 0 ? readable : sections).slice(0, 24);
 }
 
+function parseChartFactSections(content: string): ResultPreviewSection[] {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split("\n");
+  const sections: ResultPreviewSection[] = [];
+  let currentTitle = "";
+  let currentBody: string[] = [];
+
+  function flush() {
+    const body = cleanResultPreviewBody(currentBody.join("\n"));
+    if (!currentTitle && !body) return;
+    sections.push({
+      id: `chart-section-${sections.length + 1}`,
+      title: cleanMarkdownInline(currentTitle || "Overview"),
+      body: body || currentTitle
+    });
+  }
+
+  for (const line of lines) {
+    const heading = line.trim().match(/^##\s+(.+)$/);
+    if (heading) {
+      flush();
+      currentTitle = heading[1].trim();
+      currentBody = [];
+      continue;
+    }
+    currentBody.push(line);
+  }
+  flush();
+
+  return sections.filter((section) => stripMarkdownForPreview(section.body).length > 8);
+}
+
 function cleanResultPreviewBody(content: string) {
   return content
     .split("\n")
@@ -2116,11 +2245,14 @@ function formatElapsed(startedAt: number | null, now: number) {
 }
 
 function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | null): BirthInfo {
+  const coordinates = resolveBirthCoordinates(session, navState?.birth?.birthPlace);
   if (navState?.birth) {
     return {
       date: navState.birth.birthDate,
       time: navState.birth.birthTime || "Unknown birth time",
       place: navState.birth.birthPlace,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
       gender: displayCollected(GENDER_LABELS[navState.birth.gender] ?? navState.birth.gender),
       relationship: displayCollected(
         RELATIONSHIP_LABELS[navState.birth.relationship] ?? navState.birth.relationship
@@ -2149,6 +2281,8 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
       date: birthMatch?.[1] ?? birth,
       time: birthMatch?.[2] ?? "—",
       place: grabBazi("Place"),
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
       gender: displayCollected(grabBazi("Gender")),
       relationship: displayCollected(context.match(/- Relationship:\s*(.+)/)?.[1]?.trim()),
       timePrecision: displayMappedValue(grabBazi("Time precision"), PRECISION_LABELS),
@@ -2165,6 +2299,8 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     date: grab("出生日期"),
     time: grab("出生时间"),
     place: grab("出生地点"),
+    latitude: coordinates.latitude,
+    longitude: coordinates.longitude,
     gender: displayCollected(displayMappedValue(grab("性别"), GENDER_LABELS)),
     relationship: displayCollected(displayMappedValue(grab("感情状态"), RELATIONSHIP_LABELS)),
     timePrecision: displayMappedValue(grab("时间精度"), PRECISION_LABELS),
@@ -2172,6 +2308,83 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     effectivePrecision: displayMappedValue(grab("有效精度"), EFFECTIVE_PRECISION_LABELS),
     concern: extractConcern(feedback)
   };
+}
+
+function resolveBirthCoordinates(
+  session: SkillSessionResponse | null,
+  fallbackPlace?: string
+): { latitude: string; longitude: string } {
+  const inputContext = parseJsonArtifact(session, "birth_input_context.json");
+  const inputCoordinates = objectValue(objectValue(inputContext, "place"), "coordinates");
+  const fromInput = coordinatesFromObject(inputCoordinates);
+  if (fromInput) return fromInput;
+
+  const structuredData = parseJsonArtifact(session, "structured_data.json");
+  const structuredCoordinates = objectValue(objectValue(structuredData, "subject"), "coordinates");
+  const fromStructured = coordinatesFromObject(structuredCoordinates);
+  if (fromStructured) return fromStructured;
+
+  const structuredMarkdown =
+    session?.artifacts.find((artifact) => artifact.path === "structured_data.md")?.content ?? "";
+  const markdownPlace =
+    structuredMarkdown.match(/出生地点:\s*(.+)/)?.[1]?.trim() ??
+    structuredMarkdown.match(/- Place:\s*(.+)/)?.[1]?.trim();
+  const fromText = coordinatesFromText(fallbackPlace ?? markdownPlace ?? "");
+  if (fromText) return fromText;
+
+  return { latitude: "", longitude: "" };
+}
+
+function parseJsonArtifact(
+  session: SkillSessionResponse | null,
+  path: string
+): Record<string, unknown> | null {
+  const artifact = session?.artifacts.find((item) => item.path === path);
+  if (!artifact) return null;
+  try {
+    const parsed = JSON.parse(artifact.content) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function objectValue(value: unknown, key: string): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const next = (value as Record<string, unknown>)[key];
+  return next && typeof next === "object" && !Array.isArray(next)
+    ? (next as Record<string, unknown>)
+    : null;
+}
+
+function coordinatesFromObject(
+  value: Record<string, unknown> | null
+): { latitude: string; longitude: string } | null {
+  const lat = numberLike(value?.lat ?? value?.latitude);
+  const lon = numberLike(value?.lon ?? value?.lng ?? value?.longitude);
+  if (lat == null || lon == null) return null;
+  return { latitude: formatCoordinateDisplay(lat), longitude: formatCoordinateDisplay(lon) };
+}
+
+function coordinatesFromText(text: string): { latitude: string; longitude: string } | null {
+  const latMatch = text.match(/(?:lat|latitude|纬度|緯度)\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
+  const lonMatch = text.match(/(?:lon|lng|longitude|经度|經度|経度)\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
+  const lat = numberLike(latMatch?.[1]);
+  const lon = numberLike(lonMatch?.[1]);
+  if (lat == null || lon == null) return null;
+  return { latitude: formatCoordinateDisplay(lat), longitude: formatCoordinateDisplay(lon) };
+}
+
+function numberLike(value: unknown): number | null {
+  const number =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatCoordinateDisplay(value: number) {
+  return value.toFixed(6).replace(/\.?0+$/, "");
 }
 
 function displayMappedValue(value: string | undefined, labels: Record<string, string>) {

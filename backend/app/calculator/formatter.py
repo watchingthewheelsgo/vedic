@@ -37,7 +37,14 @@ SIGNS = [
 ]
 
 
-def format_structured_data(chart, transit_data, meta, user_info):
+def format_structured_data(
+    chart,
+    transit_data,
+    meta,
+    user_info,
+    input_context=None,
+    sensitivity_scan=None,
+):
     """
     chart: calculate_full_chart() 的返回值
     transit_data: calc_transit() 的返回值
@@ -60,6 +67,9 @@ def format_structured_data(chart, transit_data, meta, user_info):
     lines.append(f"Ayanamsa: True Chitrapaksha（Lahiri系,差<1′） ({chart['ayanamsa']:.4f}°)")
     lines.append(f"Node模式: Mean Node")
     lines.append("```\n")
+
+    if input_context or sensitivity_scan:
+        lines.extend(_format_input_confidence(input_context or {}, sensitivity_scan or {}))
 
     # === 用户信息 ===
     lines.append("## 用户信息\n")
@@ -316,11 +326,13 @@ def format_structured_data(chart, transit_data, meta, user_info):
     lines.append("## 分盘数据\n")
     lines.append("### 分盘可信度声明")
     lines.append("```")
-    lines.append("D1  ✅ 可信（直接计算）")
-    lines.append("D9  ✅ 可信（直接计算）")
-    lines.append("D10 ✅ 可信（直接计算）")
-    lines.append("D4  ✅ 可信（直接计算）")
-    lines.append("D5  ✅ 可信（直接计算）")
+    confidence = (sensitivity_scan or {}).get("summary", {}).get("divisionalConfidence", {})
+    for key in ["D1", "D9", "D10", "D4", "D5"]:
+        item = confidence.get(key, {})
+        level = item.get("confidence", "high")
+        marker = "✅" if level == "high" else ("⚠️" if level == "medium" else "❌")
+        reason = "; ".join(item.get("reasons", [])) or "sensitivity scan stable"
+        lines.append(f"{key:<3} {marker} {level}（{reason}）")
     lines.append("```\n")
 
     # D9
@@ -451,3 +463,95 @@ def format_structured_data(chart, transit_data, meta, user_info):
         lines.append("```")
 
     return "\n".join(lines)
+
+
+def _format_input_confidence(input_context, sensitivity_scan):
+    lines = ["## 输入可信度与敏感度\n"]
+    summary = sensitivity_scan.get("summary", {})
+    place = input_context.get("place", {})
+    time = input_context.get("time", {})
+    window = time.get("window", {})
+    risk_level = summary.get("riskLevel", "unknown")
+    risk_factors = summary.get("riskFactors", [])
+    changed_fields = summary.get("changedFields", [])
+    readiness = sensitivity_scan.get("reportReadiness", {})
+    stability = sensitivity_scan.get("stability", {})
+
+    lines.append("```")
+    lines.append(f"总体输入风险: {risk_level}")
+    lines.append(f"报告模式: {readiness.get('mode', 'unknown')}")
+    lines.append(f"报告范围: {readiness.get('scope', 'unknown')}")
+    lines.append(
+        "Core门控: "
+        f"prevalidationRequired={readiness.get('prevalidationRequired', True)}, "
+        f"minimumHitRate={readiness.get('minimumHitRateForCore', '?')}, "
+        f"coreAllowedWithoutRectification={readiness.get('coreAllowedWithoutRectification', False)}"
+    )
+    lines.append(f"时间输入: {time.get('reported', '?')} / {time.get('precision', '?')}")
+    if window:
+        lines.append(
+            "时间扫描窗口: "
+            f"{window.get('start', '?')} ~ {window.get('end', '?')} "
+            f"(±{window.get('radiusMinutes', '?')}分钟)"
+        )
+    coordinates = place.get("coordinates", {})
+    lines.append(
+        "地点输入: "
+        f"{place.get('resolvedLabel', '?')} "
+        f"({coordinates.get('lon', '?')}, {coordinates.get('lat', '?')})"
+    )
+    lines.append(
+        "地点精度: "
+        f"{place.get('accuracy', '?')} / radius≈{place.get('radiusKm', '?')}km / "
+        f"{place.get('source', '?')}"
+    )
+    lines.append("变动字段: " + (", ".join(changed_fields) if changed_fields else "无"))
+    lines.append("风险因素: " + (", ".join(risk_factors) if risk_factors else "无"))
+    blocked = readiness.get("blockingFactors", [])
+    lines.append("阻断因素: " + (", ".join(blocked) if blocked else "无"))
+    lines.append(f"建议动作: {summary.get('recommendedAction', 'standard prevalidation')}")
+    lines.append("```\n")
+
+    restricted = stability.get("llmRestrictedEvidence", [])
+    allowed = stability.get("llmStableEvidence", [])
+    lines.append("### LLM消费契约")
+    lines.append("| 项目 | 内容 |")
+    lines.append("|------|------|")
+    lines.append(f"| 可作为主证据 | {', '.join(allowed) if allowed else '无'} |")
+    lines.append(f"| 不可作为主证据 | {', '.join(restricted) if restricted else '无'} |")
+    lines.append(
+        f"| 写作约束 | {readiness.get('llmContract', {}).get('claimStyle', '标注置信度并降级不稳定结论')} |"
+    )
+    lines.append("")
+
+    candidate_groups = sensitivity_scan.get("candidateGroups", [])
+    if candidate_groups:
+        lines.append("### 候选盘签名")
+        lines.append("| 候选 | 是否基准 | 变动字段 | 样本 |")
+        lines.append("|------|----------|----------|------|")
+        for item in candidate_groups:
+            members = item.get("members", [])
+            member_labels = []
+            for member in members[:4]:
+                member_labels.append(f"{member.get('axis')}:{member.get('label')}")
+            if len(members) > 4:
+                member_labels.append(f"+{len(members) - 4}")
+            lines.append(
+                f"| {item.get('candidateId')} | {item.get('isBase')} | "
+                f"{', '.join(item.get('changedFromBase', [])) or '无'} | "
+                f"{', '.join(member_labels)} |"
+            )
+        lines.append("")
+
+    boundary_flags = sensitivity_scan.get("boundaryFlags", [])
+    if boundary_flags:
+        lines.append("### 边界提醒")
+        lines.append("| 因子 | 距边界 | 风险 |")
+        lines.append("|------|--------|------|")
+        for item in boundary_flags:
+            lines.append(
+                f"| {item.get('factor')} | {item.get('distanceDegrees')}° | {item.get('risk')} |"
+            )
+        lines.append("")
+
+    return lines

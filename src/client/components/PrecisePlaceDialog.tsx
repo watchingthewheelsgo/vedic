@@ -149,7 +149,7 @@ export function PrecisePlaceDialog({
         birthPlace: `${label} | ${formatCoordinateValue(
           manualValidation.latitude,
           manualValidation.longitude
-        )}`
+        )}, source=manual, accuracy=coordinate`
       });
       onClose();
     }
@@ -169,7 +169,9 @@ export function PrecisePlaceDialog({
       latitude,
       longitude,
       accuracy: current.accuracy === "city" ? "coordinate" : current.accuracy,
-      birthPlace: `${label} | ${formatCoordinateValue(latitude, longitude)}`
+      birthPlace: `${label} | ${formatCoordinateValue(latitude, longitude)}, source=${
+        current.source
+      }, accuracy=${current.accuracy === "city" ? "coordinate" : current.accuracy}`
     };
     setSelected(next);
     setManualLatitude(formatCoordinateNumber(latitude));
@@ -442,6 +444,6 @@ function optionFromManual(
     coordinateSystem: "WGS84",
     latitude: validation.latitude,
     longitude: validation.longitude,
-    birthPlace: `${label} | ${validation.value}`
+    birthPlace: `${label} | ${validation.value}, source=manual, accuracy=coordinate`
   };
 }

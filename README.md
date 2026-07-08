@@ -10,7 +10,7 @@ skills through a browser workspace while preserving their input/output contract:
 ```text
 birth information
   -> vedic-calculator
-  -> structured_data.md
+  -> birth_input_context.json + sensitivity_scan.json + structured_data.md/json
   -> vedic-reader / vedic-core / vedic-career / vedic-love / vedic-rectifier
   -> original markdown artifacts
 
@@ -651,6 +651,15 @@ normalizes returned GCJ-02 coordinates to WGS84 for chart calculation.
 - `structured_data.json` is generated alongside it as the canonical
   machine-readable chart fact schema (`vedic-chart-facts/v1`) for validators,
   backend tools, and future deterministic rule engines.
+- `birth_input_context.json` records the original birth-time/place facts,
+  resolved coordinates, timezone, coordinate source, place accuracy, radius, and
+  rectification guardrails.
+- `sensitivity_scan.json` records small-sample time/place perturbation checks.
+  Reader/core workflows use it to decide whether prevalidation should validate a
+  single chart or first shrink uncertain time/place candidates. It also exposes
+  `candidateGroups`, `stability`, `reportReadiness`, and an `llmContract` so
+  downstream LLM steps know which chart factors may be used as primary evidence
+  and which factors must be downgraded or omitted.
 - Aspect facts use Vedic whole-sign contact + Graha Drishti. Western
   degree-angle aspects are not part of the calculation fact source.
 - Skill outputs stay as markdown artifacts with the original file names.
