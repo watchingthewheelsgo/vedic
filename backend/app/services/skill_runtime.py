@@ -13,6 +13,7 @@ from app.schemas import (
     SkillSessionResponse,
     SynastryBirthInput,
 )
+from app.services.chart_rectification import ChartRectificationService
 from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
@@ -34,6 +35,7 @@ class SkillRuntime:
         self.agent_runtime = agent_runtime
         self.metadata_store = metadata_store
         self.tools = BackendToolRunner(workspace.settings)
+        self.rectification = ChartRectificationService()
 
     async def create_reader_session(
         self, input_data: SkillBirthInput, *, owner_user_id: str | None = None
@@ -56,6 +58,11 @@ class SkillRuntime:
         self.workspace.write_artifact(
             session_id,
             "sensitivity_scan.json",
+            calculation.sensitivity_scan_json,
+        )
+        self._write_initial_rectification_state(
+            session_id,
+            calculation.birth_input_context_json,
             calculation.sensitivity_scan_json,
         )
         self.workspace.write_artifact(
@@ -90,6 +97,9 @@ class SkillRuntime:
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "sensitivity_scan.json", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "chart_rectification_state.json", producer="chart-rectification"
         )
         await self._sync_metadata(
             session_id, stage="reader_ready", status="draft", owner_user_id=owner_user_id
@@ -531,7 +541,11 @@ class SkillRuntime:
         self.workspace.mark_artifact_checkpoint(
             session_id, "user_context.md", producer="vedic-reader-feedback"
         )
-        self._write_prevalidation_result(session_id, feedback_markdown=feedback_markdown)
+        prevalidation_result = self._write_prevalidation_result(
+            session_id, feedback_markdown=feedback_markdown
+        )
+        if prevalidation_result is not None:
+            self._apply_rectification_feedback(session_id, prevalidation_result)
         await self._sync_metadata(
             session_id,
             stage="reader_validation",
@@ -605,16 +619,32 @@ class SkillRuntime:
             "Dasha, Navamsha, Mahadasha, and Antardasha consistent."
         )
 
+    def _write_initial_rectification_state(
+        self,
+        session_id: str,
+        birth_input_context_json: str,
+        sensitivity_scan_json: str,
+    ) -> None:
+        state = self.rectification.initial_state(
+            self._json_dict(birth_input_context_json),
+            self._json_dict(sensitivity_scan_json),
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        )
+
     def _write_prevalidation_result(
         self, session_id: str, *, feedback_markdown: str | None = None
-    ) -> None:
+    ) -> dict[str, object] | None:
         artifacts = {
             artifact.path: artifact.content
             for artifact in self.workspace.read_artifacts(session_id)
         }
         prevalidation = artifacts.get("reader_prevalidation.md", "")
         if not prevalidation.strip():
-            return
+            return None
         feedback = (
             feedback_markdown
             if feedback_markdown is not None
@@ -635,6 +665,147 @@ class SkillRuntime:
             "prevalidation_result.json",
             producer="vedic-reader:prevalidation-result",
         )
+        return result
+
+    def _apply_rectification_feedback(
+        self,
+        session_id: str,
+        prevalidation_result: dict[str, object],
+    ) -> None:
+        artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id)
+        }
+        state = self._json_dict(artifacts.get("chart_rectification_state.json", ""))
+        if not state:
+            return
+        updated_state = self.rectification.update_from_feedback(
+            state,
+            artifacts.get("reader_prevalidation.md", ""),
+            artifacts.get("user_context.md", ""),
+            prevalidation_result,
+        )
+
+        if updated_state.get("status") == "needs_recalculation":
+            rectified_input = self.rectification.rectified_birth_input(
+                updated_state,
+                self._json_dict(artifacts.get("birth_input_context.json", "")),
+                self._json_dict(artifacts.get("structured_data.json", "")),
+            )
+            if rectified_input is not None:
+                chart_revision = self._next_chart_revision(updated_state)
+                self._archive_current_chart_artifacts(session_id, chart_revision - 1, artifacts)
+                calculation = self.calculator.calculate(rectified_input)
+                self._write_chart_calculation(
+                    session_id,
+                    calculation.structured_data,
+                    calculation.structured_data_json,
+                    calculation.birth_input_context_json,
+                    calculation.sensitivity_scan_json,
+                    producer="calculator:rectification",
+                )
+                self.workspace.write_session_manifest(
+                    session_id, locale=self.workspace.read_session_locale(session_id)
+                )
+                updated_state = self.rectification.apply_chart_revision(
+                    updated_state,
+                    rectified_input=rectified_input,
+                    chart_revision=chart_revision,
+                )
+            else:
+                updated_state["status"] = "needs_more_feedback"
+                updated_state["reportGate"] = {
+                    "fullReportAllowed": False,
+                    "reason": "Selected candidate did not contain a deterministic time or place correction.",
+                    "nextStep": "continue_rectification",
+                }
+
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            "chart_rectification_state.json",
+            producer="chart-rectification",
+        )
+
+        decision = prevalidation_result.get("decision")
+        if isinstance(decision, dict):
+            prevalidation_result["decision"] = self.rectification.apply_prevalidation_decision(
+                decision,
+                updated_state,
+            )
+            self.workspace.write_artifact(
+                session_id,
+                "prevalidation_result.json",
+                json.dumps(prevalidation_result, ensure_ascii=False, indent=2) + "\n",
+            )
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                "prevalidation_result.json",
+                producer="vedic-reader:prevalidation-result",
+            )
+
+    def _write_chart_calculation(
+        self,
+        session_id: str,
+        structured_data: str,
+        structured_data_json: str,
+        birth_input_context_json: str,
+        sensitivity_scan_json: str,
+        *,
+        producer: str,
+    ) -> None:
+        chart_artifacts = {
+            "structured_data.md": structured_data,
+            "structured_data.json": structured_data_json,
+            "birth_input_context.json": birth_input_context_json,
+            "sensitivity_scan.json": sensitivity_scan_json,
+        }
+        for path, content in chart_artifacts.items():
+            self.workspace.write_artifact(session_id, path, content)
+            self.workspace.mark_artifact_checkpoint(session_id, path, producer=producer)
+
+    def _archive_current_chart_artifacts(
+        self,
+        session_id: str,
+        revision: int,
+        artifacts: dict[str, str],
+    ) -> None:
+        for path in [
+            "structured_data.md",
+            "structured_data.json",
+            "birth_input_context.json",
+            "sensitivity_scan.json",
+        ]:
+            content = artifacts.get(path)
+            if content is None:
+                continue
+            self.workspace.write_artifact(
+                session_id,
+                f".runtime/chart_revisions/rev_{revision}/{path}",
+                content,
+            )
+
+    @staticmethod
+    def _next_chart_revision(state: dict[str, object]) -> int:
+        active = state.get("activeChartRevision")
+        if isinstance(active, dict):
+            try:
+                return int(active.get("revision") or 0) + 1
+            except (TypeError, ValueError):
+                return 1
+        return 1
+
+    @staticmethod
+    def _json_dict(content: str) -> dict[str, object]:
+        try:
+            payload = json.loads(content) if content.strip() else {}
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _build_prevalidation_result(
         self,
@@ -706,7 +877,11 @@ class SkillRuntime:
                 block,
             )
             rationale = rationale_match.group(1).strip() if rationale_match else ""
-            statement = re.sub(r"(?m)^>\s*(?:推导|Derivation|根拠)\s*[：:].*$", "", block)
+            statement = re.sub(
+                r"(?m)^>\s*(?:推导|Derivation|根拠|Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段)\s*[：:].*$",
+                "",
+                block,
+            )
             statement = self._plain_markdown_text(statement)
             anchors.append(
                 {
@@ -924,6 +1099,7 @@ class SkillRuntime:
   - Each item is followed by one blank line and a quoted derivation line: > 推导：...
   - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
   - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
+  - For rectification_required anchors, add a second quoted machine line after 推导 using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
   - End with: 请逐条回复：**准 / 不准 / 部分准**"""
         if locale == "ja":
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 正確 / 不正確 / 一部正確.
@@ -934,6 +1110,7 @@ class SkillRuntime:
   - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
   - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
+  - For rectification_required anchors, add a second quoted machine line after 根拠 using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
   - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
         return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
 - reader_prevalidation.md must follow the original Step 5 output template:
@@ -943,6 +1120,7 @@ class SkillRuntime:
   - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
   - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
+  - For rectification_required anchors, add a second quoted machine line after Derivation using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
   - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
 
     def _prompt_for(self, input_data: SkillRunInput) -> str:
@@ -1269,7 +1447,8 @@ Rules:
                 "appendix.md",
                 (
                     "Run the original Step 5 technical appendix only. Read structured_data.md, "
-                    "birth_input_context.json, sensitivity_scan.json, prevalidation_result.json "
+                    "birth_input_context.json, sensitivity_scan.json, "
+                    "chart_rectification_state.json, prevalidation_result.json "
                     "if present, p2a-p2d, p3a/p3b, p4a/p4b, p5a/p5b, and "
                     ".runtime/dasha_review.md. Include the P1-P12 parameter table, divisional "
                     "data overview, input confidence / report readiness summary, validation "
@@ -1290,7 +1469,8 @@ Rules:
                 "report_quality_audit.md",
                 (
                     "Run the current vedic-core Step 6 final report quality audit only. "
-                    "Read birth_input_context.json, sensitivity_scan.json, prevalidation_result.json "
+                    "Read birth_input_context.json, sensitivity_scan.json, "
+                    "chart_rectification_state.json, prevalidation_result.json "
                     "if present, structured_data.md, p5a_life.md, p5b_life.md, and appendix.md. "
                     "Do not rewrite the report body. Write a clear PASS / NEEDS_REVISION audit "
                     "with blocking issues, evidence, and exact fixes. Fail the audit if "
@@ -1365,7 +1545,7 @@ Rules:
 - Do not inherit old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - {language_instruction}
 - Use structured_data.md as the calculation source of truth.
-- Read birth_input_context.json and sensitivity_scan.json when present; use them only as the input-confidence and report-readiness gate.
+- Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json when present; use them only as the input-confidence, active chart revision, and report-readiness gate.
 - Obey sensitivity_scan.reportReadiness.llmContract: never use mustNotUseAsPrimaryEvidence fields as primary conclusion anchors, and downgrade or omit unstable divisional/timing claims.
 - If sensitivity_scan.reportReadiness.mode is rectification_required, write only candidate-discriminating or clearly low-confidence/D1-only content unless prevalidation_result.json explicitly allows the full report.
 - Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
@@ -1578,14 +1758,14 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
 - Use the provided structured_data.md content.
-- Read birth_input_context.json and sensitivity_scan.json before writing anchors.
-- If sensitivity_scan.reportReadiness.mode is rectification_required, make the anchors candidate-discriminating and focused on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
+- Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
+- If sensitivity_scan.reportReadiness.mode is rectification_required, make each anchor support one explicit candidate ID from chart_rectification_state.json and focus on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
 {self._reader_prevalidation_format_instruction(locale)}
 - Treat pre-validation as a scoring gate, not as performance writing: do not show the internal SOP, do not add full candidate tables, and do not reframe misses as hits.
 - Do not generate core report, career report, love report, daily note, or app-specific claims.
-- The backend will deterministically create prevalidation_result.json from reader_prevalidation.md and user feedback; do not hand-write that artifact.
+- The backend will deterministically create prevalidation_result.json and update chart_rectification_state.json from reader_prevalidation.md and user feedback; do not hand-write those artifacts.
 
 User message:
 {user_message or self._reader_default_user_message(locale)}"""
@@ -1594,13 +1774,13 @@ User message:
         return f"""Run vedic-core exactly as the original skill.
 
 Workspace contains structured_data.md, birth_input_context.json, sensitivity_scan.json,
-and may contain user_context.md / reader_prevalidation.md.
+chart_rectification_state.json, and may contain user_context.md / reader_prevalidation.md.
 
 Rules:
 - {self._language_instruction(locale)}
 - Follow vedic-core Step 0 through Step 5.
 - Preserve blind-audit rules: Step 1-3 must not use user_context.md.
-- Use prevalidation_result.json, when present, as the structured source for validation score, time confidence, and report gating. Do not reinterpret missed anchors as hits.
+- Use prevalidation_result.json and chart_rectification_state.json, when present, as the structured source for validation score, active chart revision, time confidence, and report gating. Do not reinterpret missed anchors as hits.
 - Obey sensitivity_scan.reportReadiness.llmContract: do not use restricted evidence as a primary conclusion anchor, and downgrade or omit unstable divisional/timing claims.
 - Follow the current report quality rules: main report sections use plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
 - Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
