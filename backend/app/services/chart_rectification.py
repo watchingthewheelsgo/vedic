@@ -118,14 +118,10 @@ class ChartRectificationService:
                     candidate["reject"] = int(candidate.get("reject") or 0) + 1
 
         selected = self._select_candidate(candidates)
-        score = prevalidation_result.get("score") if isinstance(prevalidation_result, dict) else {}
-        hit_rate = score.get("hitRate") if isinstance(score, dict) else None
         status, confidence, gate = self._state_from_selection(
             next_state,
-            candidates,
             selected,
             candidate_bound_count,
-            hit_rate,
         )
 
         next_state.update(
@@ -418,15 +414,14 @@ class ChartRectificationService:
     @staticmethod
     def _candidate_ids_from_block(block: str) -> list[str]:
         ids: list[str] = []
-        patterns = [
-            r"(?im)^>\s*(?:Candidate|Candidate IDs?|候选盘|候選盤)\s*[：:]\s*([A-Z](?:\s*[,/，、]\s*[A-Z])*)\b",
-            r"(?im)\bcandidate\s+([A-Z])\b",
-        ]
-        for pattern in patterns:
-            for match in re.finditer(pattern, block):
-                for candidate_id in re.findall(r"\b[A-Z]\b", match.group(1)):
-                    if candidate_id not in ids:
-                        ids.append(candidate_id)
+        pattern = re.compile(
+            r"(?im)^>[ \t]*(?:Candidate(?:[ \t]+IDs?)?|候选盘|候選盤)"
+            r"[ \t]*[：:][ \t]*([A-Z](?:[ \t]*[,/，、][ \t]*[A-Z])*)[ \t]*$"
+        )
+        for match in pattern.finditer(block):
+            for candidate_id in re.findall(r"\b[A-Z]\b", match.group(1)):
+                if candidate_id not in ids:
+                    ids.append(candidate_id)
         return ids
 
     @staticmethod
@@ -478,10 +473,8 @@ class ChartRectificationService:
     def _state_from_selection(
         self,
         state: dict[str, Any],
-        candidates: list[dict[str, Any]],
         selected: dict[str, Any] | None,
         candidate_bound_count: int,
-        hit_rate: object,
     ) -> tuple[str, str, dict[str, Any]]:
         current_status = str(state.get("status") or "")
         if current_status == "not_required":
@@ -527,18 +520,6 @@ class ChartRectificationService:
                     "nextStep": "apply_candidate_recalculation",
                 },
             )
-        if isinstance(hit_rate, (int, float)) and hit_rate >= 0.9:
-            base = next((candidate for candidate in candidates if candidate.get("isBase")), None)
-            if base and candidate_bound_count > 0:
-                return (
-                    "base_confirmed",
-                    "medium",
-                    {
-                        "fullReportAllowed": True,
-                        "reason": "Strong candidate-bound feedback kept the base candidate active.",
-                        "nextStep": "full_report",
-                    },
-                )
         return (
             "needs_more_feedback",
             "none",

@@ -344,6 +344,114 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
     assert decision["nextStep"] == "report_allowed_after_rectification"
 
 
+def test_rectification_requires_machine_candidate_line_for_candidate_bound_anchor() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Candidate B timing anchor.
+
+> Derivation: test
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        updated,
+    )
+
+    assert updated["candidateBoundAnchorCount"] == 0
+    assert updated["status"] == "needs_candidate_bound_checks"
+    assert decision["reportAllowed"] is False
+
+
+def test_rectification_does_not_confirm_base_from_generic_hit_rate_and_non_base_anchor() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Generic accurate anchor.
+
+> Derivation: test
+
+**2.** Generic accurate anchor.
+
+> Derivation: test
+
+**3.** Generic accurate anchor.
+
+> Derivation: test
+
+**4.** Generic accurate anchor.
+
+> Derivation: test
+
+**5.** B-specific timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+#### Anchor 2
+- User answer: 准 (accurate)
+#### Anchor 3
+- User answer: 准 (accurate)
+#### Anchor 4
+- User answer: 准 (accurate)
+#### Anchor 5
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        updated,
+    )
+
+    candidate_scores = {
+        candidate["candidateId"]: candidate["score"] for candidate in updated["candidates"]
+    }
+
+    assert updated["candidateBoundAnchorCount"] == 1
+    assert updated["selectedCandidateId"] is None
+    assert updated["status"] == "needs_more_feedback"
+    assert candidate_scores == {"A": 0.0, "B": 1.0}
+    assert decision["reportAllowed"] is False
+
+
 def test_rectification_blocks_high_risk_feedback_without_candidate_bound_anchors() -> None:
     service = ChartRectificationService()
     state = service.initial_state(
