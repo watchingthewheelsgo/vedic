@@ -195,6 +195,8 @@ class SkillWorkspace:
         order = [
             "structured_data.md",
             "structured_data.json",
+            "birth_input_context.json",
+            "sensitivity_scan.json",
             "user_context.md",
             "reader_prevalidation.md",
             "prevalidation_result.json",

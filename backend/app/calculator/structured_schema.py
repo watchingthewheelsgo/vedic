@@ -24,6 +24,8 @@ def build_structured_schema(
     transit_data: dict[str, Any] | None,
     meta: dict[str, Any],
     user_info: dict[str, Any],
+    input_context: dict[str, Any] | None = None,
+    sensitivity_scan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the canonical machine-readable chart facts.
 
@@ -60,6 +62,8 @@ def build_structured_schema(
             "gender": user_info.get("gender"),
             "relationship": user_info.get("relationship"),
         },
+        "inputContext": input_context or {},
+        "sensitivityScan": sensitivity_scan or {},
         "rashi": {
             "lagna": _body("Lagna", lagna),
             "planets": {

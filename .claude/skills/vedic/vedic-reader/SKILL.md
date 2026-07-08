@@ -204,14 +204,42 @@ structured_data.md 随阶段分3次写入（每次≤200行）：
 
 ```
 阶段1（读取数据）: 读取 structured_data.md 全部数据
+                   必须读取 birth_input_context.json 和 sensitivity_scan.json（如存在）
                    确认生命阶段上下文 + 用户信息（性别/感情/时间精度，如calc未收集则补问）
                    对 minor/未成年盘主跳过感情状态字段
 阶段2（信号预扫）: 信号预扫 + Yoga扫描（直接用structured_data中的数据）
-阶段3（验前事）  : 生成验前事 → 等反馈 → 追加写入 → 完成
+阶段3（验前事）  : 根据 sensitivity_scan 风险等级生成验前事/校正问题 → 等反馈 → 追加写入 → 完成
 ```
 
 Calc模式下不做任何计算！宫主表/尊贵度/相位/SAV映射/分盘/过运
 全部由 calc 已写入 structured_data.md，直接读取使用。
+
+### 输入敏感度与反向校正规则
+
+读取 `sensitivity_scan.json` 后先判断：
+
+- `summary.riskLevel=low`：按标准验前事验证单一主盘。
+- `summary.riskLevel=medium`：验前事必须优先覆盖 `changedFields` 和 `boundaryFlags` 对应领域；报告中避免把受影响分盘写成确定结论。
+- `summary.riskLevel=high`：验前事不是普通确认，而是校正流程。必须把问题设计成能区分候选时间/地点范围，优先收缩时间窗口，其次收缩地点半径。
+
+还必须读取 `sensitivity_scan.reportReadiness`：
+
+- `mode=standard_after_prevalidation`：3-5条标准验前事即可。
+- `mode=guarded_after_strong_prevalidation`：3-5条验前事必须覆盖 `llmContract.mustNotUseAsPrimaryEvidence` 指向的风险领域，且不能把 medium/low 分盘当主证据。
+- `mode=rectification_required`：3-5条必须是候选盘区分问题；每条都要能区分 `candidateGroups` 中至少两个候选签名。不得输出"可以直接进入完整报告"。
+
+`reader_prevalidation.md` 仍保持用户可读的编号格式，但推导行必须标注来源字段，例如：
+
+```
+> 推导：sensitivity_scan.candidateGroups A/B 的 D9 Lagna 与 D10 Lagna 不同，本题用于区分关系/事业路径候选。
+```
+
+反向校正边界：
+
+- 时间只能在 `birth_input_context.json.time.window` 内收缩。
+- 地点只能在 `birth_input_context.json.place.radiusKm` 内收缩。
+- 如果用户反馈需要超出上述边界，必须先要求用户重新确认原始出生事实，不能直接改盘。
+- 用户反馈不准时，不允许继续用原 structured_data 硬写完整报告；必须输出需要校正的字段和下一轮问题。
 
 ### Calc主模式（PDF/文本作为交叉验证）
 

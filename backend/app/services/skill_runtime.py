@@ -50,6 +50,16 @@ class SkillRuntime:
         )
         self.workspace.write_artifact(
             session_id,
+            "birth_input_context.json",
+            calculation.birth_input_context_json,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "sensitivity_scan.json",
+            calculation.sensitivity_scan_json,
+        )
+        self.workspace.write_artifact(
+            session_id,
             "run_metrics.json",
             json.dumps(
                 {
@@ -74,6 +84,12 @@ class SkillRuntime:
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "structured_data.json", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "birth_input_context.json", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, "sensitivity_scan.json", producer="calculator"
         )
         await self._sync_metadata(
             session_id, stage="reader_ready", status="draft", owner_user_id=owner_user_id
@@ -325,6 +341,7 @@ class SkillRuntime:
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
+        self.assert_core_readiness(input_data.session_id)
         locale = self._run_locale(input_data)
         batches = self.core_batches(input_data.user_message, locale)
         existing_paths = self._session_paths(session_dir)
@@ -347,6 +364,31 @@ class SkillRuntime:
         return await self.run_core_batch(
             input_data, batch, batches=batches, owner_user_id=owner_user_id
         )
+
+    def assert_core_readiness(self, session_id: str) -> None:
+        session_dir = self.workspace.require_session_dir(session_id)
+        result_path = session_dir / "prevalidation_result.json"
+        if not result_path.exists():
+            raise ValueError(
+                "请先运行验前事并提交反馈。完整报告需要 prevalidation_result.json "
+                "确认输入风险和命中率后才能生成。"
+            )
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("prevalidation_result.json 格式损坏，请重新运行验前事。") from exc
+        decision = result.get("decision") if isinstance(result, dict) else {}
+        if not isinstance(decision, dict):
+            raise ValueError("prevalidation_result.json 缺少 decision，请重新运行验前事。")
+        if decision.get("reportAllowed") is not True:
+            reason = decision.get("reason") or "输入风险或验前事反馈未达到完整报告门槛。"
+            next_step = decision.get("nextStep") or "boundary_scan_or_rectifier"
+            raise ValueError(f"完整报告暂不允许生成：{reason} 下一步：{next_step}")
+        scope = str(decision.get("reportScope") or "")
+        if scope == "prevalidation_or_d1_only":
+            raise ValueError(
+                "当前输入只允许验前事/低置信D1-only说明，不允许生成完整 vedic-core 报告。"
+            )
 
     def core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
         return self._core_batches(user_message, locale)
@@ -629,6 +671,12 @@ class SkillRuntime:
             max_score,
             status=status,
             time_reliability=str(subject.get("timeReliability") or "uncertain"),
+            input_risk_level=str(subject.get("inputRiskLevel") or "unknown"),
+            report_readiness=(
+                subject.get("reportReadiness")
+                if isinstance(subject.get("reportReadiness"), dict)
+                else {}
+            ),
         )
         return {
             "schemaVersion": "vedic-prevalidation-result/v1",
@@ -715,6 +763,18 @@ class SkillRuntime:
         subject = payload.get("subject") if isinstance(payload, dict) else {}
         if not isinstance(subject, dict):
             subject = {}
+        sensitivity = payload.get("sensitivityScan") if isinstance(payload, dict) else {}
+        if not isinstance(sensitivity, dict):
+            sensitivity = {}
+        summary = sensitivity.get("summary") if isinstance(sensitivity, dict) else {}
+        if not isinstance(summary, dict):
+            summary = {}
+        report_readiness = sensitivity.get("reportReadiness")
+        if not isinstance(report_readiness, dict):
+            report_readiness = {}
+        stability = sensitivity.get("stability")
+        if not isinstance(stability, dict):
+            stability = {}
         time_precision = str(subject.get("timePrecision") or "")
         time_source = str(subject.get("timeSource") or "")
         reliable_source = bool(
@@ -735,6 +795,11 @@ class SkillRuntime:
             "timePrecision": time_precision or None,
             "timeSource": time_source or None,
             "timeReliability": time_reliability,
+            "inputRiskLevel": summary.get("riskLevel"),
+            "changedFields": summary.get("changedFields") or [],
+            "divisionalConfidence": summary.get("divisionalConfidence") or {},
+            "reportReadiness": report_readiness,
+            "llmRestrictedEvidence": stability.get("llmRestrictedEvidence") or [],
         }
 
     def _prevalidation_decision(
@@ -744,47 +809,98 @@ class SkillRuntime:
         *,
         status: str,
         time_reliability: str,
+        input_risk_level: str,
+        report_readiness: dict[str, object],
     ) -> dict[str, object]:
+        min_hit_rate = float(report_readiness.get("minimumHitRateForCore") or 0.8)
+        mode = str(report_readiness.get("mode") or "unknown")
+        scope = str(report_readiness.get("scope") or "unknown")
+        core_allowed_without_rectification = bool(
+            report_readiness.get("coreAllowedWithoutRectification", False)
+        )
+        llm_contract = (
+            report_readiness.get("llmContract")
+            if isinstance(report_readiness.get("llmContract"), dict)
+            else {}
+        )
         if status != "scored" or max_score == 0:
             return {
                 "nextStep": "await_feedback",
                 "timeConfidence": "pending",
                 "reportAllowed": False,
+                "reportScope": "none",
+                "inputRiskLevel": input_risk_level,
+                "llmContract": llm_contract,
                 "reason": "Feedback is not complete yet.",
             }
         hit_rate = total_score / max_score
         threshold_high = hit_rate >= 0.8
         threshold_medium = hit_rate >= 0.6
+        meets_readiness_threshold = hit_rate >= min_hit_rate
         reliable_exact = time_reliability == "reliable_exact"
+        if mode == "rectification_required" and not reliable_exact:
+            return {
+                "nextStep": "candidate_confirmation_or_rectifier",
+                "timeConfidence": "low",
+                "reportAllowed": False,
+                "reportScope": scope,
+                "inputRiskLevel": input_risk_level,
+                "llmContract": llm_contract,
+                "reason": (
+                    "Input sensitivity scan found chart-changing candidates. "
+                    "Run candidate confirmation or rectifier before full report."
+                ),
+            }
         if reliable_exact:
             return {
-                "nextStep": "report_allowed",
+                "nextStep": (
+                    "report_allowed_with_limits"
+                    if input_risk_level in {"medium", "high"}
+                    else "report_allowed"
+                ),
                 "timeConfidence": "high",
                 "reportAllowed": True,
+                "reportScope": "guarded_full_report" if input_risk_level == "high" else scope,
+                "inputRiskLevel": input_risk_level,
+                "llmContract": llm_contract,
                 "reason": (
                     "Reliable exact time source. Low prevalidation score is recorded as signal or expression limitation."
                     if total_score <= 2
                     else "Reliable exact time source and validation feedback recorded."
                 ),
             }
-        if threshold_high:
+        if core_allowed_without_rectification and meets_readiness_threshold:
             return {
-                "nextStep": "report_allowed",
-                "timeConfidence": "high",
+                "nextStep": "report_allowed"
+                if input_risk_level == "low"
+                else "report_allowed_with_limits",
+                "timeConfidence": "high" if threshold_high else "medium",
                 "reportAllowed": True,
-                "reason": "Uncertain time but validation score is high.",
+                "reportScope": scope,
+                "inputRiskLevel": input_risk_level,
+                "llmContract": llm_contract,
+                "reason": "Validation feedback satisfies the input-risk report readiness threshold.",
             }
         if threshold_medium:
             return {
                 "nextStep": "report_allowed_with_limits",
                 "timeConfidence": "medium",
-                "reportAllowed": True,
-                "reason": "Uncertain time with medium validation score; sensitive divisional charts need conservative language.",
+                "reportAllowed": input_risk_level == "low",
+                "reportScope": "guarded_full_report" if input_risk_level == "low" else scope,
+                "inputRiskLevel": input_risk_level,
+                "llmContract": llm_contract,
+                "reason": (
+                    "Medium validation score is enough only for low input-risk sessions; "
+                    "medium/high risk sessions need stronger feedback or rectification."
+                ),
             }
         return {
             "nextStep": "boundary_scan_or_rectifier",
             "timeConfidence": "low",
             "reportAllowed": False,
+            "reportScope": scope,
+            "inputRiskLevel": input_risk_level,
+            "llmContract": llm_contract,
             "reason": "Uncertain time and low validation score; run boundary correction or rectifier before full report.",
         }
 
@@ -807,6 +923,7 @@ class SkillRuntime:
   - Each item uses bold markdown number, e.g. **1.** 推断正文.
   - Each item is followed by one blank line and a quoted derivation line: > 推导：...
   - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
+  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
   - End with: 请逐条回复：**准 / 不准 / 部分准**"""
         if locale == "ja":
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 正確 / 不正確 / 一部正確.
@@ -816,6 +933,7 @@ class SkillRuntime:
   - Each item uses bold markdown number, e.g. **1.** 推論本文.
   - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
+  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
   - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
         return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
 - reader_prevalidation.md must follow the original Step 5 output template:
@@ -824,6 +942,7 @@ class SkillRuntime:
   - Each item uses bold markdown number, e.g. **1.** Inference text.
   - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
+  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
   - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
 
     def _prompt_for(self, input_data: SkillRunInput) -> str:
@@ -1150,8 +1269,10 @@ Rules:
                 "appendix.md",
                 (
                     "Run the original Step 5 technical appendix only. Read structured_data.md, "
-                    "p2a-p2d, p3a/p3b, p4a/p4b, p5a/p5b, and .runtime/dasha_review.md. "
-                    "Include the P1-P12 parameter table, divisional data overview, validation "
+                    "birth_input_context.json, sensitivity_scan.json, prevalidation_result.json "
+                    "if present, p2a-p2d, p3a/p3b, p4a/p4b, p5a/p5b, and "
+                    ".runtime/dasha_review.md. Include the P1-P12 parameter table, divisional "
+                    "data overview, input confidence / report readiness summary, validation "
                     "report, Dasha timeline, and the Dasha回顾速查表 if available."
                 ),
                 user_line,
@@ -1169,11 +1290,16 @@ Rules:
                 "report_quality_audit.md",
                 (
                     "Run the current vedic-core Step 6 final report quality audit only. "
-                    "Read prevalidation_result.json if present, structured_data.md, p5a_life.md, "
-                    "p5b_life.md, and appendix.md. Do not rewrite the report body. Write a clear "
-                    "PASS / NEEDS_REVISION audit with blocking issues, evidence, and exact fixes. "
-                    "Fail the audit if time confidence is inconsistent, missed validation anchors "
-                    "are reinterpreted as hits, child/adult framing is wrong, Dasha ages are incoherent, "
+                    "Read birth_input_context.json, sensitivity_scan.json, prevalidation_result.json "
+                    "if present, structured_data.md, p5a_life.md, p5b_life.md, and appendix.md. "
+                    "Do not rewrite the report body. Write a clear PASS / NEEDS_REVISION audit "
+                    "with blocking issues, evidence, and exact fixes. Fail the audit if "
+                    "prevalidation_result.decision.reportAllowed is false, "
+                    "sensitivity_scan.reportReadiness.mode is rectification_required but the report "
+                    "is written as a deterministic full report, any "
+                    "llmContract.mustNotUseAsPrimaryEvidence field is used as a primary conclusion "
+                    "anchor, time confidence is inconsistent, missed validation anchors are "
+                    "reinterpreted as hits, child/adult framing is wrong, Dasha ages are incoherent, "
                     "or the main report contains raw technical-label paragraphs."
                 ),
                 user_line,
@@ -1239,6 +1365,9 @@ Rules:
 - Do not inherit old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - {language_instruction}
 - Use structured_data.md as the calculation source of truth.
+- Read birth_input_context.json and sensitivity_scan.json when present; use them only as the input-confidence and report-readiness gate.
+- Obey sensitivity_scan.reportReadiness.llmContract: never use mustNotUseAsPrimaryEvidence fields as primary conclusion anchors, and downgrade or omit unstable divisional/timing claims.
+- If sensitivity_scan.reportReadiness.mode is rectification_required, write only candidate-discriminating or clearly low-confidence/D1-only content unless prevalidation_result.json explicitly allows the full report.
 - Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
 - Each requested file must be complete markdown, not a placeholder and not "see previous".
 - If the requested file is under .runtime/, treat it as an internal shard; do not write the public composed files such as p2a_planets.md, p3a_d9.md, p4a_houses.md, p4b_houses.md, p5a_life.md, or p5b_life.md.
@@ -1449,6 +1578,8 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
 - Use the provided structured_data.md content.
+- Read birth_input_context.json and sensitivity_scan.json before writing anchors.
+- If sensitivity_scan.reportReadiness.mode is rectification_required, make the anchors candidate-discriminating and focused on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
 {self._reader_prevalidation_format_instruction(locale)}
@@ -1462,13 +1593,15 @@ User message:
     def _core_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-core exactly as the original skill.
 
-Workspace contains structured_data.md and may contain user_context.md / reader_prevalidation.md.
+Workspace contains structured_data.md, birth_input_context.json, sensitivity_scan.json,
+and may contain user_context.md / reader_prevalidation.md.
 
 Rules:
 - {self._language_instruction(locale)}
 - Follow vedic-core Step 0 through Step 5.
 - Preserve blind-audit rules: Step 1-3 must not use user_context.md.
 - Use prevalidation_result.json, when present, as the structured source for validation score, time confidence, and report gating. Do not reinterpret missed anchors as hits.
+- Obey sensitivity_scan.reportReadiness.llmContract: do not use restricted evidence as a primary conclusion anchor, and downgrade or omit unstable divisional/timing claims.
 - Follow the current report quality rules: main report sections use plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
 - Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - Write the original expected markdown files: p1_overview.md, p2a_planets.md, p2b_planets.md, p2c_planets.md, p2d_planets.md, p3a_d9.md, p3b_divisional.md, p4a_houses.md, p4b_houses.md, p5a_life.md, p5b_life.md, appendix.md.

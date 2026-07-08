@@ -78,6 +78,9 @@ class CoreJobRuntime:
         if input_data.skill != "vedic-core":
             raise ValueError("Core jobs only support vedic-core")
         self.skill_runtime.workspace.require_session_dir(input_data.session_id)
+        readiness_check = getattr(self.skill_runtime, "assert_core_readiness", None)
+        if callable(readiness_check):
+            readiness_check(input_data.session_id)
 
         async with self._registry_lock:
             active_job_id = self._active_by_session.get(input_data.session_id)

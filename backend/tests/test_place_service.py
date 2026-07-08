@@ -28,8 +28,9 @@ def test_precise_search_uses_local_city_index_first(tmp_path) -> None:
     assert response.fallback_source is None
     assert response.options[0].source == "geonames-local"
     assert response.options[0].coordinate_system == "WGS84"
-    assert (
-        response.options[0].birth_place == "Shanghai, Shanghai, China | lat=31.2304, lon=121.4737"
+    assert response.options[0].birth_place == (
+        "Shanghai, Shanghai, China | lat=31.2304, lon=121.4737, "
+        "source=geonames-local, accuracy=city"
     )
 
 
@@ -74,6 +75,20 @@ def test_resolve_accepts_valid_inline_coordinates(monkeypatch: pytest.MonkeyPatc
     assert place.lon == 121.4737
     assert place.timezone == "Asia/Shanghai"
     assert place.source == "inline-coordinates"
+    assert place.accuracy == "coordinate"
+    assert place.radius_km == 0.25
+
+
+def test_resolve_parses_inline_coordinate_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = PlaceService(SimpleNamespace())
+    monkeypatch.setattr(service, "_timezone_for_coordinates", lambda lat, lon: "Asia/Shanghai")
+
+    place = service.resolve("Shanghai | lat=31.2304, lon=121.4737, source=amap, accuracy=poi")
+
+    assert place.source == "amap"
+    assert place.accuracy == "poi"
+    assert place.confidence == "high"
+    assert place.radius_km == 0.3
 
 
 @pytest.mark.parametrize(

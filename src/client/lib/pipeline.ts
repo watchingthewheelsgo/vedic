@@ -59,13 +59,18 @@ export function getPipelineData(
   runMetrics: RunMetrics | null,
   options: { session?: SkillSessionResponse | null; readerRunning?: boolean } = {}
 ): PipelineData | null {
-  const readerNode = readerPipelineNode(options.session ?? null, Boolean(options.readerRunning));
+  const session = options.session ?? null;
+  const calculatorNode = calculatorPipelineNode(session);
+  const readerNode = readerPipelineNode(session, Boolean(options.readerRunning));
+  const setupNodes = [calculatorNode, readerNode].filter((node): node is PipelineNode =>
+    Boolean(node)
+  );
 
   if (coreJob && coreJob.nodes.length > 0) {
     const coreNodes = coreJob.nodes.map((node) => ({
       id: node.id,
       label: node.label,
-      wave: node.wave + 1,
+      wave: node.wave + setupNodes.length,
       status: node.status,
       files: node.files,
       dependencies: node.dependencies,
@@ -74,12 +79,12 @@ export function getPipelineData(
       durationSeconds: node.durationSeconds,
       error: node.error
     }));
-    const nodes = readerNode ? [readerNode, ...coreNodes] : coreNodes;
-    const readerComplete = readerNode?.status === "completed" ? 1 : 0;
-    const readerFailed = readerNode?.status === "failed" ? 1 : 0;
-    const total = coreJob.progress.total + (readerNode ? 1 : 0);
-    const completed = coreJob.progress.completed + readerComplete;
-    const failed = coreJob.progress.failed + readerFailed;
+    const nodes = [...setupNodes, ...coreNodes];
+    const setupComplete = setupNodes.filter((node) => node.status === "completed").length;
+    const setupFailed = setupNodes.filter((node) => node.status === "failed").length;
+    const total = coreJob.progress.total + setupNodes.length;
+    const completed = coreJob.progress.completed + setupComplete;
+    const failed = coreJob.progress.failed + setupFailed;
     return {
       nodes,
       status: coreJob.status,
@@ -97,7 +102,7 @@ export function getPipelineData(
     const normalized: PipelineNode[] = nodes.map((node) => ({
       id: node.id,
       label: node.label ?? node.id,
-      wave: (node.wave ?? 1) + 1,
+      wave: (node.wave ?? 1) + setupNodes.length,
       status: persistedFailed && node.status === "running" ? "pending" : (node.status ?? "pending"),
       files: node.files ?? [],
       dependencies: node.dependencies ?? [],
@@ -106,16 +111,17 @@ export function getPipelineData(
       error: node.error ?? null,
       durationSeconds: node.durationSeconds ?? null
     }));
-    const allNodes = readerNode ? [readerNode, ...normalized] : normalized;
+    const allNodes = [...setupNodes, ...normalized];
     const total = runMetrics?.progress?.total ?? normalized.length;
     const completed =
       runMetrics?.progress?.completed ??
       normalized.filter((node) => node.status === "completed" || node.status === "skipped").length;
     const failed =
       runMetrics?.progress?.failed ?? normalized.filter((node) => node.status === "failed").length;
-    const adjustedTotal = total + (readerNode ? 1 : 0);
-    const adjustedCompleted = completed + (readerNode?.status === "completed" ? 1 : 0);
-    const adjustedFailed = failed + (readerNode?.status === "failed" ? 1 : 0);
+    const adjustedTotal = total + setupNodes.length;
+    const adjustedCompleted =
+      completed + setupNodes.filter((node) => node.status === "completed").length;
+    const adjustedFailed = failed + setupNodes.filter((node) => node.status === "failed").length;
     return {
       nodes: allNodes,
       status: runMetrics?.status,
@@ -127,21 +133,51 @@ export function getPipelineData(
     };
   }
 
-  if (readerNode) {
-    const completed = readerNode.status === "completed" ? 1 : 0;
-    const failed = readerNode.status === "failed" ? 1 : 0;
+  if (setupNodes.length > 0) {
+    const completed = setupNodes.filter((node) => node.status === "completed").length;
+    const failed = setupNodes.filter((node) => node.status === "failed").length;
     return {
-      nodes: [readerNode],
-      status: readerNode.status,
-      percent: completed ? 100 : 0,
+      nodes: setupNodes,
+      status: readerNode?.status ?? calculatorNode?.status,
+      percent: Math.round((completed / setupNodes.length) * 100),
       completed,
-      total: 1,
+      total: setupNodes.length,
       failed,
       durationSeconds: null
     };
   }
 
   return null;
+}
+
+function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineNode | null {
+  const artifacts = session?.artifacts ?? [];
+  const structuredData = artifacts.find((artifact) => artifact.path === "structured_data.md");
+  if (!structuredData) return null;
+  const structuredJson = artifacts.find((artifact) => artifact.path === "structured_data.json");
+  const inputContext = artifacts.find((artifact) => artifact.path === "birth_input_context.json");
+  const sensitivity = artifacts.find((artifact) => artifact.path === "sensitivity_scan.json");
+  return {
+    id: "chart_facts",
+    label: "Chart Facts",
+    wave: 1,
+    status: "completed",
+    files: [
+      "structured_data.md",
+      "structured_data.json",
+      "birth_input_context.json",
+      "sensitivity_scan.json"
+    ],
+    dependencies: [],
+    startedAt: null,
+    finishedAt:
+      sensitivity?.updatedAt ??
+      inputContext?.updatedAt ??
+      structuredJson?.updatedAt ??
+      structuredData.updatedAt,
+    durationSeconds: null,
+    error: null
+  };
 }
 
 function readerPipelineNode(
@@ -164,10 +200,10 @@ function readerPipelineNode(
   return {
     id: "reader_prevalidation",
     label: "First Check",
-    wave: 1,
+    wave: 2,
     status,
     files: ["reader_prevalidation.md", "prevalidation_result.json", "user_context.md"],
-    dependencies: ["structured_data.md"],
+    dependencies: ["chart_facts"],
     startedAt: null,
     finishedAt:
       feedback?.updatedAt ?? validationResult?.updatedAt ?? prevalidation?.updatedAt ?? null,
