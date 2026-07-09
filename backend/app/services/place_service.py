@@ -13,6 +13,8 @@ from typing import Literal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+import requests
+
 from app.schemas import (
     PlaceOption,
     PlaceSearchResponse,
@@ -749,9 +751,9 @@ class PlaceService:
         )
         separator = "&" if "?" in base_url else "?"
         url = f"{base_url}{separator}{urlencode({'q': search_query})}"
-        request = Request(url, headers={"User-Agent": user_agent})
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310
-            return response.read().decode("utf-8", errors="replace"), url
+        response = requests.get(url, headers={"User-Agent": user_agent}, timeout=timeout)
+        response.raise_for_status()
+        return response.text, url
 
     def _web_search_html_to_options(
         self,

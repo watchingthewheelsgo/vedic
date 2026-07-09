@@ -10,7 +10,8 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+
+import requests
 
 if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
@@ -181,9 +182,9 @@ class BackendToolRunner:
         )
         separator = "&" if "?" in base_url else "?"
         url = f"{base_url}{separator}{urlencode({'q': query})}"
-        request = Request(url, headers={"User-Agent": user_agent})
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310
-            raw_html = response.read().decode("utf-8", errors="replace")
+        response = requests.get(url, headers={"User-Agent": user_agent}, timeout=timeout)
+        response.raise_for_status()
+        raw_html = response.text
         text = self._html_to_text(raw_html)
         return {
             "query": query,

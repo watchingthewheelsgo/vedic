@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -41,15 +42,27 @@ class PrecisePlaceLookupService:
         if agent_enabled:
             agent_attempted = True
             try:
-                result = await self.agent_runtime.run_place_lookup_task(
-                    query=query,
-                    city_label=city_base.label,
-                    city_lat=city_base.lat,
-                    city_lon=city_base.lon,
-                    max_distance_km=self.place_service.max_city_distance_km(city_base),
-                    max_results=min(limit, 5),
-                )
+                agent_settings = getattr(self.agent_runtime, "settings", None)
+                async with asyncio.timeout(
+                    float(
+                        getattr(
+                            agent_settings,
+                            "place_lookup_agent_timeout_seconds",
+                            45.0,
+                        )
+                    )
+                ):
+                    result = await self.agent_runtime.run_place_lookup_task(
+                        query=query,
+                        city_label=city_base.label,
+                        city_lat=city_base.lat,
+                        city_lon=city_base.lon,
+                        max_distance_km=self.place_service.max_city_distance_km(city_base),
+                        max_results=min(limit, 5),
+                    )
                 agent_options = self._agent_result_to_options(result.raw_text, query, city_base)
+            except TimeoutError:
+                agent_error = "agent place lookup timed out"
             except Exception as exc:
                 agent_error = str(exc)
                 logger.warning("precise_place_agent_lookup_failed: %s", agent_error)
