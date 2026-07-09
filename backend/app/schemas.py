@@ -82,7 +82,7 @@ class PrecisePlaceOption(ApiModel):
     label: str
     address: str | None = None
     meta: str | None = None
-    source: Literal["geonames-local", "amap", "web", "manual"]
+    source: Literal["geonames-local", "amap", "agent", "web", "manual"]
     accuracy: Literal["city", "poi", "address", "district", "coordinate"]
     coordinate_system: str = Field(alias="coordinateSystem")
     latitude: float
@@ -103,9 +103,13 @@ class PrecisePlaceSearchResponse(ApiModel):
     local_count: int = Field(default=0, alias="localCount")
     fallback_source: str | None = Field(default=None, alias="fallbackSource")
     fallback_enabled: bool = Field(default=False, alias="fallbackEnabled")
+    agent_fallback_enabled: bool = Field(default=False, alias="agentFallbackEnabled")
+    agent_attempted: bool = Field(default=False, alias="agentAttempted")
+    agent_error: str | None = Field(default=None, alias="agentError")
     web_fallback_enabled: bool = Field(default=False, alias="webFallbackEnabled")
     verification_base: str | None = Field(default=None, alias="verificationBase")
     rejected_count: int = Field(default=0, alias="rejectedCount")
+    attempted_sources: list[str] = Field(default_factory=list, alias="attemptedSources")
 
 
 BillingPlanKey = Literal["pro_monthly", "pro_yearly", "single_report"]

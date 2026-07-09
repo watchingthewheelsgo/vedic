@@ -14,6 +14,7 @@ from app.services.admin_sessions import AdminSessionsService
 from app.services.creem_billing import CreemBillingService
 from app.services.metadata_store import MetadataStore
 from app.services.place_service import PlaceService
+from app.services.precise_place_lookup import PrecisePlaceLookupService
 from app.services.report_exporter import ReportExporter
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
@@ -40,6 +41,9 @@ class AppContainer:
         self.user_store = UserStore()
         self.billing = CreemBillingService(settings)
         self.agent_runtime = ClaudeRuntime(settings)
+        self.precise_place_lookup = PrecisePlaceLookupService(
+            self.place_service, self.agent_runtime
+        )
         self.skill_runtime = SkillRuntime(
             calculator=self.calculator,
             workspace=self.skill_workspace,

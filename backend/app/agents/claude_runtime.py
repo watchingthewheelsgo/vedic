@@ -120,6 +120,89 @@ class ClaudeRuntime:
         )
         return await self._run_query(task_name, prompt, options)
 
+    async def run_place_lookup_task(
+        self,
+        *,
+        query: str,
+        city_label: str,
+        city_lat: float,
+        city_lon: float,
+        max_distance_km: float,
+        max_results: int = 5,
+    ) -> AgentRunResult:
+        if not self.is_configured():
+            raise RuntimeError("Claude Agent SDK runtime is not configured")
+
+        from claude_agent_sdk import ClaudeAgentOptions
+
+        place_search_tool = "mcp__vedic_backend_tools__place_web_search"
+        options = ClaudeAgentOptions(
+            tools=[],
+            allowed_tools=[place_search_tool],
+            disallowed_tools=[
+                "Bash",
+                "Read",
+                "Write",
+                "Edit",
+                "Glob",
+                "Grep",
+                "WebSearch",
+                "WebFetch",
+            ],
+            permission_mode="dontAsk",
+            setting_sources=["project"],
+            cwd=Path.cwd(),
+            add_dirs=[Path.cwd()],
+            mcp_servers=self._backend_tool_server(),
+            env=self._agent_env(),
+            model=self.settings.anthropic_default_haiku_model or self.settings.anthropic_model,
+            max_turns=6,
+            effort="low",
+            system_prompt=(
+                "You are a precise geocoding evidence collector. Use web search only to find "
+                "candidate coordinates for a named hospital, district, landmark, or address. "
+                "Do not decide final validity; the backend will verify distance against the city. "
+                "Return JSON only."
+            ),
+        )
+        prompt = f"""
+Find candidate WGS84 coordinates for this place query.
+
+Query: {query}
+Selected city baseline: {city_label}
+City center: lat={city_lat}, lon={city_lon}
+Expected max distance from city center: {max_distance_km} km
+Max candidates: {max_results}
+
+Rules:
+- Use the `{place_search_tool}` tool to search for coordinate evidence. Suggested searches:
+  1. "{query} {city_label} latitude longitude coordinates"
+  2. "{query} {city_label} 经纬度 坐标"
+- Prefer official or map/knowledge-panel evidence when available.
+- Include only candidates that plausibly refer to the query inside the selected city.
+- If evidence lists longitude before latitude, normalize output to latitude then longitude.
+- If you cannot find credible coordinates, return an empty candidates array.
+- Return valid JSON only, no markdown fences.
+
+Schema:
+{{
+  "candidates": [
+    {{
+      "label": "place name",
+      "address": "short address or locality",
+      "latitude": 31.0,
+      "longitude": 121.0,
+      "accuracy": "poi",
+      "sourceUrl": "https://...",
+      "rawEvidence": "short quote or summary of where the coordinates came from",
+      "confidence": "high"
+    }}
+  ],
+  "notes": ["optional short notes"]
+}}
+"""
+        return await self._run_query("precise-place-agent-lookup", prompt.strip(), options)
+
     def _agent_env(self) -> dict[str, str]:
         token = self.settings.get_agent_auth_token()
         haiku = self.settings.anthropic_default_haiku_model
@@ -156,6 +239,7 @@ class ClaudeRuntime:
             "mcp__vedic_backend_tools__vedic_rectifier_time_scan",
             "mcp__vedic_backend_tools__vedic_report_builder",
             "mcp__vedic_backend_tools__bazi_calculate_chart",
+            "mcp__vedic_backend_tools__place_web_search",
         ]
 
     def _agent_effort(self) -> AgentEffort:
