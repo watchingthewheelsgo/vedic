@@ -120,7 +120,11 @@ async def precise_places(
     limit: int = Query(default=8, ge=1, le=20),
 ) -> PrecisePlaceSearchResponse:
     try:
-        return get_container().place_service.search_precise(query=q, limit=limit, city_context=city)
+        return await get_container().precise_place_lookup.search_precise(
+            query=q,
+            limit=limit,
+            city_context=city,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

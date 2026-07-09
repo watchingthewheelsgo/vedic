@@ -42,6 +42,9 @@ export function PrecisePlaceDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
+  const [agentFallbackEnabled, setAgentFallbackEnabled] = useState(false);
+  const [agentAttempted, setAgentAttempted] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
   const [webFallbackEnabled, setWebFallbackEnabled] = useState(false);
   const [verificationBase, setVerificationBase] = useState<string | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);
@@ -56,6 +59,9 @@ export function PrecisePlaceDialog({
     setSelected(null);
     setError("");
     setFallbackEnabled(false);
+    setAgentFallbackEnabled(false);
+    setAgentAttempted(false);
+    setAgentError(null);
     setWebFallbackEnabled(false);
     setVerificationBase(null);
     setRejectedCount(0);
@@ -83,6 +89,9 @@ export function PrecisePlaceDialog({
       setLoading(false);
       setError("");
       setFallbackEnabled(false);
+      setAgentFallbackEnabled(false);
+      setAgentAttempted(false);
+      setAgentError(null);
       setWebFallbackEnabled(false);
       setVerificationBase(null);
       setRejectedCount(0);
@@ -101,6 +110,9 @@ export function PrecisePlaceDialog({
         .then((response) => {
           setOptions(response.options);
           setFallbackEnabled(response.fallbackEnabled);
+          setAgentFallbackEnabled(response.agentFallbackEnabled);
+          setAgentAttempted(response.agentAttempted);
+          setAgentError(response.agentError ?? null);
           setWebFallbackEnabled(response.webFallbackEnabled);
           setVerificationBase(response.verificationBase ?? null);
           setRejectedCount(response.rejectedCount);
@@ -277,6 +289,17 @@ export function PrecisePlaceDialog({
                   ? t("precisePlace.source.amap.enabled")
                   : t("precisePlace.source.amap.disabled")}
               </Badge>
+              <Badge
+                variant={agentAttempted ? "done" : agentFallbackEnabled ? "neutral" : "neutral"}
+                className="gap-1"
+              >
+                <Crosshair className="size-3" />
+                {agentAttempted
+                  ? t("precisePlace.source.agent.attempted")
+                  : agentFallbackEnabled
+                    ? t("precisePlace.source.agent.enabled")
+                    : t("precisePlace.source.agent.disabled")}
+              </Badge>
               <Badge variant={webFallbackEnabled ? "done" : "neutral"} className="gap-1">
                 <Search className="size-3" />
                 {webFallbackEnabled
@@ -290,6 +313,11 @@ export function PrecisePlaceDialog({
                 {rejectedCount > 0
                   ? ` · ${t("precisePlace.verification.rejected")} ${rejectedCount}`
                   : ""}
+              </div>
+            ) : null}
+            {agentError ? (
+              <div className="rounded-[10px] border border-gold/20 bg-cream-2 px-3 py-2 text-xs leading-relaxed text-muted">
+                {t("precisePlace.source.agent.error")}: {agentError}
               </div>
             ) : null}
 
@@ -479,6 +507,7 @@ function EmptyState({ text }: { text: string }) {
 
 function labelForSource(source: PrecisePlaceOption["source"]) {
   if (source === "amap") return "AMap";
+  if (source === "agent") return "Agent";
   if (source === "web") return "Web";
   if (source === "geonames-local") return "GeoNames";
   return "Manual";

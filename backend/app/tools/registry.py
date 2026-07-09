@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from html import unescape
+import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
+
+import requests
 
 if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
@@ -165,6 +171,27 @@ class BackendToolRunner:
             args,
         )
 
+    def place_web_search(self, query: str, *, max_chars: int = 6000) -> dict[str, str]:
+        base_url = (
+            getattr(self.settings, "web_place_search_url", "") or "https://duckduckgo.com/html/"
+        ).strip()
+        timeout = float(getattr(self.settings, "web_place_search_timeout_seconds", 3.0))
+        user_agent = (
+            getattr(self.settings, "web_place_search_user_agent", "")
+            or "Mozilla/5.0 (compatible; VedicPlaceVerifier/1.0)"
+        )
+        separator = "&" if "?" in base_url else "?"
+        url = f"{base_url}{separator}{urlencode({'q': query})}"
+        response = requests.get(url, headers={"User-Agent": user_agent}, timeout=timeout)
+        response.raise_for_status()
+        raw_html = response.text
+        text = self._html_to_text(raw_html)
+        return {
+            "query": query,
+            "sourceUrl": url,
+            "text": text[: max(1000, min(max_chars, 12000))],
+        }
+
     def sdk_tools(self) -> list[SdkMcpTool[Any]]:
         """Return in-process SDK tools for agent workflows that explicitly need them."""
 
@@ -287,7 +314,26 @@ class BackendToolRunner:
             )
             return _tool_text(result.output)
 
-        return [validate_synastry, build_synastry, time_scan, report_builder, bazi_calculate_chart]
+        @tool(
+            "place_web_search",
+            "Search the web for place coordinate evidence and return result-page text.",
+            {"query": str, "max_chars": int},
+        )
+        async def place_web_search(args: dict[str, Any]) -> dict[str, Any]:
+            result = self.place_web_search(
+                str(args["query"]),
+                max_chars=int(args.get("max_chars") or 6000),
+            )
+            return _tool_text(json.dumps(result, ensure_ascii=False))
+
+        return [
+            validate_synastry,
+            build_synastry,
+            time_scan,
+            report_builder,
+            bazi_calculate_chart,
+            place_web_search,
+        ]
 
     def _tool_path(self, group: str, filename: str) -> Path:
         return self.settings.project_root / "backend" / "app" / "tools" / group / filename
@@ -306,6 +352,14 @@ class BackendToolRunner:
         if result.returncode != 0:
             raise RuntimeError(output or f"{name} failed")
         return ToolRunResult(name=name, output=output)
+
+    @staticmethod
+    def _html_to_text(raw_html: str) -> str:
+        without_scripts = re.sub(
+            r"<(script|style)\b[^>]*>.*?</\1>", " ", raw_html, flags=re.I | re.S
+        )
+        without_tags = re.sub(r"<[^>]+>", " ", without_scripts)
+        return re.sub(r"\s+", " ", unescape(without_tags)).strip()
 
 
 def _tool_text(text: str) -> dict[str, Any]:

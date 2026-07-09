@@ -19,7 +19,7 @@ export type PlaceSearchResponse = {
 
 export type PrecisePlaceAccuracy = "city" | "poi" | "address" | "district" | "coordinate";
 
-export type PrecisePlaceSource = "geonames-local" | "amap" | "web" | "manual";
+export type PrecisePlaceSource = "geonames-local" | "amap" | "agent" | "web" | "manual";
 
 export type PrecisePlaceVerificationStatus = "verified" | "city-fallback" | "unverified" | "manual";
 
@@ -47,9 +47,13 @@ export type PrecisePlaceSearchResponse = {
   localCount: number;
   fallbackSource?: string | null;
   fallbackEnabled: boolean;
+  agentFallbackEnabled: boolean;
+  agentAttempted: boolean;
+  agentError?: string | null;
   webFallbackEnabled: boolean;
   verificationBase?: string | null;
   rejectedCount: number;
+  attemptedSources: string[];
 };
 
 export type AccountProfileResponse = {

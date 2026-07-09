@@ -13,6 +13,8 @@ from typing import Literal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+import requests
+
 from app.schemas import (
     PlaceOption,
     PlaceSearchResponse,
@@ -236,7 +238,15 @@ class PlaceService:
         return PlaceSearchResponse(options=[])
 
     def search_precise(
-        self, query: str = "", limit: int = 8, city_context: str | None = None
+        self,
+        query: str = "",
+        limit: int = 8,
+        city_context: str | None = None,
+        agent_options: list[PrecisePlaceOption] | None = None,
+        agent_enabled: bool = False,
+        agent_attempted: bool = False,
+        agent_error: str | None = None,
+        use_web_fallback: bool = True,
     ) -> PrecisePlaceSearchResponse:
         trimmed = query.strip()
         limit = max(1, min(20, limit))
@@ -245,9 +255,13 @@ class PlaceService:
         fallback_enabled = self._amap_enabled()
         web_enabled = self._web_place_search_enabled()
         fallback_sources: list[str] = []
+        attempted_sources = ["local"]
+        if agent_attempted:
+            attempted_sources.append("agent")
         options = list(local_options)
 
         if not local_options and fallback_enabled:
+            attempted_sources.append("amap")
             amap_options = self._search_precise_amap(
                 trimmed,
                 limit,
@@ -257,7 +271,18 @@ class PlaceService:
                 options.extend(amap_options)
                 fallback_sources.append("amap")
 
-        if not local_options and len(options) < limit and city_base and web_enabled:
+        if not local_options and len(options) < limit and agent_options:
+            options.extend(agent_options[: limit - len(options)])
+            fallback_sources.append("agent")
+
+        if (
+            not local_options
+            and len(options) < limit
+            and city_base
+            and web_enabled
+            and use_web_fallback
+        ):
+            attempted_sources.append("web")
             web_options = self._search_precise_web(trimmed, city_base, limit - len(options))
             if web_options:
                 options.extend(web_options)
@@ -283,9 +308,13 @@ class PlaceService:
             localCount=len(local_options),
             fallbackSource="+".join(fallback_sources) if fallback_sources else None,
             fallbackEnabled=fallback_enabled,
+            agentFallbackEnabled=agent_enabled,
+            agentAttempted=agent_attempted,
+            agentError=agent_error,
             webFallbackEnabled=bool(city_base and web_enabled),
             verificationBase=city_base.label if city_base else None,
             rejectedCount=rejected_count,
+            attemptedSources=attempted_sources,
         )
 
     def resolve(self, raw_query: str) -> ResolvedPlace:
@@ -722,9 +751,9 @@ class PlaceService:
         )
         separator = "&" if "?" in base_url else "?"
         url = f"{base_url}{separator}{urlencode({'q': search_query})}"
-        request = Request(url, headers={"User-Agent": user_agent})
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310
-            return response.read().decode("utf-8", errors="replace"), url
+        response = requests.get(url, headers={"User-Agent": user_agent}, timeout=timeout)
+        response.raise_for_status()
+        return response.text, url
 
     def _web_search_html_to_options(
         self,
@@ -871,6 +900,23 @@ class PlaceService:
             parts.append(f"accuracy={accuracy}")
         return f"{label} | {', '.join(parts)}"
 
+    def birth_place_with_coordinates(
+        self,
+        label: str,
+        lat: float,
+        lon: float,
+        *,
+        source: str | None = None,
+        accuracy: str | None = None,
+    ) -> str:
+        return self._birth_place_with_coordinates(
+            label,
+            lat,
+            lon,
+            source=source,
+            accuracy=accuracy,
+        )
+
     @staticmethod
     def _string_or_empty(value: object) -> str:
         if isinstance(value, str):
@@ -899,6 +945,9 @@ class PlaceService:
     @staticmethod
     def _max_city_distance_km(city_base: ResolvedPlace) -> float:
         return max(city_base.radius_km + 10.0, 35.0)
+
+    def max_city_distance_km(self, city_base: ResolvedPlace) -> float:
+        return self._max_city_distance_km(city_base)
 
     @staticmethod
     def _format_distance(distance: float) -> str:

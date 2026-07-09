@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     web_place_search_timeout_seconds: float = Field(
         default=3.0, alias="WEB_PLACE_SEARCH_TIMEOUT_SECONDS"
     )
+    place_lookup_agent_timeout_seconds: float = Field(
+        default=45.0, alias="PLACE_LOOKUP_AGENT_TIMEOUT_SECONDS"
+    )
     web_place_search_user_agent: str = Field(
         default=(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
