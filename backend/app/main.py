@@ -116,10 +116,11 @@ async def places(
 @app.get("/api/precise-places", response_model=PrecisePlaceSearchResponse)
 async def precise_places(
     q: str = Query(default="", min_length=0, max_length=120),
+    city: str | None = Query(default=None, max_length=160),
     limit: int = Query(default=8, ge=1, le=20),
 ) -> PrecisePlaceSearchResponse:
     try:
-        return get_container().place_service.search_precise(query=q, limit=limit)
+        return get_container().place_service.search_precise(query=q, limit=limit, city_context=city)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

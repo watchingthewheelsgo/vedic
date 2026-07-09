@@ -63,6 +63,20 @@ class Settings(BaseSettings):
     amap_web_service_key: str = Field(default="", alias="AMAP_WEB_SERVICE_KEY")
     amap_place_fallback_enabled: bool = Field(default=False, alias="AMAP_PLACE_FALLBACK_ENABLED")
     amap_request_timeout_seconds: float = Field(default=2.5, alias="AMAP_REQUEST_TIMEOUT_SECONDS")
+    web_place_search_enabled: bool = Field(default=True, alias="WEB_PLACE_SEARCH_ENABLED")
+    web_place_search_url: str = Field(
+        default="https://duckduckgo.com/html/", alias="WEB_PLACE_SEARCH_URL"
+    )
+    web_place_search_timeout_seconds: float = Field(
+        default=3.0, alias="WEB_PLACE_SEARCH_TIMEOUT_SECONDS"
+    )
+    web_place_search_user_agent: str = Field(
+        default=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"
+        ),
+        alias="WEB_PLACE_SEARCH_USER_AGENT",
+    )
 
     anthropic_base_url: str = Field(
         default="https://api.deepseek.com/anthropic", alias="ANTHROPIC_BASE_URL"

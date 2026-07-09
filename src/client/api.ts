@@ -167,9 +167,10 @@ export const api = {
     if (input.limit) params.set("limit", String(input.limit));
     return getJson<PlaceSearchResponse>(`/api/places?${params.toString()}`, signal);
   },
-  searchPrecisePlaces(input: { q: string; limit?: number }, signal?: AbortSignal) {
+  searchPrecisePlaces(input: { q: string; city?: string; limit?: number }, signal?: AbortSignal) {
     const params = new URLSearchParams();
     params.set("q", input.q);
+    if (input.city) params.set("city", input.city);
     if (input.limit) params.set("limit", String(input.limit));
     return getJson<PrecisePlaceSearchResponse>(`/api/precise-places?${params.toString()}`, signal);
   },

@@ -56,6 +56,90 @@ def test_precise_search_stays_empty_without_configured_fallback(tmp_path) -> Non
     assert response.fallback_enabled is False
 
 
+def test_precise_search_verifies_web_candidate_against_city(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Beijing,北京|Beijing,Beijing,China,39.9042,116.4074,8\n",
+        encoding="utf-8",
+    )
+    service = PlaceService(
+        SimpleNamespace(
+            geonames_path=lambda: geonames,
+            amap_place_fallback_enabled=False,
+            amap_web_service_key="",
+            web_place_search_enabled=True,
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_web_search_get",
+        lambda query: (
+            "<html>Beijing Union Medical College Hospital latitude 39.9149, "
+            "longitude 116.4136</html>",
+            "https://example.test/search?q=beijing",
+        ),
+    )
+
+    response = service.search_precise(
+        "北京协和医院",
+        city_context="Beijing, Beijing, China",
+        limit=5,
+    )
+
+    assert response.verification_base == "Beijing, Beijing, China"
+    assert response.rejected_count == 0
+    assert response.fallback_source == "web"
+    assert response.web_fallback_enabled is True
+    assert response.options[0].source == "web"
+    assert response.options[0].verification_status == "verified"
+    assert response.options[0].distance_from_city_km is not None
+    assert response.options[0].distance_from_city_km < 2
+    assert response.options[0].birth_place.startswith("北京协和医院, Beijing, Beijing, China")
+
+
+def test_precise_search_rejects_web_candidate_outside_city_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Beijing,北京|Beijing,Beijing,China,39.9042,116.4074,8\n",
+        encoding="utf-8",
+    )
+    service = PlaceService(
+        SimpleNamespace(
+            geonames_path=lambda: geonames,
+            amap_place_fallback_enabled=False,
+            amap_web_service_key="",
+            web_place_search_enabled=True,
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_web_search_get",
+        lambda query: (
+            "<html>Wrong candidate latitude 22.5431, longitude 114.0579</html>",
+            "https://example.test/search?q=wrong",
+        ),
+    )
+
+    response = service.search_precise(
+        "北京协和医院",
+        city_context="Beijing, Beijing, China",
+        limit=5,
+    )
+
+    assert response.rejected_count == 1
+    assert response.options[0].verification_status == "city-fallback"
+    assert response.options[0].source == "geonames-local"
+    assert response.options[0].accuracy == "city"
+    assert response.options[0].latitude == 39.9042
+    assert response.options[0].longitude == 116.4074
+
+
 def test_gcj02_to_wgs84_conversion_keeps_non_china_coordinates() -> None:
     service = PlaceService(SimpleNamespace())
 
