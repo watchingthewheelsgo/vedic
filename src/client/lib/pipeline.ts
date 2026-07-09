@@ -157,6 +157,9 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
   const structuredJson = artifacts.find((artifact) => artifact.path === "structured_data.json");
   const inputContext = artifacts.find((artifact) => artifact.path === "birth_input_context.json");
   const sensitivity = artifacts.find((artifact) => artifact.path === "sensitivity_scan.json");
+  const rectification = artifacts.find(
+    (artifact) => artifact.path === "chart_rectification_state.json"
+  );
   return {
     id: "chart_facts",
     label: "Chart Facts",
@@ -166,12 +169,14 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
       "structured_data.md",
       "structured_data.json",
       "birth_input_context.json",
-      "sensitivity_scan.json"
+      "sensitivity_scan.json",
+      "chart_rectification_state.json"
     ],
     dependencies: [],
     startedAt: null,
     finishedAt:
       sensitivity?.updatedAt ??
+      rectification?.updatedAt ??
       inputContext?.updatedAt ??
       structuredJson?.updatedAt ??
       structuredData.updatedAt,
@@ -202,7 +207,12 @@ function readerPipelineNode(
     label: "First Check",
     wave: 2,
     status,
-    files: ["reader_prevalidation.md", "prevalidation_result.json", "user_context.md"],
+    files: [
+      "reader_prevalidation.md",
+      "prevalidation_result.json",
+      "chart_rectification_state.json",
+      "user_context.md"
+    ],
     dependencies: ["chart_facts"],
     startedAt: null,
     finishedAt:

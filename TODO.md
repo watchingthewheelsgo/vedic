@@ -34,6 +34,34 @@ producing reliable user-facing reports.
 - Persist job state outside process memory. A uvicorn reload or backend restart
   currently loses in-flight core job state.
 
+## P0: chart rectification gaps
+
+- Fix base-chart tie bias in candidate selection. The base candidate should not
+  be confirmed when another candidate has comparable support; require a clear
+  margin and sufficient candidate-bound evidence before allowing the full report.
+- Add a strict artifact whitelist for `vedic-reader` output. The prompt says the
+  reader should only write `reader_prevalidation.md`, but the backend currently
+  accepts any returned artifact path.
+- Enforce candidate-bound prevalidation anchors with structured validation:
+  each high-risk anchor must include a machine-readable candidate ID, unstable
+  field list, and user-facing claim that can actually discriminate between
+  candidate charts.
+- Add a real multi-round rectification loop. When the backend returns
+  `needs_more_feedback` or `needs_candidate_bound_checks`, the UI/backend should
+  generate the next round of narrower questions instead of leaving the session
+  stalled.
+- Replace fixed time sampling with adaptive narrowing inside the user's reported
+  confidence window. Approximate or unknown times should progressively shrink
+  the candidate range from user feedback rather than relying only on static
+  samples.
+- Tighten place rectification after a coordinate candidate is selected. A
+  rectified coordinate should not inherit coarse city-level accuracy/radius, and
+  timezone handling should be rechecked when the corrected coordinate materially
+  differs from the original city center.
+- Add regression tests for rectification gates: missing candidate machine lines,
+  mixed candidate feedback, base-vs-non-base ties, non-base recalculation, and
+  `reportAllowed` transitions.
+
 ## P0: skill execution quality
 
 - Validate every generated public report file for non-placeholder content,

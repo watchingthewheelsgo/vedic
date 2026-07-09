@@ -97,6 +97,35 @@ type ResultPreviewSection = {
   body: string;
 };
 
+type RectificationState = {
+  status?: string;
+  riskLevel?: string;
+  reportReadinessMode?: string;
+  activeCandidateId?: string | null;
+  selectedCandidateId?: string | null;
+  selectionConfidence?: string;
+  candidateBoundAnchorCount?: number;
+  feedbackAnchorCount?: number;
+  candidates?: Array<{
+    candidateId?: string;
+    isBase?: boolean;
+    score?: number;
+    support?: number;
+    reject?: number;
+    changedFromBase?: string[];
+  }>;
+  reportGate?: {
+    fullReportAllowed?: boolean;
+    reason?: string;
+    nextStep?: string;
+  };
+  activeChartRevision?: {
+    revision?: number;
+    source?: string;
+    candidateId?: string | null;
+  };
+};
+
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 const STAGE_COPY: Record<string, StageCopy> = {
@@ -224,8 +253,18 @@ const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
     "sensitivity_scan.json",
     "run_metrics.json"
   ],
-  chart: ["structured_data.md", "birth_input_context.json", "sensitivity_scan.json"],
-  reader: ["reader_prevalidation.md", "prevalidation_result.json", "user_context.md"],
+  chart: [
+    "structured_data.md",
+    "birth_input_context.json",
+    "sensitivity_scan.json",
+    "chart_rectification_state.json"
+  ],
+  reader: [
+    "reader_prevalidation.md",
+    "prevalidation_result.json",
+    "chart_rectification_state.json",
+    "user_context.md"
+  ],
   p1: ["p1_overview.md"],
   yoga: [".runtime/p2/yoga.md", "p2a_planets.md"],
   p2: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
@@ -527,7 +566,8 @@ export function Session() {
         const hasFeedback = Boolean(findArtifact(loaded, "user_context.md"));
         const hasReader = Boolean(findArtifact(loaded, "reader_prevalidation.md"));
         if (hasFeedback) {
-          void startCoreReport();
+          if (canStartFullReading(loaded)) void startCoreReport();
+          else setSelectedStageId("chart");
         } else if (hasReader) {
           setSelectedStageId("reader");
         } else {
@@ -627,7 +667,8 @@ export function Session() {
         feedbackMarkdown
       });
       setSession(updated);
-      await startCoreReport();
+      if (canStartFullReading(updated)) await startCoreReport();
+      else setSelectedStageId("chart");
     } catch (caught) {
       setError(userFacingError(caught, "Could not save your replies. Please try again."));
     } finally {
@@ -1133,6 +1174,11 @@ function ChartFactsDetail({
   const structuredData = findArtifact(session, "structured_data.md");
   const inputContext = findArtifact(session, "birth_input_context.json");
   const sensitivityScan = findArtifact(session, "sensitivity_scan.json");
+  const rectificationArtifact = findArtifact(session, "chart_rectification_state.json");
+  const rectificationState = useMemo(
+    () => parseRectificationState(rectificationArtifact?.content ?? ""),
+    [rectificationArtifact?.content]
+  );
   const sections = useMemo(
     () => parseChartFactSections(structuredData?.content ?? ""),
     [structuredData?.content]
@@ -1153,7 +1199,12 @@ function ChartFactsDetail({
       <section className="my-5 border-t border-gold/25 pt-4">
         <DetailSubtitle>{t("session.chart.sourceFiles")}</DetailSubtitle>
         <div className="flex flex-wrap gap-2">
-          {[structuredData?.path, inputContext?.path, sensitivityScan?.path]
+          {[
+            structuredData?.path,
+            inputContext?.path,
+            sensitivityScan?.path,
+            rectificationArtifact?.path
+          ]
             .filter((path): path is string => Boolean(path))
             .map((path) => (
               <span
@@ -1165,6 +1216,8 @@ function ChartFactsDetail({
             ))}
         </div>
       </section>
+
+      {rectificationState && <ChartRectificationSummary state={rectificationState} />}
 
       {sections.length > 0 ? (
         <section className="my-5 border-t border-gold/25 pt-4">
@@ -1194,6 +1247,68 @@ function ChartFactsDetail({
         <EmptyResultState status={status} copy={copy} progress="" />
       )}
     </>
+  );
+}
+
+function ChartRectificationSummary({ state }: { state: RectificationState }) {
+  const candidates = state.candidates ?? [];
+  const active = state.activeCandidateId || "—";
+  const selected = state.selectedCandidateId || "—";
+  const revision = state.activeChartRevision?.revision ?? 0;
+  const gateAllowed = state.reportGate?.fullReportAllowed === true;
+
+  return (
+    <section className="my-5 border-t border-gold/25 pt-4">
+      <DetailSubtitle>Chart correction state</DetailSubtitle>
+      <div className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Badge variant={gateAllowed ? "done" : "neutral"}>
+            {formatRectificationStatus(state.status)}
+          </Badge>
+          <span className="text-[12px] text-muted">
+            {state.riskLevel || "unknown"} risk · {candidates.length} candidate
+            {candidates.length === 1 ? "" : "s"} · active {active}
+          </span>
+        </div>
+        <div className="grid gap-2 text-[12.5px] leading-[1.6] text-body">
+          <InfoRow label="Selected candidate" value={selected} />
+          <InfoRow label="Chart revision" value={String(revision)} />
+          <InfoRow
+            label="Candidate-bound checks"
+            value={String(state.candidateBoundAnchorCount ?? 0)}
+          />
+          <InfoRow label="Next step" value={state.reportGate?.nextStep || "—"} />
+        </div>
+        {state.reportGate?.reason && (
+          <p className="m-0 mt-3 text-[12.5px] leading-[1.65] text-muted">
+            {state.reportGate.reason}
+          </p>
+        )}
+        {candidates.length > 1 && (
+          <div className="mt-3 grid gap-2">
+            {candidates.slice(0, 4).map((candidate) => (
+              <div
+                className="flex items-center justify-between gap-3 rounded-lg border border-gold/20 bg-cream px-3 py-2 text-[12px]"
+                key={candidate.candidateId}
+              >
+                <div className="min-w-0">
+                  <span className="font-semibold text-ink">{candidate.candidateId}</span>
+                  {candidate.isBase && <span className="ml-1 text-muted">(base)</span>}
+                  {candidate.changedFromBase?.length ? (
+                    <span className="ml-2 text-muted">
+                      {candidate.changedFromBase.slice(0, 3).join(", ")}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="shrink-0 tabular-nums text-muted">
+                  score {candidate.score ?? 0}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2145,10 +2260,12 @@ function parseValidationAnchors(content: string): ValidationAnchor[] {
           continue;
         }
         if (trimmed.startsWith(">")) {
+          const quoted = trimmed.replace(/^>\s*/, "");
+          if (/^(Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段)[:：]/i.test(quoted)) {
+            continue;
+          }
           inRationale = true;
-          rationaleLines.push(
-            trimmed.replace(/^>\s*/, "").replace(/^(推导|Derivation|根拠)[:：]\s*/i, "")
-          );
+          rationaleLines.push(quoted.replace(/^(推导|Derivation|根拠)[:：]\s*/i, ""));
           continue;
         }
         if (inRationale) rationaleLines.push(trimmed);
@@ -2349,6 +2466,37 @@ function parseJsonArtifact(
   } catch {
     return null;
   }
+}
+
+function canStartFullReading(session: SkillSessionResponse | null): boolean {
+  const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
+  const decision = objectValue(prevalidationResult, "decision");
+  return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
+}
+
+function parseRectificationState(content: string): RectificationState | null {
+  if (!content.trim()) return null;
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as RectificationState;
+  } catch {
+    return null;
+  }
+}
+
+function formatRectificationStatus(status?: string) {
+  const labels: Record<string, string> = {
+    not_required: "No correction needed",
+    candidate_feedback_pending: "Needs first-check feedback",
+    needs_candidate_bound_checks: "Needs candidate-bound checks",
+    needs_more_feedback: "Needs more feedback",
+    needs_boundary_scan: "Needs deeper scan",
+    needs_recalculation: "Recalculation required",
+    base_confirmed: "Base chart confirmed",
+    corrected_chart_ready: "Corrected chart ready"
+  };
+  return labels[status ?? ""] ?? status ?? "Unknown";
 }
 
 function objectValue(value: unknown, key: string): Record<string, unknown> | null {

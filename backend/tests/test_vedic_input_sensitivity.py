@@ -7,6 +7,7 @@ import json
 import pytest
 
 from app.services.place_service import ResolvedPlace
+from app.services.chart_rectification import ChartRectificationService
 from app.services.skill_runtime import SkillRuntime
 from app.services.vedic_calculator import VedicCalculator
 
@@ -237,6 +238,256 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
         "d9Lagna",
         "D9",
     ]
+
+
+def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> None:
+    service = ChartRectificationService()
+    birth_context = {
+        "time": {
+            "date": "1990-01-01",
+            "reported": "08:30",
+            "precision": "approximate",
+            "source": "family memory",
+            "window": {"start": "1990-01-01 08:15", "end": "1990-01-01 08:45"},
+        },
+        "place": {
+            "reported": "Shanghai, Shanghai, China",
+            "accuracy": "city",
+            "radiusKm": 25,
+        },
+        "constraints": {
+            "timeSearchMustStayWithinReportedWindow": True,
+            "placeSearchMustStayWithinRadiusKm": True,
+            "rejectRectificationOutsideUserFacts": True,
+        },
+    }
+    sensitivity = {
+        "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+        "reportReadiness": {"mode": "rectification_required"},
+        "candidateGroups": [
+            {
+                "candidateId": "A",
+                "isBase": True,
+                "signature": {"d9Lagna": "Libra"},
+                "changedFromBase": [],
+                "members": [{"axis": "time", "label": "base", "datetime": "1990-01-01 08:30"}],
+            },
+            {
+                "candidateId": "B",
+                "isBase": False,
+                "signature": {"d9Lagna": "Scorpio"},
+                "changedFromBase": ["d9Lagna"],
+                "members": [{"axis": "time", "label": "+15m", "datetime": "1990-01-01 08:45"}],
+            },
+        ],
+    }
+    state = service.initial_state(birth_context, sensitivity)
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Candidate B timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+
+**2.** Another B timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+- Anchor text: Candidate B timing anchor.
+
+#### Anchor 2
+- User answer: 准 (accurate)
+- Anchor text: Another B timing anchor.
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    assert updated["status"] == "needs_recalculation"
+    assert updated["selectedCandidateId"] == "B"
+    assert updated["candidateBoundAnchorCount"] == 2
+
+    rectified = service.rectified_birth_input(
+        updated,
+        birth_context,
+        {
+            "subject": {
+                "birthDate": "1990-01-01",
+                "birthTime": "08:30",
+                "birthPlace": "Shanghai",
+                "gender": "女",
+                "relationship": "单身",
+            }
+        },
+    )
+
+    assert rectified is not None
+    assert rectified.birth_time == "08:45"
+    assert rectified.birth_time_precision == "approximate"
+    assert rectified.birth_place == "Shanghai, Shanghai, China"
+
+    ready = service.apply_chart_revision(updated, rectified_input=rectified, chart_revision=1)
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        ready,
+    )
+
+    assert ready["status"] == "corrected_chart_ready"
+    assert decision["reportAllowed"] is True
+    assert decision["nextStep"] == "report_allowed_after_rectification"
+
+
+def test_rectification_requires_machine_candidate_line_for_candidate_bound_anchor() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Candidate B timing anchor.
+
+> Derivation: test
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        updated,
+    )
+
+    assert updated["candidateBoundAnchorCount"] == 0
+    assert updated["status"] == "needs_candidate_bound_checks"
+    assert decision["reportAllowed"] is False
+
+
+def test_rectification_does_not_confirm_base_from_generic_hit_rate_and_non_base_anchor() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Generic accurate anchor.
+
+> Derivation: test
+
+**2.** Generic accurate anchor.
+
+> Derivation: test
+
+**3.** Generic accurate anchor.
+
+> Derivation: test
+
+**4.** Generic accurate anchor.
+
+> Derivation: test
+
+**5.** B-specific timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+#### Anchor 2
+- User answer: 准 (accurate)
+#### Anchor 3
+- User answer: 准 (accurate)
+#### Anchor 4
+- User answer: 准 (accurate)
+#### Anchor 5
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        updated,
+    )
+
+    candidate_scores = {
+        candidate["candidateId"]: candidate["score"] for candidate in updated["candidates"]
+    }
+
+    assert updated["candidateBoundAnchorCount"] == 1
+    assert updated["selectedCandidateId"] is None
+    assert updated["status"] == "needs_more_feedback"
+    assert candidate_scores == {"A": 0.0, "B": 1.0}
+    assert decision["reportAllowed"] is False
+
+
+def test_rectification_blocks_high_risk_feedback_without_candidate_bound_anchors() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Generic personality anchor.
+
+> Derivation: test
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        updated,
+    )
+
+    assert updated["status"] == "needs_candidate_bound_checks"
+    assert decision["reportAllowed"] is False
+    assert decision["nextStep"] == "needs_candidate_bound_checks"
 
 
 def test_core_batch_prompts_enforce_input_confidence_contract() -> None:

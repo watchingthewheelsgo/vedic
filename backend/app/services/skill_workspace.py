@@ -197,6 +197,7 @@ class SkillWorkspace:
             "structured_data.json",
             "birth_input_context.json",
             "sensitivity_scan.json",
+            "chart_rectification_state.json",
             "user_context.md",
             "reader_prevalidation.md",
             "prevalidation_result.json",
