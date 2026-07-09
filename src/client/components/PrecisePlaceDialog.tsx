@@ -23,6 +23,7 @@ import { Button } from "./ui/button";
 type PrecisePlaceDialogProps = {
   open: boolean;
   initialValue?: string;
+  cityContext?: string;
   onClose: () => void;
   onConfirm: (option: PrecisePlaceOption) => void;
 };
@@ -30,6 +31,7 @@ type PrecisePlaceDialogProps = {
 export function PrecisePlaceDialog({
   open,
   initialValue = "",
+  cityContext = "",
   onClose,
   onConfirm
 }: PrecisePlaceDialogProps) {
@@ -40,6 +42,9 @@ export function PrecisePlaceDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
+  const [webFallbackEnabled, setWebFallbackEnabled] = useState(false);
+  const [verificationBase, setVerificationBase] = useState<string | null>(null);
+  const [rejectedCount, setRejectedCount] = useState(0);
   const [manualLatitude, setManualLatitude] = useState("");
   const [manualLongitude, setManualLongitude] = useState("");
 
@@ -47,7 +52,13 @@ export function PrecisePlaceDialog({
     if (!open) return;
     const seed = initialValue.split("|")[0]?.trim() ?? "";
     setQuery(seed);
+    setOptions([]);
+    setSelected(null);
     setError("");
+    setFallbackEnabled(false);
+    setWebFallbackEnabled(false);
+    setVerificationBase(null);
+    setRejectedCount(0);
   }, [initialValue, open]);
 
   useEffect(() => {
@@ -71,6 +82,10 @@ export function PrecisePlaceDialog({
       setOptions([]);
       setLoading(false);
       setError("");
+      setFallbackEnabled(false);
+      setWebFallbackEnabled(false);
+      setVerificationBase(null);
+      setRejectedCount(0);
       return;
     }
 
@@ -79,10 +94,16 @@ export function PrecisePlaceDialog({
       setLoading(true);
       setError("");
       api
-        .searchPrecisePlaces({ q: trimmed, limit: 8 }, controller.signal)
+        .searchPrecisePlaces(
+          { q: trimmed, city: cityContext.trim() || undefined, limit: 8 },
+          controller.signal
+        )
         .then((response) => {
           setOptions(response.options);
           setFallbackEnabled(response.fallbackEnabled);
+          setWebFallbackEnabled(response.webFallbackEnabled);
+          setVerificationBase(response.verificationBase ?? null);
+          setRejectedCount(response.rejectedCount);
           setSelected((current) =>
             current && response.options.some((option) => option.id === current.id) ? current : null
           );
@@ -101,7 +122,7 @@ export function PrecisePlaceDialog({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [open, query, t]);
+  }, [cityContext, open, query, t]);
 
   const manualValidation = useMemo(
     () => validateCoordinateParts(manualLatitude, manualLongitude),
@@ -146,6 +167,7 @@ export function PrecisePlaceDialog({
         coordinateSystem: "WGS84",
         latitude: manualValidation.latitude,
         longitude: manualValidation.longitude,
+        verificationStatus: "manual",
         birthPlace: `${label} | ${formatCoordinateValue(
           manualValidation.latitude,
           manualValidation.longitude
@@ -206,6 +228,11 @@ export function PrecisePlaceDialog({
             <p className="mt-1 max-w-[620px] text-sm leading-relaxed text-body">
               {t("precisePlace.subtitle")}
             </p>
+            {cityContext.trim() ? (
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                {t("precisePlace.cityContext")}: {cityContext.trim()}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -250,7 +277,21 @@ export function PrecisePlaceDialog({
                   ? t("precisePlace.source.amap.enabled")
                   : t("precisePlace.source.amap.disabled")}
               </Badge>
+              <Badge variant={webFallbackEnabled ? "done" : "neutral"} className="gap-1">
+                <Search className="size-3" />
+                {webFallbackEnabled
+                  ? t("precisePlace.source.web.enabled")
+                  : t("precisePlace.source.web.disabled")}
+              </Badge>
             </div>
+            {verificationBase ? (
+              <div className="rounded-[10px] border border-gold/20 bg-cream-2 px-3 py-2 text-xs leading-relaxed text-body">
+                {t("precisePlace.verification.base")}: {verificationBase}
+                {rejectedCount > 0
+                  ? ` · ${t("precisePlace.verification.rejected")} ${rejectedCount}`
+                  : ""}
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               {error ? (
@@ -265,7 +306,7 @@ export function PrecisePlaceDialog({
               ) : options.length === 0 ? (
                 <EmptyState
                   text={
-                    fallbackEnabled
+                    fallbackEnabled || webFallbackEnabled
                       ? t("precisePlace.search.empty")
                       : t("precisePlace.search.emptyNoFallback")
                   }
@@ -292,6 +333,16 @@ export function PrecisePlaceDialog({
                       {formatCoordinateNumber(option.longitude)},{" "}
                       {formatCoordinateNumber(option.latitude)} · {option.coordinateSystem}
                     </span>
+                    {option.verificationReason ? (
+                      <span className="text-[11px] leading-relaxed text-muted">
+                        {option.verificationReason}
+                      </span>
+                    ) : null}
+                    {option.rawEvidence ? (
+                      <span className="line-clamp-2 text-[11px] leading-relaxed text-muted">
+                        {option.rawEvidence}
+                      </span>
+                    ) : null}
                   </button>
                 ))
               )}
@@ -393,6 +444,9 @@ export function PrecisePlaceDialog({
                     {formatCoordinateNumber(activeOption.latitude)} ·{" "}
                     {activeOption.coordinateSystem}
                   </div>
+                  {activeOption.verificationReason ? (
+                    <div className="mt-1 text-muted">{activeOption.verificationReason}</div>
+                  ) : null}
                 </>
               ) : (
                 t("precisePlace.confirm.empty")
@@ -425,6 +479,7 @@ function EmptyState({ text }: { text: string }) {
 
 function labelForSource(source: PrecisePlaceOption["source"]) {
   if (source === "amap") return "AMap";
+  if (source === "web") return "Web";
   if (source === "geonames-local") return "GeoNames";
   return "Manual";
 }
@@ -444,6 +499,7 @@ function optionFromManual(
     coordinateSystem: "WGS84",
     latitude: validation.latitude,
     longitude: validation.longitude,
+    verificationStatus: "manual",
     birthPlace: `${label} | ${validation.value}, source=manual, accuracy=coordinate`
   };
 }

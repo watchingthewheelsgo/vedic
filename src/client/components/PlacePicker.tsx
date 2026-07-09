@@ -8,7 +8,7 @@ import {
   parseCoordinateInput,
   validateCoordinateParts
 } from "../lib/coordinates";
-import type { PlaceOption } from "../../shared/domain";
+import type { PlaceOption, PrecisePlaceOption } from "../../shared/domain";
 import { Field } from "./ui/field";
 import { PrecisePlaceDialog } from "./PrecisePlaceDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -30,6 +30,7 @@ export function PlacePicker({
   const initialCoordinates = parseCoordinateInput(value);
   const [mode, setMode] = useState<PlaceMode>(initialCoordinates.ok ? "coordinates" : "city");
   const [query, setQuery] = useState(initialCoordinates.ok ? "" : value);
+  const [cityFallback, setCityFallback] = useState(initialCoordinates.ok ? "" : value);
   const [latitude, setLatitude] = useState(
     initialCoordinates.ok ? formatCoordinateNumber(initialCoordinates.latitude) : ""
   );
@@ -45,6 +46,10 @@ export function PlacePicker({
   useEffect(() => {
     if (mode === "city" && value && value !== query && options.length === 0) setQuery(value);
   }, [mode, options.length, query, value]);
+
+  useEffect(() => {
+    if (mode === "city" && value && query.trim() === value) setCityFallback(value);
+  }, [mode, query, value]);
 
   useEffect(() => {
     const q = query.trim();
@@ -78,13 +83,17 @@ export function PlacePicker({
     const picked = option.birthPlace ?? option.value;
     onChange(picked);
     setQuery(picked);
+    setCityFallback(picked);
     setOptions([]);
     setOpen(false);
   }
 
   function onInput(text: string) {
     setQuery(text);
-    if (value) onChange("");
+    if (value) {
+      onChange("");
+      setCityFallback("");
+    }
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
@@ -100,7 +109,11 @@ export function PlacePicker({
     if (nextMode === "city") {
       setLatitude("");
       setLongitude("");
-      if (parseCoordinateInput(value).ok) onChange("");
+      if (parseCoordinateInput(value).ok) {
+        const fallback = cityFallback.trim();
+        setQuery(fallback);
+        onChange(fallback);
+      }
       return;
     }
     setQuery("");
@@ -114,12 +127,7 @@ export function PlacePicker({
     onChange(validation.ok ? validation.value : "");
   }
 
-  function commitPrecise(option: {
-    label: string;
-    birthPlace: string;
-    latitude: number;
-    longitude: number;
-  }) {
+  function commitPrecise(option: PrecisePlaceOption) {
     setMode("coordinates");
     setQuery(option.label);
     setLatitude(formatCoordinateNumber(option.latitude));
@@ -127,6 +135,17 @@ export function PlacePicker({
     setOptions([]);
     setOpen(false);
     onChange(option.birthPlace);
+  }
+
+  function useCityFallback() {
+    const fallback = cityFallback.trim();
+    setMode("city");
+    setLatitude("");
+    setLongitude("");
+    setOptions([]);
+    setOpen(false);
+    setQuery(fallback);
+    onChange(fallback);
   }
 
   const coordinateValidation = validateCoordinateParts(latitude, longitude);
@@ -174,7 +193,9 @@ export function PlacePicker({
         <button
           type="button"
           onClick={() => setPreciseOpen(true)}
-          className="inline-flex w-fit items-center gap-2 rounded-full border border-gold/25 bg-gold/10 px-3 py-1.5 text-xs font-medium text-gold-dim transition hover:border-gold/60 hover:bg-gold/15 hover:text-gold"
+          disabled={!cityFallback.trim()}
+          title={!cityFallback.trim() ? t("place.precise.requiresCity") : undefined}
+          className="inline-flex w-fit items-center gap-2 rounded-full border border-gold/25 bg-gold/10 px-3 py-1.5 text-xs font-medium text-gold-dim transition hover:border-gold/60 hover:bg-gold/15 hover:text-gold disabled:cursor-not-allowed disabled:border-gold/15 disabled:bg-cream disabled:text-muted"
         >
           <LocateFixed className="size-3.5" />
           {t("place.precise.open")}
@@ -281,15 +302,25 @@ export function PlacePicker({
           </div>
         )}
         {selectedPreciseLabel ? (
-          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-gold/25 bg-cream px-3 py-1 text-xs text-body">
-            <MapPin className="size-3.5 text-gold-dim" />
-            {selectedPreciseLabel}
+          <div className="flex w-fit flex-wrap items-center gap-2 rounded-full border border-gold/25 bg-cream px-3 py-1 text-xs text-body">
+            <span className="inline-flex items-center gap-2">
+              <MapPin className="size-3.5 text-gold-dim" />
+              {selectedPreciseLabel}
+            </span>
+            <button
+              type="button"
+              onClick={useCityFallback}
+              className="font-medium text-gold-dim underline-offset-2 hover:text-gold hover:underline"
+            >
+              {t("place.precise.incorrect")}
+            </button>
           </div>
         ) : null}
       </div>
       <PrecisePlaceDialog
         open={preciseOpen}
         initialValue={value || query}
+        cityContext={cityFallback}
         onClose={() => setPreciseOpen(false)}
         onConfirm={commitPrecise}
       />

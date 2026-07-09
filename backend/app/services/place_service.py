@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from html import unescape
 import json
 import math
 import re
@@ -10,7 +11,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from app.schemas import (
     PlaceOption,
@@ -234,24 +235,57 @@ class PlaceService:
             return PlaceSearchResponse(options=self._search_cities(country, region, query, limit))
         return PlaceSearchResponse(options=[])
 
-    def search_precise(self, query: str = "", limit: int = 8) -> PrecisePlaceSearchResponse:
+    def search_precise(
+        self, query: str = "", limit: int = 8, city_context: str | None = None
+    ) -> PrecisePlaceSearchResponse:
         trimmed = query.strip()
         limit = max(1, min(20, limit))
+        city_base = self._resolve_city_context(city_context)
         local_options = self._search_precise_local(trimmed, limit)
-        if local_options:
-            return PrecisePlaceSearchResponse(
-                options=local_options,
-                localCount=len(local_options),
-                fallbackEnabled=self._amap_enabled(),
-            )
-
         fallback_enabled = self._amap_enabled()
-        fallback_options = self._search_precise_amap(trimmed, limit) if fallback_enabled else []
+        web_enabled = self._web_place_search_enabled()
+        fallback_sources: list[str] = []
+        options = list(local_options)
+
+        if not local_options and fallback_enabled:
+            amap_options = self._search_precise_amap(
+                trimmed,
+                limit,
+                city_base,
+            )
+            if amap_options:
+                options.extend(amap_options)
+                fallback_sources.append("amap")
+
+        if not local_options and len(options) < limit and city_base and web_enabled:
+            web_options = self._search_precise_web(trimmed, city_base, limit - len(options))
+            if web_options:
+                options.extend(web_options)
+                fallback_sources.append("web")
+
+        options = self._dedupe_precise_options(options)
+        rejected_count = 0
+        if city_base:
+            options, rejected_count = self._verify_precise_options(options, city_base)
+            if not options and trimmed:
+                options = [
+                    self._city_fallback_option(
+                        city_base,
+                        reason=(
+                            "No precise candidate stayed within the selected city scope; "
+                            "using the city center until the user provides a better point."
+                        ),
+                    )
+                ]
+
         return PrecisePlaceSearchResponse(
-            options=fallback_options,
-            localCount=0,
-            fallbackSource="amap" if fallback_options else None,
+            options=options[:limit],
+            localCount=len(local_options),
+            fallbackSource="+".join(fallback_sources) if fallback_sources else None,
             fallbackEnabled=fallback_enabled,
+            webFallbackEnabled=bool(city_base and web_enabled),
+            verificationBase=city_base.label if city_base else None,
+            rejectedCount=rejected_count,
         )
 
     def resolve(self, raw_query: str) -> ResolvedPlace:
@@ -433,15 +467,111 @@ class PlaceService:
             ),
         )
 
+    def _resolve_city_context(self, raw_city: str | None) -> ResolvedPlace | None:
+        if not raw_city or not raw_city.strip():
+            return None
+        try:
+            return self.resolve(raw_city)
+        except Exception:
+            return None
+
+    def _verify_precise_options(
+        self, options: list[PrecisePlaceOption], city_base: ResolvedPlace
+    ) -> tuple[list[PrecisePlaceOption], int]:
+        verified: list[PrecisePlaceOption] = []
+        rejected_count = 0
+        max_distance = self._max_city_distance_km(city_base)
+        for option in options:
+            distance = self._distance_km(
+                city_base.lat,
+                city_base.lon,
+                option.latitude,
+                option.longitude,
+            )
+            if distance > max_distance:
+                rejected_count += 1
+                continue
+            reason = (
+                f"Verified against {city_base.label}; "
+                f"{self._format_distance(distance)} km from the selected city center."
+            )
+            verified.append(
+                option.model_copy(
+                    update={
+                        "verification_status": "verified",
+                        "verification_reason": reason,
+                        "distance_from_city_km": round(distance, 3),
+                        "city_label": city_base.label,
+                    }
+                )
+            )
+        verified.sort(
+            key=lambda option: (
+                option.distance_from_city_km if option.distance_from_city_km is not None else 9999,
+                self._source_rank(option.source),
+                self._accuracy_rank(option.accuracy),
+                option.label,
+            )
+        )
+        return verified, rejected_count
+
+    def _city_fallback_option(self, city_base: ResolvedPlace, *, reason: str) -> PrecisePlaceOption:
+        return PrecisePlaceOption(
+            id=f"city-fallback:{city_base.label}:{city_base.lat}:{city_base.lon}",
+            label=city_base.label,
+            address=city_base.label,
+            meta=reason,
+            source="geonames-local",
+            accuracy="city",
+            coordinateSystem="WGS84",
+            latitude=city_base.lat,
+            longitude=city_base.lon,
+            birthPlace=self._birth_place_with_coordinates(
+                city_base.label,
+                city_base.lat,
+                city_base.lon,
+                source="geonames-local",
+                accuracy="city",
+            ),
+            verificationStatus="city-fallback",
+            verificationReason=reason,
+            distanceFromCityKm=0.0,
+            cityLabel=city_base.label,
+        )
+
+    def _dedupe_precise_options(
+        self, options: list[PrecisePlaceOption]
+    ) -> list[PrecisePlaceOption]:
+        deduped: list[PrecisePlaceOption] = []
+        seen: set[tuple[str, float, float]] = set()
+        for option in options:
+            key = (
+                self.normalize(option.label),
+                round(option.latitude, 5),
+                round(option.longitude, 5),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(option)
+        return deduped
+
     def _amap_enabled(self) -> bool:
         return bool(
             getattr(self.settings, "amap_place_fallback_enabled", False)
             and getattr(self.settings, "amap_web_service_key", "").strip()
         )
 
-    def _search_precise_amap(self, query: str, limit: int) -> list[PrecisePlaceOption]:
+    def _web_place_search_enabled(self) -> bool:
+        return bool(getattr(self.settings, "web_place_search_enabled", False))
+
+    def _search_precise_amap(
+        self, query: str, limit: int, city_context: ResolvedPlace | None = None
+    ) -> list[PrecisePlaceOption]:
         if not query:
             return []
+        city_name = (city_context.matched or {}).get("placeName", "") if city_context else ""
+        city_params = {"city": city_name} if city_name else {}
         pois = self._amap_get(
             "https://restapi.amap.com/v3/place/text",
             {
@@ -449,6 +579,7 @@ class PlaceService:
                 "offset": str(limit),
                 "page": "1",
                 "extensions": "base",
+                **city_params,
             },
         ).get("pois", [])
         options = self._amap_pois_to_options(pois, limit)
@@ -460,6 +591,7 @@ class PlaceService:
             {
                 "keywords": query,
                 "datatype": "all",
+                **city_params,
             },
         ).get("tips", [])
         return self._amap_tips_to_options(tips, limit)
@@ -551,6 +683,175 @@ class PlaceService:
             return "address"
         return "poi"
 
+    def _search_precise_web(
+        self, query: str, city_base: ResolvedPlace, limit: int
+    ) -> list[PrecisePlaceOption]:
+        if not query or limit <= 0:
+            return []
+        search_queries = [
+            f"{query} {city_base.label} latitude longitude coordinates",
+            f"{query} {city_base.label} 经纬度 坐标",
+        ]
+        options: list[PrecisePlaceOption] = []
+        for search_query in search_queries:
+            try:
+                raw_html, source_url = self._web_search_get(search_query)
+            except Exception:
+                continue
+            options.extend(
+                self._web_search_html_to_options(
+                    raw_html,
+                    source_url=source_url,
+                    query=query,
+                    city_base=city_base,
+                    limit=limit - len(options),
+                )
+            )
+            if len(options) >= limit:
+                break
+        return self._dedupe_precise_options(options)[:limit]
+
+    def _web_search_get(self, search_query: str) -> tuple[str, str]:
+        base_url = (
+            getattr(self.settings, "web_place_search_url", "") or "https://duckduckgo.com/html/"
+        ).strip()
+        timeout = float(getattr(self.settings, "web_place_search_timeout_seconds", 3.0))
+        user_agent = (
+            getattr(self.settings, "web_place_search_user_agent", "")
+            or "Mozilla/5.0 (compatible; VedicPlaceVerifier/1.0)"
+        )
+        separator = "&" if "?" in base_url else "?"
+        url = f"{base_url}{separator}{urlencode({'q': search_query})}"
+        request = Request(url, headers={"User-Agent": user_agent})
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310
+            return response.read().decode("utf-8", errors="replace"), url
+
+    def _web_search_html_to_options(
+        self,
+        raw_html: str,
+        *,
+        source_url: str,
+        query: str,
+        city_base: ResolvedPlace,
+        limit: int,
+    ) -> list[PrecisePlaceOption]:
+        if limit <= 0:
+            return []
+        text = self._html_to_text(raw_html)
+        pairs = self._coordinate_pairs_from_text(text, city_base)
+        options: list[PrecisePlaceOption] = []
+        label = ", ".join(part for part in [query.strip(), city_base.label] if part)
+        for index, (lat, lon, evidence) in enumerate(pairs[:limit]):
+            readable_lat = self._format_coordinate(lat)
+            readable_lon = self._format_coordinate(lon)
+            options.append(
+                PrecisePlaceOption(
+                    id=f"web:{self.normalize(label)[:48]}:{readable_lat}:{readable_lon}:{index}",
+                    label=query.strip() or city_base.label,
+                    address=label,
+                    meta="Web search evidence",
+                    source="web",
+                    accuracy="poi",
+                    coordinateSystem="WGS84",
+                    latitude=lat,
+                    longitude=lon,
+                    birthPlace=self._birth_place_with_coordinates(
+                        label,
+                        lat,
+                        lon,
+                        source="web",
+                        accuracy="poi",
+                    ),
+                    sourceUrl=source_url,
+                    rawEvidence=evidence,
+                )
+            )
+        return options
+
+    def _coordinate_pairs_from_text(
+        self, text: str, city_base: ResolvedPlace
+    ) -> list[tuple[float, float, str]]:
+        pairs: list[tuple[float, float, str]] = []
+        seen: set[tuple[float, float]] = set()
+
+        def add_pair(match: re.Match[str], first: float, second: float) -> None:
+            ordered = self._best_coordinate_order(first, second, city_base)
+            if not ordered:
+                return
+            lat, lon = ordered
+            key = (round(lat, 5), round(lon, 5))
+            if key in seen:
+                return
+            seen.add(key)
+            pairs.append((lat, lon, self._evidence_snippet(text, match.start(), match.end())))
+
+        labelled_patterns = [
+            re.compile(
+                r"(?:lat(?:itude)?|纬度|緯度)\D{0,40}"
+                r"([+-]?\d{1,2}(?:\.\d+)?)"
+                r".{0,120}?"
+                r"(?:lon|lng|longitude|经度|經度|経度)\D{0,40}"
+                r"([+-]?\d{1,3}(?:\.\d+)?)",
+                re.I,
+            ),
+            re.compile(
+                r"(?:lon|lng|longitude|经度|經度|経度)\D{0,40}"
+                r"([+-]?\d{1,3}(?:\.\d+)?)"
+                r".{0,120}?"
+                r"(?:lat(?:itude)?|纬度|緯度)\D{0,40}"
+                r"([+-]?\d{1,2}(?:\.\d+)?)",
+                re.I,
+            ),
+        ]
+        for pattern_index, pattern in enumerate(labelled_patterns):
+            for match in pattern.finditer(text):
+                first = float(match.group(1))
+                second = float(match.group(2))
+                if pattern_index == 0:
+                    add_pair(match, first, second)
+                else:
+                    add_pair(match, second, first)
+
+        pair_pattern = re.compile(r"([+-]?\d{1,3}\.\d{3,})\s*[,，]\s*([+-]?\d{1,3}\.\d{3,})")
+        for match in pair_pattern.finditer(text):
+            add_pair(match, float(match.group(1)), float(match.group(2)))
+        return pairs
+
+    def _best_coordinate_order(
+        self, first: float, second: float, city_base: ResolvedPlace
+    ) -> tuple[float, float] | None:
+        candidates: list[tuple[float, float, float]] = []
+        if self._valid_lat_lon(first, second):
+            candidates.append(
+                (self._distance_km(city_base.lat, city_base.lon, first, second), first, second)
+            )
+        if self._valid_lat_lon(second, first):
+            candidates.append(
+                (self._distance_km(city_base.lat, city_base.lon, second, first), second, first)
+            )
+        if not candidates:
+            return None
+        _, lat, lon = min(candidates, key=lambda item: item[0])
+        return lat, lon
+
+    @staticmethod
+    def _valid_lat_lon(lat: float, lon: float) -> bool:
+        return -90 <= lat <= 90 and -180 <= lon <= 180
+
+    @staticmethod
+    def _html_to_text(raw_html: str) -> str:
+        without_scripts = re.sub(
+            r"<(script|style)\b[^>]*>.*?</\1>", " ", raw_html, flags=re.I | re.S
+        )
+        without_tags = re.sub(r"<[^>]+>", " ", without_scripts)
+        return re.sub(r"\s+", " ", unescape(without_tags)).strip()
+
+    @staticmethod
+    def _evidence_snippet(text: str, start: int, end: int) -> str:
+        snippet_start = max(0, start - 120)
+        snippet_end = min(len(text), end + 120)
+        return text[snippet_start:snippet_end].strip()
+
     def _birth_place_with_coordinates(
         self,
         label: str,
@@ -575,6 +876,47 @@ class PlaceService:
         if isinstance(value, str):
             return value.strip()
         return ""
+
+    @staticmethod
+    def _source_rank(source: str) -> int:
+        return {
+            "geonames-local": 0,
+            "amap": 1,
+            "web": 2,
+            "manual": 3,
+        }.get(source, 9)
+
+    @staticmethod
+    def _accuracy_rank(accuracy: str) -> int:
+        return {
+            "coordinate": 0,
+            "poi": 1,
+            "address": 2,
+            "district": 3,
+            "city": 4,
+        }.get(accuracy, 9)
+
+    @staticmethod
+    def _max_city_distance_km(city_base: ResolvedPlace) -> float:
+        return max(city_base.radius_km + 10.0, 35.0)
+
+    @staticmethod
+    def _format_distance(distance: float) -> str:
+        rounded = round(distance, 1)
+        return str(int(rounded)) if rounded.is_integer() else f"{rounded:.1f}"
+
+    @staticmethod
+    def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        radius_km = 6371.0088
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        haversine = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+        )
+        return radius_km * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
 
     @staticmethod
     def _format_coordinate(value: float) -> str:

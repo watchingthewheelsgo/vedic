@@ -628,10 +628,16 @@ npm run report:pdf:install
 - `POST /api/skill-runs`
 - `POST /api/skill-feedback`
 
-`GET /api/precise-places` searches the local GeoNames city index first. If no
-local city match is found and `AMAP_PLACE_FALLBACK_ENABLED=true` with
-`AMAP_WEB_SERVICE_KEY` set, it falls back to AMap Web Service POI search and
-normalizes returned GCJ-02 coordinates to WGS84 for chart calculation.
+`GET /api/precise-places` searches the local GeoNames city index first. Pass the
+selected city as `city=...` when searching for a hospital, district, landmark, or
+address. The backend treats that city as the verification base: AMap and web
+search candidates are only returned when their coordinates stay within the
+city's accepted distance band; otherwise the response falls back to the city
+center and marks the result as `city-fallback`. If
+`AMAP_PLACE_FALLBACK_ENABLED=true` with `AMAP_WEB_SERVICE_KEY` set, AMap POI
+results are normalized from GCJ-02 to WGS84. `WEB_PLACE_SEARCH_ENABLED=true`
+adds a best-effort web search fallback that extracts coordinate evidence from
+search-result text and still requires city-distance verification before use.
 
 ## Alignment Rules
 
