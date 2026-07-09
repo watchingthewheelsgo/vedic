@@ -344,6 +344,173 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
     assert decision["nextStep"] == "report_allowed_after_rectification"
 
 
+def test_rectification_does_not_confirm_base_from_tied_candidate_support() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Base chart timing anchor.
+
+> Derivation: test
+> Candidate: A
+> Field: d9Lagna
+
+**2.** Candidate B timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+
+#### Anchor 2
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    decision = service.apply_prevalidation_decision(
+        {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
+        updated,
+    )
+
+    assert updated["selectedCandidateId"] is None
+    assert updated["status"] == "needs_more_feedback"
+    assert decision["reportAllowed"] is False
+
+
+def test_rectification_does_not_confirm_base_from_one_supported_anchor() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Base chart timing anchor.
+
+> Derivation: test
+> Candidate: A
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    assert updated["selectedCandidateId"] is None
+    assert updated["status"] == "needs_more_feedback"
+
+
+def test_rectification_allows_single_supported_candidate_when_alternatives_are_rejected() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {
+                    "candidateId": "B",
+                    "isBase": False,
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:45"}],
+                },
+            ],
+        },
+    )
+
+    updated = service.update_from_feedback(
+        state,
+        """
+**1.** Base chart timing anchor.
+
+> Derivation: test
+> Candidate: A
+> Field: d9Lagna
+
+**2.** Candidate B timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 不准 (inaccurate)
+
+#### Anchor 2
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 0.5}},
+    )
+
+    assert updated["selectedCandidateId"] == "B"
+    assert updated["status"] == "needs_recalculation"
+
+
+def test_rectified_place_candidate_uses_coordinate_accuracy() -> None:
+    service = ChartRectificationService()
+    state = {
+        "selectedCandidateId": "B",
+        "candidates": [
+            {"candidateId": "A", "isBase": True, "members": []},
+            {
+                "candidateId": "B",
+                "isBase": False,
+                "members": [
+                    {
+                        "axis": "place",
+                        "coordinates": {"lat": 31.2, "lon": 121.5},
+                    }
+                ],
+            },
+        ],
+    }
+
+    rectified = service.rectified_birth_input(
+        state,
+        {
+            "time": {"date": "1990-01-01", "reported": "08:30", "precision": "approximate"},
+            "place": {
+                "reported": "Shanghai, Shanghai, China",
+                "accuracy": "city",
+                "radiusKm": 25,
+            },
+        },
+        {"subject": {"gender": "女", "relationship": "单身"}},
+    )
+
+    assert rectified is not None
+    assert "lat=31.2, lon=121.5" in rectified.birth_place
+    assert "accuracy=coordinate" in rectified.birth_place
+
+
 def test_rectification_requires_machine_candidate_line_for_candidate_bound_anchor() -> None:
     service = ChartRectificationService()
     state = service.initial_state(
@@ -447,7 +614,7 @@ def test_rectification_does_not_confirm_base_from_generic_hit_rate_and_non_base_
 
     assert updated["candidateBoundAnchorCount"] == 1
     assert updated["selectedCandidateId"] is None
-    assert updated["status"] == "needs_more_feedback"
+    assert updated["status"] == "needs_candidate_bound_checks"
     assert candidate_scores == {"A": 0.0, "B": 1.0}
     assert decision["reportAllowed"] is False
 
@@ -505,3 +672,62 @@ def test_core_batch_prompts_enforce_input_confidence_contract() -> None:
     assert all("rectification_required" in prompt for prompt in prompts)
     assert "prevalidation_result.decision.reportAllowed is false" in audit_prompt
     assert "primary conclusion anchor" in audit_prompt
+
+
+def test_reader_artifact_validation_rejects_unexpected_artifacts() -> None:
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.workspace = SimpleNamespace(read_artifacts=lambda _session_id: [])
+    runtime.rectification = ChartRectificationService()
+
+    with pytest.raises(ValueError, match="unexpected artifact"):
+        runtime._validate_skill_artifacts(
+            "session",
+            "vedic-reader",
+            {
+                "artifacts": [
+                    {"path": "reader_prevalidation.md", "content": "**1.** ok"},
+                    {"path": "prevalidation_result.json", "content": "{}"},
+                ]
+            },
+        )
+
+
+def test_reader_artifact_validation_rejects_missing_candidate_field_lines() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {"time": {"window": {}}, "place": {"radiusKm": 25, "accuracy": "city"}},
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {"candidateId": "B", "isBase": False, "members": []},
+            ],
+        },
+    )
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.workspace = SimpleNamespace(
+        read_artifacts=lambda _session_id: [
+            SimpleNamespace(path="chart_rectification_state.json", content=json.dumps(state))
+        ]
+    )
+    runtime.rectification = service
+
+    with pytest.raises(ValueError, match="candidate-bound validation"):
+        runtime._validate_skill_artifacts(
+            "session",
+            "vedic-reader",
+            {
+                "artifacts": [
+                    {
+                        "path": "reader_prevalidation.md",
+                        "content": """
+**1.** Candidate B timing anchor.
+
+> Derivation: test
+> Candidate: B
+""",
+                    }
+                ]
+            },
+        )

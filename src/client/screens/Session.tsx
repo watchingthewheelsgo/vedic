@@ -449,7 +449,11 @@ export function Session() {
   const birthInfo = useMemo(() => resolveBirthInfo(navState, session), [navState, session]);
   const readerPrevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedbackArtifact = findArtifact(session, "user_context.md");
-  const awaitingValidationFeedback = Boolean(readerPrevalidation && !feedbackArtifact && !complete);
+  const awaitingValidationFeedback = Boolean(
+    readerPrevalidation &&
+    !hasCurrentValidationFeedback(readerPrevalidation, feedbackArtifact) &&
+    !complete
+  );
 
   const setTab = useCallback(
     (next: "reading" | "report") => {
@@ -496,28 +500,31 @@ export function Session() {
     await startCoreReport({ resume: true });
   }, [startCoreReport]);
 
-  const startReaderValidation = useCallback(async () => {
-    if (!id || readerStartedRef.current) return;
-    readerStartedRef.current = true;
-    setError("");
-    setReaderRunning(true);
-    setReaderStartedAt(Date.now());
-    setSelectedStageId("reader");
-    try {
-      const response = await api.runSkill({
-        sessionId: id,
-        skill: "vedic-reader",
-        userMessage: "",
-        locale
-      });
-      setSession(response);
-    } catch (caught) {
-      readerStartedRef.current = false;
-      setError(userFacingError(caught, t("session.error.firstCheck")));
-    } finally {
-      setReaderRunning(false);
-    }
-  }, [id, locale, t]);
+  const startReaderValidation = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!id || (readerStartedRef.current && !options?.force)) return;
+      readerStartedRef.current = true;
+      setError("");
+      setReaderRunning(true);
+      setReaderStartedAt(Date.now());
+      setSelectedStageId("reader");
+      try {
+        const response = await api.runSkill({
+          sessionId: id,
+          skill: "vedic-reader",
+          userMessage: "",
+          locale
+        });
+        setSession(response);
+      } catch (caught) {
+        readerStartedRef.current = false;
+        setError(userFacingError(caught, t("session.error.firstCheck")));
+      } finally {
+        setReaderRunning(false);
+      }
+    },
+    [id, locale, t]
+  );
 
   const startBaziReport = useCallback(async () => {
     if (!id || baziStartedRef.current) return;
@@ -563,8 +570,10 @@ export function Session() {
         }
         if (loaded.stage === "core_complete") return;
 
-        const hasFeedback = Boolean(findArtifact(loaded, "user_context.md"));
-        const hasReader = Boolean(findArtifact(loaded, "reader_prevalidation.md"));
+        const loadedReader = findArtifact(loaded, "reader_prevalidation.md");
+        const loadedFeedback = findArtifact(loaded, "user_context.md");
+        const hasFeedback = hasCurrentValidationFeedback(loadedReader, loadedFeedback);
+        const hasReader = Boolean(loadedReader);
         if (hasFeedback) {
           if (canStartFullReading(loaded)) void startCoreReport();
           else setSelectedStageId("chart");
@@ -725,6 +734,7 @@ export function Session() {
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
             onResumeCoreReport={resumeCoreReport}
+            onStartReaderValidation={() => startReaderValidation({ force: true })}
             onStartBaziReport={startBaziReport}
             coreInterrupted={coreInterrupted}
             baziRunning={baziRunning}
@@ -914,6 +924,7 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange,
   onSubmitFeedback,
   onResumeCoreReport,
+  onStartReaderValidation,
   onStartBaziReport,
   coreInterrupted,
   baziRunning,
@@ -934,6 +945,7 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onResumeCoreReport: () => Promise<void>;
+  onStartReaderValidation: () => Promise<void>;
   onStartBaziReport: () => Promise<void>;
   coreInterrupted: boolean;
   baziRunning: boolean;
@@ -964,7 +976,12 @@ function WorkshopDetailPanel({
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
       ) : stage.id === "chart" ? (
-        <ChartFactsDetail session={session} status={status} />
+        <ChartFactsDetail
+          session={session}
+          status={status}
+          readerRunning={readerRunning}
+          onStartReaderValidation={onStartReaderValidation}
+        />
       ) : baziMode ? (
         <BaziStageDetail
           stageId={stage.id}
@@ -1164,10 +1181,14 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
 
 function ChartFactsDetail({
   session,
-  status
+  status,
+  readerRunning,
+  onStartReaderValidation
 }: {
   session: SkillSessionResponse | null;
   status: StageStatus;
+  readerRunning: boolean;
+  onStartReaderValidation: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const copy = localizedStageCopy("chart", t);
@@ -1217,7 +1238,13 @@ function ChartFactsDetail({
         </div>
       </section>
 
-      {rectificationState && <ChartRectificationSummary state={rectificationState} />}
+      {rectificationState && (
+        <ChartRectificationSummary
+          state={rectificationState}
+          readerRunning={readerRunning}
+          onStartReaderValidation={onStartReaderValidation}
+        />
+      )}
 
       {sections.length > 0 ? (
         <section className="my-5 border-t border-gold/25 pt-4">
@@ -1250,12 +1277,23 @@ function ChartFactsDetail({
   );
 }
 
-function ChartRectificationSummary({ state }: { state: RectificationState }) {
+function ChartRectificationSummary({
+  state,
+  readerRunning,
+  onStartReaderValidation
+}: {
+  state: RectificationState;
+  readerRunning: boolean;
+  onStartReaderValidation: () => Promise<void>;
+}) {
   const candidates = state.candidates ?? [];
   const active = state.activeCandidateId || "—";
   const selected = state.selectedCandidateId || "—";
   const revision = state.activeChartRevision?.revision ?? 0;
   const gateAllowed = state.reportGate?.fullReportAllowed === true;
+  const canGenerateNextRound =
+    !gateAllowed &&
+    ["needs_more_feedback", "needs_candidate_bound_checks"].includes(state.status ?? "");
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
@@ -1283,6 +1321,23 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
           <p className="m-0 mt-3 text-[12.5px] leading-[1.65] text-muted">
             {state.reportGate.reason}
           </p>
+        )}
+        {canGenerateNextRound && (
+          <Button
+            className="mt-3 w-full"
+            disabled={readerRunning}
+            onClick={() => void onStartReaderValidation()}
+          >
+            {readerRunning ? (
+              <>
+                <LoaderCircle className="size-4 animate-spin" /> Generating next check...
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={15} /> Generate next check
+              </>
+            )}
+          </Button>
         )}
         {candidates.length > 1 && (
           <div className="mt-3 grid gap-2">
@@ -1337,7 +1392,10 @@ function ReaderDetail({
 }) {
   const { t } = useI18n();
   const prevalidation = findArtifact(session, "reader_prevalidation.md");
-  const feedback = findArtifact(session, "user_context.md");
+  const feedbackArtifact = findArtifact(session, "user_context.md");
+  const feedback = hasCurrentValidationFeedback(prevalidation, feedbackArtifact)
+    ? feedbackArtifact
+    : null;
   const anchors = useMemo(
     () => parseValidationAnchors(prevalidation?.content ?? ""),
     [prevalidation?.content]
@@ -2031,6 +2089,17 @@ function findStageArtifact(
 
 function findArtifact(session: SkillSessionResponse | null, path: string): SkillArtifact | null {
   return session?.artifacts.find((artifact) => artifact.path === path) ?? null;
+}
+
+function hasCurrentValidationFeedback(
+  prevalidation: SkillArtifact | null,
+  feedback: SkillArtifact | null
+) {
+  if (!prevalidation || !feedback) return false;
+  const prevalidationTime = Date.parse(prevalidation.updatedAt);
+  const feedbackTime = Date.parse(feedback.updatedAt);
+  if (Number.isNaN(prevalidationTime) || Number.isNaN(feedbackTime)) return true;
+  return feedbackTime >= prevalidationTime;
 }
 
 function isBaziSession(session: SkillSessionResponse | null) {
