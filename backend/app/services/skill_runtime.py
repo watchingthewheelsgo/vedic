@@ -317,6 +317,7 @@ class SkillRuntime:
             max_turns=self._max_turns_for(input_data.skill),
         )
         parsed = self._parse_artifact_response(result.raw_text)
+        self._validate_skill_artifacts(input_data.session_id, input_data.skill, parsed)
         for artifact in parsed["artifacts"]:
             artifact_path = str(artifact["path"])
             self.workspace.write_artifact(
@@ -330,7 +331,7 @@ class SkillRuntime:
                 producer=input_data.skill,
             )
         if input_data.skill == "vedic-reader":
-            self._write_prevalidation_result(input_data.session_id)
+            self._write_prevalidation_result(input_data.session_id, feedback_markdown="")
         stage = self._stage_for(input_data.skill)
         await self._sync_metadata(
             input_data.session_id,
@@ -1134,6 +1135,52 @@ class SkillRuntime:
   - For rectification_required anchors, add a second quoted machine line after Derivation using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
   - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
 
+    def _validate_skill_artifacts(
+        self,
+        session_id: str,
+        skill: str,
+        parsed: dict[str, object],
+    ) -> None:
+        artifacts = parsed.get("artifacts")
+        if not isinstance(artifacts, list):
+            raise ValueError("Artifact response missing artifacts")
+        allowed = self._allowed_output_artifacts(skill)
+        if allowed is not None:
+            unexpected = [
+                str(artifact.get("path"))
+                for artifact in artifacts
+                if isinstance(artifact, dict) and str(artifact.get("path")) not in allowed
+            ]
+            if unexpected:
+                raise ValueError(
+                    f"{skill} returned unexpected artifact(s): {', '.join(unexpected)}"
+                )
+        if skill != "vedic-reader":
+            return
+        prevalidation = ""
+        for artifact in artifacts:
+            if isinstance(artifact, dict) and artifact.get("path") == "reader_prevalidation.md":
+                prevalidation = str(artifact.get("content") or "")
+                break
+        if not prevalidation.strip():
+            raise ValueError("vedic-reader must return reader_prevalidation.md")
+        existing = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id)
+        }
+        state = self._json_dict(existing.get("chart_rectification_state.json", ""))
+        errors = self.rectification.validate_prevalidation_contract(state, prevalidation)
+        if errors:
+            raise ValueError(
+                "vedic-reader output failed candidate-bound validation: " + "; ".join(errors[:4])
+            )
+
+    @staticmethod
+    def _allowed_output_artifacts(skill: str) -> set[str] | None:
+        if skill == "vedic-reader":
+            return {"reader_prevalidation.md"}
+        return None
+
     def _prompt_for(self, input_data: SkillRunInput) -> str:
         locale = self._run_locale(input_data)
         if input_data.skill == "vedic-reader":
@@ -1771,6 +1818,7 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - Use the provided structured_data.md content.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
 - If sensitivity_scan.reportReadiness.mode is rectification_required, make each anchor support one explicit candidate ID from chart_rectification_state.json and focus on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
+- If chart_rectification_state.status is needs_more_feedback or needs_candidate_bound_checks, generate a new rectification round. Use prior feedbackAnchors, roundHistory, and candidate scores to ask narrower candidate-discriminating anchors; do not repeat anchors that already failed to separate candidates.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
 {self._reader_prevalidation_format_instruction(locale)}

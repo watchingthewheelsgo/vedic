@@ -40,6 +40,7 @@ class ChartRectificationService:
         return {
             "schemaVersion": self.schema_version,
             "revision": 0,
+            "rectificationRound": 0,
             "generatedAt": self._now(),
             "updatedAt": self._now(),
             "status": status,
@@ -67,6 +68,8 @@ class ChartRectificationService:
             },
             "candidates": self._scoreless_candidates(candidates),
             "feedbackAnchors": [],
+            "roundHistory": [],
+            "anchorContractErrors": [],
             "activeChartRevision": {
                 "revision": 0,
                 "source": "initial_input",
@@ -97,6 +100,7 @@ class ChartRectificationService:
         anchors = self._parse_candidate_anchors(prevalidation_markdown, feedback_markdown)
         candidates = self._reset_candidate_scores(next_state.get("candidates"))
         by_id = {str(candidate.get("candidateId")): candidate for candidate in candidates}
+        contract_errors = self.validate_prevalidation_contract(next_state, prevalidation_markdown)
 
         candidate_bound_count = 0
         for anchor in anchors:
@@ -117,16 +121,42 @@ class ChartRectificationService:
                 elif weight < 0:
                     candidate["reject"] = int(candidate.get("reject") or 0) + 1
 
-        selected = self._select_candidate(candidates)
-        status, confidence, gate = self._state_from_selection(
-            next_state,
-            selected,
-            candidate_bound_count,
+        if contract_errors:
+            selected = None
+            status, confidence, gate = self._candidate_contract_error_state(contract_errors)
+        else:
+            selected = self._select_candidate(candidates)
+            status, confidence, gate = self._state_from_selection(
+                next_state,
+                selected,
+                candidate_bound_count,
+            )
+        next_round = int(next_state.get("rectificationRound") or 0) + 1
+        round_history = self._round_history(next_state)
+        round_history.append(
+            {
+                "round": next_round,
+                "status": status,
+                "selectedCandidateId": selected.get("candidateId") if selected else None,
+                "candidateBoundAnchorCount": candidate_bound_count,
+                "feedbackAnchorCount": len(anchors),
+                "anchorContractErrors": contract_errors,
+                "candidateScores": [
+                    {
+                        "candidateId": candidate.get("candidateId"),
+                        "score": candidate.get("score"),
+                        "support": candidate.get("support"),
+                        "reject": candidate.get("reject"),
+                    }
+                    for candidate in candidates
+                ],
+            }
         )
 
         next_state.update(
             {
                 "revision": int(next_state.get("revision") or 0) + 1,
+                "rectificationRound": next_round,
                 "updatedAt": self._now(),
                 "status": status,
                 "selectedCandidateId": selected.get("candidateId") if selected else None,
@@ -135,6 +165,8 @@ class ChartRectificationService:
                 "feedbackAnchorCount": len(anchors),
                 "candidates": candidates,
                 "feedbackAnchors": anchors,
+                "roundHistory": round_history,
+                "anchorContractErrors": contract_errors,
                 "reportGate": gate,
             }
         )
@@ -185,10 +217,9 @@ class ChartRectificationService:
                 lat = coordinates.get("lat")
                 lon = coordinates.get("lon")
                 if lat is not None and lon is not None:
-                    accuracy = str(place_context.get("accuracy") or "coordinate")
                     birth_place = (
                         f"{birth_place.split('|', 1)[0].strip()} | "
-                        f"lat={lat}, lon={lon}, source=rectification, accuracy={accuracy}"
+                        f"lat={lat}, lon={lon}, source=rectification, accuracy=coordinate"
                     )
                     axis_changes.append("place")
 
@@ -290,6 +321,52 @@ class ChartRectificationService:
             )
         return next_decision
 
+    def validate_prevalidation_contract(
+        self,
+        state: dict[str, Any],
+        prevalidation_markdown: str,
+    ) -> list[str]:
+        """Return contract errors for high-risk candidate-bound reader output."""
+
+        if not self._requires_candidate_bound_anchors(state):
+            return []
+
+        raw_candidates = state.get("candidates")
+        candidates = raw_candidates if isinstance(raw_candidates, list) else []
+        candidate_ids = {
+            str(candidate.get("candidateId"))
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("candidateId")
+        }
+        anchors = self._parse_prevalidation_blocks(prevalidation_markdown)
+        errors: list[str] = []
+        if not anchors:
+            return ["reader_prevalidation.md does not contain numbered validation anchors."]
+
+        for anchor in anchors:
+            index = int(anchor["index"])
+            block = str(anchor["block"])
+            anchor_candidate_ids = self._candidate_ids_from_block(block)
+            fields = self._unstable_fields_from_block(block)
+            if not anchor_candidate_ids:
+                errors.append(f"Anchor {index} is missing a machine-readable Candidate line.")
+            invalid_ids = [
+                candidate_id
+                for candidate_id in anchor_candidate_ids
+                if candidate_id not in candidate_ids
+            ]
+            if invalid_ids:
+                errors.append(
+                    f"Anchor {index} references unknown candidate ID(s): {', '.join(invalid_ids)}."
+                )
+            if not fields:
+                errors.append(f"Anchor {index} is missing a machine-readable Field line.")
+            statement = self._statement_from_anchor_block(block)
+            if len(statement) < 12:
+                errors.append(f"Anchor {index} does not contain a concrete user-facing claim.")
+
+        return errors
+
     def _candidate_groups(self, sensitivity_scan: dict[str, Any]) -> list[dict[str, Any]]:
         groups = sensitivity_scan.get("candidateGroups")
         if isinstance(groups, list) and groups:
@@ -348,6 +425,13 @@ class ChartRectificationService:
             result.append(item)
         return result
 
+    @staticmethod
+    def _round_history(state: dict[str, Any]) -> list[dict[str, Any]]:
+        history = state.get("roundHistory")
+        if not isinstance(history, list):
+            return []
+        return [copy.deepcopy(item) for item in history if isinstance(item, dict)]
+
     def _parse_candidate_anchors(
         self,
         prevalidation_markdown: str,
@@ -367,6 +451,15 @@ class ChartRectificationService:
                 }
             )
         return parsed
+
+    @staticmethod
+    def _statement_from_anchor_block(block: str) -> str:
+        statement = re.sub(
+            r"(?m)^>\s*(?:推导|Derivation|根拠|Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段)\s*[：:].*$",
+            "",
+            block,
+        )
+        return statement.replace("**", "").replace("`", "").replace("\n", " ").strip()
 
     @staticmethod
     def _parse_prevalidation_blocks(content: str) -> list[dict[str, object]]:
@@ -464,11 +557,47 @@ class ChartRectificationService:
         top = ordered[0]
         second_score = float(ordered[1].get("score") or 0) if len(ordered) > 1 else 0.0
         top_score = float(top.get("score") or 0)
-        if top_score >= 1.25 and top_score - second_score >= 0.75:
-            return top
-        if top.get("isBase") and top_score >= 1.0 and int(top.get("support") or 0) >= 1:
+        support = int(top.get("support") or 0)
+        clear_margin = top_score - second_score >= 0.75
+        enough_positive_support = support >= 2 and top_score >= 1.25
+        alternatives_rejected = bool(ordered[1:]) and all(
+            int(candidate.get("reject") or 0) >= 1 for candidate in ordered[1:]
+        )
+        one_positive_with_rejections = support >= 1 and top_score >= 1.0 and alternatives_rejected
+        if clear_margin and (enough_positive_support or one_positive_with_rejections):
             return top
         return None
+
+    @staticmethod
+    def _requires_candidate_bound_anchors(state: dict[str, Any]) -> bool:
+        status = str(state.get("status") or "")
+        mode = str(state.get("reportReadinessMode") or "")
+        candidates = state.get("candidates") if isinstance(state.get("candidates"), list) else []
+        return (
+            mode == "rectification_required"
+            and len(candidates) > 1
+            and status
+            in {
+                "candidate_feedback_pending",
+                "needs_candidate_bound_checks",
+                "needs_more_feedback",
+            }
+        )
+
+    @staticmethod
+    def _candidate_contract_error_state(
+        errors: list[str],
+    ) -> tuple[str, str, dict[str, Any]]:
+        return (
+            "needs_candidate_bound_checks",
+            "none",
+            {
+                "fullReportAllowed": False,
+                "reason": "Reader validation anchors do not satisfy the candidate-bound contract: "
+                + "; ".join(errors[:3]),
+                "nextStep": "rerun_reader_with_candidate_bound_anchors",
+            },
+        )
 
     def _state_from_selection(
         self,
