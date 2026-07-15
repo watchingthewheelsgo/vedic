@@ -53,7 +53,7 @@ export function Landing() {
         <div className="mb-9 inline-block rounded-full border border-gold/25 px-5 py-1.5 text-[11px] uppercase tracking-[4px] text-gold">
           {t("landing.eyebrow")}
         </div>
-        <h1 className="mb-5 text-[42px] font-light leading-[1.18] tracking-normal text-night sm:text-[52px]">
+        <h1 className="mb-5 text-[42px] font-light leading-[1.18] tracking-normal text-cream sm:text-[52px]">
           {t("landing.hero.title")}
           {heroStrong ? <strong className="font-semibold text-gold">{heroStrong}</strong> : null}
         </h1>

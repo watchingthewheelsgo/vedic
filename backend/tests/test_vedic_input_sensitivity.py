@@ -6,10 +6,57 @@ from typing import Any, cast
 import json
 import pytest
 
+from app.schemas import BirthInput
 from app.services.place_service import ResolvedPlace
 from app.services.chart_rectification import ChartRectificationService
 from app.services.skill_runtime import SkillRuntime
 from app.services.vedic_calculator import VedicCalculator
+
+
+def _birth_payload() -> dict[str, Any]:
+    return {
+        "year": 1990,
+        "month": 1,
+        "day": 1,
+        "hour": 8,
+        "minute": 30,
+        "dob": "1990-01-01",
+        "time": "08:30",
+        "timezone": "Asia/Shanghai",
+        "lat": 31.2304,
+        "lon": 121.4737,
+    }
+
+
+def _birth_input(place: str = "Shanghai, Shanghai, China") -> BirthInput:
+    return BirthInput(
+        birthDate="1990-01-01",
+        birthTime="08:30",
+        birthPlace=place,
+        birthTimePrecision="exact",
+        gender="女",
+        relationship="单身",
+        timeSource="birth certificate",
+        locale="zh",
+    )
+
+
+def _base_chart() -> dict[str, Any]:
+    return {
+        "lagna": {"sign": "Aries", "degree": 5.0, "nakshatra": {"name": "Ashwini"}},
+        "planets": {
+            "Moon": {
+                "sign": "Taurus",
+                "longitude": 50.0,
+                "nakshatra": {"name": "Rohini", "pada": 1},
+            }
+        },
+        "dashas": [{"planet": "Moon", "is_current": True, "antardashas": []}],
+        "d9": {"Lagna": ("Libra", 0)},
+        "d10": {"Lagna": ("Capricorn", 0)},
+        "d4": {"Lagna": ("Cancer", 0)},
+        "d5": {"Lagna": ("Leo", 0)},
+    }
 
 
 def test_scan_summary_marks_changed_divisional_chart_as_high_risk() -> None:
@@ -37,6 +84,8 @@ def test_scan_summary_marks_changed_divisional_chart_as_high_risk() -> None:
     assert "variant_changes:d9Lagna" in summary["riskFactors"]
     assert summary["divisionalConfidence"]["D9"]["confidence"] == "low"
     assert summary["divisionalConfidence"]["D1"]["confidence"] == "medium"
+    assert summary["rectificationAxes"] == ["time", "place"]
+    assert summary["placeRectificationAllowed"] is True
 
 
 def test_scan_summary_keeps_precise_stable_coordinate_low_risk() -> None:
@@ -63,6 +112,127 @@ def test_scan_summary_keeps_precise_stable_coordinate_low_risk() -> None:
     assert summary["riskLevel"] == "low"
     assert summary["riskFactors"] == []
     assert summary["divisionalConfidence"]["D10"]["confidence"] == "high"
+    assert summary["rectificationAxes"] == ["time"]
+    assert summary["placeRectificationAllowed"] is False
+
+
+def test_birth_input_context_locks_precise_place_rectification() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    place = ResolvedPlace(
+        label="上海市第一妇婴保健院东院",
+        lat=31.19174,
+        lon=121.54581,
+        timezone="Asia/Shanghai",
+        source="agent",
+        accuracy="poi",
+        radius_km=0.3,
+        confidence="high",
+    )
+
+    context = calculator._birth_input_context(
+        _birth_payload(),
+        _birth_input("上海市第一妇婴保健院东院"),
+        place,
+    )
+
+    assert context["place"]["rectificationAllowed"] is False
+    assert context["place"]["rectificationPolicy"] == "locked_precise_coordinates"
+    assert context["constraints"]["placeRectificationAllowed"] is False
+    assert context["constraints"]["rectificationAxes"] == ["time"]
+
+
+def test_birth_input_context_allows_city_place_rectification() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    place = ResolvedPlace(
+        label="Shanghai, Shanghai, China",
+        lat=31.2304,
+        lon=121.4737,
+        timezone="Asia/Shanghai",
+        source="geonames-local",
+        accuracy="city",
+        radius_km=25.0,
+        confidence="medium",
+    )
+
+    context = calculator._birth_input_context(
+        _birth_payload(),
+        _birth_input(),
+        place,
+    )
+
+    assert context["place"]["rectificationAllowed"] is True
+    assert context["place"]["rectificationPolicy"] == "scan_within_reported_radius"
+    assert context["constraints"]["placeRectificationAllowed"] is True
+    assert context["constraints"]["rectificationAxes"] == ["time", "place"]
+
+
+def test_sensitivity_scan_excludes_place_candidates_for_precise_place() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    chart = _base_chart()
+    place = ResolvedPlace(
+        label="上海市第一妇婴保健院东院",
+        lat=31.19174,
+        lon=121.54581,
+        timezone="Asia/Shanghai",
+        source="agent",
+        accuracy="poi",
+        radius_km=0.3,
+        confidence="high",
+    )
+
+    scan = calculator._sensitivity_scan(
+        lambda *_args: chart,
+        chart,
+        _birth_payload(),
+        _birth_input("上海市第一妇婴保健院东院"),
+        place,
+    )
+
+    member_axes = [
+        member["axis"]
+        for candidate in scan["candidateGroups"]
+        for member in candidate.get("members", [])
+    ]
+    assert scan["summary"]["rectificationAxes"] == ["time"]
+    assert scan["summary"]["placeRectificationAllowed"] is False
+    assert scan["reportReadiness"]["llmContract"]["rectificationAxes"] == ["time"]
+    assert scan["placeVariants"][0]["rectificationAllowed"] is False
+    assert "Detailed place coordinates are locked" in scan["rectificationGuardrails"]["place"]
+    assert "place" not in member_axes
+
+
+def test_sensitivity_scan_keeps_place_candidates_for_city_place() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    chart = _base_chart()
+    place = ResolvedPlace(
+        label="Shanghai, Shanghai, China",
+        lat=31.2304,
+        lon=121.4737,
+        timezone="Asia/Shanghai",
+        source="geonames-local",
+        accuracy="city",
+        radius_km=25.0,
+        confidence="medium",
+    )
+
+    scan = calculator._sensitivity_scan(
+        lambda *_args: chart,
+        chart,
+        _birth_payload(),
+        _birth_input(),
+        place,
+    )
+
+    member_axes = [
+        member["axis"]
+        for candidate in scan["candidateGroups"]
+        for member in candidate.get("members", [])
+    ]
+    assert scan["summary"]["rectificationAxes"] == ["time", "place"]
+    assert scan["summary"]["placeRectificationAllowed"] is True
+    assert scan["reportReadiness"]["placeRectificationAllowed"] is True
+    assert "City/district coordinates are approximate" in scan["rectificationGuardrails"]["place"]
+    assert "place" in member_axes
 
 
 class FakeWorkspace:
@@ -344,6 +514,41 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
     assert decision["nextStep"] == "report_allowed_after_rectification"
 
 
+def test_rectification_state_marks_precise_place_as_time_only() -> None:
+    service = ChartRectificationService()
+
+    state = service.initial_state(
+        {
+            "time": {"window": {"start": "1990-01-01 08:28", "end": "1990-01-01 08:32"}},
+            "place": {
+                "accuracy": "poi",
+                "radiusKm": 0.3,
+                "rectificationAllowed": False,
+            },
+            "constraints": {
+                "placeRectificationAllowed": False,
+                "rectificationAxes": ["time"],
+            },
+        },
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {
+                    "candidateId": "B",
+                    "isBase": False,
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:32"}],
+                },
+            ],
+        },
+    )
+
+    assert state["searchBounds"]["place"]["rectificationAllowed"] is False
+    assert state["guardrails"]["placeRectificationAllowed"] is False
+    assert state["guardrails"]["rectificationAxes"] == ["time"]
+
+
 def test_rectification_does_not_confirm_base_from_tied_candidate_support() -> None:
     service = ChartRectificationService()
     state = service.initial_state(
@@ -509,6 +714,41 @@ def test_rectified_place_candidate_uses_coordinate_accuracy() -> None:
     assert rectified is not None
     assert "lat=31.2, lon=121.5" in rectified.birth_place
     assert "accuracy=coordinate" in rectified.birth_place
+
+
+def test_rectified_place_candidate_ignored_for_precise_place() -> None:
+    service = ChartRectificationService()
+    state = {
+        "selectedCandidateId": "B",
+        "candidates": [
+            {"candidateId": "A", "isBase": True, "members": []},
+            {
+                "candidateId": "B",
+                "isBase": False,
+                "members": [
+                    {
+                        "axis": "place",
+                        "coordinates": {"lat": 31.2, "lon": 121.5},
+                    }
+                ],
+            },
+        ],
+    }
+
+    rectified = service.rectified_birth_input(
+        state,
+        {
+            "time": {"date": "1990-01-01", "reported": "08:30", "precision": "exact"},
+            "place": {
+                "reported": "上海市第一妇婴保健院东院 | lat=31.19174, lon=121.54581, source=agent, accuracy=poi",
+                "accuracy": "poi",
+                "radiusKm": 0.3,
+            },
+        },
+        {"subject": {"gender": "女", "relationship": "单身"}},
+    )
+
+    assert rectified is None
 
 
 def test_rectification_requires_machine_candidate_line_for_candidate_bound_anchor() -> None:

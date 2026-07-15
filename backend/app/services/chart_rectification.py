@@ -23,6 +23,18 @@ class ChartRectificationService:
         readiness = self._report_readiness(sensitivity_scan)
         risk_level = str(self._scan_summary(sensitivity_scan).get("riskLevel") or "unknown")
         mode = str(readiness.get("mode") or "unknown")
+        constraints = birth_input_context.get("constraints") or {}
+        place_context = birth_input_context.get("place") or {}
+        place_rectification_allowed = constraints.get(
+            "placeRectificationAllowed",
+            self._place_rectification_allowed(place_context)
+            if isinstance(place_context, dict)
+            else True,
+        )
+        rectification_axes = constraints.get(
+            "rectificationAxes",
+            ["time", "place"] if place_rectification_allowed else ["time"],
+        )
 
         if mode == "rectification_required" and len(candidates) > 1:
             status = "candidate_feedback_pending"
@@ -62,8 +74,13 @@ class ChartRectificationService:
             "searchBounds": {
                 "time": (birth_input_context.get("time") or {}).get("window"),
                 "place": {
-                    "radiusKm": (birth_input_context.get("place") or {}).get("radiusKm"),
-                    "accuracy": (birth_input_context.get("place") or {}).get("accuracy"),
+                    "radiusKm": place_context.get("radiusKm")
+                    if isinstance(place_context, dict)
+                    else None,
+                    "accuracy": place_context.get("accuracy")
+                    if isinstance(place_context, dict)
+                    else None,
+                    "rectificationAllowed": place_rectification_allowed,
                 },
             },
             "candidates": self._scoreless_candidates(candidates),
@@ -77,15 +94,20 @@ class ChartRectificationService:
             },
             "rectifiedInput": None,
             "guardrails": {
-                "timeSearchMustStayWithinReportedWindow": (
-                    birth_input_context.get("constraints") or {}
-                ).get("timeSearchMustStayWithinReportedWindow", True),
-                "placeSearchMustStayWithinRadiusKm": (
-                    birth_input_context.get("constraints") or {}
-                ).get("placeSearchMustStayWithinRadiusKm", True),
-                "rejectRectificationOutsideUserFacts": (
-                    birth_input_context.get("constraints") or {}
-                ).get("rejectRectificationOutsideUserFacts", True),
+                "timeSearchMustStayWithinReportedWindow": constraints.get(
+                    "timeSearchMustStayWithinReportedWindow",
+                    True,
+                ),
+                "placeSearchMustStayWithinRadiusKm": constraints.get(
+                    "placeSearchMustStayWithinRadiusKm",
+                    True,
+                ),
+                "placeRectificationAllowed": place_rectification_allowed,
+                "rectificationAxes": rectification_axes,
+                "rejectRectificationOutsideUserFacts": constraints.get(
+                    "rejectRectificationOutsideUserFacts",
+                    True,
+                ),
             },
         }
 
@@ -200,6 +222,7 @@ class ChartRectificationService:
             or place_context.get("resolvedLabel")
             or ""
         )
+        place_rectification_allowed = self._place_rectification_allowed(place_context)
 
         axis_changes = []
         for member in candidate.get("members") or []:
@@ -213,7 +236,11 @@ class ChartRectificationService:
                     birth_time = time_part
                 axis_changes.append("time")
             coordinates = member.get("coordinates")
-            if member.get("axis") == "place" and isinstance(coordinates, dict):
+            if (
+                member.get("axis") == "place"
+                and place_rectification_allowed
+                and isinstance(coordinates, dict)
+            ):
                 lat = coordinates.get("lat")
                 lon = coordinates.get("lon")
                 if lat is not None and lon is not None:
@@ -236,6 +263,10 @@ class ChartRectificationService:
             timeSource=self._rectified_time_source(time_context.get("source")),
             locale="zh",
         )
+
+    @staticmethod
+    def _place_rectification_allowed(place_context: dict[str, Any]) -> bool:
+        return str(place_context.get("accuracy") or "city") in {"city", "district"}
 
     def selected_candidate(self, state: dict[str, Any]) -> dict[str, Any] | None:
         selected_id = state.get("selectedCandidateId")

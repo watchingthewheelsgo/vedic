@@ -4,6 +4,7 @@ import { UserRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { AccountCenter } from "../components/AccountCenter";
+import { BirthInputLayout } from "../components/BirthInputLayout";
 import {
   BirthDateTimeFields,
   BirthGenderField,
@@ -14,7 +15,6 @@ import {
 } from "../components/BirthDetailsFields";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { Button } from "../components/ui/button";
-import { Card, CardContent } from "../components/ui/card";
 import { Field } from "../components/ui/field";
 import {
   Select,
@@ -23,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "../components/ui/select";
-import { cn } from "../lib/cn";
 import { formatBirthDate } from "../lib/birth-details";
 import { formatBirthTime, normalizeTimeForPrecision } from "../lib/birth-time";
 import { useI18n } from "../i18n/provider";
@@ -111,143 +110,108 @@ export function Intake() {
   }
 
   return (
-    <div className="min-h-screen bg-cream-2">
-      <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-6 backdrop-blur-xl sm:px-10">
-        <div className="mx-auto flex h-16 max-w-[1100px] items-center justify-between">
-          <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-            Veda<span>Light</span>
-          </button>
-          <IntakeAuthControls />
-        </div>
-      </nav>
+    <BirthInputLayout
+      navControls={<IntakeAuthControls />}
+      backLabel={t("common.back")}
+      title={t("intake.title")}
+      subtitle={t("intake.subtitle")}
+      icon={<UserRound size={18} />}
+      steps={[
+        { active: true, label: t("intake.step.personal"), index: 1 },
+        { label: t("intake.step.reading"), index: 2 },
+        { label: t("intake.step.report"), index: 3 }
+      ]}
+      onBack={() => navigate("/")}
+    >
+      <form onSubmit={onStart} noValidate>
+        <BirthDateTimeFields
+          birthDate={birthDate}
+          birthTime={birthTime}
+          timePrecision={timePrecision}
+          errors={errors}
+          onBirthDateChange={(date) => {
+            setBirthDate(date);
+            clearError(setErrors, "birthDate");
+          }}
+          onBirthTimeChange={(date) => {
+            setBirthTime(date);
+            clearError(setErrors, "birthTime");
+          }}
+        />
 
-      <main className="px-5 py-9 sm:px-10 sm:py-14">
-        <div className="mx-auto max-w-[760px]">
-          <div className="mb-8 flex items-center justify-start">
-            <button
-              className="inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
-              onClick={() => navigate("/")}
-            >
-              ← {t("common.back")}
-            </button>
+        <BirthTimePrecisionField
+          value={timePrecision}
+          onChange={(next) => {
+            setTimePrecision(next);
+            setBirthTime((current) => normalizeTimeForPrecision(current, next));
+            if (next !== "exact") {
+              setTimeSource("");
+              clearError(setErrors, "timeSource");
+            }
+            if (next === "unknown") {
+              clearError(setErrors, "birthTime");
+            }
+          }}
+        />
+
+        {timePrecision === "exact" && (
+          <BirthTimeSourceField
+            value={timeSource}
+            error={errors.timeSource}
+            onChange={(value) => {
+              setTimeSource(value);
+              clearError(setErrors, "timeSource");
+            }}
+          />
+        )}
+
+        {timePrecision === "unknown" && (
+          <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
+            {t("intake.unknownNotice")}
           </div>
+        )}
 
-          <div className="mb-12 flex items-start">
-            <ProgressStep active label={t("intake.step.personal")} index={1} />
-            <ProgressStep label={t("intake.step.reading")} index={2} />
-            <ProgressStep label={t("intake.step.report")} index={3} last />
-          </div>
+        <BirthPlaceField
+          value={place}
+          onChange={(value) => {
+            setPlace(value);
+            if (value) clearError(setErrors, "place");
+          }}
+          error={errors.place}
+        />
 
-          <section className="mb-6 flex items-start gap-3.5">
-            <div className="grid size-[38px] shrink-0 place-items-center rounded-[10px] bg-night text-gold shadow-[0_10px_24px_rgba(15,12,9,0.12)]">
-              <UserRound size={18} />
-            </div>
-            <div>
-              <h2 className="mb-1.5 text-[26px] font-light tracking-[-0.2px] text-ink">
-                {t("intake.title")}
-              </h2>
-              <p className="mb-9 text-sm text-body">{t("intake.subtitle")}</p>
-            </div>
-          </section>
+        <BirthNameField value={name} onChange={setName} />
 
-          <Card>
-            <CardContent className="p-5 sm:p-6">
-              <form onSubmit={onStart} noValidate>
-                <BirthDateTimeFields
-                  birthDate={birthDate}
-                  birthTime={birthTime}
-                  timePrecision={timePrecision}
-                  errors={errors}
-                  onBirthDateChange={(date) => {
-                    setBirthDate(date);
-                    clearError(setErrors, "birthDate");
-                  }}
-                  onBirthTimeChange={(date) => {
-                    setBirthTime(date);
-                    clearError(setErrors, "birthTime");
-                  }}
-                />
+        <div className="grid gap-4 md:grid-cols-2">
+          <BirthGenderField value={gender} onChange={setGender} />
 
-                <BirthTimePrecisionField
-                  value={timePrecision}
-                  onChange={(next) => {
-                    setTimePrecision(next);
-                    setBirthTime((current) => normalizeTimeForPrecision(current, next));
-                    if (next !== "exact") {
-                      setTimeSource("");
-                      clearError(setErrors, "timeSource");
-                    }
-                    if (next === "unknown") {
-                      clearError(setErrors, "birthTime");
-                    }
-                  }}
-                />
-
-                {timePrecision === "exact" && (
-                  <BirthTimeSourceField
-                    value={timeSource}
-                    error={errors.timeSource}
-                    onChange={(value) => {
-                      setTimeSource(value);
-                      clearError(setErrors, "timeSource");
-                    }}
-                  />
-                )}
-
-                {timePrecision === "unknown" && (
-                  <div className="mb-5 rounded-[10px] border border-gold/25 bg-[#fff9ed] px-4 py-3 text-[13px] leading-relaxed text-body">
-                    {t("intake.unknownNotice")}
-                  </div>
-                )}
-
-                <BirthPlaceField
-                  value={place}
-                  onChange={(value) => {
-                    setPlace(value);
-                    if (value) clearError(setErrors, "place");
-                  }}
-                  error={errors.place}
-                />
-
-                <BirthNameField value={name} onChange={setName} />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <BirthGenderField value={gender} onChange={setGender} />
-
-                  <Field
-                    label={t("intake.relationship.label")}
-                    hint={t("intake.relationship.hint")}
-                  >
-                    <Select value={relationship || undefined} onValueChange={setRelationship}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={t("intake.select")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {RELATIONSHIP_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {t(option.labelKey)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-
-                {errors.submit && (
-                  <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
-                    {errors.submit}
-                  </div>
-                )}
-
-                <Button className="mt-2 w-full" size="lg" disabled={busy}>
-                  {busy ? t("intake.submit.busy") : t("intake.submit")}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+          <Field label={t("intake.relationship.label")} hint={t("intake.relationship.hint")}>
+            <Select value={relationship || undefined} onValueChange={setRelationship}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("intake.select")} />
+              </SelectTrigger>
+              <SelectContent>
+                {RELATIONSHIP_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
         </div>
-      </main>
-    </div>
+
+        {errors.submit && (
+          <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
+            {errors.submit}
+          </div>
+        )}
+
+        <Button className="mt-2 w-full" size="lg" disabled={busy}>
+          {busy ? t("intake.submit.busy") : t("intake.submit")}
+        </Button>
+      </form>
+    </BirthInputLayout>
   );
 }
 
@@ -272,38 +236,6 @@ function IntakeAuthControls() {
       <SignedIn>
         <AccountCenter compact />
       </SignedIn>
-    </div>
-  );
-}
-
-function ProgressStep({
-  active = false,
-  label,
-  index,
-  last = false
-}: {
-  active?: boolean;
-  label: string;
-  index: number;
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "relative flex-1 text-center text-xs tracking-[0.3px]",
-        active ? "text-gold" : "text-muted"
-      )}
-    >
-      {!last && <div className="absolute left-[55%] right-[-55%] top-[15px] h-px bg-gold/25" />}
-      <div
-        className={cn(
-          "relative z-[1] mx-auto mb-2 grid size-[30px] place-items-center rounded-full border text-[13px]",
-          active ? "border-gold bg-gold text-white" : "border-gold/25 bg-cream text-muted"
-        )}
-      >
-        {index}
-      </div>
-      {label}
     </div>
   );
 }

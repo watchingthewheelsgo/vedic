@@ -176,6 +176,7 @@ class VedicCalculator:
     ) -> dict[str, Any]:
         time_window = self._time_window(payload, intake.birth_time_precision)
         place_radius = round(float(place.radius_km), 3)
+        place_rectification_allowed = self._place_rectification_allowed(place)
         return {
             "schemaVersion": "birth-input-context/v1",
             "time": {
@@ -201,10 +202,14 @@ class VedicCalculator:
                 "radiusKm": place_radius,
                 "confidence": place.confidence,
                 "matched": place.matched,
+                "rectificationAllowed": place_rectification_allowed,
+                "rectificationPolicy": self._place_rectification_policy(place),
             },
             "constraints": {
                 "timeSearchMustStayWithinReportedWindow": True,
                 "placeSearchMustStayWithinRadiusKm": place_radius,
+                "placeRectificationAllowed": place_rectification_allowed,
+                "rectificationAxes": self._rectification_axes(place),
                 "rejectRectificationOutsideUserFacts": True,
             },
         }
@@ -232,6 +237,7 @@ class VedicCalculator:
             payload,
             place,
         )
+        place_rectification_allowed = self._place_rectification_allowed(place)
         boundary_flags = self._boundary_flags(base_chart)
         summary = self._scan_summary(
             intake.birth_time_precision,
@@ -243,7 +249,7 @@ class VedicCalculator:
         candidate_groups = self._candidate_groups(
             base_signature,
             time_variants,
-            place_variants,
+            place_variants if place_rectification_allowed else [],
         )
         stability = self._stability_map(
             set(summary["changedFields"]),
@@ -266,11 +272,7 @@ class VedicCalculator:
             "timeVariants": time_variants,
             "placeVariants": place_variants,
             "boundaryFlags": boundary_flags,
-            "rectificationGuardrails": {
-                "time": "Only search inside the reported time window.",
-                "place": "Only search inside the reported place radius unless the user corrects the place.",
-                "feedback": "If prevalidation misses, shrink candidates before writing a deterministic report.",
-            },
+            "rectificationGuardrails": self._rectification_guardrails(place),
         }
 
     def _candidate_groups(
@@ -445,6 +447,12 @@ class VedicCalculator:
             "minimumHitRateForCore": min_hit_rate,
             "coreAllowedWithoutRectification": core_allowed_without_rectification,
             "candidateCount": candidate_count,
+            "rectificationAxes": summary.get("rectificationAxes", ["time"]),
+            "placeRectificationAllowed": summary.get("placeRectificationAllowed", False),
+            "placeRectificationPolicy": summary.get(
+                "placeRectificationPolicy",
+                "locked_precise_coordinates",
+            ),
             "blockingFactors": blockers,
             "llmContract": {
                 "mustRead": [
@@ -455,6 +463,8 @@ class VedicCalculator:
                 ],
                 "mustNotUseAsPrimaryEvidence": stability.get("llmRestrictedEvidence", []),
                 "mayUseAsPrimaryEvidence": stability.get("llmStableEvidence", []),
+                "rectificationAxes": summary.get("rectificationAxes", ["time"]),
+                "placeRectificationAllowed": summary.get("placeRectificationAllowed", False),
                 "ifBlocked": (
                     "Do not write a full deterministic report. Ask for rectification "
                     "or write only a clearly labeled low-confidence/D1-only note."
@@ -569,11 +579,13 @@ class VedicCalculator:
         place: ResolvedPlace,
     ) -> list[dict[str, Any]]:
         radius_km = float(place.radius_km)
-        if radius_km < 1.0:
+        if not self._place_rectification_allowed(place) or radius_km < 1.0:
             return [
                 {
                     "label": "base",
                     "radiusKm": round(radius_km, 3),
+                    "rectificationAllowed": self._place_rectification_allowed(place),
+                    "rectificationPolicy": self._place_rectification_policy(place),
                     "changed": [],
                     "signature": base_signature,
                 }
@@ -749,7 +761,13 @@ class VedicCalculator:
             "riskFactors": risk_factors,
             "changedFields": sorted(changed),
             "divisionalConfidence": self._divisional_confidence(precision, changed),
-            "recommendedAction": self._recommended_action(risk_level),
+            "recommendedAction": self._recommended_action(
+                risk_level,
+                place_rectification_allowed=self._place_rectification_allowed(place),
+            ),
+            "rectificationAxes": self._rectification_axes(place),
+            "placeRectificationAllowed": self._place_rectification_allowed(place),
+            "placeRectificationPolicy": self._place_rectification_policy(place),
         }
 
     @staticmethod
@@ -779,14 +797,56 @@ class VedicCalculator:
         }
 
     @staticmethod
-    def _recommended_action(risk_level: str) -> str:
+    def _recommended_action(risk_level: str, *, place_rectification_allowed: bool) -> str:
         if risk_level == "high":
+            if not place_rectification_allowed:
+                return "Run prevalidation as time rectification: shrink time candidates before core synthesis; keep detailed place coordinates locked."
             return "Run prevalidation as rectification: shrink time/place candidates before core synthesis."
         if risk_level == "medium":
+            if not place_rectification_allowed:
+                return "Run targeted prevalidation and avoid deterministic claims from changed or boundary-sensitive factors; do not move the locked place."
             return "Run targeted prevalidation and avoid deterministic claims from changed or boundary-sensitive factors."
         return (
             "Proceed with standard prevalidation; still record user feedback before full synthesis."
         )
+
+    @staticmethod
+    def _place_rectification_allowed(place: ResolvedPlace) -> bool:
+        return place.accuracy in {"city", "district"}
+
+    def _rectification_axes(self, place: ResolvedPlace) -> list[str]:
+        return ["time", "place"] if self._place_rectification_allowed(place) else ["time"]
+
+    def _place_rectification_policy(self, place: ResolvedPlace) -> str:
+        if self._place_rectification_allowed(place):
+            return "scan_within_reported_radius"
+        return "locked_precise_coordinates"
+
+    def _rectification_guardrails(self, place: ResolvedPlace) -> dict[str, str]:
+        if self._place_rectification_allowed(place):
+            place_rule = (
+                "City/district coordinates are approximate; place candidates may vary "
+                "only inside the reported radius and must stay consistent with the "
+                "user-selected city or district."
+            )
+            feedback_rule = (
+                "If prevalidation misses, shrink time/place candidates before writing "
+                "a deterministic report."
+            )
+        else:
+            place_rule = (
+                "Detailed place coordinates are locked; do not create place-axis "
+                "rectification candidates unless the user corrects the place."
+            )
+            feedback_rule = (
+                "If prevalidation misses, shrink time candidates first. Ask the user "
+                "to correct the place only when they explicitly reject the selected POI/address."
+            )
+        return {
+            "time": "Only search inside the reported time window.",
+            "place": place_rule,
+            "feedback": feedback_rule,
+        }
 
     def _chart_facts(self, chart: dict[str, Any], sav_total: int) -> ChartFacts:
         shadbala_items: list[StrengthFact] = []

@@ -3,6 +3,7 @@ import { FormEvent, useMemo, useState, type Dispatch, type SetStateAction } from
 import { Compass, ScrollText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { BirthInputLayout } from "../components/BirthInputLayout";
 import {
   BirthDateTimeFields,
   BirthGenderField,
@@ -13,7 +14,6 @@ import {
 import { AccountCenter } from "../components/AccountCenter";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { Button } from "../components/ui/button";
-import { Card, CardContent } from "../components/ui/card";
 import { Field } from "../components/ui/field";
 import {
   Select,
@@ -32,9 +32,9 @@ type FormErrors = Partial<
   Record<"birthDate" | "birthTime" | "place" | "gender" | "submit", string>
 >;
 
-const CALENDAR_OPTIONS: Array<{ value: BaziCalendarType; label: string }> = [
-  { value: "solar", label: "Solar / 阳历" },
-  { value: "lunar", label: "Lunar / 农历" }
+const CALENDAR_OPTIONS: Array<{ value: BaziCalendarType; labelKey: string }> = [
+  { value: "solar", labelKey: "bazi.calendar.solar" },
+  { value: "lunar", labelKey: "bazi.calendar.lunar" }
 ];
 
 export function BaziWorkshop() {
@@ -62,7 +62,7 @@ export function BaziWorkshop() {
         timePrecision === "part_of_day" ? t("intake.error.birthHour") : t("intake.error.birthTime");
     }
     if (!place) nextErrors.place = t("intake.error.place");
-    if (!gender) nextErrors.gender = "Gender is required for major-luck direction.";
+    if (!gender) nextErrors.gender = t("bazi.error.gender");
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -107,149 +107,127 @@ export function BaziWorkshop() {
       });
     } catch (caught) {
       setErrors({
-        submit: caught instanceof Error ? caught.message : "Could not start BaZi workshop."
+        submit: caught instanceof Error ? caught.message : t("bazi.error.start")
       });
       setBusy(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-cream-2">
-      <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-6 backdrop-blur-xl sm:px-10">
-        <div className="mx-auto flex h-16 max-w-[1100px] items-center justify-between">
-          <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-            Veda<span>Light</span>
-          </button>
-          <BaziAuthControls />
+    <BirthInputLayout
+      navControls={<BaziAuthControls />}
+      backLabel={t("common.back")}
+      title={t("bazi.title")}
+      subtitle={t("bazi.subtitle")}
+      icon={<ScrollText size={18} />}
+      badge={
+        <div className="rounded-full border border-gold/25 bg-gold/10 px-3 py-1 text-[11px] uppercase tracking-[1.6px] text-gold-dim">
+          {t("bazi.hiddenBadge")}
         </div>
-      </nav>
+      }
+      steps={[
+        { active: true, label: t("intake.step.personal"), index: 1 },
+        { label: t("bazi.step.chart"), index: 2 },
+        { label: t("intake.step.report"), index: 3 }
+      ]}
+      maxWidthClass="max-w-[620px]"
+      onBack={() => navigate("/")}
+    >
+      <form onSubmit={onStart} noValidate>
+        <BirthDateTimeFields
+          birthDate={birthDate}
+          birthTime={birthTime}
+          timePrecision={timePrecision}
+          errors={errors}
+          onBirthDateChange={(date) => {
+            setBirthDate(date);
+            clearError(setErrors, "birthDate");
+          }}
+          onBirthTimeChange={(date) => {
+            setBirthTime(date);
+            clearError(setErrors, "birthTime");
+          }}
+        />
 
-      <main className="px-5 py-9 sm:px-10 sm:py-14">
-        <div className="mx-auto max-w-[820px]">
-          <div className="mb-8 flex items-center justify-between gap-4">
-            <button
-              className="inline-flex items-center gap-1 border-0 bg-transparent text-sm text-muted transition hover:text-ink"
-              onClick={() => navigate("/")}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label={t("bazi.calendar.label")}
+            icon={<Compass size={16} />}
+            hint={t("bazi.calendar.hint")}
+          >
+            <Select
+              value={calendarType}
+              onValueChange={(value) => setCalendarType(value as BaziCalendarType)}
             >
-              ← {t("common.back")}
-            </button>
-            <div className="rounded-full border border-gold/25 bg-gold/10 px-3 py-1 text-[11px] uppercase tracking-[1.6px] text-gold-dim">
-              Hidden BaZi Workshop
-            </div>
-          </div>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CALENDAR_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
 
-          <section className="mb-7 flex items-start gap-3.5">
-            <div className="grid size-[38px] shrink-0 place-items-center rounded-[10px] bg-night text-gold shadow-[0_10px_24px_rgba(15,12,9,0.12)]">
-              <ScrollText size={18} />
-            </div>
-            <div>
-              <h1 className="mb-1.5 text-[27px] font-light tracking-normal text-ink">
-                BaZi Workshop
-              </h1>
-              <p className="max-w-[620px] text-sm leading-relaxed text-body">
-                Generate the four pillars and luck-cycle workspace first, then run the classical
-                report from the workshop page.
-              </p>
-            </div>
-          </section>
-
-          <Card>
-            <CardContent className="p-5 sm:p-6">
-              <form onSubmit={onStart} noValidate>
-                <BirthDateTimeFields
-                  birthDate={birthDate}
-                  birthTime={birthTime}
-                  timePrecision={timePrecision}
-                  errors={errors}
-                  onBirthDateChange={(date) => {
-                    setBirthDate(date);
-                    clearError(setErrors, "birthDate");
-                  }}
-                  onBirthTimeChange={(date) => {
-                    setBirthTime(date);
-                    clearError(setErrors, "birthTime");
-                  }}
-                />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Calendar" icon={<Compass size={16} />} hint="Default is solar.">
-                    <Select
-                      value={calendarType}
-                      onValueChange={(value) => setCalendarType(value as BaziCalendarType)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CALENDAR_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-
-                  <BirthTimePrecisionField
-                    value={timePrecision}
-                    onChange={(next) => {
-                      setTimePrecision(next);
-                      setBirthTime((current) => normalizeTimeForPrecision(current, next));
-                      if (next === "unknown") {
-                        clearError(setErrors, "birthTime");
-                      }
-                    }}
-                  />
-                </div>
-
-                <BirthPlaceField
-                  value={place}
-                  onChange={(value) => {
-                    setPlace(value);
-                    if (value) clearError(setErrors, "place");
-                  }}
-                  error={errors.place}
-                />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <BirthNameField value={name} onChange={setName} />
-
-                  <BirthGenderField
-                    value={gender}
-                    error={errors.gender}
-                    options={REQUIRED_GENDER_OPTIONS}
-                    hint="Required by the BaZi luck-cycle direction algorithm."
-                    onChange={(value) => {
-                      setGender(value);
-                      clearError(setErrors, "gender");
-                    }}
-                  />
-                </div>
-
-                <Field label="Focus" hint="Optional. Kept as report context for the classical run.">
-                  <Textarea
-                    rows={4}
-                    value={topic}
-                    onChange={(event) => setTopic(event.target.value)}
-                    placeholder="Career, relationship, timing, general life direction..."
-                  />
-                </Field>
-
-                {errors.submit && (
-                  <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
-                    {errors.submit}
-                  </div>
-                )}
-
-                <Button className="mt-2 w-full" size="lg" disabled={busy}>
-                  {busy ? "Preparing BaZi workshop..." : "Open BaZi Workshop"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+          <BirthTimePrecisionField
+            value={timePrecision}
+            onChange={(next) => {
+              setTimePrecision(next);
+              setBirthTime((current) => normalizeTimeForPrecision(current, next));
+              if (next === "unknown") {
+                clearError(setErrors, "birthTime");
+              }
+            }}
+          />
         </div>
-      </main>
-    </div>
+
+        <BirthPlaceField
+          value={place}
+          onChange={(value) => {
+            setPlace(value);
+            if (value) clearError(setErrors, "place");
+          }}
+          error={errors.place}
+        />
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <BirthNameField value={name} onChange={setName} />
+
+          <BirthGenderField
+            value={gender}
+            error={errors.gender}
+            options={REQUIRED_GENDER_OPTIONS}
+            hint={t("bazi.gender.hint")}
+            onChange={(value) => {
+              setGender(value);
+              clearError(setErrors, "gender");
+            }}
+          />
+        </div>
+
+        <Field label={t("bazi.focus.label")} hint={t("bazi.focus.hint")}>
+          <Textarea
+            rows={4}
+            value={topic}
+            onChange={(event) => setTopic(event.target.value)}
+            placeholder={t("bazi.focus.placeholder")}
+          />
+        </Field>
+
+        {errors.submit && (
+          <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
+            {errors.submit}
+          </div>
+        )}
+
+        <Button className="mt-2 w-full" size="lg" disabled={busy}>
+          {busy ? t("bazi.submit.busy") : t("bazi.submit")}
+        </Button>
+      </form>
+    </BirthInputLayout>
   );
 }
 
