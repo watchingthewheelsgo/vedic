@@ -28,8 +28,8 @@
 
   body {
     margin: 0;
-    background: theme(colors.cream);
-    color: theme(colors.ink);
+    background: theme(colors.night);
+    color: theme(colors.cream);
     font-family:
       -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, "PingFang SC",
       "Microsoft YaHei", sans-serif;
@@ -55,7 +55,7 @@
 
 @layer components {
   .brand-logo {
-    @apply text-[15px] font-bold uppercase tracking-[2px] text-[#111111];
+    @apply text-[15px] font-bold uppercase tracking-[2px] text-cream;
   }
 
   .brand-logo span {
@@ -93,6 +93,199 @@
     border: 1px solid rgb(201 169 110 / 20%);
     border-radius: 6px;
   }
+
+  .birth-input-screen {
+    position: relative;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel label {
+    color: rgb(201 169 110 / 72%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .text-muted {
+    color: rgb(245 239 230 / 42%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .text-body {
+    color: rgb(245 239 230 / 72%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .text-ink {
+    color: theme(colors.cream) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel input,
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel textarea,
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel [role="combobox"],
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel button[aria-invalid],
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-field-shell {
+    background: rgb(255 255 255 / 5%) !important;
+    border-color: rgb(201 169 110 / 24%) !important;
+    color: theme(colors.cream) !important;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel input::placeholder,
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel textarea::placeholder {
+    color: rgb(245 239 230 / 34%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel input:focus,
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel textarea:focus,
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel [role="combobox"]:focus,
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel button[aria-invalid]:focus {
+    background: rgb(255 255 255 / 9%) !important;
+    border-color: theme(colors.gold) !important;
+    box-shadow:
+      0 0 0 3px rgb(201 169 110 / 16%),
+      0 0 22px rgb(201 169 110 / 16%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-readout {
+    background: rgb(201 169 110 / 8%) !important;
+    border-color: rgb(201 169 110 / 22%) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-readout .text-ink {
+    color: theme(colors.cream) !important;
+  }
+
+  .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-mode-switch {
+    background: rgb(255 255 255 / 5%) !important;
+    border-color: rgb(201 169 110 / 24%) !important;
+  }
+
+  .birth-input-readout {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .birth-input-readout::before {
+    animation: birth-readout-sweep 5s linear infinite;
+    background: linear-gradient(90deg, transparent, rgb(237 217 163 / 16%), transparent);
+    content: "";
+    height: 100%;
+    left: -100%;
+    position: absolute;
+    top: 0;
+    width: 55%;
+  }
+
+  @keyframes birth-readout-sweep {
+    to {
+      left: 150%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .birth-input-readout::before {
+      animation: none;
+    }
+  }
+
+  .cosmic-floating-surface .text-ink {
+    color: theme(colors.cream) !important;
+  }
+
+  .cosmic-floating-surface .text-body {
+    color: rgb(245 239 230 / 70%) !important;
+  }
+
+  .cosmic-floating-surface .text-muted {
+    color: rgb(245 239 230 / 48%) !important;
+  }
+
+  .cosmic-floating-surface input,
+  .cosmic-floating-surface textarea,
+  .cosmic-floating-surface [role="combobox"] {
+    color: theme(colors.cream) !important;
+  }
+
+  .cosmic-floating-surface input::placeholder,
+  .cosmic-floating-surface textarea::placeholder {
+    color: rgb(245 239 230 / 34%) !important;
+  }
+}
+
+.cosmic-site {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -5%, rgb(110 82 170 / 34%), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 82% 96%, rgb(201 169 110 / 18%), transparent 60%),
+    radial-gradient(circle at 15% 78%, rgb(130 90 185 / 16%), transparent 55%),
+    linear-gradient(180deg, rgb(8 5 16 / 96%) 0%, rgb(15 12 9 / 94%) 100%);
+}
+
+.cosmic-site .brand-logo,
+.cosmic-site .text-\[\#111111\] {
+  color: theme(colors.cream) !important;
+}
+
+.cosmic-site .bg-cream,
+.cosmic-site .bg-cream\/95,
+.cosmic-site .bg-cream\/90,
+.cosmic-site .bg-cream\/85,
+.cosmic-site .bg-cream\/80,
+.cosmic-site .bg-cream\/72,
+.cosmic-site .bg-\[\#fff9ed\] {
+  background-color: rgb(16 12 22 / 78%) !important;
+}
+
+.cosmic-site .bg-cream-2,
+.cosmic-site .bg-cream-2\/70 {
+  background-color: rgb(8 5 16 / 72%) !important;
+}
+
+.cosmic-site .bg-cream-3 {
+  background-color: rgb(255 255 255 / 8%) !important;
+}
+
+.cosmic-site .bg-cream\/5 {
+  background-color: rgb(255 255 255 / 5%) !important;
+}
+
+.cosmic-site .bg-cream\/10 {
+  background-color: rgb(255 255 255 / 10%) !important;
+}
+
+.cosmic-site .from-cream {
+  --tw-gradient-from: rgb(8 5 16 / 96%) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(8 5 16 / 0%) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.cosmic-site .to-cream-2 {
+  --tw-gradient-to: rgb(16 12 22 / 92%) var(--tw-gradient-to-position) !important;
+}
+
+.cosmic-site .text-ink {
+  color: theme(colors.cream) !important;
+}
+
+.cosmic-site .text-body {
+  color: rgb(245 239 230 / 70%) !important;
+}
+
+.cosmic-site .text-muted {
+  color: rgb(245 239 230 / 46%) !important;
+}
+
+.cosmic-site input,
+.cosmic-site textarea,
+.cosmic-site [role="combobox"] {
+  color: theme(colors.cream);
+}
+
+.cosmic-site input::placeholder,
+.cosmic-site textarea::placeholder {
+  color: rgb(245 239 230 / 34%);
+}
+
+.cosmic-site .shadow-\[0_18px_48px_rgba\(44\,31\,15\,0\.07\)\],
+.cosmic-site .shadow-\[0_18px_48px_rgba\(44\,31\,15\,0\.08\)\],
+.cosmic-site .shadow-\[0_18px_50px_rgba\(44\,31\,15\,0\.08\)\],
+.cosmic-site .shadow-\[0_18px_48px_rgba\(44\,31\,15\,0\.16\)\],
+.cosmic-site .shadow-\[0_14px_36px_rgba\(44\,31\,15\,0\.06\)\] {
+  box-shadow: 0 24px 80px rgb(0 0 0 / 32%) !important;
 }
 
 @media print {

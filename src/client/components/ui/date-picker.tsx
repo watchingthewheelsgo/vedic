@@ -42,13 +42,13 @@ export function DatePicker({
           size="lg"
           aria-invalid={invalid}
           className={cn(
-            "w-full justify-start border-gold/30 bg-white px-4 text-left font-normal text-ink hover:border-gold/50 hover:bg-white data-[state=open]:border-gold data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
+            "birth-input-field-shell w-full justify-start border-gold/30 bg-white/5 px-4 text-left font-normal text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-gold/50 hover:bg-white/10 data-[state=open]:border-gold data-[state=open]:bg-white/10 data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
             invalid && "border-red bg-red/5 hover:border-red",
             className
           )}
         >
           <CalendarDays className="size-4 shrink-0 text-gold-dim" />
-          <span className={cn("min-w-0 flex-1 truncate", value ? "text-ink" : "text-muted")}>
+          <span className={cn("min-w-0 flex-1 truncate", value ? "text-cream" : "text-cream/40")}>
             {value ? format(value, formatPattern) : placeholder}
           </span>
         </Button>

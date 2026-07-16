@@ -61,7 +61,7 @@ export function BirthTimePicker({
             disabled={disabled}
             aria-invalid={invalid}
             className={cn(
-              "w-full justify-start border-gold/30 bg-white px-4 text-left font-normal text-ink hover:border-gold/50 hover:bg-white data-[state=open]:border-gold data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
+              "birth-input-field-shell w-full justify-start border-gold/30 bg-white/5 px-4 text-left font-normal text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-gold/50 hover:bg-white/10 data-[state=open]:border-gold data-[state=open]:bg-white/10 data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
               invalid && "border-red bg-red/5 hover:border-red"
             )}
           >
@@ -69,7 +69,7 @@ export function BirthTimePicker({
             <span
               className={cn(
                 "min-w-0 flex-1 text-[15px] font-medium tabular-nums",
-                value ? "text-ink" : "text-muted"
+                value ? "text-cream" : "text-cream/40"
               )}
             >
               {disabled
@@ -105,7 +105,7 @@ export function BirthTimePicker({
             <div className="mt-3 flex items-center justify-between">
               <button
                 type="button"
-                className="text-xs text-muted transition hover:text-ink"
+                className="text-xs text-cream/50 transition hover:text-cream focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15"
                 onClick={() => {
                   onChange(null);
                   setOpen(false);

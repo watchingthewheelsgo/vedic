@@ -71,6 +71,9 @@ class PlaceOption(ApiModel):
     country: str | None = None
     region: str | None = None
     birth_place: str | None = Field(default=None, alias="birthPlace")
+    latitude: float | None = None
+    longitude: float | None = None
+    timezone: str | None = None
 
 
 class PlaceSearchResponse(ApiModel):
@@ -82,7 +85,7 @@ class PrecisePlaceOption(ApiModel):
     label: str
     address: str | None = None
     meta: str | None = None
-    source: Literal["geonames-local", "amap", "agent", "web", "manual"]
+    source: Literal["geonames-local", "amap", "agent", "manual"]
     accuracy: Literal["city", "poi", "address", "district", "coordinate"]
     coordinate_system: str = Field(alias="coordinateSystem")
     latitude: float
@@ -106,7 +109,7 @@ class PrecisePlaceSearchResponse(ApiModel):
     agent_fallback_enabled: bool = Field(default=False, alias="agentFallbackEnabled")
     agent_attempted: bool = Field(default=False, alias="agentAttempted")
     agent_error: str | None = Field(default=None, alias="agentError")
-    web_fallback_enabled: bool = Field(default=False, alias="webFallbackEnabled")
+    agent_search_queries: list[str] = Field(default_factory=list, alias="agentSearchQueries")
     verification_base: str | None = Field(default=None, alias="verificationBase")
     rejected_count: int = Field(default=0, alias="rejectedCount")
     attempted_sources: list[str] = Field(default_factory=list, alias="attemptedSources")

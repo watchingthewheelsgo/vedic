@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-from html import unescape
 import json
 import math
 import re
@@ -12,8 +11,6 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-
-import requests
 
 from app.schemas import (
     PlaceOption,
@@ -83,6 +80,8 @@ class PlaceService:
         "广东": "Guangdong",
         "广东省": "Guangdong",
         "浙江": "Zhejiang",
+        "安徽": "Anhui",
+        "安徽省": "Anhui",
         "江苏": "Jiangsu",
         "四川": "Sichuan",
         "湖北": "Hubei",
@@ -101,12 +100,16 @@ class PlaceService:
         "北京市": PlacePreference("Beijing", "China", "Beijing"),
         "上海": PlacePreference("Shanghai", "China", "Shanghai"),
         "上海市": PlacePreference("Shanghai", "China", "Shanghai"),
+        "浦东": PlacePreference("Pudong", "China", "Shanghai"),
+        "浦东新区": PlacePreference("Pudong", "China", "Shanghai"),
         "广州": PlacePreference("Guangzhou", "China", "Guangdong"),
         "广州市": PlacePreference("Guangzhou", "China", "Guangdong"),
         "深圳": PlacePreference("Shenzhen", "China", "Guangdong"),
         "深圳市": PlacePreference("Shenzhen", "China", "Guangdong"),
         "杭州": PlacePreference("Hangzhou", "China", "Zhejiang"),
         "成都": PlacePreference("Chengdu", "China", "Sichuan"),
+        "宿州": PlacePreference("Suzhou", "China", "Anhui"),
+        "宿州市": PlacePreference("Suzhou", "China", "Anhui"),
         "纽约": PlacePreference("New York City", "United States", "New York"),
         "洛杉矶": PlacePreference("Los Angeles", "United States", "California"),
         "旧金山": PlacePreference("San Francisco", "United States", "California"),
@@ -150,6 +153,7 @@ class PlaceService:
             "Shanghai",
             "Guangdong",
             "Zhejiang",
+            "Anhui",
             "Jiangsu",
             "Sichuan",
             "Hubei",
@@ -246,14 +250,14 @@ class PlaceService:
         agent_enabled: bool = False,
         agent_attempted: bool = False,
         agent_error: str | None = None,
-        use_web_fallback: bool = True,
+        agent_search_queries: list[str] | None = None,
     ) -> PrecisePlaceSearchResponse:
         trimmed = query.strip()
         limit = max(1, min(20, limit))
         city_base = self._resolve_city_context(city_context)
+        selected_context = self._resolve_selected_context(city_context)
         local_options = self._search_precise_local(trimmed, limit)
         fallback_enabled = self._amap_enabled()
-        web_enabled = self._web_place_search_enabled()
         fallback_sources: list[str] = []
         attempted_sources = ["local"]
         if agent_attempted:
@@ -275,31 +279,32 @@ class PlaceService:
             options.extend(agent_options[: limit - len(options)])
             fallback_sources.append("agent")
 
-        if (
-            not local_options
-            and len(options) < limit
-            and city_base
-            and web_enabled
-            and use_web_fallback
-        ):
-            attempted_sources.append("web")
-            web_options = self._search_precise_web(trimmed, city_base, limit - len(options))
-            if web_options:
-                options.extend(web_options)
-                fallback_sources.append("web")
-
         options = self._dedupe_precise_options(options)
         rejected_count = 0
+        selected_context_mismatch = False
         if city_base:
             options, rejected_count = self._verify_precise_options(options, city_base)
+            options, selected_context_mismatch = self._apply_selected_context_preference(
+                options,
+                selected_context=selected_context,
+                city_base=city_base,
+                query=trimmed,
+            )
             if not options and trimmed:
+                reason = (
+                    "No precise candidate stayed within the selected city scope; "
+                    "using the city center until the user provides a better point."
+                )
+                if selected_context_mismatch:
+                    reason = (
+                        "Could not verify detailed address coordinates against the selected "
+                        "city or district. Try another place, or continue with the "
+                        "city-level coordinates."
+                    )
                 options = [
                     self._city_fallback_option(
                         city_base,
-                        reason=(
-                            "No precise candidate stayed within the selected city scope; "
-                            "using the city center until the user provides a better point."
-                        ),
+                        reason=reason,
                     )
                 ]
 
@@ -311,7 +316,7 @@ class PlaceService:
             agentFallbackEnabled=agent_enabled,
             agentAttempted=agent_attempted,
             agentError=agent_error,
-            webFallbackEnabled=bool(city_base and web_enabled),
+            agentSearchQueries=agent_search_queries or [],
             verificationBase=city_base.label if city_base else None,
             rejectedCount=rejected_count,
             attemptedSources=attempted_sources,
@@ -357,6 +362,7 @@ class PlaceService:
             source="geonames-local",
             matched={
                 "placeName": best.place_name,
+                "alternateNames": best.alternate_names,
                 "state": best.state,
                 "country": best.country,
             },
@@ -419,6 +425,7 @@ class PlaceService:
         self, country: str | None, region: str | None, query: str, limit: int
     ) -> list[PlaceOption]:
         variants = self._query_variants("city", query)
+        preference = self._detect_preference(query)
         # Global single-box typeahead: no country context, search the whole world
         # by name/alias. Require >= 2 chars so a single letter doesn't scan all.
         global_search = not country
@@ -430,9 +437,11 @@ class PlaceService:
 
         items = []
         for record in self.records:
-            if country and record.country != country:
+            effective_country = country or preference.country
+            effective_region = region or preference.state
+            if effective_country and record.country != effective_country:
                 continue
-            if region and record.state != region:
+            if effective_region and record.state != effective_region:
                 continue
             score = self._label_score(record.place_name, record.search_text, variants)
             if score <= 0:
@@ -454,6 +463,11 @@ class PlaceService:
                 country=record.country,
                 region=record.state,
                 birth_place=self._birth_place_value(record),
+                latitude=record.latitude,
+                longitude=record.longitude,
+                timezone=self._timezone_for(
+                    record.latitude, record.longitude, record.timezone_hours
+                ),
             )
             for _, _, _, record in items[:limit]
         ]
@@ -500,9 +514,75 @@ class PlaceService:
         if not raw_city or not raw_city.strip():
             return None
         try:
+            return self.resolve_city_scope(raw_city)
+        except Exception:
+            return None
+
+    def _resolve_selected_context(self, raw_city: str | None) -> ResolvedPlace | None:
+        if not raw_city or not raw_city.strip():
+            return None
+        try:
             return self.resolve(raw_city)
         except Exception:
             return None
+
+    def resolve_city_scope(self, raw_query: str) -> ResolvedPlace:
+        """Resolve the city-level scope used to verify precise POI candidates.
+
+        GeoNames contains many district records that look like cities in a global
+        typeahead. For Chinese municipalities, a selected district such as
+        "Pudong, Shanghai, China" should verify POIs against Shanghai, not just
+        the district center; otherwise legitimate POIs elsewhere in Shanghai are
+        rejected before the user can choose the right campus.
+        """
+
+        return self._city_scope_for_precise_lookup(self.resolve(raw_query))
+
+    def _city_scope_for_precise_lookup(self, city_base: ResolvedPlace) -> ResolvedPlace:
+        matched = city_base.matched or {}
+        country = matched.get("country", "")
+        state = matched.get("state", "")
+        place_name = matched.get("placeName", "")
+        municipality_regions = {"Beijing", "Shanghai", "Tianjin", "Chongqing", "Hong Kong"}
+        if (
+            country != "China"
+            or state not in municipality_regions
+            or not state
+            or self.normalize(place_name) == self.normalize(state)
+        ):
+            return city_base
+
+        parent = next(
+            (
+                record
+                for record in self.records
+                if record.country == country
+                and record.state == state
+                and self.normalize(record.place_name) == self.normalize(state)
+            ),
+            None,
+        )
+        if not parent:
+            return city_base
+
+        return ResolvedPlace(
+            label=self._birth_place_value(parent),
+            lat=parent.latitude,
+            lon=parent.longitude,
+            timezone=self._timezone_for(parent.latitude, parent.longitude, parent.timezone_hours),
+            source=city_base.source,
+            matched={
+                "placeName": parent.place_name,
+                "alternateNames": parent.alternate_names,
+                "state": parent.state,
+                "country": parent.country,
+            },
+            accuracy="city",
+            coordinate_system=city_base.coordinate_system,
+            radius_km=self._radius_for_accuracy("city"),
+            confidence=self._confidence_for_accuracy("city"),
+            raw_query=city_base.raw_query,
+        )
 
     def _verify_precise_options(
         self, options: list[PrecisePlaceOption], city_base: ResolvedPlace
@@ -510,6 +590,7 @@ class PlaceService:
         verified: list[PrecisePlaceOption] = []
         rejected_count = 0
         max_distance = self._max_city_distance_km(city_base)
+        administrative_max_distance = self._administrative_scope_max_distance_km(city_base)
         for option in options:
             distance = self._distance_km(
                 city_base.lat,
@@ -518,12 +599,23 @@ class PlaceService:
                 option.longitude,
             )
             if distance > max_distance:
-                rejected_count += 1
-                continue
+                if not (
+                    administrative_max_distance
+                    and distance <= administrative_max_distance
+                    and self._option_mentions_city_scope(option, city_base)
+                ):
+                    rejected_count += 1
+                    continue
             reason = (
                 f"Verified against {city_base.label}; "
                 f"{self._format_distance(distance)} km from the selected city center."
             )
+            if distance > max_distance:
+                reason = (
+                    f"Verified against {city_base.label}'s administrative scope; "
+                    f"{self._format_distance(distance)} km from the selected city center, "
+                    "and the evidence names the selected city/province."
+                )
             verified.append(
                 option.model_copy(
                     update={
@@ -543,6 +635,111 @@ class PlaceService:
             )
         )
         return verified, rejected_count
+
+    def _apply_selected_context_preference(
+        self,
+        options: list[PrecisePlaceOption],
+        *,
+        selected_context: ResolvedPlace | None,
+        city_base: ResolvedPlace,
+        query: str,
+    ) -> tuple[list[PrecisePlaceOption], bool]:
+        if not options or not selected_context:
+            return options, False
+        if self._same_context_scope(selected_context, city_base):
+            return options, False
+        if not self._is_broad_precise_query(query):
+            return options, False
+
+        matching = [
+            option
+            for option in options
+            if self._option_mentions_selected_context(option, selected_context)
+        ]
+        if matching:
+            return matching, False
+        return [], True
+
+    def _same_context_scope(
+        self, selected_context: ResolvedPlace, city_base: ResolvedPlace
+    ) -> bool:
+        selected_place = (selected_context.matched or {}).get("placeName", "")
+        city_place = (city_base.matched or {}).get("placeName", "")
+        if (
+            selected_place
+            and city_place
+            and self.normalize(selected_place) == self.normalize(city_place)
+        ):
+            return True
+        return (
+            self._distance_km(
+                selected_context.lat,
+                selected_context.lon,
+                city_base.lat,
+                city_base.lon,
+            )
+            < 1.0
+        )
+
+    @staticmethod
+    def _is_broad_precise_query(query: str) -> bool:
+        stripped = query.strip().lower()
+        if not stripped:
+            return False
+        return not bool(
+            re.search(
+                r"\d|东院|西院|南院|北院|院区|分院|校区|门诊|"
+                r"路|街|号|弄|区|县|镇|乡|"
+                r"\b(?:east|west|south|north|campus|branch|district|county|road|street)\b",
+                stripped,
+                re.I,
+            )
+        )
+
+    def _option_mentions_selected_context(
+        self, option: PrecisePlaceOption, selected_context: ResolvedPlace
+    ) -> bool:
+        tokens = self._selected_context_tokens(selected_context)
+        if not tokens:
+            return False
+        text = self.normalize(
+            "|".join(
+                value
+                for value in [
+                    option.label,
+                    option.address or "",
+                    option.meta or "",
+                    option.birth_place,
+                    option.raw_evidence or "",
+                    option.source_url or "",
+                ]
+                if value
+            )
+        )
+        return any(token and token in text for token in tokens)
+
+    def _selected_context_tokens(self, selected_context: ResolvedPlace) -> list[str]:
+        matched = selected_context.matched or {}
+        raw_tokens = [
+            matched.get("placeName", ""),
+            *(
+                matched.get("alternateNames", "").split("|")
+                if matched.get("alternateNames")
+                else []
+            ),
+        ]
+        place_name = matched.get("placeName", "")
+        state = matched.get("state", "")
+        country = matched.get("country", "")
+        for alias, preference in self.city_aliases.items():
+            if (
+                preference.country == country
+                and preference.state == state
+                and self.normalize(preference.query) == self.normalize(place_name)
+            ):
+                raw_tokens.append(alias)
+        tokens = [self.normalize(token) for token in raw_tokens if token]
+        return [token for token in dict.fromkeys(tokens) if len(token) >= 2]
 
     def _city_fallback_option(self, city_base: ResolvedPlace, *, reason: str) -> PrecisePlaceOption:
         return PrecisePlaceOption(
@@ -590,9 +787,6 @@ class PlaceService:
             getattr(self.settings, "amap_place_fallback_enabled", False)
             and getattr(self.settings, "amap_web_service_key", "").strip()
         )
-
-    def _web_place_search_enabled(self) -> bool:
-        return bool(getattr(self.settings, "web_place_search_enabled", False))
 
     def _search_precise_amap(
         self, query: str, limit: int, city_context: ResolvedPlace | None = None
@@ -712,175 +906,6 @@ class PlaceService:
             return "address"
         return "poi"
 
-    def _search_precise_web(
-        self, query: str, city_base: ResolvedPlace, limit: int
-    ) -> list[PrecisePlaceOption]:
-        if not query or limit <= 0:
-            return []
-        search_queries = [
-            f"{query} {city_base.label} latitude longitude coordinates",
-            f"{query} {city_base.label} 经纬度 坐标",
-        ]
-        options: list[PrecisePlaceOption] = []
-        for search_query in search_queries:
-            try:
-                raw_html, source_url = self._web_search_get(search_query)
-            except Exception:
-                continue
-            options.extend(
-                self._web_search_html_to_options(
-                    raw_html,
-                    source_url=source_url,
-                    query=query,
-                    city_base=city_base,
-                    limit=limit - len(options),
-                )
-            )
-            if len(options) >= limit:
-                break
-        return self._dedupe_precise_options(options)[:limit]
-
-    def _web_search_get(self, search_query: str) -> tuple[str, str]:
-        base_url = (
-            getattr(self.settings, "web_place_search_url", "") or "https://duckduckgo.com/html/"
-        ).strip()
-        timeout = float(getattr(self.settings, "web_place_search_timeout_seconds", 3.0))
-        user_agent = (
-            getattr(self.settings, "web_place_search_user_agent", "")
-            or "Mozilla/5.0 (compatible; VedicPlaceVerifier/1.0)"
-        )
-        separator = "&" if "?" in base_url else "?"
-        url = f"{base_url}{separator}{urlencode({'q': search_query})}"
-        response = requests.get(url, headers={"User-Agent": user_agent}, timeout=timeout)
-        response.raise_for_status()
-        return response.text, url
-
-    def _web_search_html_to_options(
-        self,
-        raw_html: str,
-        *,
-        source_url: str,
-        query: str,
-        city_base: ResolvedPlace,
-        limit: int,
-    ) -> list[PrecisePlaceOption]:
-        if limit <= 0:
-            return []
-        text = self._html_to_text(raw_html)
-        pairs = self._coordinate_pairs_from_text(text, city_base)
-        options: list[PrecisePlaceOption] = []
-        label = ", ".join(part for part in [query.strip(), city_base.label] if part)
-        for index, (lat, lon, evidence) in enumerate(pairs[:limit]):
-            readable_lat = self._format_coordinate(lat)
-            readable_lon = self._format_coordinate(lon)
-            options.append(
-                PrecisePlaceOption(
-                    id=f"web:{self.normalize(label)[:48]}:{readable_lat}:{readable_lon}:{index}",
-                    label=query.strip() or city_base.label,
-                    address=label,
-                    meta="Web search evidence",
-                    source="web",
-                    accuracy="poi",
-                    coordinateSystem="WGS84",
-                    latitude=lat,
-                    longitude=lon,
-                    birthPlace=self._birth_place_with_coordinates(
-                        label,
-                        lat,
-                        lon,
-                        source="web",
-                        accuracy="poi",
-                    ),
-                    sourceUrl=source_url,
-                    rawEvidence=evidence,
-                )
-            )
-        return options
-
-    def _coordinate_pairs_from_text(
-        self, text: str, city_base: ResolvedPlace
-    ) -> list[tuple[float, float, str]]:
-        pairs: list[tuple[float, float, str]] = []
-        seen: set[tuple[float, float]] = set()
-
-        def add_pair(match: re.Match[str], first: float, second: float) -> None:
-            ordered = self._best_coordinate_order(first, second, city_base)
-            if not ordered:
-                return
-            lat, lon = ordered
-            key = (round(lat, 5), round(lon, 5))
-            if key in seen:
-                return
-            seen.add(key)
-            pairs.append((lat, lon, self._evidence_snippet(text, match.start(), match.end())))
-
-        labelled_patterns = [
-            re.compile(
-                r"(?:lat(?:itude)?|纬度|緯度)\D{0,40}"
-                r"([+-]?\d{1,2}(?:\.\d+)?)"
-                r".{0,120}?"
-                r"(?:lon|lng|longitude|经度|經度|経度)\D{0,40}"
-                r"([+-]?\d{1,3}(?:\.\d+)?)",
-                re.I,
-            ),
-            re.compile(
-                r"(?:lon|lng|longitude|经度|經度|経度)\D{0,40}"
-                r"([+-]?\d{1,3}(?:\.\d+)?)"
-                r".{0,120}?"
-                r"(?:lat(?:itude)?|纬度|緯度)\D{0,40}"
-                r"([+-]?\d{1,2}(?:\.\d+)?)",
-                re.I,
-            ),
-        ]
-        for pattern_index, pattern in enumerate(labelled_patterns):
-            for match in pattern.finditer(text):
-                first = float(match.group(1))
-                second = float(match.group(2))
-                if pattern_index == 0:
-                    add_pair(match, first, second)
-                else:
-                    add_pair(match, second, first)
-
-        pair_pattern = re.compile(r"([+-]?\d{1,3}\.\d{3,})\s*[,，]\s*([+-]?\d{1,3}\.\d{3,})")
-        for match in pair_pattern.finditer(text):
-            add_pair(match, float(match.group(1)), float(match.group(2)))
-        return pairs
-
-    def _best_coordinate_order(
-        self, first: float, second: float, city_base: ResolvedPlace
-    ) -> tuple[float, float] | None:
-        candidates: list[tuple[float, float, float]] = []
-        if self._valid_lat_lon(first, second):
-            candidates.append(
-                (self._distance_km(city_base.lat, city_base.lon, first, second), first, second)
-            )
-        if self._valid_lat_lon(second, first):
-            candidates.append(
-                (self._distance_km(city_base.lat, city_base.lon, second, first), second, first)
-            )
-        if not candidates:
-            return None
-        _, lat, lon = min(candidates, key=lambda item: item[0])
-        return lat, lon
-
-    @staticmethod
-    def _valid_lat_lon(lat: float, lon: float) -> bool:
-        return -90 <= lat <= 90 and -180 <= lon <= 180
-
-    @staticmethod
-    def _html_to_text(raw_html: str) -> str:
-        without_scripts = re.sub(
-            r"<(script|style)\b[^>]*>.*?</\1>", " ", raw_html, flags=re.I | re.S
-        )
-        without_tags = re.sub(r"<[^>]+>", " ", without_scripts)
-        return re.sub(r"\s+", " ", unescape(without_tags)).strip()
-
-    @staticmethod
-    def _evidence_snippet(text: str, start: int, end: int) -> str:
-        snippet_start = max(0, start - 120)
-        snippet_end = min(len(text), end + 120)
-        return text[snippet_start:snippet_end].strip()
-
     def _birth_place_with_coordinates(
         self,
         label: str,
@@ -928,7 +953,7 @@ class PlaceService:
         return {
             "geonames-local": 0,
             "amap": 1,
-            "web": 2,
+            "agent": 2,
             "manual": 3,
         }.get(source, 9)
 
@@ -947,7 +972,71 @@ class PlaceService:
         return max(city_base.radius_km + 10.0, 35.0)
 
     def max_city_distance_km(self, city_base: ResolvedPlace) -> float:
-        return self._max_city_distance_km(city_base)
+        return self._administrative_scope_max_distance_km(city_base) or self._max_city_distance_km(
+            city_base
+        )
+
+    def _administrative_scope_max_distance_km(self, city_base: ResolvedPlace) -> float | None:
+        matched = city_base.matched or {}
+        if matched.get("country") != "China":
+            return None
+        # Chinese prefecture-level cities commonly include county seats far
+        # beyond the urban center. Use this wider scope only when the candidate
+        # evidence explicitly names the selected city/province.
+        return 150.0
+
+    def _option_mentions_city_scope(
+        self, option: PrecisePlaceOption, city_base: ResolvedPlace
+    ) -> bool:
+        matched = city_base.matched or {}
+        city_tokens = self._city_scope_tokens(city_base)
+        state_tokens = self._region_scope_tokens(matched.get("state", ""))
+        text = self.normalize(
+            "|".join(
+                value
+                for value in [
+                    option.label,
+                    option.address or "",
+                    option.meta or "",
+                    option.birth_place,
+                    option.raw_evidence or "",
+                    option.source_url or "",
+                ]
+                if value
+            )
+        )
+        city_match = any(token and token in text for token in city_tokens)
+        state_match = not state_tokens or any(token and token in text for token in state_tokens)
+        return city_match and state_match
+
+    def _city_scope_tokens(self, city_base: ResolvedPlace) -> list[str]:
+        matched = city_base.matched or {}
+        tokens = [
+            self.normalize(value)
+            for value in [
+                matched.get("placeName", ""),
+                city_base.label,
+            ]
+            if value
+        ]
+        place_name = matched.get("placeName", "")
+        state = matched.get("state", "")
+        country = matched.get("country", "")
+        for alias, preference in self.city_aliases.items():
+            if (
+                preference.country == country
+                and preference.state == state
+                and self.normalize(preference.query) == self.normalize(place_name)
+            ):
+                tokens.append(self.normalize(alias))
+        return [token for token in dict.fromkeys(tokens) if token]
+
+    def _region_scope_tokens(self, state: str) -> list[str]:
+        tokens = [self.normalize(state)] if state else []
+        for alias, canonical in self.region_aliases.items():
+            if canonical == state:
+                tokens.append(self.normalize(alias))
+        return [token for token in dict.fromkeys(tokens) if token]
 
     @staticmethod
     def _format_distance(distance: float) -> str:
@@ -1022,9 +1111,14 @@ class PlaceService:
         if normalized in self.default_preferences:
             return self.default_preferences[normalized]
 
-        for marker, preference in self.city_aliases.items():
-            if marker in raw_query:
-                return preference
+        city_alias_matches = [
+            (raw_query.find(marker), -len(marker), preference)
+            for marker, preference in self.city_aliases.items()
+            if marker in raw_query
+        ]
+        if city_alias_matches:
+            city_alias_matches.sort(key=lambda item: (item[0], item[1]))
+            return city_alias_matches[0][2]
 
         parts = [part.strip() for part in re.split(r"[,，]", raw_query) if part.strip()]
         if len(parts) >= 3:

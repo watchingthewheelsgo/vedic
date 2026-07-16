@@ -6,7 +6,7 @@ import { cn } from "../../lib/cn";
 export function Calendar({ className, classNames, ...props }: DayPickerProps) {
   return (
     <DayPicker
-      className={cn("p-1 text-ink [--rdp-accent-color:theme(colors.gold)]", className)}
+      className={cn("p-1 text-cream [--rdp-accent-color:theme(colors.gold)]", className)}
       classNames={{
         root: "w-fit",
         months: "flex flex-col gap-4",
@@ -21,18 +21,18 @@ export function Calendar({ className, classNames, ...props }: DayPickerProps) {
         month_grid: "w-full border-collapse",
         dropdowns: "flex items-center gap-2",
         dropdown:
-          "rounded-md border border-gold/25 bg-white px-2 py-1 text-xs text-ink outline-none transition focus:border-gold focus:ring-4 focus:ring-gold/15",
+          "rounded-md border border-gold/25 bg-white/5 px-2 py-1 text-xs text-cream outline-none transition focus:border-gold focus:ring-4 focus:ring-gold/15",
         weekdays: "flex",
-        weekday: "w-9 rounded-md text-[11px] font-medium uppercase tracking-wide text-muted",
+        weekday: "w-9 rounded-md text-[11px] font-medium uppercase tracking-wide text-cream/46",
         week: "mt-1 flex w-full",
         day: "size-9 p-0 text-center text-sm",
         day_button:
-          "size-9 rounded-md text-sm transition hover:bg-gold/10 hover:text-ink focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15 aria-selected:bg-gold aria-selected:text-white aria-selected:hover:bg-gold-dim",
+          "size-9 rounded-md text-sm text-cream transition hover:bg-gold/10 hover:text-cream focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15 aria-selected:bg-gold aria-selected:text-white aria-selected:hover:bg-gold-dim",
         selected:
           "text-white [&_button]:bg-gold [&_button]:text-white [&_button]:shadow-sm [&_button]:hover:bg-gold-dim [&_button]:focus-visible:ring-gold/25",
         today: "[&_button]:border [&_button]:border-gold/45 [&_button]:text-gold-dim",
-        outside: "text-muted/45",
-        disabled: "pointer-events-none text-muted/35",
+        outside: "text-cream/26",
+        disabled: "pointer-events-none text-cream/20",
         ...classNames
       }}
       components={{

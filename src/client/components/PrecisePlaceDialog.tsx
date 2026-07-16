@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   Crosshair,
@@ -45,7 +46,6 @@ export function PrecisePlaceDialog({
   const [agentFallbackEnabled, setAgentFallbackEnabled] = useState(false);
   const [agentAttempted, setAgentAttempted] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
-  const [webFallbackEnabled, setWebFallbackEnabled] = useState(false);
   const [verificationBase, setVerificationBase] = useState<string | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);
   const [manualLatitude, setManualLatitude] = useState("");
@@ -62,7 +62,6 @@ export function PrecisePlaceDialog({
     setAgentFallbackEnabled(false);
     setAgentAttempted(false);
     setAgentError(null);
-    setWebFallbackEnabled(false);
     setVerificationBase(null);
     setRejectedCount(0);
   }, [initialValue, open]);
@@ -92,7 +91,6 @@ export function PrecisePlaceDialog({
       setAgentFallbackEnabled(false);
       setAgentAttempted(false);
       setAgentError(null);
-      setWebFallbackEnabled(false);
       setVerificationBase(null);
       setRejectedCount(0);
       return;
@@ -113,7 +111,6 @@ export function PrecisePlaceDialog({
           setAgentFallbackEnabled(response.agentFallbackEnabled);
           setAgentAttempted(response.agentAttempted);
           setAgentError(response.agentError ?? null);
-          setWebFallbackEnabled(response.webFallbackEnabled);
           setVerificationBase(response.verificationBase ?? null);
           setRejectedCount(response.rejectedCount);
           setSelected((current) =>
@@ -212,32 +209,32 @@ export function PrecisePlaceDialog({
     setManualLongitude(formatCoordinateNumber(longitude));
   }
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
   const canConfirm = Boolean(activeOption) || manualValidation.ok;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[90] grid place-items-center bg-night/45 px-3 py-6 backdrop-blur-[2px]"
+      className="cosmic-floating-surface fixed inset-0 z-[100] grid place-items-center bg-night/68 px-3 py-6 backdrop-blur-[4px]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="precise-place-title"
       onMouseDown={onClose}
     >
       <div
-        className="grid max-h-[min(760px,calc(100vh-32px))] w-full max-w-[920px] overflow-hidden rounded-[14px] border border-gold/30 bg-cream shadow-[0_28px_90px_rgba(15,12,9,0.32)]"
+        className="grid max-h-[min(760px,calc(100dvh-32px))] w-full max-w-[940px] overflow-hidden rounded-[14px] border border-gold/30 bg-[rgba(16,12,22,0.94)] text-cream shadow-[0_30px_100px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-gold/20 bg-cream-2 px-5 py-4">
+        <header className="flex items-start justify-between gap-4 border-b border-gold/20 bg-white/8 px-5 py-4">
           <div>
             <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-[1.6px] text-gold-dim">
               <LocateFixed className="size-4" />
               {t("precisePlace.eyebrow")}
             </div>
-            <h2 id="precise-place-title" className="text-xl font-medium tracking-normal text-ink">
+            <h2 id="precise-place-title" className="text-xl font-medium tracking-normal text-cream">
               {t("precisePlace.title")}
             </h2>
-            <p className="mt-1 max-w-[620px] text-sm leading-relaxed text-body">
+            <p className="mt-1 max-w-[620px] text-sm leading-relaxed text-cream/70">
               {t("precisePlace.subtitle")}
             </p>
             {cityContext.trim() ? (
@@ -249,7 +246,7 @@ export function PrecisePlaceDialog({
           <button
             type="button"
             onClick={onClose}
-            className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/25 bg-cream text-muted transition hover:border-gold hover:bg-gold/10 hover:text-ink"
+            className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/25 bg-white/5 text-cream/50 transition hover:border-gold hover:bg-gold/10 hover:text-cream focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15"
             aria-label={t("common.cancel")}
           >
             <X className="size-4" />
@@ -263,12 +260,12 @@ export function PrecisePlaceDialog({
                 <Search className="size-4 text-gold-dim" />
                 {t("precisePlace.search.label")}
               </span>
-              <div className="flex h-[50px] items-center gap-3 rounded-[10px] border border-gold/30 bg-white px-4 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] transition focus-within:border-gold focus-within:ring-4 focus-within:ring-gold/15">
+              <div className="flex h-[50px] items-center gap-3 rounded-[10px] border border-gold/30 bg-white/5 px-4 text-cream/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition focus-within:border-gold focus-within:bg-white/10 focus-within:ring-4 focus-within:ring-gold/15">
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t("precisePlace.search.placeholder")}
-                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[15px] text-ink outline-none placeholder:text-muted"
+                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[15px] text-cream outline-none placeholder:text-cream/35"
                 />
                 {loading ? (
                   <LoaderCircle className="size-4 animate-spin text-gold" />
@@ -300,15 +297,9 @@ export function PrecisePlaceDialog({
                     ? t("precisePlace.source.agent.enabled")
                     : t("precisePlace.source.agent.disabled")}
               </Badge>
-              <Badge variant={webFallbackEnabled ? "done" : "neutral"} className="gap-1">
-                <Search className="size-3" />
-                {webFallbackEnabled
-                  ? t("precisePlace.source.web.enabled")
-                  : t("precisePlace.source.web.disabled")}
-              </Badge>
             </div>
             {verificationBase ? (
-              <div className="rounded-[10px] border border-gold/20 bg-cream-2 px-3 py-2 text-xs leading-relaxed text-body">
+              <div className="rounded-[10px] border border-gold/20 bg-white/5 px-3 py-2 text-xs leading-relaxed text-cream/70">
                 {t("precisePlace.verification.base")}: {verificationBase}
                 {rejectedCount > 0
                   ? ` · ${t("precisePlace.verification.rejected")} ${rejectedCount}`
@@ -316,7 +307,7 @@ export function PrecisePlaceDialog({
               </div>
             ) : null}
             {agentError ? (
-              <div className="rounded-[10px] border border-gold/20 bg-cream-2 px-3 py-2 text-xs leading-relaxed text-muted">
+              <div className="rounded-[10px] border border-gold/20 bg-white/5 px-3 py-2 text-xs leading-relaxed text-cream/55">
                 {t("precisePlace.source.agent.error")}: {agentError}
               </div>
             ) : null}
@@ -334,7 +325,7 @@ export function PrecisePlaceDialog({
               ) : options.length === 0 ? (
                 <EmptyState
                   text={
-                    fallbackEnabled || webFallbackEnabled
+                    fallbackEnabled || agentFallbackEnabled
                       ? t("precisePlace.search.empty")
                       : t("precisePlace.search.emptyNoFallback")
                   }
@@ -346,28 +337,28 @@ export function PrecisePlaceDialog({
                     type="button"
                     onClick={() => selectOption(option)}
                     data-active={selected?.id === option.id}
-                    className="grid gap-1 rounded-[10px] border border-gold/20 bg-white px-4 py-3 text-left shadow-sm transition hover:border-gold/50 hover:bg-gold/10 data-[active=true]:border-gold data-[active=true]:bg-gold/15"
+                    className="grid gap-1 rounded-[10px] border border-gold/20 bg-white/5 px-4 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] outline-none transition hover:border-gold/50 hover:bg-gold/10 focus-visible:ring-4 focus-visible:ring-gold/20 data-[active=true]:border-gold data-[active=true]:bg-gold/15"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <span className="font-medium text-ink">{option.label}</span>
-                      <span className="shrink-0 rounded-full border border-gold/25 bg-cream px-2 py-0.5 text-[10px] uppercase tracking-normal text-gold-dim">
+                      <span className="font-medium text-cream">{option.label}</span>
+                      <span className="shrink-0 rounded-full border border-gold/25 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-normal text-gold-light">
                         {labelForSource(option.source)}
                       </span>
                     </div>
-                    <span className="text-xs leading-relaxed text-body">
+                    <span className="text-xs leading-relaxed text-cream/70">
                       {option.address || option.meta}
                     </span>
-                    <span className="font-mono text-[11px] text-muted">
+                    <span className="font-mono text-[11px] text-cream/50">
                       {formatCoordinateNumber(option.longitude)},{" "}
                       {formatCoordinateNumber(option.latitude)} · {option.coordinateSystem}
                     </span>
                     {option.verificationReason ? (
-                      <span className="text-[11px] leading-relaxed text-muted">
+                      <span className="text-[11px] leading-relaxed text-cream/50">
                         {option.verificationReason}
                       </span>
                     ) : null}
                     {option.rawEvidence ? (
-                      <span className="line-clamp-2 text-[11px] leading-relaxed text-muted">
+                      <span className="line-clamp-2 text-[11px] leading-relaxed text-cream/50">
                         {option.rawEvidence}
                       </span>
                     ) : null}
@@ -377,8 +368,8 @@ export function PrecisePlaceDialog({
             </div>
           </section>
 
-          <aside className="grid gap-4 bg-[#fff9ed] p-5">
-            <div className="rounded-[12px] border border-gold/25 bg-cream p-3">
+          <aside className="grid gap-4 bg-white/5 p-5">
+            <div className="rounded-[12px] border border-gold/25 bg-white/5 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-[11px] uppercase tracking-[1.1px] text-muted">
                   <Crosshair className="size-4 text-gold-dim" />
@@ -388,34 +379,38 @@ export function PrecisePlaceDialog({
               </div>
               <div className="relative aspect-[4/3] overflow-hidden rounded-[10px] border border-gold/25 bg-[linear-gradient(90deg,rgba(201,169,110,0.12)_1px,transparent_1px),linear-gradient(0deg,rgba(201,169,110,0.12)_1px,transparent_1px)] bg-[size:28px_28px]">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(201,169,110,0.24),transparent_44%)]" />
-                <div className="absolute left-1/2 top-1/2 grid size-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-gold bg-cream text-gold shadow-[0_8px_24px_rgba(44,31,15,0.18)]">
+                <div className="absolute left-1/2 top-1/2 grid size-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-gold bg-night/80 text-gold shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                   <MapPin className="size-5 fill-gold/20" />
                 </div>
                 <button
                   type="button"
                   onClick={() => nudge(0.001, 0)}
-                  className="absolute left-1/2 top-3 grid size-8 -translate-x-1/2 place-items-center rounded-full border border-gold/30 bg-cream/90 text-xs text-gold-dim hover:bg-gold/10"
+                  aria-label={t("precisePlace.nudge.north")}
+                  className="absolute left-1/2 top-3 grid size-8 -translate-x-1/2 place-items-center rounded-full border border-gold/30 bg-night/80 text-xs text-gold-light transition hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20"
                 >
                   ↑
                 </button>
                 <button
                   type="button"
                   onClick={() => nudge(-0.001, 0)}
-                  className="absolute bottom-3 left-1/2 grid size-8 -translate-x-1/2 place-items-center rounded-full border border-gold/30 bg-cream/90 text-xs text-gold-dim hover:bg-gold/10"
+                  aria-label={t("precisePlace.nudge.south")}
+                  className="absolute bottom-3 left-1/2 grid size-8 -translate-x-1/2 place-items-center rounded-full border border-gold/30 bg-night/80 text-xs text-gold-light transition hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20"
                 >
                   ↓
                 </button>
                 <button
                   type="button"
                   onClick={() => nudge(0, -0.001)}
-                  className="absolute left-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full border border-gold/30 bg-cream/90 text-xs text-gold-dim hover:bg-gold/10"
+                  aria-label={t("precisePlace.nudge.west")}
+                  className="absolute left-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full border border-gold/30 bg-night/80 text-xs text-gold-light transition hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20"
                 >
                   ←
                 </button>
                 <button
                   type="button"
                   onClick={() => nudge(0, 0.001)}
-                  className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full border border-gold/30 bg-cream/90 text-xs text-gold-dim hover:bg-gold/10"
+                  aria-label={t("precisePlace.nudge.east")}
+                  className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full border border-gold/30 bg-night/80 text-xs text-gold-light transition hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20"
                 >
                   →
                 </button>
@@ -439,7 +434,7 @@ export function PrecisePlaceDialog({
                     }}
                     inputMode="decimal"
                     placeholder={t("place.coordinates.longitude.placeholder")}
-                    className="h-11 rounded-[10px] border border-gold/30 bg-white px-3 text-[14px] text-ink outline-none transition placeholder:text-muted focus:border-gold focus:ring-4 focus:ring-gold/15"
+                    className="h-11 rounded-[10px] border border-gold/30 bg-white/5 px-3 text-[14px] text-cream outline-none transition placeholder:text-cream/35 focus:border-gold focus:bg-white/10 focus:ring-4 focus:ring-gold/15"
                   />
                 </label>
                 <label className="grid gap-1.5">
@@ -454,7 +449,7 @@ export function PrecisePlaceDialog({
                     }}
                     inputMode="decimal"
                     placeholder={t("place.coordinates.latitude.placeholder")}
-                    className="h-11 rounded-[10px] border border-gold/30 bg-white px-3 text-[14px] text-ink outline-none transition placeholder:text-muted focus:border-gold focus:ring-4 focus:ring-gold/15"
+                    className="h-11 rounded-[10px] border border-gold/30 bg-white/5 px-3 text-[14px] text-cream outline-none transition placeholder:text-cream/35 focus:border-gold focus:bg-white/10 focus:ring-4 focus:ring-gold/15"
                   />
                 </label>
               </div>
@@ -463,17 +458,17 @@ export function PrecisePlaceDialog({
               ) : null}
             </div>
 
-            <div className="rounded-[10px] border border-gold/25 bg-cream px-4 py-3 text-xs leading-relaxed text-body">
+            <div className="rounded-[10px] border border-gold/25 bg-white/5 px-4 py-3 text-xs leading-relaxed text-cream/70">
               {activeOption ? (
                 <>
-                  <div className="mb-1 font-medium text-ink">{activeOption.label}</div>
+                  <div className="mb-1 font-medium text-cream">{activeOption.label}</div>
                   <div>
                     {formatCoordinateNumber(activeOption.longitude)},{" "}
                     {formatCoordinateNumber(activeOption.latitude)} ·{" "}
                     {activeOption.coordinateSystem}
                   </div>
                   {activeOption.verificationReason ? (
-                    <div className="mt-1 text-muted">{activeOption.verificationReason}</div>
+                    <div className="mt-1 text-cream/50">{activeOption.verificationReason}</div>
                   ) : null}
                 </>
               ) : (
@@ -483,7 +478,7 @@ export function PrecisePlaceDialog({
           </aside>
         </div>
 
-        <footer className="flex flex-col-reverse gap-3 border-t border-gold/20 bg-cream-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+        <footer className="flex flex-col-reverse gap-3 border-t border-gold/20 bg-white/8 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
           <Button type="button" variant="ghost" onClick={onClose}>
             {t("common.cancel")}
           </Button>
@@ -493,13 +488,14 @@ export function PrecisePlaceDialog({
           </Button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-[10px] border border-dashed border-gold/30 bg-cream-2 px-4 py-8 text-center text-sm text-muted">
+    <div className="rounded-[10px] border border-dashed border-gold/30 bg-white/5 px-4 py-8 text-center text-sm text-cream/55">
       {text}
     </div>
   );
@@ -508,7 +504,6 @@ function EmptyState({ text }: { text: string }) {
 function labelForSource(source: PrecisePlaceOption["source"]) {
   if (source === "amap") return "AMap";
   if (source === "agent") return "Agent";
-  if (source === "web") return "Web";
   if (source === "geonames-local") return "GeoNames";
   return "Manual";
 }

@@ -2,6 +2,7 @@ import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { api, setAnonymousIdProvider, setAuthFailureHandler, setAuthTokenProvider } from "./api";
+import { CosmicBackdrop } from "./components/CosmicBackdrop";
 import { Button } from "./components/ui/button";
 import { useI18n } from "./i18n/provider";
 import { Landing } from "./screens/Landing";
@@ -48,12 +49,13 @@ export function App() {
   }, [anonymousId]);
 
   return (
-    <>
+    <div className="cosmic-site relative min-h-screen overflow-x-hidden bg-night text-cream">
+      <CosmicBackdrop />
       {sessionExpired && (
-        <div className="fixed inset-x-4 top-4 z-[90] mx-auto flex max-w-[720px] flex-col gap-3 rounded-lg border border-gold/30 bg-cream px-4 py-3 text-ink shadow-[0_18px_48px_rgba(44,31,15,0.16)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="fixed inset-x-4 top-4 z-[90] mx-auto flex max-w-[720px] flex-col gap-3 rounded-lg border border-gold/30 bg-[rgba(16,12,22,0.88)] px-4 py-3 text-cream shadow-[0_18px_48px_rgba(0,0,0,0.36)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-sm font-semibold">{t("auth.sessionExpiredTitle")}</div>
-            <div className="mt-0.5 text-xs leading-relaxed text-body">
+            <div className="mt-0.5 text-xs leading-relaxed text-cream/65">
               {t("auth.sessionExpiredBody")}
             </div>
           </div>
@@ -67,39 +69,41 @@ export function App() {
           </div>
         </div>
       )}
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/new" element={<Intake />} />
-        <Route path="/bazi" element={<BaziWorkshop />} />
-        <Route path="/session/:id" element={<Session />} />
-        <Route
-          path="/account"
-          element={
-            <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-              <Account />
-            </RequireAuth>
-          }
-        />
-        <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
-        <Route
-          path="/admin/sessions"
-          element={
-            <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-              <AdminSessions />
-            </RequireAdmin>
-          }
-        />
-        <Route
-          path="/admin/sessions/:id"
-          element={
-            <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-              <AdminSessionDetail />
-            </RequireAdmin>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+      <div className="relative z-10 min-h-screen">
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/new" element={<Intake />} />
+          <Route path="/bazi" element={<BaziWorkshop />} />
+          <Route path="/session/:id" element={<Session />} />
+          <Route
+            path="/account"
+            element={
+              <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                <Account />
+              </RequireAuth>
+            }
+          />
+          <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
+          <Route
+            path="/admin/sessions"
+            element={
+              <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                <AdminSessions />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/sessions/:id"
+            element={
+              <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                <AdminSessionDetail />
+              </RequireAdmin>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </div>
   );
 }
 
@@ -129,7 +133,7 @@ function RequireAuth({
 
   if (!isLoaded) {
     return (
-      <div className="grid min-h-screen place-items-center bg-cream px-6 text-muted">
+      <div className="grid min-h-screen place-items-center px-6 text-cream/55">
         {t("auth.loading")}
       </div>
     );
@@ -137,13 +141,13 @@ function RequireAuth({
 
   if (!isSignedIn) {
     return (
-      <div className="grid min-h-screen place-items-center bg-cream px-6 text-ink">
-        <div className="max-w-[460px] rounded-lg border border-gold/25 bg-cream-2 p-6 text-center shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
+      <div className="grid min-h-screen place-items-center px-6 text-cream">
+        <div className="max-w-[460px] rounded-lg border border-gold/25 bg-[rgba(16,12,22,0.72)] p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur-xl">
           <div className="mb-2 text-[10px] uppercase tracking-[2px] text-gold">
             {t("auth.requiredEyebrow")}
           </div>
           <h1 className="mb-3 text-2xl font-semibold tracking-normal">{t("auth.requiredTitle")}</h1>
-          <p className="mb-5 text-sm leading-[1.7] text-body">{t("auth.requiredBody")}</p>
+          <p className="mb-5 text-sm leading-[1.7] text-cream/68">{t("auth.requiredBody")}</p>
           <div className="flex justify-center gap-2">
             <SignInButton mode="modal">
               <Button>{t("common.signIn")}</Button>
@@ -196,7 +200,7 @@ function RequireAdmin({
 
   if (!isLoaded) {
     return (
-      <div className="grid min-h-screen place-items-center bg-cream px-6 text-muted">
+      <div className="grid min-h-screen place-items-center px-6 text-cream/55">
         {t("auth.loading")}
       </div>
     );
@@ -212,7 +216,7 @@ function RequireAdmin({
 
   if (allowed === null) {
     return (
-      <div className="grid min-h-screen place-items-center bg-cream px-6 text-muted">
+      <div className="grid min-h-screen place-items-center px-6 text-cream/55">
         {t("auth.adminChecking")}
       </div>
     );
@@ -220,15 +224,15 @@ function RequireAdmin({
 
   if (!allowed) {
     return (
-      <div className="grid min-h-screen place-items-center bg-cream px-6 text-ink">
-        <div className="max-w-[460px] rounded-lg border border-gold/25 bg-cream-2 p-6 text-center shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
+      <div className="grid min-h-screen place-items-center px-6 text-cream">
+        <div className="max-w-[460px] rounded-lg border border-gold/25 bg-[rgba(16,12,22,0.72)] p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur-xl">
           <div className="mb-2 text-[10px] uppercase tracking-[2px] text-gold">
             {t("auth.adminDeniedEyebrow")}
           </div>
           <h1 className="mb-3 text-2xl font-semibold tracking-normal">
             {t("auth.adminDeniedTitle")}
           </h1>
-          <p className="mb-5 text-sm leading-[1.7] text-body">
+          <p className="mb-5 text-sm leading-[1.7] text-cream/68">
             {error || t("auth.adminDeniedBody")}
           </p>
           <Button onClick={() => (window.location.href = "/account")}>{t("account.center")}</Button>

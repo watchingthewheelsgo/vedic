@@ -11,9 +11,9 @@ const buttonVariants = cva(
         gold: "border border-gold bg-gold text-white shadow-sm hover:bg-gold-dim",
         outline: "border border-gold bg-transparent text-gold hover:bg-gold/10",
         ghost:
-          "border border-transparent bg-transparent text-muted hover:bg-gold/10 hover:text-ink",
+          "border border-transparent bg-transparent text-cream/50 hover:bg-gold/10 hover:text-cream",
         dark: "border border-gold/25 bg-night text-gold hover:bg-night-2",
-        tab: "rounded-full border border-transparent bg-transparent px-4 py-2 text-muted hover:text-ink data-[active=true]:border-gold data-[active=true]:bg-gold data-[active=true]:text-white"
+        tab: "rounded-full border border-transparent bg-transparent px-4 py-2 text-cream/50 hover:text-cream data-[active=true]:border-gold data-[active=true]:bg-gold data-[active=true]:text-white"
       },
       size: {
         sm: "h-9 px-3 text-xs",
