@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "../components/ui/select";
+import { Textarea } from "../components/ui/textarea";
 import { formatBirthDate } from "../lib/birth-details";
 import { formatBirthTime, normalizeTimeForPrecision } from "../lib/birth-time";
 import { useI18n } from "../i18n/provider";
@@ -52,6 +53,7 @@ export function Intake() {
   const [name, setName] = useState("");
   const [gender, setGender] = useState("");
   const [relationship, setRelationship] = useState("");
+  const [lifeEvents, setLifeEvents] = useState("");
   const [timePrecision, setTimePrecision] = useState<BirthTimePrecision>("exact");
   const [timeSource, setTimeSource] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
@@ -66,10 +68,21 @@ export function Intake() {
         timePrecision,
         gender,
         relationship,
+        lifeEvents,
         timeSource,
         locale
       }),
-    [birthDate, birthTime, gender, locale, place, relationship, timePrecision, timeSource]
+    [
+      birthDate,
+      birthTime,
+      gender,
+      lifeEvents,
+      locale,
+      place,
+      relationship,
+      timePrecision,
+      timeSource
+    ]
   );
 
   async function onStart(event: FormEvent) {
@@ -201,6 +214,15 @@ export function Intake() {
           </Field>
         </div>
 
+        <Field label={t("intake.lifeEvents.label")} hint={t("intake.lifeEvents.hint")}>
+          <Textarea
+            value={lifeEvents}
+            onChange={(event) => setLifeEvents(event.target.value)}
+            placeholder={t("intake.lifeEvents.placeholder")}
+            rows={5}
+          />
+        </Field>
+
         {errors.submit && (
           <div className="mt-1 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
             {errors.submit}
@@ -256,6 +278,7 @@ function buildBirthInput({
   timePrecision,
   gender,
   relationship,
+  lifeEvents,
   timeSource,
   locale
 }: {
@@ -265,6 +288,7 @@ function buildBirthInput({
   timePrecision: BirthTimePrecision;
   gender: string;
   relationship: string;
+  lifeEvents: string;
   timeSource: string;
   locale: AppLocale;
 }): BirthInput | null {
@@ -280,6 +304,7 @@ function buildBirthInput({
     birthTimePrecision: timePrecision,
     gender: gender || "未提供",
     relationship: relationship || "未提供",
+    lifeEvents: lifeEvents.trim(),
     timeSource: timePrecision === "exact" ? timeSource : "未追问",
     locale
   };

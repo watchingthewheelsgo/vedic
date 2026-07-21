@@ -259,6 +259,11 @@ export const messages: Record<LocaleCode, Dict> = {
     "intake.relationship.single": "Single",
     "intake.relationship.dating": "Dating / in a relationship",
     "intake.relationship.married": "Married",
+    "intake.lifeEvents.label": "Major life events",
+    "intake.lifeEvents.hint":
+      "Optional but important for birth-time rectification. Add 2-5 dated events.",
+    "intake.lifeEvents.placeholder":
+      "Examples:\n2018-10 married\n2021 moved to another city\n2023 major job change or surgery",
     "intake.select": "Select",
     "intake.submit.busy": "Preparing...",
     "intake.submit": "Continue to Reading ->",
@@ -828,6 +833,10 @@ const zhOverrides: Dict = {
   "intake.relationship.single": "单身",
   "intake.relationship.dating": "恋爱中",
   "intake.relationship.married": "已婚",
+  "intake.lifeEvents.label": "重大经历",
+  "intake.lifeEvents.hint": "可选，但对生时校正很关键。建议填写 2-5 条带年份的大事。",
+  "intake.lifeEvents.placeholder":
+    "例如：\n2018年10月 结婚\n2021年 搬到上海\n2023年 重大跳槽 / 手术 / 生子",
   "intake.select": "请选择",
   "intake.submit.busy": "准备中...",
   "intake.submit": "继续读盘 ->",
@@ -1333,6 +1342,11 @@ const jaOverrides: Dict = {
   "intake.relationship.single": "独身",
   "intake.relationship.dating": "交際中",
   "intake.relationship.married": "既婚",
+  "intake.lifeEvents.label": "主な出来事",
+  "intake.lifeEvents.hint":
+    "任意ですが出生時刻補正に重要です。年付きの出来事を2-5件入力してください。",
+  "intake.lifeEvents.placeholder":
+    "例：\n2018-10 結婚\n2021 別の都市へ引っ越し\n2023 大きな転職 / 手術 / 出産",
   "intake.select": "選択",
   "intake.submit.busy": "準備中...",
   "intake.submit": "リーディングへ進む ->",

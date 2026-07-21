@@ -32,6 +32,7 @@ class BirthInput(ApiModel):
     gender: str = Field(default="[待填]", max_length=80)
     relationship: str = Field(default="[待填]", max_length=120)
     time_source: str = Field(default="未追问", alias="timeSource", max_length=120)
+    life_events: str = Field(default="", alias="lifeEvents", max_length=4000)
     locale: AppLocale = "en"
 
 

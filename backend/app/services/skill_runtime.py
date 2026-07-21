@@ -546,7 +546,11 @@ class SkillRuntime:
             session_id, feedback_markdown=feedback_markdown
         )
         if prevalidation_result is not None:
-            self._apply_rectification_feedback(session_id, prevalidation_result)
+            self._apply_rectification_feedback(
+                session_id,
+                prevalidation_result,
+                feedback_markdown=feedback_markdown,
+            )
         decision = (
             prevalidation_result.get("decision") if isinstance(prevalidation_result, dict) else None
         )
@@ -683,6 +687,8 @@ class SkillRuntime:
         self,
         session_id: str,
         prevalidation_result: dict[str, object],
+        *,
+        feedback_markdown: str | None = None,
     ) -> None:
         artifacts = {
             artifact.path: artifact.content
@@ -694,7 +700,9 @@ class SkillRuntime:
         updated_state = self.rectification.update_from_feedback(
             state,
             artifacts.get("reader_prevalidation.md", ""),
-            artifacts.get("user_context.md", ""),
+            feedback_markdown
+            if feedback_markdown is not None
+            else artifacts.get("user_context.md", ""),
             prevalidation_result,
         )
 
@@ -1111,7 +1119,7 @@ class SkillRuntime:
   - Each item is followed by one blank line and a quoted derivation line: > 推导：...
   - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
   - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
-  - For rectification_required anchors, add a second quoted machine line after 推导 using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
+  - For rectification_required anchors, add quoted machine lines after 推导 using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
   - End with: 请逐条回复：**准 / 不准 / 部分准**"""
         if locale == "ja":
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 正確 / 不正確 / 一部正確.
@@ -1122,7 +1130,7 @@ class SkillRuntime:
   - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
   - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
-  - For rectification_required anchors, add a second quoted machine line after 根拠 using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
+  - For rectification_required anchors, add quoted machine lines after 根拠 using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
   - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
         return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
 - reader_prevalidation.md must follow the original Step 5 output template:
@@ -1132,7 +1140,7 @@ class SkillRuntime:
   - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
   - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
-  - For rectification_required anchors, add a second quoted machine line after Derivation using exactly: > Candidate: A and, when relevant, > Field: d9Lagna. Use candidate IDs from chart_rectification_state.json.
+  - For rectification_required anchors, add quoted machine lines after Derivation using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
   - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
 
     def _validate_skill_artifacts(
@@ -1605,6 +1613,7 @@ Rules:
 - Use structured_data.md as the calculation source of truth.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json when present; use them only as the input-confidence, active chart revision, and report-readiness gate.
 - Obey sensitivity_scan.reportReadiness.llmContract: never use mustNotUseAsPrimaryEvidence fields as primary conclusion anchors, and downgrade or omit unstable divisional/timing claims.
+- Obey chart_rectification_state.rectificationPlan.advancedVargaPolicy: D16/D20/D24/D27/D30 are corroboration-only until the time window is narrow; D60 is final-confirmation-only, never a first-pass report anchor.
 - If sensitivity_scan.reportReadiness.mode is rectification_required, write only candidate-discriminating or clearly low-confidence/D1-only content unless prevalidation_result.json explicitly allows the full report.
 - Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
 - Each requested file must be complete markdown, not a placeholder and not "see previous".
@@ -1818,7 +1827,11 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - Use the provided structured_data.md content.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
 - If sensitivity_scan.reportReadiness.mode is rectification_required, make each anchor support one explicit candidate ID from chart_rectification_state.json and focus on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
-- If chart_rectification_state.status is needs_more_feedback or needs_candidate_bound_checks, generate a new rectification round. Use prior feedbackAnchors, roundHistory, and candidate scores to ask narrower candidate-discriminating anchors; do not repeat anchors that already failed to separate candidates.
+- Use chart_rectification_state.rectificationPlan as the backend-owned next-round plan: targetCandidateIds, discriminatingFields, focusAxes, timeWindow, placeWindow, lifeEventFocus, eventCollectionRequired, and requiredAnchorCount are hard constraints.
+- When rectificationPlan.lifeEventFocus is non-empty, build validation anchors from those dated events first. Each such anchor must include a machine-readable > Event: line using an eventId or category from chart_rectification_state.lifeEventLedger.
+- When rectificationPlan.eventCollectionRequired is true and lifeEventFocus is empty, still produce candidate-bound anchors using available chart differences, but keep them low-confidence and do not claim complete birth-time rectification.
+- If chart_rectification_state.status is needs_more_feedback or needs_candidate_bound_checks, generate a new rectification round from rectificationPlan. Use prior feedbackAnchors, roundHistory, and candidate scores to ask narrower candidate-discriminating anchors; do not repeat anchors that already failed to separate candidates.
+- Do not invent candidate IDs, event IDs, times, coordinates, or fields outside chart_rectification_state.rectificationPlan.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
 {self._reader_prevalidation_format_instruction(locale)}

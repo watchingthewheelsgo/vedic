@@ -36,31 +36,56 @@ producing reliable user-facing reports.
 
 ## P0: chart rectification gaps
 
-- Fix base-chart tie bias in candidate selection. The base candidate should not
-  be confirmed when another candidate has comparable support; require a clear
-  margin and sufficient candidate-bound evidence before allowing the full report.
-- Add a strict artifact whitelist for `vedic-reader` output. The prompt says the
-  reader should only write `reader_prevalidation.md`, but the backend currently
-  accepts any returned artifact path.
-- Enforce candidate-bound prevalidation anchors with structured validation:
-  each high-risk anchor must include a machine-readable candidate ID, unstable
-  field list, and user-facing claim that can actually discriminate between
-  candidate charts.
-- Add a real multi-round rectification loop. When the backend returns
-  `needs_more_feedback` or `needs_candidate_bound_checks`, the UI/backend should
-  generate the next round of narrower questions instead of leaving the session
-  stalled.
-- Replace fixed time sampling with adaptive narrowing inside the user's reported
-  confidence window. Approximate or unknown times should progressively shrink
-  the candidate range from user feedback rather than relying only on static
-  samples.
-- Tighten place rectification after a coordinate candidate is selected. A
-  rectified coordinate should not inherit coarse city-level accuracy/radius, and
-  timezone handling should be rechecked when the corrected coordinate materially
-  differs from the original city center.
-- Add regression tests for rectification gates: missing candidate machine lines,
-  mixed candidate feedback, base-vs-non-base ties, non-base recalculation, and
-  `reportAllowed` transitions.
+- [x] Fix base-chart tie bias in candidate selection. The base candidate should not
+      be confirmed when another candidate has comparable support; require a clear
+      margin and sufficient candidate-bound evidence before allowing the full report.
+- [x] Add a strict artifact whitelist for `vedic-reader` output. The prompt says the
+      reader should only write `reader_prevalidation.md`, but the backend currently
+      accepts any returned artifact path.
+- [x] Enforce candidate-bound prevalidation anchors with structured validation:
+      each high-risk anchor must include a machine-readable candidate ID, unstable
+      field list, and user-facing claim that can actually discriminate between
+      candidate charts.
+- [x] Add backend state for a real multi-round rectification loop. When feedback
+      does not select a candidate, `chart_rectification_state.json` now carries a
+      `rectificationPlan` with target candidates, discriminating fields, focus axes,
+      narrowed time/place windows, required anchor count, and stop conditions.
+- [x] Add adaptive narrowing state inside the user's reported confidence window.
+      Candidate scores accumulate across rounds, and the next plan narrows
+      `timeWindow` from supported/contested candidate member times instead of
+      relying only on the first static samples.
+- [x] Add dated life-event input and backend event ledger. Intake can now collect
+      major events, the calculator writes `lifeEvents` into
+      `birth_input_context.json`, and `chart_rectification_state.json` exposes
+      `lifeEventLedger` / `lifeEventFocus` for professional rectification anchors.
+- [x] Require event-bound reader anchors when life-event evidence exists. In
+      high-risk rectification, reader output must cite `Candidate`, `Field`, and
+      `Event` machine lines, so generic personality validation cannot masquerade as
+      event-based birth-time proof.
+- [x] Add all-standard-varga sensitivity policy for `D1, D2, D3, D4, D5, D7,
+D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
+      confidence, average lagna-slice sensitivity, changed-in-scan status, usage
+      tier, and LLM primary-evidence restrictions. Candidate grouping uses
+      rectification-relevant vargas without letting D60 noise explode the candidate
+      set.
+- [ ] Add UI/job orchestration to automatically launch the next `vedic-reader`
+      round when the backend returns `needs_more_feedback` or
+      `needs_candidate_bound_checks`; the backend plan is ready, but the product flow
+      still needs to trigger the next round cleanly.
+- [ ] Add deterministic dasha/transit scoring for life events. The current event
+      ledger maps events to relevant houses, vargas, karakas, and unstable fields,
+      but it does not yet numerically score each candidate against the event year or
+      month.
+- [ ] Add deeper recalculation-backed boundary search for broad/unknown windows.
+      The current plan narrows from existing candidate members; it does not yet
+      resample every midpoint/minute across the newly narrowed window.
+- [ ] Tighten place rectification after a coordinate candidate is selected. A
+      rectified coordinate should not inherit coarse city-level accuracy/radius, and
+      timezone handling should be rechecked when the corrected coordinate materially
+      differs from the original city center.
+- [x] Add regression tests for rectification gates: missing candidate machine lines,
+      mixed candidate feedback, base-vs-non-base ties, non-base recalculation, and
+      `reportAllowed` transitions.
 
 ## P0: skill execution quality
 

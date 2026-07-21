@@ -1,0 +1,233 @@
+{
+  "schemaVersion": "vedic-reference-cases/v1",
+  "calculationProfile": "TRUE_CITRA mean nodes whole-sign PyJHora chart_method=1",
+  "sourceNotes": [
+    "Inputs are adapted from PyJHora's bundled jhora.tests.book_chart_data samples.",
+    "expectedSnapshot is a product-level drift fixture for the current backend profile.",
+    "The regression test also computes independent Swiss Ephemeris and PyJHora references at runtime."
+  ],
+  "cases": [
+    {
+      "id": "pvr_chart_1_massachusetts_d1",
+      "label": "PVR book chart 1 / Massachusetts",
+      "year": 2000,
+      "month": 4,
+      "day": 9,
+      "hour": 17,
+      "minute": 55,
+      "lat": 42.5,
+      "lon": -71.2,
+      "tz": "Etc/GMT+4",
+      "tz_offset": -4.0,
+      "source": "PyJHora book_chart_data.chart_1",
+      "expectedSnapshot": {
+        "ayanamsa": 23.850831,
+        "lagna": {
+          "sign": "Virgo",
+          "degree": 10.8278
+        },
+        "moon": {
+          "sign": "Gemini",
+          "degree": 4.7604,
+          "nakshatra": "Mrigashira",
+          "pada": 4
+        },
+        "rahu": {
+          "sign": "Cancer",
+          "degree": 5.9294
+        },
+        "d9Lagna": "Aries",
+        "d10Lagna": "Leo",
+        "sav": {
+          "Aries": 25,
+          "Taurus": 23,
+          "Gemini": 24,
+          "Cancer": 33,
+          "Leo": 28,
+          "Virgo": 24,
+          "Libra": 24,
+          "Scorpio": 34,
+          "Sagittarius": 29,
+          "Capricorn": 38,
+          "Aquarius": 37,
+          "Pisces": 18
+        },
+        "savTotal": 337,
+        "firstThreeMahadashas": [
+          {
+            "planet": "Mars",
+            "start": "1994-04",
+            "end": "2001-04"
+          },
+          {
+            "planet": "Rahu",
+            "start": "2001-04",
+            "end": "2019-04"
+          },
+          {
+            "planet": "Jupiter",
+            "start": "2019-04",
+            "end": "2035-04"
+          }
+        ],
+        "shadbalaRupas": {
+          "Sun": 8.9,
+          "Moon": 7.49,
+          "Mars": 6.63,
+          "Mercury": 5.71,
+          "Jupiter": 6.8,
+          "Venus": 6.58,
+          "Saturn": 7.95
+        }
+      }
+    },
+    {
+      "id": "vajpayee_chart_3_gwalior",
+      "label": "A.B. Vajpayee chart from PyJHora book data",
+      "year": 1926,
+      "month": 12,
+      "day": 25,
+      "hour": 5,
+      "minute": 12,
+      "lat": 26.233333333333334,
+      "lon": 78.16666666666667,
+      "tz": "Asia/Kolkata",
+      "tz_offset": 5.5,
+      "source": "PyJHora book_chart_data.chart_3",
+      "expectedSnapshot": {
+        "ayanamsa": 22.820383,
+        "lagna": {
+          "sign": "Scorpio",
+          "degree": 14.2247
+        },
+        "moon": {
+          "sign": "Leo",
+          "degree": 15.4952,
+          "nakshatra": "Purva Phalguni",
+          "pada": 1
+        },
+        "rahu": {
+          "sign": "Gemini",
+          "degree": 14.5293
+        },
+        "d9Lagna": "Scorpio",
+        "d10Lagna": "Scorpio",
+        "sav": {
+          "Aries": 29,
+          "Taurus": 22,
+          "Gemini": 27,
+          "Cancer": 29,
+          "Leo": 28,
+          "Virgo": 38,
+          "Libra": 29,
+          "Scorpio": 26,
+          "Sagittarius": 23,
+          "Capricorn": 34,
+          "Aquarius": 28,
+          "Pisces": 24
+        },
+        "savTotal": 337,
+        "firstThreeMahadashas": [
+          {
+            "planet": "Venus",
+            "start": "1923-09",
+            "end": "1943-09"
+          },
+          {
+            "planet": "Sun",
+            "start": "1943-09",
+            "end": "1949-09"
+          },
+          {
+            "planet": "Moon",
+            "start": "1949-09",
+            "end": "1959-09"
+          }
+        ],
+        "shadbalaRupas": {
+          "Sun": 6.28,
+          "Moon": 5.22,
+          "Mars": 7.41,
+          "Mercury": 8.12,
+          "Jupiter": 7.37,
+          "Venus": 6.14,
+          "Saturn": 5.22
+        }
+      }
+    },
+    {
+      "id": "ronald_reagan_chart_7_illinois",
+      "label": "Ronald Reagan chart from PyJHora book data",
+      "year": 1911,
+      "month": 2,
+      "day": 6,
+      "hour": 2,
+      "minute": 4,
+      "lat": 41.63333333333333,
+      "lon": -89.78333333333333,
+      "tz": "Etc/GMT+6",
+      "tz_offset": -6.0,
+      "source": "PyJHora book_chart_data.chart_7",
+      "expectedSnapshot": {
+        "ayanamsa": 22.603094,
+        "lagna": {
+          "sign": "Scorpio",
+          "degree": 7.1577
+        },
+        "moon": {
+          "sign": "Aries",
+          "degree": 19.8349,
+          "nakshatra": "Bharani",
+          "pada": 2
+        },
+        "rahu": {
+          "sign": "Aries",
+          "degree": 21.9135
+        },
+        "d9Lagna": "Virgo",
+        "d10Lagna": "Virgo",
+        "sav": {
+          "Aries": 27,
+          "Taurus": 24,
+          "Gemini": 25,
+          "Cancer": 26,
+          "Leo": 34,
+          "Virgo": 35,
+          "Libra": 31,
+          "Scorpio": 28,
+          "Sagittarius": 26,
+          "Capricorn": 26,
+          "Aquarius": 34,
+          "Pisces": 21
+        },
+        "savTotal": 337,
+        "firstThreeMahadashas": [
+          {
+            "planet": "Venus",
+            "start": "1901-05",
+            "end": "1921-05"
+          },
+          {
+            "planet": "Sun",
+            "start": "1921-05",
+            "end": "1927-05"
+          },
+          {
+            "planet": "Moon",
+            "start": "1927-05",
+            "end": "1937-05"
+          }
+        ],
+        "shadbalaRupas": {
+          "Sun": 5.41,
+          "Moon": 6.25,
+          "Mars": 5.83,
+          "Mercury": 7.72,
+          "Jupiter": 5.39,
+          "Venus": 7.72,
+          "Saturn": 6.45
+        }
+      }
+    }
+  ]
+}

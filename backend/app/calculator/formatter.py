@@ -327,12 +327,31 @@ def format_structured_data(
     lines.append("### 分盘可信度声明")
     lines.append("```")
     confidence = (sensitivity_scan or {}).get("summary", {}).get("divisionalConfidence", {})
-    for key in ["D1", "D9", "D10", "D4", "D5"]:
+    confidence_order = [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D7",
+        "D9",
+        "D10",
+        "D12",
+        "D16",
+        "D20",
+        "D24",
+        "D27",
+        "D30",
+        "D60",
+    ]
+    for key in confidence_order:
         item = confidence.get(key, {})
         level = item.get("confidence", "high")
         marker = "✅" if level == "high" else ("⚠️" if level == "medium" else "❌")
-        reason = "; ".join(item.get("reasons", [])) or "sensitivity scan stable"
-        lines.append(f"{key:<3} {marker} {level}（{reason}）")
+        use = item.get("recommendedUse", "primary_or_strong_support")
+        interval = item.get("approxLagnaIntervalMinutes")
+        reason = "; ".join(item.get("reasons", [])[:2]) or "sensitivity scan stable"
+        lines.append(f"{key:<4} {marker} {level:<6} use={use}; avgSlice≈{interval}m; {reason}")
     lines.append("```\n")
 
     # D9
@@ -514,11 +533,20 @@ def _format_input_confidence(input_context, sensitivity_scan):
 
     restricted = stability.get("llmRestrictedEvidence", [])
     allowed = stability.get("llmStableEvidence", [])
+    advanced_policy = summary.get("advancedVargaPolicy", {})
     lines.append("### LLM消费契约")
     lines.append("| 项目 | 内容 |")
     lines.append("|------|------|")
     lines.append(f"| 可作为主证据 | {', '.join(allowed) if allowed else '无'} |")
     lines.append(f"| 不可作为主证据 | {', '.join(restricted) if restricted else '无'} |")
+    lines.append(
+        "| 高级分盘限制 | "
+        f"{', '.join(advanced_policy.get('restrictedDivisions', [])) if advanced_policy else '无'} |"
+    )
+    lines.append(
+        "| D60策略 | "
+        f"{', '.join(advanced_policy.get('finalConfirmationOnly', [])) if advanced_policy else '无'} |"
+    )
     lines.append(
         f"| 写作约束 | {readiness.get('llmContract', {}).get('claimStyle', '标注置信度并降级不稳定结论')} |"
     )
