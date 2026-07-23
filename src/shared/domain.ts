@@ -122,6 +122,7 @@ export type BirthInput = {
   gender: string;
   relationship: string;
   timeSource: string;
+  lifeEvents?: string;
   locale?: AppLocale;
 };
 

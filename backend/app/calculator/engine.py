@@ -83,6 +83,7 @@ if _missing:
     )
 
 # === 配置 ===
+swe.set_ephe_path(os.path.join(os.path.dirname(__file__), "ephe"))
 swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
 
 SIGNS = [

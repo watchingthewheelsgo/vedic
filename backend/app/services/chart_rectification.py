@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import copy
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.schemas import BirthInput
+from app.services.life_event_rectification import build_life_event_focus
 
 
 class ChartRectificationService:
@@ -21,7 +22,8 @@ class ChartRectificationService:
         candidates = self._candidate_groups(sensitivity_scan)
         base_candidate_id = self._base_candidate_id(candidates)
         readiness = self._report_readiness(sensitivity_scan)
-        risk_level = str(self._scan_summary(sensitivity_scan).get("riskLevel") or "unknown")
+        scan_summary = self._scan_summary(sensitivity_scan)
+        risk_level = str(scan_summary.get("riskLevel") or "unknown")
         mode = str(readiness.get("mode") or "unknown")
         constraints = birth_input_context.get("constraints") or {}
         place_context = birth_input_context.get("place") or {}
@@ -35,6 +37,11 @@ class ChartRectificationService:
             "rectificationAxes",
             ["time", "place"] if place_rectification_allowed else ["time"],
         )
+        life_event_ledger = birth_input_context.get("lifeEvents")
+        if not isinstance(life_event_ledger, dict):
+            life_event_ledger = {}
+
+        scored_candidates = self._scoreless_candidates(candidates)
 
         if mode == "rectification_required" and len(candidates) > 1:
             status = "candidate_feedback_pending"
@@ -49,7 +56,7 @@ class ChartRectificationService:
             gate_reason = "Sensitivity scan does not require candidate rectification."
             full_report_allowed = True
 
-        return {
+        state = {
             "schemaVersion": self.schema_version,
             "revision": 0,
             "rectificationRound": 0,
@@ -83,7 +90,18 @@ class ChartRectificationService:
                     "rectificationAllowed": place_rectification_allowed,
                 },
             },
-            "candidates": self._scoreless_candidates(candidates),
+            "candidates": scored_candidates,
+            "lifeEventLedger": copy.deepcopy(life_event_ledger),
+            "divisionalSensitivity": copy.deepcopy(
+                scan_summary.get("divisionalSensitivity")
+                if isinstance(scan_summary.get("divisionalSensitivity"), list)
+                else []
+            ),
+            "advancedVargaPolicy": copy.deepcopy(
+                scan_summary.get("advancedVargaPolicy")
+                if isinstance(scan_summary.get("advancedVargaPolicy"), dict)
+                else {}
+            ),
             "feedbackAnchors": [],
             "roundHistory": [],
             "anchorContractErrors": [],
@@ -110,6 +128,8 @@ class ChartRectificationService:
                 ),
             },
         }
+        state["rectificationPlan"] = self._build_rectification_plan(state)
+        return state
 
     def update_from_feedback(
         self,
@@ -120,11 +140,12 @@ class ChartRectificationService:
     ) -> dict[str, Any]:
         next_state = copy.deepcopy(state)
         anchors = self._parse_candidate_anchors(prevalidation_markdown, feedback_markdown)
-        candidates = self._reset_candidate_scores(next_state.get("candidates"))
+        candidates = self._candidate_score_state(next_state.get("candidates"))
         by_id = {str(candidate.get("candidateId")): candidate for candidate in candidates}
         contract_errors = self.validate_prevalidation_contract(next_state, prevalidation_markdown)
 
         candidate_bound_count = 0
+        next_round = int(next_state.get("rectificationRound") or 0) + 1
         for anchor in anchors:
             answer = str(anchor.get("answer") or "pending")
             weight = self._answer_weight(answer)
@@ -142,6 +163,7 @@ class ChartRectificationService:
                     candidate["support"] = int(candidate.get("support") or 0) + 1
                 elif weight < 0:
                     candidate["reject"] = int(candidate.get("reject") or 0) + 1
+            anchor["round"] = next_round
 
         if contract_errors:
             selected = None
@@ -153,7 +175,6 @@ class ChartRectificationService:
                 selected,
                 candidate_bound_count,
             )
-        next_round = int(next_state.get("rectificationRound") or 0) + 1
         round_history = self._round_history(next_state)
         round_history.append(
             {
@@ -174,6 +195,8 @@ class ChartRectificationService:
                 ],
             }
         )
+        feedback_anchors = self._feedback_anchors(next_state)
+        feedback_anchors.extend(anchors)
 
         next_state.update(
             {
@@ -183,15 +206,18 @@ class ChartRectificationService:
                 "status": status,
                 "selectedCandidateId": selected.get("candidateId") if selected else None,
                 "selectionConfidence": confidence,
-                "candidateBoundAnchorCount": candidate_bound_count,
-                "feedbackAnchorCount": len(anchors),
+                "candidateBoundAnchorCount": int(next_state.get("candidateBoundAnchorCount") or 0)
+                + candidate_bound_count,
+                "currentRoundCandidateBoundAnchorCount": candidate_bound_count,
+                "feedbackAnchorCount": len(feedback_anchors),
                 "candidates": candidates,
-                "feedbackAnchors": anchors,
+                "feedbackAnchors": feedback_anchors,
                 "roundHistory": round_history,
                 "anchorContractErrors": contract_errors,
                 "reportGate": gate,
             }
         )
+        next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
         return next_state
 
     def rectified_birth_input(
@@ -305,6 +331,7 @@ class ChartRectificationService:
                 "rectifiedInput": rectified_input.model_dump(by_alias=True),
             }
         )
+        next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
         return next_state
 
     def apply_prevalidation_decision(
@@ -323,6 +350,7 @@ class ChartRectificationService:
             "candidateBoundAnchorCount": state.get("candidateBoundAnchorCount"),
             "activeChartRevision": state.get("activeChartRevision"),
             "reason": gate.get("reason"),
+            "plan": state.get("rectificationPlan"),
         }
         if status in {"base_confirmed", "corrected_chart_ready"}:
             next_decision.update(
@@ -379,6 +407,7 @@ class ChartRectificationService:
             block = str(anchor["block"])
             anchor_candidate_ids = self._candidate_ids_from_block(block)
             fields = self._unstable_fields_from_block(block)
+            event_refs = self._event_refs_from_block(block)
             if not anchor_candidate_ids:
                 errors.append(f"Anchor {index} is missing a machine-readable Candidate line.")
             invalid_ids = [
@@ -392,6 +421,19 @@ class ChartRectificationService:
                 )
             if not fields:
                 errors.append(f"Anchor {index} is missing a machine-readable Field line.")
+            if self._requires_life_event_bound_anchors(state):
+                if not event_refs:
+                    errors.append(f"Anchor {index} is missing a machine-readable Event line.")
+                invalid_event_refs = [
+                    event_ref
+                    for event_ref in event_refs
+                    if event_ref not in self._known_event_refs(state)
+                ]
+                if invalid_event_refs:
+                    errors.append(
+                        f"Anchor {index} references unknown event(s): "
+                        f"{', '.join(invalid_event_refs)}."
+                    )
             statement = self._statement_from_anchor_block(block)
             if len(statement) < 12:
                 errors.append(f"Anchor {index} does not contain a concrete user-facing claim.")
@@ -443,16 +485,16 @@ class ChartRectificationService:
         return readiness if isinstance(readiness, dict) else {}
 
     @staticmethod
-    def _reset_candidate_scores(raw_candidates: object) -> list[dict[str, Any]]:
+    def _candidate_score_state(raw_candidates: object) -> list[dict[str, Any]]:
         candidates = raw_candidates if isinstance(raw_candidates, list) else []
         result = []
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
             item = copy.deepcopy(candidate)
-            item["score"] = 0.0
-            item["support"] = 0
-            item["reject"] = 0
+            item["score"] = round(float(item.get("score") or 0.0), 3)
+            item["support"] = int(item.get("support") or 0)
+            item["reject"] = int(item.get("reject") or 0)
             result.append(item)
         return result
 
@@ -462,6 +504,13 @@ class ChartRectificationService:
         if not isinstance(history, list):
             return []
         return [copy.deepcopy(item) for item in history if isinstance(item, dict)]
+
+    @staticmethod
+    def _feedback_anchors(state: dict[str, Any]) -> list[dict[str, Any]]:
+        anchors = state.get("feedbackAnchors")
+        if not isinstance(anchors, list):
+            return []
+        return [copy.deepcopy(item) for item in anchors if isinstance(item, dict)]
 
     def _parse_candidate_anchors(
         self,
@@ -478,6 +527,7 @@ class ChartRectificationService:
                     "index": index,
                     "candidateIds": self._candidate_ids_from_block(str(anchor["block"])),
                     "unstableFields": self._unstable_fields_from_block(str(anchor["block"])),
+                    "eventRefs": self._event_refs_from_block(str(anchor["block"])),
                     "answer": answers.get(index, "pending"),
                 }
             )
@@ -486,7 +536,7 @@ class ChartRectificationService:
     @staticmethod
     def _statement_from_anchor_block(block: str) -> str:
         statement = re.sub(
-            r"(?m)^>\s*(?:推导|Derivation|根拠|Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段)\s*[：:].*$",
+            r"(?m)^>\s*(?:推导|Derivation|根拠|Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段|Event|事件)\s*[：:].*$",
             "",
             block,
         )
@@ -563,6 +613,15 @@ class ChartRectificationService:
         return fields
 
     @staticmethod
+    def _event_refs_from_block(block: str) -> list[str]:
+        refs: list[str] = []
+        for match in re.finditer(r"(?im)^>\s*(?:Event|事件)\s*[：:]\s*(.+)$", block):
+            for raw in re.split(r"[,/，、\s]+", match.group(1).strip()):
+                if raw and raw not in refs:
+                    refs.append(raw)
+        return refs
+
+    @staticmethod
     def _answer_weight(answer: str) -> float:
         if answer == "accurate":
             return 1.0
@@ -614,6 +673,34 @@ class ChartRectificationService:
                 "needs_more_feedback",
             }
         )
+
+    @staticmethod
+    def _requires_life_event_bound_anchors(state: dict[str, Any]) -> bool:
+        if not ChartRectificationService._requires_candidate_bound_anchors(state):
+            return False
+        plan = (
+            state.get("rectificationPlan")
+            if isinstance(state.get("rectificationPlan"), dict)
+            else {}
+        )
+        focus = plan.get("lifeEventFocus") if isinstance(plan, dict) else None
+        return isinstance(focus, list) and len(focus) > 0
+
+    @staticmethod
+    def _known_event_refs(state: dict[str, Any]) -> set[str]:
+        ledger = state.get("lifeEventLedger")
+        events = ledger.get("events") if isinstance(ledger, dict) else None
+        refs: set[str] = set()
+        if not isinstance(events, list):
+            return refs
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            for key in ("eventId", "category"):
+                value = event.get(key)
+                if value:
+                    refs.add(str(value))
+        return refs
 
     @staticmethod
     def _candidate_contract_error_state(
@@ -689,6 +776,340 @@ class ChartRectificationService:
                 "nextStep": "continue_rectification",
             },
         )
+
+    def _build_rectification_plan(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Build the backend-owned next step for multi-round birth time correction."""
+
+        status = str(state.get("status") or "unknown")
+        candidates = self._candidate_score_state(state.get("candidates"))
+        selected_id = state.get("selectedCandidateId")
+        sorted_candidates = self._sorted_candidates(candidates)
+        target_candidates = self._target_candidates(sorted_candidates, selected_id)
+        target_ids = [str(candidate.get("candidateId")) for candidate in target_candidates]
+        fields = self._discriminating_fields(target_candidates, state)
+        axes = self._rectification_axes(state)
+        time_window = self._narrow_time_window(state, target_candidates)
+        place_window = self._place_window(state, target_candidates)
+        life_event_focus = self._life_event_focus(state, fields)
+        event_collection_required = self._event_collection_required(state)
+        divisional_sensitivity = (
+            state.get("divisionalSensitivity")
+            if isinstance(state.get("divisionalSensitivity"), list)
+            else []
+        )
+        advanced_varga_policy = (
+            state.get("advancedVargaPolicy")
+            if isinstance(state.get("advancedVargaPolicy"), dict)
+            else {}
+        )
+        round_number = int(state.get("rectificationRound") or 0)
+        gate = state.get("reportGate") if isinstance(state.get("reportGate"), dict) else {}
+
+        if status == "not_required":
+            action = "full_report"
+            directive = "Rectification is not required; run standard prevalidation only."
+        elif status == "base_confirmed":
+            action = "full_report"
+            directive = (
+                "Base candidate is confirmed; full report may proceed with recorded confidence."
+            )
+        elif status == "corrected_chart_ready":
+            action = "full_report"
+            directive = "Rectified chart has been recalculated; use activeChartRevision as source."
+        elif status == "needs_recalculation":
+            action = "apply_candidate_recalculation"
+            directive = "Selected non-base candidate must be recalculated before report synthesis."
+        elif status == "needs_candidate_bound_checks":
+            action = "rerun_reader"
+            directive = (
+                "Regenerate prevalidation anchors with machine-readable Candidate and Field lines; "
+                "when lifeEventFocus exists, also include Event lines."
+            )
+        elif status == "needs_more_feedback":
+            action = "next_rectification_round"
+            directive = (
+                "Ask narrower candidate-discriminating anchors using target candidates, fields, "
+                "and dated life events where available."
+            )
+        elif status == "needs_boundary_scan":
+            action = "boundary_scan"
+            directive = "Run a deeper time boundary scan before allowing report synthesis."
+        else:
+            action = "first_rectification_round"
+            directive = (
+                "Ask candidate-bound prevalidation anchors before any deterministic full report."
+            )
+
+        return {
+            "schemaVersion": "chart-rectification-plan/v1",
+            "status": status,
+            "action": action,
+            "round": round_number,
+            "maxRounds": 8,
+            "targetCandidateIds": target_ids,
+            "candidateSummaries": [
+                self._candidate_summary(candidate) for candidate in target_candidates
+            ],
+            "discriminatingFields": fields,
+            "focusAxes": axes,
+            "timeWindow": time_window,
+            "placeWindow": place_window,
+            "lifeEventFocus": life_event_focus,
+            "divisionalSensitivity": self._plan_divisional_sensitivity(
+                divisional_sensitivity,
+                fields,
+            ),
+            "advancedVargaPolicy": advanced_varga_policy,
+            "eventCollectionRequired": event_collection_required,
+            "eventQuestionStrategy": (
+                "Use dated life events as primary rectification anchors. Prefer stable D1, "
+                "Dasha, D7/D9/D10/D12 differences when available; use D16/D20/D24/D27/D30 "
+                "only as corroboration and D60 only as final confirmation after the time "
+                "window is very narrow."
+            ),
+            "requiredAnchorCount": self._required_anchor_count(status, target_candidates),
+            "directive": directive,
+            "gateReason": gate.get("reason"),
+            "stopConditions": [
+                "A candidate has clear score margin and enough candidate-bound support.",
+                "The base chart is confirmed by candidate-bound anchors.",
+                "A non-base candidate is selected and recalculated.",
+                "Eight rounds are reached without convergence; keep report D1-only/low-confidence.",
+            ],
+        }
+
+    @staticmethod
+    def _plan_divisional_sensitivity(
+        divisional_sensitivity: list[Any],
+        discriminating_fields: list[str],
+    ) -> list[dict[str, Any]]:
+        fields = set(discriminating_fields)
+        result: list[dict[str, Any]] = []
+        for item in divisional_sensitivity:
+            if not isinstance(item, dict):
+                continue
+            include = (
+                item.get("field") in fields
+                or item.get("changedInScan")
+                or item.get("recommendedUse") in {"final_confirmation_only", "corroboration_only"}
+            )
+            if not include:
+                continue
+            result.append(
+                {
+                    "division": item.get("division"),
+                    "field": item.get("field"),
+                    "confidence": item.get("confidence"),
+                    "usageTier": item.get("usageTier"),
+                    "recommendedUse": item.get("recommendedUse"),
+                    "changedInScan": item.get("changedInScan"),
+                    "role": item.get("role"),
+                }
+            )
+        return result
+
+    def _life_event_focus(self, state: dict[str, Any], fields: list[str]) -> list[dict[str, Any]]:
+        ledger = state.get("lifeEventLedger")
+        if not isinstance(ledger, dict):
+            return []
+        return build_life_event_focus(ledger, fields)
+
+    @staticmethod
+    def _event_collection_required(state: dict[str, Any]) -> bool:
+        ledger = state.get("lifeEventLedger")
+        if not isinstance(ledger, dict):
+            return True
+        return bool(ledger.get("eventCollectionRequired"))
+
+    @staticmethod
+    def _sorted_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            candidates,
+            key=lambda item: (
+                float(item.get("score") or 0),
+                int(item.get("support") or 0),
+                -int(item.get("reject") or 0),
+                1 if item.get("isBase") else 0,
+                str(item.get("candidateId") or ""),
+            ),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _target_candidates(
+        sorted_candidates: list[dict[str, Any]],
+        selected_id: object,
+    ) -> list[dict[str, Any]]:
+        if not sorted_candidates:
+            return []
+        if selected_id:
+            selected = [
+                candidate
+                for candidate in sorted_candidates
+                if str(candidate.get("candidateId")) == str(selected_id)
+            ]
+            base = [
+                candidate
+                for candidate in sorted_candidates
+                if candidate.get("isBase") and str(candidate.get("candidateId")) != str(selected_id)
+            ]
+            return (selected + base)[:2] or selected
+        viable = [
+            candidate
+            for candidate in sorted_candidates
+            if int(candidate.get("reject") or 0) == 0 or int(candidate.get("support") or 0) > 0
+        ]
+        return (viable or sorted_candidates)[: min(3, len(sorted_candidates))]
+
+    @staticmethod
+    def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "candidateId": candidate.get("candidateId"),
+            "isBase": bool(candidate.get("isBase")),
+            "score": round(float(candidate.get("score") or 0), 3),
+            "support": int(candidate.get("support") or 0),
+            "reject": int(candidate.get("reject") or 0),
+            "changedFromBase": candidate.get("changedFromBase") or [],
+            "members": candidate.get("members") or [],
+        }
+
+    def _discriminating_fields(
+        self,
+        candidates: list[dict[str, Any]],
+        state: dict[str, Any],
+    ) -> list[str]:
+        fields: list[str] = []
+        for candidate in candidates:
+            for field in candidate.get("changedFromBase") or []:
+                if isinstance(field, str) and field and field not in fields:
+                    fields.append(field)
+        for anchor in self._feedback_anchors(state):
+            for field in anchor.get("unstableFields") or []:
+                if isinstance(field, str) and field and field not in fields:
+                    fields.append(field)
+        if fields:
+            return fields
+        return ["lagnaSign", "moonNakshatra", "d9Lagna", "d10Lagna", "currentDasha"]
+
+    @staticmethod
+    def _rectification_axes(state: dict[str, Any]) -> list[str]:
+        guardrails = state.get("guardrails") if isinstance(state.get("guardrails"), dict) else {}
+        axes = guardrails.get("rectificationAxes")
+        if isinstance(axes, list) and axes:
+            return [str(axis) for axis in axes]
+        place_allowed = guardrails.get("placeRectificationAllowed") is not False
+        return ["time", "place"] if place_allowed else ["time"]
+
+    def _narrow_time_window(
+        self,
+        state: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        search_bounds = (
+            state.get("searchBounds") if isinstance(state.get("searchBounds"), dict) else {}
+        )
+        time_bounds = (
+            search_bounds.get("time") if isinstance(search_bounds.get("time"), dict) else {}
+        )
+        original_start = self._parse_datetime(str(time_bounds.get("start") or ""))
+        original_end = self._parse_datetime(str(time_bounds.get("end") or ""))
+        if original_start is None or original_end is None:
+            return time_bounds or None
+
+        candidate_times: list[datetime] = []
+        for candidate in candidates:
+            for member in candidate.get("members") or []:
+                if not isinstance(member, dict) or member.get("axis") != "time":
+                    continue
+                value = self._parse_datetime(str(member.get("datetime") or ""))
+                if value is not None:
+                    candidate_times.append(value)
+        if not candidate_times:
+            return {
+                **time_bounds,
+                "basis": "reported_window",
+                "targetCandidateIds": [
+                    str(candidate.get("candidateId"))
+                    for candidate in candidates
+                    if candidate.get("candidateId")
+                ],
+            }
+
+        span_minutes = max(1, int((original_end - original_start).total_seconds() / 60))
+        padding = max(2, min(15, span_minutes // 6))
+        narrowed_start = max(original_start, min(candidate_times) - timedelta(minutes=padding))
+        narrowed_end = min(original_end, max(candidate_times) + timedelta(minutes=padding))
+        return {
+            "start": narrowed_start.strftime("%Y-%m-%d %H:%M"),
+            "end": narrowed_end.strftime("%Y-%m-%d %H:%M"),
+            "radiusMinutes": int((narrowed_end - narrowed_start).total_seconds() / 120),
+            "basis": "candidate_member_datetimes",
+            "paddingMinutes": padding,
+            "targetCandidateIds": [
+                str(candidate.get("candidateId"))
+                for candidate in candidates
+                if candidate.get("candidateId")
+            ],
+        }
+
+    @staticmethod
+    def _place_window(
+        state: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        guardrails = state.get("guardrails") if isinstance(state.get("guardrails"), dict) else {}
+        if guardrails.get("placeRectificationAllowed") is False:
+            return {
+                "rectificationAllowed": False,
+                "reason": "Detailed place coordinates are locked.",
+            }
+        coords = []
+        for candidate in candidates:
+            for member in candidate.get("members") or []:
+                if not isinstance(member, dict) or member.get("axis") != "place":
+                    continue
+                coordinates = member.get("coordinates")
+                if not isinstance(coordinates, dict):
+                    continue
+                try:
+                    coords.append((float(coordinates["lat"]), float(coordinates["lon"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        search_bounds = (
+            state.get("searchBounds") if isinstance(state.get("searchBounds"), dict) else {}
+        )
+        place_bounds = (
+            search_bounds.get("place") if isinstance(search_bounds.get("place"), dict) else {}
+        )
+        if not coords:
+            return place_bounds or None
+        lats = [item[0] for item in coords]
+        lons = [item[1] for item in coords]
+        return {
+            "rectificationAllowed": True,
+            "radiusKm": place_bounds.get("radiusKm"),
+            "boundingBox": {
+                "minLat": round(min(lats), 6),
+                "maxLat": round(max(lats), 6),
+                "minLon": round(min(lons), 6),
+                "maxLon": round(max(lons), 6),
+            },
+        }
+
+    @staticmethod
+    def _required_anchor_count(status: str, candidates: list[dict[str, Any]]) -> int:
+        if status in {"not_required", "base_confirmed", "corrected_chart_ready"}:
+            return 0
+        if len(candidates) <= 1:
+            return 3
+        return min(5, max(3, len(candidates) + 1))
+
+    @staticmethod
+    def _parse_datetime(value: str) -> datetime | None:
+        try:
+            return datetime.strptime(value.strip(), "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
 
     @staticmethod
     def _split_datetime(value: str) -> tuple[str | None, str | None]:

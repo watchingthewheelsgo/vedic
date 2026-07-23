@@ -18,6 +18,7 @@ from app.schemas import (
     PlanetFact,
     StrengthFact,
 )
+from app.services.life_event_rectification import parse_life_event_ledger
 from app.services.place_service import PlaceService, ResolvedPlace
 from app.settings import Settings
 from app.utils.ids import make_id
@@ -29,6 +30,97 @@ PRECISION_STATUS: dict[str, str] = {
     "part_of_day": "degraded",
     "unknown": "limited",
 }
+
+DIVISIONAL_FACTORS = [1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]
+
+DIVISIONAL_POLICIES: dict[int, dict[str, str]] = {
+    1: {
+        "name": "Rashi",
+        "role": "body, identity, house lords, and the foundation for all readings",
+        "usageTier": "primary_foundation",
+    },
+    2: {
+        "name": "Hora",
+        "role": "wealth flow, liquidity, food, family resources",
+        "usageTier": "supporting_domain",
+    },
+    3: {
+        "name": "Drekkana",
+        "role": "siblings, initiative, courage, effort pattern",
+        "usageTier": "supporting_domain",
+    },
+    4: {
+        "name": "Chaturthamsha",
+        "role": "home, property, residence, vehicles, core comforts",
+        "usageTier": "supporting_domain",
+    },
+    5: {
+        "name": "Panchamsha",
+        "role": "creative authority, counsel, recognition, purva punya",
+        "usageTier": "supporting_domain",
+    },
+    7: {
+        "name": "Saptamsha",
+        "role": "children, fertility, lineage, legacy",
+        "usageTier": "rectification_domain",
+    },
+    9: {
+        "name": "Navamsha",
+        "role": "marriage, dharma, maturity, promise confirmation",
+        "usageTier": "rectification_domain",
+    },
+    10: {
+        "name": "Dashamsha",
+        "role": "career, public role, work environment, authority",
+        "usageTier": "rectification_domain",
+    },
+    12: {
+        "name": "Dwadashamsha",
+        "role": "parents, ancestry, inherited family patterns",
+        "usageTier": "rectification_domain",
+    },
+    16: {
+        "name": "Shodashamsha",
+        "role": "vehicles, luxuries, comforts, lived ease",
+        "usageTier": "advanced_validation",
+    },
+    20: {
+        "name": "Vimshamsha",
+        "role": "spiritual practice, devotion, initiation",
+        "usageTier": "advanced_validation",
+    },
+    24: {
+        "name": "Chaturvimshamsha",
+        "role": "education, learning, formal knowledge",
+        "usageTier": "advanced_validation",
+    },
+    27: {
+        "name": "Bhamsa",
+        "role": "strengths, vulnerabilities, resilience",
+        "usageTier": "advanced_validation",
+    },
+    30: {
+        "name": "Trimshamsha",
+        "role": "adversity, misfortune, hidden stress, faults",
+        "usageTier": "advanced_validation",
+    },
+    60: {
+        "name": "Shashtiamsha",
+        "role": "fine karmic residue and final birth-time confirmation",
+        "usageTier": "final_confirmation_only",
+    },
+}
+
+DIVISIONAL_FINGERPRINT_FACTORS = [2, 3, 4, 5, 7, 9, 10, 12]
+HIGH_RISK_CHANGED_FIELDS = {
+    "lagnaSign",
+    "moonNakshatra",
+    "currentDasha",
+    "d7Lagna",
+    "d9Lagna",
+    "d10Lagna",
+}
+CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
 @dataclass(frozen=True)
@@ -177,6 +269,7 @@ class VedicCalculator:
         time_window = self._time_window(payload, intake.birth_time_precision)
         place_radius = round(float(place.radius_km), 3)
         place_rectification_allowed = self._place_rectification_allowed(place)
+        life_event_ledger = parse_life_event_ledger(str(payload.get("life_events") or ""))
         return {
             "schemaVersion": "birth-input-context/v1",
             "time": {
@@ -205,6 +298,7 @@ class VedicCalculator:
                 "rectificationAllowed": place_rectification_allowed,
                 "rectificationPolicy": self._place_rectification_policy(place),
             },
+            "lifeEvents": life_event_ledger,
             "constraints": {
                 "timeSearchMustStayWithinReportedWindow": True,
                 "placeSearchMustStayWithinRadiusKm": place_radius,
@@ -326,13 +420,20 @@ class VedicCalculator:
             "moonSign",
             "moonNakshatra",
             "moonPada",
-            "d9Lagna",
-            "d10Lagna",
-            "d4Lagna",
-            "d5Lagna",
             "currentDasha",
         ]
+        stable_keys.extend(
+            VedicCalculator._divisional_field(factor) for factor in DIVISIONAL_FINGERPRINT_FACTORS
+        )
         return "|".join(str(signature.get(key)) for key in stable_keys)
+
+    @staticmethod
+    def _divisional_key(factor: int) -> str:
+        return f"D{factor}"
+
+    @staticmethod
+    def _divisional_field(factor: int) -> str:
+        return "lagnaSign" if factor == 1 else f"d{factor}Lagna"
 
     def _stability_map(
         self,
@@ -356,28 +457,40 @@ class VedicCalculator:
                 "domain": "current timing and validation windows",
                 "severity": "blocking",
             },
-            "d9Lagna": {
-                "domain": "D9 relationship, inner maturation, promise refinement",
-                "severity": "high",
-            },
-            "d10Lagna": {
-                "domain": "D10 career environment and public action",
-                "severity": "high",
-            },
-            "d4Lagna": {
-                "domain": "D4 property, home, comfort context",
-                "severity": "medium",
-            },
-            "d5Lagna": {
-                "domain": "D5 creativity, authority, recognition context",
-                "severity": "medium",
-            },
+        }
+        for factor in DIVISIONAL_FACTORS:
+            if factor == 1:
+                continue
+            policy = DIVISIONAL_POLICIES[factor]
+            severity = "medium"
+            if factor in {7, 9, 10}:
+                severity = "high"
+            elif factor in {27, 30, 60}:
+                severity = "validation-only"
+            field_impacts[self._divisional_field(factor)] = {
+                "domain": f"{self._divisional_key(factor)} {policy['role']}",
+                "severity": severity,
+            }
+
+        confidence_by_field = {
+            str(value.get("field")): value
+            for value in divisional_confidence.values()
+            if isinstance(value, dict) and value.get("field")
         }
         stable_fields = []
         unstable_fields = []
         for field, impact in field_impacts.items():
-            item = {"field": field, **impact}
-            if field in changed_fields:
+            confidence = confidence_by_field.get(field)
+            item = {
+                "field": field,
+                **impact,
+            }
+            if confidence:
+                item["division"] = confidence.get("division")
+                item["confidence"] = confidence.get("confidence")
+                item["recommendedUse"] = confidence.get("recommendedUse")
+            restricted_by_policy = bool(confidence and not confidence.get("useAsPrimaryEvidence"))
+            if field in changed_fields or restricted_by_policy:
                 unstable_fields.append(item)
             else:
                 stable_fields.append(item)
@@ -391,8 +504,9 @@ class VedicCalculator:
             "unstableFields": unstable_fields,
             "lowConfidenceDivisions": low_confidence_divisions,
             "llmStableEvidence": [item["field"] for item in stable_fields],
-            "llmRestrictedEvidence": [item["field"] for item in unstable_fields]
-            + low_confidence_divisions,
+            "llmRestrictedEvidence": sorted(
+                set([item["field"] for item in unstable_fields] + low_confidence_divisions)
+            ),
         }
 
     def _report_readiness(
@@ -656,15 +770,36 @@ class VedicCalculator:
             "moonPada": moon_nakshatra.get("pada"),
             "currentDasha": self._current_dasha_label(chart),
         }
-        for key in ["d9", "d10", "d4", "d5"]:
-            lagna = chart.get(key, {}).get("Lagna")
-            if isinstance(lagna, tuple):
-                signature[f"{key}Lagna"] = lagna[0]
-            elif isinstance(lagna, dict):
-                signature[f"{key}Lagna"] = lagna.get("sign")
-            else:
-                signature[f"{key}Lagna"] = None
+        for factor in DIVISIONAL_FACTORS:
+            if factor == 1:
+                continue
+            signature[self._divisional_field(factor)] = self._divisional_lagna_sign(
+                chart,
+                factor,
+            )
         return signature
+
+    @staticmethod
+    def _divisional_lagna_sign(chart: dict[str, Any], factor: int) -> str | None:
+        chart_key = f"D{factor}"
+        raw_chart = (chart.get("divisional_charts") or {}).get(chart_key)
+        if isinstance(raw_chart, dict) and "error" not in raw_chart:
+            lagna = raw_chart.get("Lagna")
+            if isinstance(lagna, dict):
+                sign = lagna.get("sign")
+                return str(sign) if sign else None
+            if isinstance(lagna, tuple) and lagna:
+                return str(lagna[0]) if lagna[0] else None
+
+        legacy = chart.get(f"d{factor}", {})
+        if isinstance(legacy, dict):
+            lagna = legacy.get("Lagna")
+            if isinstance(lagna, tuple) and lagna:
+                return str(lagna[0]) if lagna[0] else None
+            if isinstance(lagna, dict):
+                sign = lagna.get("sign")
+                return str(sign) if sign else None
+        return None
 
     @staticmethod
     def _signature_changes(
@@ -743,24 +878,23 @@ class VedicCalculator:
                 "boundary_flags:" + ",".join(str(item["factor"]) for item in boundary_flags)
             )
 
-        if (
-            precision in {"part_of_day", "unknown"}
-            or "lagnaSign" in changed
-            or "d9Lagna" in changed
-            or "d10Lagna" in changed
-            or "currentDasha" in changed
-        ):
+        blocking_changed = sorted(changed & HIGH_RISK_CHANGED_FIELDS)
+        if precision in {"part_of_day", "unknown"} or bool(blocking_changed):
             risk_level = "high"
         elif risk_factors:
             risk_level = "medium"
         else:
             risk_level = "low"
 
+        divisional_confidence = self._divisional_confidence(precision, changed)
         return {
             "riskLevel": risk_level,
             "riskFactors": risk_factors,
+            "blockingChangedFields": blocking_changed,
             "changedFields": sorted(changed),
-            "divisionalConfidence": self._divisional_confidence(precision, changed),
+            "divisionalConfidence": divisional_confidence,
+            "divisionalSensitivity": self._divisional_sensitivity(divisional_confidence),
+            "advancedVargaPolicy": self._advanced_varga_policy(divisional_confidence),
             "recommendedAction": self._recommended_action(
                 risk_level,
                 place_rectification_allowed=self._place_rectification_allowed(place),
@@ -772,28 +906,158 @@ class VedicCalculator:
 
     @staticmethod
     def _divisional_confidence(precision: str, changed: set[str]) -> dict[str, dict[str, Any]]:
-        def confidence_for(field: str, base: str) -> dict[str, Any]:
-            confidence = base
-            reasons = []
+        radius_minutes = VedicCalculator._precision_radius_minutes(precision)
+        result: dict[str, dict[str, Any]] = {}
+        for factor in DIVISIONAL_FACTORS:
+            key = VedicCalculator._divisional_key(factor)
+            field = VedicCalculator._divisional_field(factor)
+            policy = DIVISIONAL_POLICIES[factor]
+            interval = round(120 / factor, 3)
+            confidence = VedicCalculator._confidence_for_division(
+                precision,
+                radius_minutes,
+                factor,
+                field in changed,
+            )
+            reasons = [
+                f"reported time window radius is +/-{radius_minutes}m",
+                f"approx average {key} Lagna slice is {interval}m",
+            ]
             if field in changed:
-                confidence = "low"
-                reasons.append(f"{field} changed in sensitivity scan")
-            return {"confidence": confidence, "reasons": reasons}
+                reasons.insert(0, f"{field} changed in sensitivity scan")
+            if policy["usageTier"] == "final_confirmation_only":
+                reasons.append(
+                    "D60 is validation/final confirmation only until birth time is rectified"
+                )
+            elif policy["usageTier"] == "advanced_validation":
+                reasons.append(
+                    "advanced varga should corroborate dated events, not drive first-pass claims"
+                )
 
-        if precision == "unknown":
-            base = {"D1": "low", "D9": "low", "D10": "low", "D4": "low", "D5": "low"}
-        elif precision == "part_of_day":
-            base = {"D1": "medium", "D9": "low", "D10": "low", "D4": "low", "D5": "low"}
-        elif precision == "approximate":
-            base = {"D1": "medium", "D9": "medium", "D10": "medium", "D4": "medium", "D5": "medium"}
+            recommended_use = VedicCalculator._recommended_divisional_use(
+                confidence,
+                policy["usageTier"],
+            )
+            result[key] = {
+                "division": key,
+                "factor": factor,
+                "field": field,
+                "name": policy["name"],
+                "role": policy["role"],
+                "usageTier": policy["usageTier"],
+                "confidence": confidence,
+                "approxLagnaIntervalMinutes": interval,
+                "timeWindowRadiusMinutes": radius_minutes,
+                "timeSensitive": True,
+                "locationSensitive": True,
+                "changedInScan": field in changed,
+                "recommendedUse": recommended_use,
+                "useAsPrimaryEvidence": recommended_use == "primary_or_strong_support",
+                "reasons": reasons,
+            }
+        return result
+
+    @staticmethod
+    def _precision_radius_minutes(precision: str) -> int:
+        return {"exact": 2, "approximate": 15, "part_of_day": 120, "unknown": 720}.get(
+            precision,
+            15,
+        )
+
+    @staticmethod
+    def _confidence_for_division(
+        precision: str,
+        radius_minutes: int,
+        factor: int,
+        changed: bool,
+    ) -> str:
+        if changed or precision == "unknown":
+            return "low"
+        if factor == 1:
+            if precision == "exact":
+                return "high"
+            if precision in {"approximate", "part_of_day"}:
+                return "medium"
+            return "low"
+
+        interval = 120 / factor
+        ratio = radius_minutes / interval if interval else 999
+        if ratio <= 0.25:
+            confidence = "high"
+        elif ratio <= 1.0:
+            confidence = "medium"
         else:
-            base = {"D1": "high", "D9": "high", "D10": "high", "D4": "high", "D5": "high"}
+            confidence = "low"
+
+        if precision == "approximate":
+            confidence = VedicCalculator._cap_confidence(confidence, "medium")
+        elif precision == "part_of_day":
+            confidence = VedicCalculator._cap_confidence(confidence, "low")
+        return confidence
+
+    @staticmethod
+    def _cap_confidence(confidence: str, cap: str) -> str:
+        if CONFIDENCE_RANK[confidence] <= CONFIDENCE_RANK[cap]:
+            return confidence
+        return cap
+
+    @staticmethod
+    def _recommended_divisional_use(confidence: str, usage_tier: str) -> str:
+        if confidence == "low":
+            return "rectification_only_or_omit"
+        if usage_tier == "final_confirmation_only":
+            return "final_confirmation_only"
+        if usage_tier == "advanced_validation":
+            return "corroboration_only"
+        if confidence == "medium":
+            return "supporting_only_with_cross_check"
+        return "primary_or_strong_support"
+
+    @staticmethod
+    def _divisional_sensitivity(
+        divisional_confidence: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "division": item.get("division"),
+                "field": item.get("field"),
+                "factor": item.get("factor"),
+                "name": item.get("name"),
+                "role": item.get("role"),
+                "usageTier": item.get("usageTier"),
+                "confidence": item.get("confidence"),
+                "approxLagnaIntervalMinutes": item.get("approxLagnaIntervalMinutes"),
+                "changedInScan": item.get("changedInScan"),
+                "recommendedUse": item.get("recommendedUse"),
+                "useAsPrimaryEvidence": item.get("useAsPrimaryEvidence"),
+            }
+            for item in divisional_confidence.values()
+            if isinstance(item, dict)
+        ]
+
+    @staticmethod
+    def _advanced_varga_policy(divisional_confidence: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        restricted = [
+            key
+            for key, item in divisional_confidence.items()
+            if isinstance(item, dict) and not item.get("useAsPrimaryEvidence")
+        ]
+        final_only = [
+            key
+            for key, item in divisional_confidence.items()
+            if isinstance(item, dict) and item.get("recommendedUse") == "final_confirmation_only"
+        ]
         return {
-            "D1": confidence_for("lagnaSign", base["D1"]),
-            "D9": confidence_for("d9Lagna", base["D9"]),
-            "D10": confidence_for("d10Lagna", base["D10"]),
-            "D4": confidence_for("d4Lagna", base["D4"]),
-            "D5": confidence_for("d5Lagna", base["D5"]),
+            "principle": (
+                "Use higher vargas after the birth-time window is narrowed. "
+                "Do not let advanced vargas override D1/Dasha/event evidence."
+            ),
+            "restrictedDivisions": restricted,
+            "finalConfirmationOnly": final_only,
+            "ifRestricted": (
+                "Use only for candidate discrimination or corroboration, and label the "
+                "claim as provisional."
+            ),
         }
 
     @staticmethod
@@ -950,6 +1214,7 @@ class VedicCalculator:
             "place_coordinate_system": place.coordinate_system,
             "time_precision": self._precision_label(intake.birth_time_precision),
             "time_source": intake.time_source,
+            "life_events": intake.life_events,
             "effective_precision": (
                 "±分钟级" if intake.birth_time_precision == "exact" else "按出生时间精度降级解释"
             ),

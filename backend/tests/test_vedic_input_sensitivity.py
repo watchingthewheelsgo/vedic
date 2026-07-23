@@ -9,6 +9,7 @@ import pytest
 from app.schemas import BirthInput
 from app.services.place_service import ResolvedPlace
 from app.services.chart_rectification import ChartRectificationService
+from app.services.life_event_rectification import parse_life_event_ledger
 from app.services.skill_runtime import SkillRuntime
 from app.services.vedic_calculator import VedicCalculator
 
@@ -37,11 +38,33 @@ def _birth_input(place: str = "Shanghai, Shanghai, China") -> BirthInput:
         gender="女",
         relationship="单身",
         timeSource="birth certificate",
+        lifeEvents="",
         locale="zh",
     )
 
 
 def _base_chart() -> dict[str, Any]:
+    divisional_lagnas = {
+        1: "Aries",
+        2: "Taurus",
+        3: "Gemini",
+        4: "Cancer",
+        5: "Leo",
+        7: "Virgo",
+        9: "Libra",
+        10: "Capricorn",
+        12: "Aquarius",
+        16: "Pisces",
+        20: "Aries",
+        24: "Taurus",
+        27: "Gemini",
+        30: "Cancer",
+        60: "Leo",
+    }
+    divisional_charts = {
+        f"D{factor}": {"Lagna": {"sign": sign, "sign_idx": index % 12, "degree": 0}}
+        for index, (factor, sign) in enumerate(divisional_lagnas.items())
+    }
     return {
         "lagna": {"sign": "Aries", "degree": 5.0, "nakshatra": {"name": "Ashwini"}},
         "planets": {
@@ -56,6 +79,7 @@ def _base_chart() -> dict[str, Any]:
         "d10": {"Lagna": ("Capricorn", 0)},
         "d4": {"Lagna": ("Cancer", 0)},
         "d5": {"Lagna": ("Leo", 0)},
+        "divisional_charts": divisional_charts,
     }
 
 
@@ -84,6 +108,7 @@ def test_scan_summary_marks_changed_divisional_chart_as_high_risk() -> None:
     assert "variant_changes:d9Lagna" in summary["riskFactors"]
     assert summary["divisionalConfidence"]["D9"]["confidence"] == "low"
     assert summary["divisionalConfidence"]["D1"]["confidence"] == "medium"
+    assert summary["divisionalConfidence"]["D60"]["recommendedUse"] == "rectification_only_or_omit"
     assert summary["rectificationAxes"] == ["time", "place"]
     assert summary["placeRectificationAllowed"] is True
 
@@ -112,8 +137,82 @@ def test_scan_summary_keeps_precise_stable_coordinate_low_risk() -> None:
     assert summary["riskLevel"] == "low"
     assert summary["riskFactors"] == []
     assert summary["divisionalConfidence"]["D10"]["confidence"] == "high"
+    assert summary["divisionalConfidence"]["D60"]["recommendedUse"] == "final_confirmation_only"
+    assert summary["advancedVargaPolicy"]["finalConfirmationOnly"] == ["D60"]
     assert summary["rectificationAxes"] == ["time"]
     assert summary["placeRectificationAllowed"] is False
+
+
+def test_chart_signature_tracks_all_standard_divisional_lagnas() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    signature = calculator._chart_signature(_base_chart())
+
+    for factor in [2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]:
+        assert signature[f"d{factor}Lagna"]
+    assert signature["d7Lagna"] == "Virgo"
+    assert signature["d60Lagna"] == "Leo"
+
+
+def test_candidate_groups_use_rectification_vargas_but_not_d60_noise() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    base_signature = calculator._chart_signature(_base_chart())
+
+    d7_variant = {**base_signature, "d7Lagna": "Sagittarius"}
+    d60_variant = {**base_signature, "d60Lagna": "Scorpio"}
+
+    d7_groups = calculator._candidate_groups(
+        base_signature,
+        [
+            {"label": "base", "datetime": "1990-01-01 08:30", "signature": base_signature},
+            {"label": "+1m", "datetime": "1990-01-01 08:31", "signature": d7_variant},
+        ],
+        [],
+    )
+    d60_groups = calculator._candidate_groups(
+        base_signature,
+        [
+            {"label": "base", "datetime": "1990-01-01 08:30", "signature": base_signature},
+            {"label": "+1m", "datetime": "1990-01-01 08:31", "signature": d60_variant},
+        ],
+        [],
+    )
+
+    assert len(d7_groups) == 2
+    assert d7_groups[1]["changedFromBase"] == ["d7Lagna"]
+    assert len(d60_groups) == 1
+
+
+def test_report_readiness_restricts_advanced_vargas_without_blocking_d1() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    place = ResolvedPlace(
+        label="manual",
+        lat=31.2304,
+        lon=121.4737,
+        timezone="Asia/Shanghai",
+        source="manual",
+        accuracy="coordinate",
+        radius_km=0.25,
+        confidence="high",
+    )
+    summary = calculator._scan_summary(
+        "exact",
+        place,
+        time_variants=[{"changed": []}],
+        place_variants=[],
+        boundary_flags=[],
+    )
+    stability = calculator._stability_map(
+        set(summary["changedFields"]),
+        summary["divisionalConfidence"],
+    )
+    readiness = calculator._report_readiness(summary, stability, [], "exact", place)
+
+    restricted = set(readiness["llmContract"]["mustNotUseAsPrimaryEvidence"])
+    allowed = set(readiness["llmContract"]["mayUseAsPrimaryEvidence"])
+    assert readiness["mode"] == "standard_after_prevalidation"
+    assert "lagnaSign" in allowed
+    assert "d60Lagna" in restricted
+    assert "D60" not in allowed
 
 
 def test_birth_input_context_locks_precise_place_rectification() -> None:
@@ -512,6 +611,141 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
     assert ready["status"] == "corrected_chart_ready"
     assert decision["reportAllowed"] is True
     assert decision["nextStep"] == "report_allowed_after_rectification"
+
+
+def test_initial_rectification_state_includes_backend_next_round_plan() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {
+            "time": {"window": {"start": "1990-01-01 08:15", "end": "1990-01-01 08:45"}},
+            "place": {"accuracy": "city", "radiusKm": 25},
+            "constraints": {
+                "placeRectificationAllowed": True,
+                "rectificationAxes": ["time", "place"],
+            },
+        },
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {
+                    "candidateId": "A",
+                    "isBase": True,
+                    "changedFromBase": [],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:30"}],
+                },
+                {
+                    "candidateId": "B",
+                    "isBase": False,
+                    "changedFromBase": ["d9Lagna"],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:45"}],
+                },
+            ],
+        },
+    )
+
+    plan = state["rectificationPlan"]
+
+    assert plan["schemaVersion"] == "chart-rectification-plan/v1"
+    assert plan["action"] == "first_rectification_round"
+    assert plan["targetCandidateIds"] == ["A", "B"]
+    assert plan["discriminatingFields"] == ["d9Lagna"]
+    assert plan["focusAxes"] == ["time", "place"]
+    assert plan["timeWindow"]["start"] == "1990-01-01 08:25"
+    assert plan["timeWindow"]["end"] == "1990-01-01 08:45"
+    assert plan["requiredAnchorCount"] == 3
+
+
+def test_rectification_accumulates_scores_and_narrows_next_round_window() -> None:
+    service = ChartRectificationService()
+    state = service.initial_state(
+        {
+            "time": {"window": {"start": "1990-01-01 08:15", "end": "1990-01-01 08:45"}},
+            "place": {"accuracy": "city", "radiusKm": 25},
+        },
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna", "d10Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {
+                    "candidateId": "A",
+                    "isBase": True,
+                    "changedFromBase": [],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:30"}],
+                },
+                {
+                    "candidateId": "B",
+                    "isBase": False,
+                    "changedFromBase": ["d9Lagna"],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:40"}],
+                },
+                {
+                    "candidateId": "C",
+                    "isBase": False,
+                    "changedFromBase": ["d10Lagna"],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:45"}],
+                },
+            ],
+        },
+    )
+
+    round_one = service.update_from_feedback(
+        state,
+        """
+**1.** Base candidate anchor.
+
+> Derivation: test
+> Candidate: A
+> Field: d9Lagna
+
+**2.** Candidate B anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 不准 (inaccurate)
+
+#### Anchor 2
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 0.5}},
+    )
+
+    assert round_one["status"] == "needs_more_feedback"
+    assert round_one["rectificationRound"] == 1
+    assert round_one["candidateBoundAnchorCount"] == 2
+    assert round_one["rectificationPlan"]["action"] == "next_rectification_round"
+    assert round_one["rectificationPlan"]["targetCandidateIds"] == ["B", "C"]
+    assert round_one["rectificationPlan"]["timeWindow"]["start"] == "1990-01-01 08:35"
+    assert round_one["rectificationPlan"]["timeWindow"]["end"] == "1990-01-01 08:45"
+
+    round_two = service.update_from_feedback(
+        round_one,
+        """
+**1.** Narrow B timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+        """
+#### Anchor 1
+- User answer: 准 (accurate)
+""",
+        {"score": {"hitRate": 1.0}},
+    )
+
+    scores = {candidate["candidateId"]: candidate["score"] for candidate in round_two["candidates"]}
+
+    assert scores["B"] == 2.0
+    assert round_two["candidateBoundAnchorCount"] == 3
+    assert round_two["feedbackAnchorCount"] == 3
+    assert round_two["status"] == "needs_recalculation"
+    assert round_two["selectedCandidateId"] == "B"
+    assert round_two["rectificationPlan"]["action"] == "apply_candidate_recalculation"
 
 
 def test_rectification_state_marks_precise_place_as_time_only() -> None:
@@ -914,6 +1148,18 @@ def test_core_batch_prompts_enforce_input_confidence_contract() -> None:
     assert "primary conclusion anchor" in audit_prompt
 
 
+def test_reader_prompt_uses_backend_rectification_plan() -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+
+    prompt = runtime._reader_prompt("继续验前事", "zh")
+
+    assert "chart_rectification_state.rectificationPlan" in prompt
+    assert "targetCandidateIds" in prompt
+    assert "discriminatingFields" in prompt
+    assert "timeWindow" in prompt
+    assert "Do not invent candidate IDs" in prompt
+
+
 def test_reader_artifact_validation_rejects_unexpected_artifacts() -> None:
     runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
     runtime.workspace = SimpleNamespace(read_artifacts=lambda _session_id: [])
@@ -971,3 +1217,150 @@ def test_reader_artifact_validation_rejects_missing_candidate_field_lines() -> N
                 ]
             },
         )
+
+
+def test_life_event_ledger_parses_dated_major_events() -> None:
+    ledger = parse_life_event_ledger(
+        "2018年10月 结婚\n2021年 搬到上海\n2023 major job change\n2025年 生子"
+    )
+
+    events = ledger["events"]
+
+    assert ledger["eventCollectionRequired"] is False
+    assert [event["category"] for event in events] == [
+        "marriage",
+        "relocation",
+        "career",
+        "child",
+    ]
+    assert events[0]["date"] == "2018-10"
+    assert events[0]["rectificationRules"]["vargas"] == ["D9"]
+    assert events[2]["rectificationRules"]["fields"] == ["d10Lagna", "currentDasha"]
+    assert events[3]["rectificationRules"]["fields"][0] == "d7Lagna"
+
+
+def test_birth_input_context_includes_life_event_ledger() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    place = ResolvedPlace(
+        label="Shanghai, Shanghai, China",
+        lat=31.2304,
+        lon=121.4737,
+        timezone="Asia/Shanghai",
+        source="geonames-local",
+        accuracy="city",
+        radius_km=25.0,
+        confidence="medium",
+    )
+    intake = BirthInput(
+        birthDate="1990-01-01",
+        birthTime="08:30",
+        birthPlace="Shanghai, Shanghai, China",
+        birthTimePrecision="approximate",
+        gender="女",
+        relationship="已婚",
+        timeSource="family memory",
+        lifeEvents="2018-10 结婚\n2023 跳槽",
+        locale="zh",
+    )
+    payload = {**_birth_payload(), "life_events": intake.life_events}
+
+    context = calculator._birth_input_context(payload, intake, place)
+
+    assert context["lifeEvents"]["schemaVersion"] == "life-event-ledger/v1"
+    assert context["lifeEvents"]["events"][0]["category"] == "marriage"
+    assert context["lifeEvents"]["events"][1]["category"] == "career"
+
+
+def test_rectification_plan_uses_life_event_focus() -> None:
+    service = ChartRectificationService()
+    ledger = parse_life_event_ledger("2018年10月 结婚\n2023年 跳槽")
+    state = service.initial_state(
+        {
+            "time": {"window": {"start": "1990-01-01 08:15", "end": "1990-01-01 08:45"}},
+            "place": {"radiusKm": 25, "accuracy": "city"},
+            "lifeEvents": ledger,
+        },
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna", "d10Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {
+                    "candidateId": "A",
+                    "isBase": True,
+                    "changedFromBase": [],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:30"}],
+                },
+                {
+                    "candidateId": "B",
+                    "isBase": False,
+                    "changedFromBase": ["d9Lagna"],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:45"}],
+                },
+                {
+                    "candidateId": "C",
+                    "isBase": False,
+                    "changedFromBase": ["d10Lagna"],
+                    "members": [{"axis": "time", "datetime": "1990-01-01 08:15"}],
+                },
+            ],
+        },
+    )
+
+    plan = state["rectificationPlan"]
+
+    assert state["lifeEventLedger"]["events"][0]["category"] == "marriage"
+    assert plan["eventCollectionRequired"] is False
+    assert [focus["category"] for focus in plan["lifeEventFocus"]] == ["marriage", "career"]
+    assert plan["lifeEventFocus"][0]["fieldOverlap"] == ["d9Lagna"]
+
+
+def test_reader_contract_requires_event_line_when_life_event_focus_exists() -> None:
+    service = ChartRectificationService()
+    ledger = parse_life_event_ledger("2018年10月 结婚\n2023年 跳槽")
+    state = service.initial_state(
+        {
+            "time": {"window": {}},
+            "place": {"radiusKm": 25, "accuracy": "city"},
+            "lifeEvents": ledger,
+        },
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [
+                {"candidateId": "A", "isBase": True, "members": []},
+                {
+                    "candidateId": "B",
+                    "isBase": False,
+                    "changedFromBase": ["d9Lagna"],
+                    "members": [],
+                },
+            ],
+        },
+    )
+
+    errors = service.validate_prevalidation_contract(
+        state,
+        """
+**1.** Candidate B marriage timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+""",
+    )
+
+    event_id = ledger["events"][0]["eventId"]
+    valid_errors = service.validate_prevalidation_contract(
+        state,
+        f"""
+**1.** Candidate B marriage timing anchor.
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+> Event: {event_id}
+""",
+    )
+
+    assert any("Event line" in error for error in errors)
+    assert valid_errors == []
