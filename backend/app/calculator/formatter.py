@@ -64,9 +64,32 @@ def format_structured_data(
     lines.append(f"有效精度: {meta.get('effective_precision', '±分钟级')}")
     lines.append(f"验证轨道: 轨道1-标准")
     lines.append(f"读盘方式: vedic-calculator直接计算")
-    lines.append(f"Ayanamsa: True Chitrapaksha（Lahiri系,差<1′） ({chart['ayanamsa']:.4f}°)")
+    lines.append(f"Ayanamsa: Lahiri ({chart['ayanamsa']:.4f}°)")
     lines.append(f"Node模式: Mean Node")
     lines.append("```\n")
+
+    ayanamsa_check = chart.get("ayanamsa_cross_check") or {}
+    if ayanamsa_check:
+        agrees = ayanamsa_check.get("lagnaSignAgrees", True)
+        marker = "✅ 一致" if agrees else "⚠️ 不一致"
+        lines.append("### Ayanamsa交叉校验")
+        lines.append("```")
+        lines.append(
+            f"主口径: {ayanamsa_check.get('primary')} ({ayanamsa_check.get('primaryAyanamsa')}°)"
+        )
+        lines.append(
+            f"参考口径: {ayanamsa_check.get('alternate')} "
+            f"({ayanamsa_check.get('alternateAyanamsa')}°)"
+        )
+        lines.append(f"两口径差异: {ayanamsa_check.get('diffArcminutes')}角分")
+        lines.append(f"Lagna星座判定: {marker}")
+        if not agrees:
+            lines.append(
+                f"⚠️ 本命盘Lagna对Ayanamsa选择敏感：Lahiri口径给出当前星座，"
+                f"True Chitrapaksha口径会给出{ayanamsa_check.get('alternateLagnaSign')}。"
+                f"下游解读须标注此边界风险，不可只用单一口径下定论。"
+            )
+        lines.append("```\n")
 
     if input_context or sensitivity_scan:
         lines.extend(_format_input_confidence(input_context or {}, sensitivity_scan or {}))
@@ -322,6 +345,8 @@ def format_structured_data(
         lines.append(f"| {h} | {info['domain']} | {info['lord']} | {info.get('lord_house', '?')} |")
     lines.append("")
 
+    lines.extend(_format_multi_varga_strength(chart))
+
     # === 分盘 ===
     lines.append("## 分盘数据\n")
     lines.append("### 分盘可信度声明")
@@ -482,6 +507,85 @@ def format_structured_data(
         lines.append("```")
 
     return "\n".join(lines)
+
+
+def _format_multi_varga_strength(chart):
+    """Vimshopaka-Bala风格的多分盘综合力量：BPHS方法把多张分盘的力量加权
+    合成为单一分数，比单看某一张分盘更能回答"这颗行星整体强不强"。
+    数据由calculator引擎计算，此前只存在于chart dict中，未写入structured_data.md。
+    """
+    lines = ["## 多分盘综合力量（Vargeeya Bala）\n"]
+    lines.append(
+        "> 用途：把D1及多张分盘的力量加权合成为单一分数，"
+        "比单看某一张分盘更能判断行星的整体强弱。数据来源：calculator引擎(PyJHora)。"
+    )
+    lines.append(
+        "> 与Shadbala的区别：Shadbala衡量D1单盘六种力量；本表衡量该行星在"
+        "多张分盘中重复出现『旺/入庙/友方』等好位置的比例，二者互为交叉验证，不可互相替代。\n"
+    )
+
+    vargeeya = chart.get("vargeeya_bala") or {}
+    pancha = vargeeya.get("pancha_vargeeya") or {}
+    dwadhasa = vargeeya.get("dwadhasa_vargeeya") or {}
+    if pancha or dwadhasa:
+        lines.append("### Vargeeya Bala（五分盘/十二分盘综合力量）")
+        lines.append("| 行星 | Pancha Vargeeya(5分盘) | Dwadhasa Vargeeya(12分盘) |")
+        lines.append("|------|------------------------|----------------------------|")
+        for planet in ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]:
+            p_val = pancha.get(planet)
+            d_val = dwadhasa.get(planet)
+            p_text = "错误" if isinstance(p_val, dict) else (p_val if p_val is not None else "—")
+            d_text = "错误" if isinstance(d_val, dict) else (d_val if d_val is not None else "—")
+            lines.append(f"| {planet} | {p_text} | {d_text} |")
+        lines.append("")
+        lines.append(
+            "> 数值越高=该行星在越多分盘中处于有利位置，整体运作能力越强；"
+            "解读时与Shadbala排序、尊贵度交叉验证，不单独作为定论依据。\n"
+        )
+
+    bhava_bala = chart.get("bhava_bala") or {}
+    if bhava_bala and "error" not in bhava_bala:
+        lines.append("### Bhava Bala（宫位力量）")
+        lines.append("| 宫位 | 力量值(Shashtiamsha) |")
+        lines.append("|------|----------------------|")
+        for house in range(1, 13):
+            entry = bhava_bala.get(house) or {}
+            total = entry.get("total", "—") if isinstance(entry, dict) else "—"
+            lines.append(f"| {house} | {total} |")
+        lines.append("")
+        lines.append(
+            "> 用途：与该宫SAV（资源带宽）交叉验证——SAV高但Bhava Bala低，"
+            "说明表面资源多但落地执行力不足，反之亦然。\n"
+        )
+
+    special_lagnas = chart.get("special_lagnas") or {}
+    valid_lagnas = {
+        name: value
+        for name, value in special_lagnas.items()
+        if isinstance(value, dict) and "error" not in value
+    }
+    if valid_lagnas:
+        lines.append("### 特殊Lagna点位（Hora/Ghati/Sree等）")
+        lines.append("| 点位 | 星座 | 度数 |")
+        lines.append("|------|------|------|")
+        label_map = {
+            "hora_lagna": "Hora Lagna（财富）",
+            "ghati_lagna": "Ghati Lagna（GL，权威）",
+            "sree_lagna": "Sree Lagna（SL，吉祥）",
+            "bhava_lagna": "Bhava Lagna",
+            "pranapada_lagna": "Pranapada Lagna（PP，生命气息）",
+            "indu_lagna": "Indu Lagna（财富蓄积）",
+            "vighati_lagna": "Vighati Lagna",
+        }
+        for key, label in label_map.items():
+            entry = valid_lagnas.get(key)
+            if not entry:
+                continue
+            lines.append(f"| {label} | {entry.get('sign', '—')} | {entry.get('degree', '—')}° |")
+        lines.append("")
+        lines.append("> 记录备用，暂无下游skill强制引用；用于财富/权威等专题分析的补充证据。\n")
+
+    return lines
 
 
 def _format_input_confidence(input_context, sensitivity_scan):

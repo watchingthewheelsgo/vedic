@@ -22,7 +22,7 @@ SIGNS = [
 
 def calc_transit(lagna_sign_idx, moon_sign_idx, tz_str="Asia/Kolkata"):
     """计算当前过运数据"""
-    swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
     flags = swe.FLG_SIDEREAL | swe.FLG_SPEED
 
     now = datetime.now(pytz.timezone(tz_str))

@@ -67,8 +67,8 @@ def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset
     from jhora.panchanga.drik import Place
     from jhora.horoscope.chart import strength, charts, house
 
-    drik.set_ayanamsa_mode("TRUE_CITRA")
-    const._DEFAULT_AYANAMSA_MODE = "TRUE_CITRA"
+    drik.set_ayanamsa_mode("LAHIRI")
+    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
     const._use_true_nodes_for_rahu_ketu = False
 
     local_hour = hour + minute / 60.0

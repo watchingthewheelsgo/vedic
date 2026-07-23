@@ -83,8 +83,11 @@ if _missing:
     )
 
 # === 配置 ===
+# Lahiri是印度官方历书及绝大多数吠陀占星软件的默认Ayanamsa，作为主计算口径
+# 保证跨软件Lagna/行星星座结论一致；True Chitrapaksha作为交叉校验口径保留，
+# 差异通常<2角分，但边界盘主可能因此跨越星座边界，见 ayanamsa_cross_check()。
 swe.set_ephe_path(os.path.join(os.path.dirname(__file__), "ephe"))
-swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+swe.set_sid_mode(swe.SIDM_LAHIRI)
 
 SIGNS = [
     "Aries",
@@ -230,6 +233,38 @@ def calc_lagna(jd, lat, lon):
         "sign_idx": sign_idx,
         "degree": degree,
         "deg_str": f"{deg_int}°{min_int:02d}'",
+    }
+
+
+def ayanamsa_cross_check(jd, lagna_longitude):
+    """Compare the primary Lahiri Lagna against the True Chitrapaksha alternative.
+
+    Both are legitimate, widely-used sidereal ayanamsas; they typically differ
+    by well under 2 arcminutes. That is usually negligible, but for a Lagna
+    sitting near a sign boundary it can be the difference between two
+    adjacent signs. This does not change any calculation output — it only
+    flags when the two mainstream ayanamsas would disagree on the Lagna sign,
+    so the report can surface that as an explicit caveat instead of silently
+    picking one.
+    """
+    lahiri_ayanamsa = swe.get_ayanamsa_ut(jd)
+    swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+    true_citra_ayanamsa = swe.get_ayanamsa_ut(jd)
+    swe.set_sid_mode(swe.SIDM_LAHIRI)  # restore primary mode for the rest of the engine
+
+    diff = lahiri_ayanamsa - true_citra_ayanamsa
+    alt_longitude = (lagna_longitude + diff) % 360
+    lahiri_sign_idx = int(lagna_longitude / 30)
+    alt_sign_idx = int(alt_longitude / 30)
+
+    return {
+        "primary": "Lahiri",
+        "alternate": "True Chitrapaksha",
+        "primaryAyanamsa": round(lahiri_ayanamsa, 6),
+        "alternateAyanamsa": round(true_citra_ayanamsa, 6),
+        "diffArcminutes": round(diff * 60, 3),
+        "alternateLagnaSign": SIGNS[alt_sign_idx],
+        "lagnaSignAgrees": alt_sign_idx == lahiri_sign_idx,
     }
 
 
@@ -561,7 +596,7 @@ def calc_transits(lagna_sign_idx, moon_sign_idx):
     """
     now = datetime.now()
     jd_now = swe.julday(now.year, now.month, now.day, now.hour + now.minute / 60)
-    swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
     flags = swe.FLG_SIDEREAL | swe.FLG_SPEED
 
     transits = {}
@@ -626,6 +661,9 @@ def calc_transits(lagna_sign_idx, moon_sign_idx):
 
 def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/Kolkata"):
     """计算完整星盘数据"""
+    # 显式重置sid_mode，不依赖进程内上一次调用留下的全局状态
+    # （PyJHora子模块/calc_transits会临时切换sid_mode，必须在每次入口处自愈）
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
     jd = to_jd(year, month, day, hour, minute, tz_str)
     ayanamsa = swe.get_ayanamsa_ut(jd)
 
@@ -633,6 +671,7 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
     lagna = calc_lagna(jd, lat, lon)
     lagna["nakshatra"] = get_nakshatra(lagna["longitude"])
     lagna["house"] = 1
+    ayanamsa_check = ayanamsa_cross_check(jd, lagna["longitude"])
 
     # 2. Planets (7 main)
     planets = {}
@@ -896,31 +935,41 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
     transits = calc_transits(lagna["sign_idx"], planets["Moon"]["sign_idx"])
 
     # 17. Bhava Bala, Special Lagnas, Vargeeya Bala (via PyJHora)
+    # 三项独立try/except：一项失败不应连带阻断另外两项；失败必须可见(stderr)，
+    # 不能像之前那样静默吞掉——否则structured_data.md里"多分盘综合力量"板块
+    # 会无声无息地整段消失，运维和排查都发现不了。
     bhava_bala = None
     special_lagnas = None
     vargeeya_bala = None
     if any([_bhava_bala_pyjhora, _special_lagnas_pyjhora, _vargeeya_bala_pyjhora]):
-        try:
-            tz = pytz.timezone(tz_str)
-            _tz_dt = tz.localize(datetime(year, month, day, hour, minute))
-            _tz_offset = _tz_dt.utcoffset().total_seconds() / 3600.0
-            if _bhava_bala_pyjhora:
+        tz = pytz.timezone(tz_str)
+        _tz_dt = tz.localize(datetime(year, month, day, hour, minute))
+        _tz_offset = _tz_dt.utcoffset().total_seconds() / 3600.0
+        if _bhava_bala_pyjhora:
+            try:
                 bhava_bala = _bhava_bala_pyjhora(
                     year, month, day, hour, minute, lat, lon, _tz_offset
                 )
-            if _special_lagnas_pyjhora:
+            except Exception as exc:
+                print(f"⚠️ Bhava Bala计算失败，跳过: {exc}", file=sys.stderr)
+        if _special_lagnas_pyjhora:
+            try:
                 special_lagnas = _special_lagnas_pyjhora(
                     year, month, day, hour, minute, lat, lon, _tz_offset
                 )
-            if _vargeeya_bala_pyjhora:
+            except Exception as exc:
+                print(f"⚠️ Special Lagnas计算失败，跳过: {exc}", file=sys.stderr)
+        if _vargeeya_bala_pyjhora:
+            try:
                 vargeeya_bala = _vargeeya_bala_pyjhora(
                     year, month, day, hour, minute, lat, lon, _tz_offset
                 )
-        except Exception:
-            pass
+            except Exception as exc:
+                print(f"⚠️ Vargeeya Bala计算失败，跳过: {exc}", file=sys.stderr)
 
     return {
         "ayanamsa": ayanamsa,
+        "ayanamsa_cross_check": ayanamsa_check,
         "lagna": lagna,
         "planets": planets,
         "sav": ashtak["sarvashtakavarga"],

@@ -216,6 +216,24 @@ chart = {
     'special_points': {'AL': {'sign':'Virgo','house':3}, 'UL': {'sign':'Pisces','house':9}},
     'combustion': {},
     'moon_phase': {'waxing': True, 'sun_moon_diff': 88.6},
+
+    # Ayanamsa交叉校验 — Lahiri(主口径) vs True Chitrapaksha(参考口径)
+    'ayanamsa_cross_check': {
+        'primary': 'Lahiri', 'alternate': 'True Chitrapaksha',
+        'primaryAyanamsa': 23.86, 'alternateAyanamsa': 23.85,
+        'diffArcminutes': 0.6, 'alternateLagnaSign': 'Virgo', 'lagnaSignAgrees': True,
+    },
+    # 多分盘综合力量 — 可能为None(计算失败时优雅降级，此时structured_data.md不展示该板块)
+    'vargeeya_bala': {
+        'pancha_vargeeya': {'Sun': 10.81, 'Moon': 9.41, ...},   # 5分盘综合
+        'dwadhasa_vargeeya': {'Sun': 4, 'Moon': 8, ...},         # 12分盘综合
+    },
+    'bhava_bala': {1: {'total': 553.09}, 2: {'total': 674.21}, ...},  # 12宫执行力
+    'special_lagnas': {
+        'hora_lagna': {'sign': 'Pisces', 'degree': 1.59},
+        'ghati_lagna': {...}, 'sree_lagna': {...}, 'bhava_lagna': {...},
+        'pranapada_lagna': {...}, 'indu_lagna': {...}, 'vighati_lagna': {...},
+    },
 }
 ```
 
@@ -244,7 +262,10 @@ chart = {
 
 ## 技术规格
 
-- Ayanamsa: **True Chitrapaksha (TRUE_CITRA)**（固定，不可更改；属Lahiri系，差<1′）
+- Ayanamsa: **Lahiri**（主口径，行业事实标准，与多数吠陀软件/官方历书一致）
+  同时计算 **True Chitrapaksha** 作为交叉校验口径（差通常<2角分）；
+  若两口径导致Lagna跨星座（罕见但存在），structured_data.md会显式标注
+  `Ayanamsa交叉校验`边界警告，下游解读禁止只用单一口径下定论。
 - Node模式: **Mean Node**
 - 天文核心: pysweph (Swiss Ephemeris C binding)
 - SAV/BAV: **PyJHora 原生**

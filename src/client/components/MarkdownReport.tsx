@@ -1,4 +1,6 @@
 import { ReactNode, useMemo } from "react";
+import { TermTooltip } from "./TermTooltip";
+import { TERMINOLOGY_INDEX, TERMINOLOGY_PATTERN } from "../lib/terminology";
 
 type MarkdownBlock =
   | { type: "heading"; level: number; text: string }
@@ -166,6 +168,36 @@ function renderInline(text: string): ReactNode[] {
     }
     if (part.startsWith("**") && part.endsWith("**"))
       return <strong key={index}>{part.slice(2, -2)}</strong>;
-    return <span key={index}>{part}</span>;
+    return <span key={index}>{renderTerms(part, `t${index}`)}</span>;
   });
+}
+
+/** Wraps known Jyotish terms inside a plain-text run with a wiki-card popover. */
+function renderTerms(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let matchCount = 0;
+  for (const match of text.matchAll(TERMINOLOGY_PATTERN)) {
+    const matched = match[0];
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+    const term = TERMINOLOGY_INDEX.get(matched);
+    if (term) {
+      nodes.push(
+        <TermTooltip key={`${keyPrefix}-${matchCount}`} term={term}>
+          {matched}
+        </TermTooltip>
+      );
+    } else {
+      nodes.push(matched);
+    }
+    lastIndex = start + matched.length;
+    matchCount += 1;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes.length > 0 ? nodes : [text];
 }

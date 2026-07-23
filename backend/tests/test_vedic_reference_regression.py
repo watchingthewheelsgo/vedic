@@ -32,9 +32,7 @@ PLANET_ID_TO_NAME = {
 
 def _reference_cases() -> list[dict[str, Any]]:
     payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-    assert (
-        payload["calculationProfile"] == "TRUE_CITRA mean nodes whole-sign PyJHora chart_method=1"
-    )
+    assert payload["calculationProfile"] == "LAHIRI mean nodes whole-sign PyJHora chart_method=1"
     return list(payload["cases"])
 
 
@@ -42,7 +40,7 @@ def _reference_cases() -> list[dict[str, Any]]:
 def test_vedic_engine_matches_swiss_ephemeris_core_positions(case: dict[str, Any]) -> None:
     chart = _calculate_case(case)
     jd = _utc_julian_day(case)
-    swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
 
     assert chart["ayanamsa"] == pytest.approx(swe.get_ayanamsa_ut(jd), abs=1e-7)
 
@@ -198,7 +196,12 @@ def _pyjhora_reference(case: dict[str, Any]) -> dict[str, Any]:
 
     from jhora.horoscope.chart import ashtakavarga, charts
     from jhora.horoscope.dhasa.graha import vimsottari
+    from jhora.panchanga import drik
     from jhora.panchanga.drik import Place
+
+    # Explicit, not inherited from whatever a prior test call left in the
+    # shared PyJHora/swisseph global ayanamsa state.
+    drik.set_ayanamsa_mode("LAHIRI")
 
     local_hour = int(case["hour"]) + int(case["minute"]) / 60.0
     jd_local = swe.julday(int(case["year"]), int(case["month"]), int(case["day"]), local_hour)

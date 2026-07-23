@@ -65,8 +65,8 @@ def calculate_divisional_charts(
     from jhora.panchanga.drik import Place
     from jhora.horoscope.chart import charts
 
-    drik.set_ayanamsa_mode("TRUE_CITRA")
-    const._DEFAULT_AYANAMSA_MODE = "TRUE_CITRA"
+    drik.set_ayanamsa_mode("LAHIRI")
+    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
     const._use_true_nodes_for_rahu_ketu = False
 
     # Fix: drik.dhasavarga() defaults set_rahu_ketu_as_true_nodes=True,

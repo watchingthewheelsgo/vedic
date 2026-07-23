@@ -55,8 +55,8 @@ def _setup():
     from jhora import const
     from jhora.panchanga import drik
 
-    drik.set_ayanamsa_mode("TRUE_CITRA")
-    const._DEFAULT_AYANAMSA_MODE = "TRUE_CITRA"
+    drik.set_ayanamsa_mode("LAHIRI")
+    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
     const._use_true_nodes_for_rahu_ketu = False
 
     return swe, const, drik

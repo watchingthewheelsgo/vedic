@@ -161,7 +161,7 @@ class VedicCalculator:
             snapshot_id=make_id("calc"),
             engine="real_vedic",
             calculation_version="vedic-calculator-pyjhora-0.5",
-            ayanamsa="True Chitrapaksha",
+            ayanamsa="Lahiri",
             house_system="whole-sign",
             ephemeris_version="Swiss Ephemeris via pysweph + PyJHora",
             timezone_source=place.timezone,
@@ -847,6 +847,17 @@ class VedicCalculator:
                     "factor": "moonNakshatra",
                     "distanceDegrees": round(nak_distance, 4),
                     "risk": "medium",
+                }
+            )
+        ayanamsa_check = chart.get("ayanamsa_cross_check") or {}
+        if ayanamsa_check and not ayanamsa_check.get("lagnaSignAgrees", True):
+            flags.append(
+                {
+                    "factor": "ayanamsaLagnaSign",
+                    "distanceDegrees": round(
+                        abs(float(ayanamsa_check.get("diffArcminutes", 0))) / 60, 4
+                    ),
+                    "risk": "high",
                 }
             )
         return flags

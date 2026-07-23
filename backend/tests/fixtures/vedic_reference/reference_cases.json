@@ -1,6 +1,6 @@
 {
   "schemaVersion": "vedic-reference-cases/v1",
-  "calculationProfile": "TRUE_CITRA mean nodes whole-sign PyJHora chart_method=1",
+  "calculationProfile": "LAHIRI mean nodes whole-sign PyJHora chart_method=1",
   "sourceNotes": [
     "Inputs are adapted from PyJHora's bundled jhora.tests.book_chart_data samples.",
     "expectedSnapshot is a product-level drift fixture for the current backend profile.",
@@ -21,20 +21,20 @@
       "tz_offset": -4.0,
       "source": "PyJHora book_chart_data.chart_1",
       "expectedSnapshot": {
-        "ayanamsa": 23.850831,
+        "ayanamsa": 23.860894,
         "lagna": {
           "sign": "Virgo",
-          "degree": 10.8278
+          "degree": 10.8177
         },
         "moon": {
           "sign": "Gemini",
-          "degree": 4.7604,
+          "degree": 4.7503,
           "nakshatra": "Mrigashira",
           "pada": 4
         },
         "rahu": {
           "sign": "Cancer",
-          "degree": 5.9294
+          "degree": 5.9193
         },
         "d9Lagna": "Aries",
         "d10Lagna": "Leo",
@@ -95,20 +95,20 @@
       "tz_offset": 5.5,
       "source": "PyJHora book_chart_data.chart_3",
       "expectedSnapshot": {
-        "ayanamsa": 22.820383,
+        "ayanamsa": 22.83725,
         "lagna": {
           "sign": "Scorpio",
-          "degree": 14.2247
+          "degree": 14.2078
         },
         "moon": {
           "sign": "Leo",
-          "degree": 15.4952,
+          "degree": 15.4783,
           "nakshatra": "Purva Phalguni",
           "pada": 1
         },
         "rahu": {
           "sign": "Gemini",
-          "degree": 14.5293
+          "degree": 14.5125
         },
         "d9Lagna": "Scorpio",
         "d10Lagna": "Scorpio",
@@ -130,18 +130,18 @@
         "firstThreeMahadashas": [
           {
             "planet": "Venus",
-            "start": "1923-09",
-            "end": "1943-09"
+            "start": "1923-10",
+            "end": "1943-10"
           },
           {
             "planet": "Sun",
-            "start": "1943-09",
-            "end": "1949-09"
+            "start": "1943-10",
+            "end": "1949-10"
           },
           {
             "planet": "Moon",
-            "start": "1949-09",
-            "end": "1959-09"
+            "start": "1949-10",
+            "end": "1959-10"
           }
         ],
         "shadbalaRupas": {
@@ -169,20 +169,20 @@
       "tz_offset": -6.0,
       "source": "PyJHora book_chart_data.chart_7",
       "expectedSnapshot": {
-        "ayanamsa": 22.603094,
+        "ayanamsa": 22.615485,
         "lagna": {
           "sign": "Scorpio",
-          "degree": 7.1577
+          "degree": 7.1453
         },
         "moon": {
           "sign": "Aries",
-          "degree": 19.8349,
+          "degree": 19.8225,
           "nakshatra": "Bharani",
           "pada": 2
         },
         "rahu": {
           "sign": "Aries",
-          "degree": 21.9135
+          "degree": 21.9011
         },
         "d9Lagna": "Virgo",
         "d10Lagna": "Virgo",

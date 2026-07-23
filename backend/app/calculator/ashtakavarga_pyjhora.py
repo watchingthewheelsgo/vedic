@@ -69,8 +69,8 @@ def calculate_ashtakavarga_fixed(year, month, day, hour, minute, lat, lon, tz_of
     from jhora.horoscope.chart import ashtakavarga, charts
 
     # 设置对齐
-    drik.set_ayanamsa_mode("TRUE_CITRA")
-    const._DEFAULT_AYANAMSA_MODE = "TRUE_CITRA"
+    drik.set_ayanamsa_mode("LAHIRI")
+    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
     const._use_true_nodes_for_rahu_ketu = False
 
     # JD = local time（和 Shadbala 一致）
