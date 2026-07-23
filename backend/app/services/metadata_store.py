@@ -453,7 +453,9 @@ class MetadataStore:
         return checkpoints
 
     def _subject_json(self, session_dir: Path) -> dict[str, Any] | None:
-        payload = self._read_json(session_dir / "structured_data.json")
+        payload = self._read_json(session_dir / "birth_chart_facts.json")
+        if payload is None:
+            payload = self._read_json(session_dir / "structured_data.json")
         subject = payload.get("subject") if isinstance(payload, dict) else None
         return subject if isinstance(subject, dict) else None
 

@@ -467,7 +467,7 @@ def format_structured_data(
     lines.append(f" 5. Ra-Ke差180°      {ra_ke_ok}")
     lines.append(f" 6. 逆行标记完整      ✅")
     lines.append(f" 6b. 燃烧检测        ✅ [{comb_str}]")
-    lines.append(f" 7. Ayanamsa一致     ✅ True Chitra")
+    lines.append(f" 7. Ayanamsa一致     ✅ Lahiri")
     lines.append(f" 7c. 盈月/亏月       {phase_str}")
     lines.append(f" 8. Nakshatra↔度数   ✅")
     lines.append(f" 9. Chara Karaka排序 ✅")

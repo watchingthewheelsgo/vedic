@@ -42,7 +42,7 @@ def test_admin_sessions_lists_database_metadata_and_local_paths(tmp_path: Path) 
             session_id = workspace.create_session()
             workspace.write_artifact(
                 session_id,
-                "structured_data.json",
+                "birth_chart_facts.json",
                 json.dumps(
                     {
                         "subject": {

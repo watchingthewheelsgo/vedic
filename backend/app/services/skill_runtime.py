@@ -19,6 +19,11 @@ from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
 from app.tools.registry import BackendToolRunner
 
+BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json"
+LEGACY_STRUCTURED_DATA_JSON = "structured_data.json"
+BIRTH_CHART_FACTS_B_JSON = "birth_chart_facts_B.json"
+LEGACY_STRUCTURED_DATA_B_JSON = "structured_data_B.json"
+
 
 class SkillRuntime:
     """Web adapter for repo-local astrology skill file workflows."""
@@ -47,8 +52,8 @@ class SkillRuntime:
         self.workspace.write_artifact(session_id, "structured_data.md", calculation.structured_data)
         self.workspace.write_artifact(
             session_id,
-            "structured_data.json",
-            calculation.structured_data_json,
+            BIRTH_CHART_FACTS_JSON,
+            calculation.birth_chart_facts_json,
         )
         self.workspace.write_artifact(
             session_id,
@@ -90,7 +95,7 @@ class SkillRuntime:
             session_id, "structured_data.md", producer="calculator"
         )
         self.workspace.mark_artifact_checkpoint(
-            session_id, "structured_data.json", producer="calculator"
+            session_id, BIRTH_CHART_FACTS_JSON, producer="calculator"
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "birth_input_context.json", producer="calculator"
@@ -262,8 +267,8 @@ class SkillRuntime:
         self.workspace.write_artifact(input_data.session_id, b_path, calculation.structured_data)
         self.workspace.write_artifact(
             input_data.session_id,
-            f"{folder}/structured_data_B.json",
-            calculation.structured_data_json,
+            f"{folder}/{BIRTH_CHART_FACTS_B_JSON}",
+            calculation.birth_chart_facts_json,
         )
 
         intake = self._synastry_intake(input_data)
@@ -669,7 +674,7 @@ class SkillRuntime:
         result = self._build_prevalidation_result(
             prevalidation,
             feedback,
-            artifacts.get("structured_data.json", ""),
+            self._birth_chart_facts_json(artifacts),
         )
         self.workspace.write_artifact(
             session_id,
@@ -710,7 +715,7 @@ class SkillRuntime:
             rectified_input = self.rectification.rectified_birth_input(
                 updated_state,
                 self._json_dict(artifacts.get("birth_input_context.json", "")),
-                self._json_dict(artifacts.get("structured_data.json", "")),
+                self._json_dict(self._birth_chart_facts_json(artifacts)),
             )
             if rectified_input is not None:
                 chart_revision = self._next_chart_revision(updated_state)
@@ -719,7 +724,7 @@ class SkillRuntime:
                 self._write_chart_calculation(
                     session_id,
                     calculation.structured_data,
-                    calculation.structured_data_json,
+                    calculation.birth_chart_facts_json,
                     calculation.birth_input_context_json,
                     calculation.sensitivity_scan_json,
                     producer="calculator:rectification",
@@ -772,7 +777,7 @@ class SkillRuntime:
         self,
         session_id: str,
         structured_data: str,
-        structured_data_json: str,
+        birth_chart_facts_json: str,
         birth_input_context_json: str,
         sensitivity_scan_json: str,
         *,
@@ -780,7 +785,7 @@ class SkillRuntime:
     ) -> None:
         chart_artifacts = {
             "structured_data.md": structured_data,
-            "structured_data.json": structured_data_json,
+            BIRTH_CHART_FACTS_JSON: birth_chart_facts_json,
             "birth_input_context.json": birth_input_context_json,
             "sensitivity_scan.json": sensitivity_scan_json,
         }
@@ -796,7 +801,8 @@ class SkillRuntime:
     ) -> None:
         for path in [
             "structured_data.md",
-            "structured_data.json",
+            BIRTH_CHART_FACTS_JSON,
+            LEGACY_STRUCTURED_DATA_JSON,
             "birth_input_context.json",
             "sensitivity_scan.json",
         ]:
@@ -827,15 +833,21 @@ class SkillRuntime:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    @staticmethod
+    def _birth_chart_facts_json(artifacts: dict[str, str]) -> str:
+        return artifacts.get(BIRTH_CHART_FACTS_JSON) or artifacts.get(
+            LEGACY_STRUCTURED_DATA_JSON, ""
+        )
+
     def _build_prevalidation_result(
         self,
         prevalidation_markdown: str,
         feedback_markdown: str,
-        structured_data_json: str,
+        birth_chart_facts_json: str,
     ) -> dict[str, object]:
         anchors = self._parse_prevalidation_anchors(prevalidation_markdown)
         answers = self._parse_prevalidation_feedback(feedback_markdown)
-        subject = self._prevalidation_subject_context(structured_data_json)
+        subject = self._prevalidation_subject_context(birth_chart_facts_json)
         scored_anchors: list[dict[str, object]] = []
         total_score = 0.0
         answered_count = 0
@@ -950,9 +962,9 @@ class SkillRuntime:
             return 0.0
         return None
 
-    def _prevalidation_subject_context(self, structured_data_json: str) -> dict[str, object]:
+    def _prevalidation_subject_context(self, birth_chart_facts_json: str) -> dict[str, object]:
         try:
-            payload = json.loads(structured_data_json) if structured_data_json.strip() else {}
+            payload = json.loads(birth_chart_facts_json) if birth_chart_facts_json.strip() else {}
         except json.JSONDecodeError:
             payload = {}
         subject = payload.get("subject") if isinstance(payload, dict) else {}
@@ -1801,7 +1813,11 @@ User message:
         for artifact in artifacts:
             path = str(getattr(artifact, "path"))
             content = str(getattr(artifact, "content"))
-            if path in {"structured_data.json"} or path.endswith("/structured_data_B.json"):
+            if (
+                path in {BIRTH_CHART_FACTS_JSON, LEGACY_STRUCTURED_DATA_JSON}
+                or path.endswith(f"/{BIRTH_CHART_FACTS_B_JSON}")
+                or path.endswith(f"/{LEGACY_STRUCTURED_DATA_B_JSON}")
+            ):
                 continue
             if skill == "vedic-synastry":
                 if path == "structured_data.md" or path.startswith("synastry_"):

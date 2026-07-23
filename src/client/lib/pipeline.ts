@@ -1,5 +1,8 @@
 import type { CoreJobResponse, SkillSessionResponse } from "../../shared/domain";
 
+const BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json";
+const LEGACY_STRUCTURED_DATA_JSON = "structured_data.json";
+
 export type RunMetrics = {
   status?: string;
   calculator?: { durationSeconds?: number | null } | null;
@@ -154,7 +157,10 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
   const artifacts = session?.artifacts ?? [];
   const structuredData = artifacts.find((artifact) => artifact.path === "structured_data.md");
   if (!structuredData) return null;
-  const structuredJson = artifacts.find((artifact) => artifact.path === "structured_data.json");
+  const birthChartFacts = artifacts.find(
+    (artifact) =>
+      artifact.path === BIRTH_CHART_FACTS_JSON || artifact.path === LEGACY_STRUCTURED_DATA_JSON
+  );
   const inputContext = artifacts.find((artifact) => artifact.path === "birth_input_context.json");
   const sensitivity = artifacts.find((artifact) => artifact.path === "sensitivity_scan.json");
   const rectification = artifacts.find(
@@ -167,7 +173,7 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
     status: "completed",
     files: [
       "structured_data.md",
-      "structured_data.json",
+      birthChartFacts?.path ?? BIRTH_CHART_FACTS_JSON,
       "birth_input_context.json",
       "sensitivity_scan.json",
       "chart_rectification_state.json"
@@ -178,7 +184,7 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
       sensitivity?.updatedAt ??
       rectification?.updatedAt ??
       inputContext?.updatedAt ??
-      structuredJson?.updatedAt ??
+      birthChartFacts?.updatedAt ??
       structuredData.updatedAt,
     durationSeconds: null,
     error: null

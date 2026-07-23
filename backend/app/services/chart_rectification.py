@@ -224,13 +224,13 @@ class ChartRectificationService:
         self,
         state: dict[str, Any],
         birth_input_context: dict[str, Any],
-        structured_data_json: dict[str, Any],
+        birth_chart_facts: dict[str, Any],
     ) -> BirthInput | None:
         candidate = self.selected_candidate(state)
         if not candidate or candidate.get("isBase"):
             return None
 
-        subject = structured_data_json.get("subject")
+        subject = birth_chart_facts.get("subject")
         if not isinstance(subject, dict):
             subject = {}
         time_context = birth_input_context.get("time")

@@ -151,7 +151,7 @@ class VedicCalculator:
         payload = self._calculator_payload(intake, birth_date, birth_time, place)
         (
             structured_data,
-            structured_data_json,
+            birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
             facts,
@@ -169,7 +169,7 @@ class VedicCalculator:
             input_precision=intake.birth_time_precision,
             validation_status=PRECISION_STATUS[intake.birth_time_precision],
             structured_data=structured_data,
-            structured_data_json=structured_data_json,
+            birth_chart_facts_json=birth_chart_facts_json,
             birth_input_context_json=birth_input_context_json,
             sensitivity_scan_json=sensitivity_scan_json,
             facts=facts,
@@ -238,7 +238,7 @@ class VedicCalculator:
                 input_context=input_context,
                 sensitivity_scan=sensitivity_scan,
             )
-            structured_data_json = (
+            birth_chart_facts_json = (
                 json.dumps(structured_payload, ensure_ascii=False, indent=2) + "\n"
             )
             birth_input_context_json = (
@@ -254,7 +254,7 @@ class VedicCalculator:
 
         return (
             structured_data,
-            structured_data_json,
+            birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
             facts,

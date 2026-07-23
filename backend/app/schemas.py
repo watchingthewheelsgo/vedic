@@ -413,7 +413,7 @@ class CalculationSnapshot(ApiModel):
     input_precision: BirthTimePrecision = Field(alias="inputPrecision")
     validation_status: Literal["passed", "degraded", "limited"] = Field(alias="validationStatus")
     structured_data: str = Field(alias="structuredData")
-    structured_data_json: str = Field(alias="structuredDataJson")
+    birth_chart_facts_json: str = Field(alias="birthChartFactsJson")
     birth_input_context_json: str = Field(alias="birthInputContextJson")
     sensitivity_scan_json: str = Field(alias="sensitivityScanJson")
     facts: ChartFacts

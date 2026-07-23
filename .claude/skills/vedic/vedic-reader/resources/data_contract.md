@@ -36,7 +36,7 @@
 时间可信度: [高 / 中 / 低 / 未验证]
 生时矫正记录: [无 / 候选边界已检查 / 建议完整rectifier / 已完成rectifier]
 读盘方式: [calc engine / JH表格 / 文本度数 / 视觉识别+用户确认]
-Ayanamsa: [True Chitra / 其他]
+Ayanamsa: [Lahiri / 其他]
 Node模式: [Mean Node / True Node]
 ```
 

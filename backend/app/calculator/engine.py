@@ -248,9 +248,11 @@ def ayanamsa_cross_check(jd, lagna_longitude):
     picking one.
     """
     lahiri_ayanamsa = swe.get_ayanamsa_ut(jd)
-    swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
-    true_citra_ayanamsa = swe.get_ayanamsa_ut(jd)
-    swe.set_sid_mode(swe.SIDM_LAHIRI)  # restore primary mode for the rest of the engine
+    try:
+        swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+        true_citra_ayanamsa = swe.get_ayanamsa_ut(jd)
+    finally:
+        swe.set_sid_mode(swe.SIDM_LAHIRI)  # restore primary mode for the rest of the engine
 
     diff = lahiri_ayanamsa - true_citra_ayanamsa
     alt_longitude = (lagna_longitude + diff) % 360
@@ -1006,7 +1008,7 @@ if __name__ == "__main__":
     # Gandhi: 1869-10-02, 07:12, Porbandar
     chart = calculate_full_chart(1869, 10, 2, 7, 12, 21.6417, 69.6293, "Asia/Kolkata")
 
-    print(f"Ayanamsa (True Chitra): {chart['ayanamsa']:.4f}°")
+    print(f"Ayanamsa (Lahiri): {chart['ayanamsa']:.4f}°")
     print(f"Lagna: {chart['lagna']['sign']} {chart['lagna']['deg_str']}")
 
     print(f"\n--- Planets ---")

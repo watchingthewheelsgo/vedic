@@ -39,9 +39,10 @@ def build_structured_schema(
         "calculation": {
             "engine": "vedic-calculator-pyjhora",
             "ayanamsa": {
-                "mode": "TRUE_CITRA",
-                "label": "True Chitrapaksha",
+                "mode": "LAHIRI",
+                "label": "Lahiri",
                 "degrees": round(float(chart["ayanamsa"]), 6),
+                "crossCheck": chart.get("ayanamsa_cross_check", {}),
             },
             "nodeMode": "mean",
             "houseSystem": "whole-sign",
@@ -88,6 +89,9 @@ def build_structured_schema(
             "combustion": chart.get("combustion", {}),
             "digbala": chart.get("digbala", {}),
             "vargottama": chart.get("vargottama", {}),
+            "vargeeyaBala": chart.get("vargeeya_bala") or {},
+            "bhavaBala": chart.get("bhava_bala") or {},
+            "specialLagnas": chart.get("special_lagnas") or {},
         },
         "ashtakavarga": {
             "savBySign": chart.get("sav", {}),

@@ -54,6 +54,9 @@ import type {
 
 type NavState = { name?: string; birth?: BirthInput; concern?: string } | null;
 
+const BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json";
+const LEGACY_STRUCTURED_DATA_JSON = "structured_data.json";
+
 type BirthInfo = {
   date: string;
   time: string;
@@ -248,7 +251,8 @@ function localizedStageCopy(stageId: string, t: Translate): StageCopy {
 const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
   src: [
     "structured_data.md",
-    "structured_data.json",
+    BIRTH_CHART_FACTS_JSON,
+    LEGACY_STRUCTURED_DATA_JSON,
     "birth_input_context.json",
     "sensitivity_scan.json",
     "run_metrics.json"
@@ -2505,8 +2509,10 @@ function resolveBirthCoordinates(
   const fromInput = coordinatesFromObject(inputCoordinates);
   if (fromInput) return fromInput;
 
-  const structuredData = parseJsonArtifact(session, "structured_data.json");
-  const structuredCoordinates = objectValue(objectValue(structuredData, "subject"), "coordinates");
+  const birthChartFacts =
+    parseJsonArtifact(session, BIRTH_CHART_FACTS_JSON) ??
+    parseJsonArtifact(session, LEGACY_STRUCTURED_DATA_JSON);
+  const structuredCoordinates = objectValue(objectValue(birthChartFacts, "subject"), "coordinates");
   const fromStructured = coordinatesFromObject(structuredCoordinates);
   if (fromStructured) return fromStructured;
 

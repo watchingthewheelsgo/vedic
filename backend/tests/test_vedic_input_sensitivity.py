@@ -455,7 +455,7 @@ def test_prevalidation_decision_requires_medium_risk_threshold() -> None:
 
 def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
-    structured_data_json = json.dumps(
+    birth_chart_facts_json = json.dumps(
         {
             "subject": {
                 "birthDate": "1990-01-01",
@@ -491,9 +491,9 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
 **2.** Anchor two.
 
 > Derivation: test
-""",
+        """,
         "1. 准\n2. 准\n",
-        structured_data_json,
+        birth_chart_facts_json,
     )
 
     score = cast(dict[str, Any], result["score"])

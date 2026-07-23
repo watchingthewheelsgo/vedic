@@ -2,7 +2,7 @@
 Vedic Rectifier — Time Scanner (swisseph版)
 =============================================
 扫描出生时间±N分钟范围，输出每分钟的Lagna/D9/D10变化。
-与 vedic-calculator engine.py 使用相同的天文引擎(swisseph)和Ayanamsa(True Chitra)，
+与 vedic-calculator engine.py 使用相同的天文引擎(swisseph)和Ayanamsa(Lahiri)，
 确保 Lagna 度数和 D9/D10 边界完全一致。
 
 用法:
@@ -19,7 +19,7 @@ import argparse
 import sys
 
 # === 与 engine.py 一致的配置 ===
-swe.set_sid_mode(swe.SIDM_TRUE_CITRA)
+swe.set_sid_mode(swe.SIDM_LAHIRI)
 
 SIGNS = ["Ar", "Ta", "Ge", "Cn", "Le", "Vi", "Li", "Sc", "Sg", "Cp", "Aq", "Pi"]
 SIGNS_CN = [
@@ -174,7 +174,7 @@ def print_results(results, date_str, time_str, lat, lon):
     """格式化输出扫描结果"""
     print(f"# 时间扫描结果")
     print(f"# 基准: {date_str} {time_str} UTC | 坐标: ({lat}, {lon})")
-    print(f"# 引擎: swisseph + True Chitra Ayanamsa (与calc engine一致)")
+    print(f"# 引擎: swisseph + Lahiri Ayanamsa (与calc engine一致)")
     print(f"# 范围: {results[0]['delta']:+d} ~ {results[-1]['delta']:+d} 分钟")
     print()
     print(
@@ -196,7 +196,7 @@ def save_results(results, date_str, time_str, lat, lon, filepath):
         f.write(f"# 时间扫描结果\n\n")
         f.write(f"> 基准: {date_str} {time_str} UTC\n")
         f.write(f"> 坐标: ({lat}, {lon})\n")
-        f.write(f"> 引擎: swisseph + True Chitra Ayanamsa\n\n")
+        f.write(f"> 引擎: swisseph + Lahiri Ayanamsa\n\n")
         f.write(f"| 偏移 | Lagna度数 | 星座 | D9 | D10 | 标记 |\n")
         f.write(f"|------|----------|------|-----|------|------|\n")
 

@@ -13,6 +13,7 @@ import pytz
 import swisseph as swe
 
 from app.calculator.engine import PLANETS_SWE, SIGNS, calculate_full_chart
+from app.calculator.structured_schema import build_structured_schema
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "vedic_reference" / "reference_cases.json"
@@ -128,6 +129,35 @@ def test_vedic_engine_matches_pinned_product_reference_snapshot(case: dict[str, 
         for planet in ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]
     }
     assert actual_rupas == expected["shadbalaRupas"]
+
+
+@pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
+def test_birth_chart_facts_schema_uses_lahiri_and_exposes_calculation_context(
+    case: dict[str, Any],
+) -> None:
+    chart = _calculate_case(case)
+    payload = build_structured_schema(
+        chart,
+        transit_data=None,
+        meta={
+            "dob": f"{int(case['year']):04d}-{int(case['month']):02d}-{int(case['day']):02d}",
+            "time": f"{int(case['hour']):02d}:{int(case['minute']):02d}",
+            "place": case["id"],
+            "lat": float(case["lat"]),
+            "lon": float(case["lon"]),
+            "timezone": case["tz"],
+        },
+        user_info={},
+    )
+
+    ayanamsa = payload["calculation"]["ayanamsa"]
+    assert ayanamsa["mode"] == "LAHIRI"
+    assert ayanamsa["label"] == "Lahiri"
+    assert ayanamsa["crossCheck"]["primary"] == "Lahiri"
+    assert ayanamsa["crossCheck"]["alternate"] == "True Chitrapaksha"
+    assert "vargeeyaBala" in payload["strengths"]
+    assert "bhavaBala" in payload["strengths"]
+    assert "specialLagnas" in payload["strengths"]
 
 
 def test_pyjhora_bundled_reference_baseline_is_available() -> None:
@@ -266,8 +296,8 @@ def _configure_pyjhora() -> None:
     from jhora import const
     from jhora.panchanga import drik
 
-    drik.set_ayanamsa_mode("TRUE_CITRA")
-    const._DEFAULT_AYANAMSA_MODE = "TRUE_CITRA"
+    drik.set_ayanamsa_mode("LAHIRI")
+    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
     const._use_true_nodes_for_rahu_ketu = False
 
 
