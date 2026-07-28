@@ -12,6 +12,7 @@ import { Account } from "./screens/Account";
 import { Session } from "./screens/Session";
 import { AdminSessions } from "./screens/AdminSessions";
 import { AdminSessionDetail } from "./screens/AdminSessionDetail";
+import { ChartRevealPreview } from "./screens/ChartRevealPreview";
 
 export function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -75,6 +76,7 @@ export function App() {
           <Route path="/new" element={<Intake />} />
           <Route path="/bazi" element={<BaziWorkshop />} />
           <Route path="/session/:id" element={<Session />} />
+          <Route path="/dev/chart-reveal" element={<ChartRevealPreview />} />
           <Route
             path="/account"
             element={

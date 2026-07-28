@@ -62,38 +62,6 @@
     @apply text-gold;
   }
 
-  .flow-canvas .react-flow__handle {
-    width: 5px;
-    height: 5px;
-    min-width: 0;
-    min-height: 0;
-    background: theme(colors.night);
-    border: 1.4px solid theme(colors.gold-dim);
-  }
-
-  .flow-canvas .react-flow__controls {
-    overflow: hidden;
-    border-radius: 6px;
-    box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
-  }
-
-  .flow-canvas .react-flow__controls-button {
-    background: theme(colors.night-3);
-    border-bottom: 1px solid rgb(201 169 110 / 16%);
-    color: theme(colors.gold);
-    fill: theme(colors.gold);
-  }
-
-  .flow-canvas .react-flow__controls-button:hover {
-    background: theme(colors.night-2);
-  }
-
-  .flow-canvas .react-flow__minimap {
-    background: theme(colors.night) !important;
-    border: 1px solid rgb(201 169 110 / 20%);
-    border-radius: 6px;
-  }
-
   .birth-input-screen {
     position: relative;
   }

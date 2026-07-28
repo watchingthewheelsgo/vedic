@@ -1,22 +1,4 @@
-import { useMemo } from "react";
-import {
-  Background,
-  BackgroundVariant,
-  Controls,
-  Handle,
-  MarkerType,
-  MiniMap,
-  Position,
-  ReactFlow,
-  type Edge,
-  type Node,
-  type NodeProps
-} from "@xyflow/react";
-import dagre from "dagre";
-import "@xyflow/react/dist/style.css";
-import { formatDuration, type PipelineData, type PipelineNode } from "../lib/pipeline";
-import { cn } from "../lib/cn";
-import { useI18n } from "../i18n/provider";
+import type { PipelineNode } from "../lib/pipeline";
 
 export type StageStatus = "done" | "running" | "waiting" | "failed" | "pending";
 
@@ -28,9 +10,9 @@ export type StageDef = {
   match: (id: string) => boolean;
 };
 
-// Logical stages shown on the canvas. Each aggregates one group of backend
-// batch nodes, mirroring docs/pipeline.md so the graph stays readable while the
-// underlying DAG has ~48 nodes.
+// Logical stages that aggregate the backend batch nodes into product-level
+// reading moments. UI surfaces can render these as cards, progress, or chart
+// reveal states without exposing the underlying DAG.
 export const WORKSHOP_STAGES: StageDef[] = [
   {
     id: "src",
@@ -88,46 +70,7 @@ export const WORKSHOP_STAGES: StageDef[] = [
   }
 ];
 
-export const WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
-  ["src", "chart"],
-  ["chart", "reader"],
-  ["reader", "p1"],
-  ["reader", "yoga"],
-  ["p1", "p2"],
-  ["yoga", "p2"],
-  ["p2", "d9"],
-  ["p2", "div"],
-  ["d9", "house"],
-  ["div", "house"],
-  ["d9", "dasha"],
-  ["div", "dasha"],
-  ["house", "pari"],
-  ["pari", "life"],
-  ["dasha", "life"],
-  ["life", "appx"]
-];
-
-const NODE_W = 210;
-const NODE_H = 68;
-
-const STATUS_STROKE: Record<StageStatus, string> = {
-  done: "#C9A96E",
-  running: "#E8C877",
-  waiting: "#C9A96E",
-  failed: "#B04A38",
-  pending: "#4A3E2C"
-};
-
-type StageAgg = { status: StageStatus; done: number; total: number };
-type StageData = {
-  label: string;
-  sub: string;
-  status: StageStatus;
-  seed: boolean;
-  selected: boolean;
-  badge: string;
-};
-type StageFlowNode = Node<StageData, "stage">;
+export type StageAgg = { status: StageStatus; done: number; total: number };
 
 export function aggregateWorkshopStages(
   nodes: PipelineNode[],
@@ -153,191 +96,4 @@ export function aggregateWorkshopStages(
     result[stage.id] = { status, done, total };
   }
   return result;
-}
-
-// Deterministic top-to-bottom layout via dagre. Graph shape is fixed, so
-// positions compute once; only node data (status/badge) changes on poll.
-function computeLayout(
-  stages: StageDef[],
-  edges: Array<[string, string]>
-): Record<string, { x: number; y: number }> {
-  const graph = new dagre.graphlib.Graph();
-  graph.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 52, marginx: 24, marginy: 24 });
-  graph.setDefaultEdgeLabel(() => ({}));
-  for (const stage of stages) graph.setNode(stage.id, { width: NODE_W, height: NODE_H });
-  for (const [source, target] of edges) graph.setEdge(source, target);
-  dagre.layout(graph);
-  const positions: Record<string, { x: number; y: number }> = {};
-  for (const stage of stages) {
-    const node = graph.node(stage.id);
-    positions[stage.id] = { x: node.x - NODE_W / 2, y: node.y - NODE_H / 2 };
-  }
-  return positions;
-}
-
-function nodeStatusClass(status: StageStatus): StageStatus {
-  return status;
-}
-
-function StageNode({ data }: NodeProps<StageFlowNode>) {
-  const statusClass: Record<StageStatus, string> = {
-    done: "border-gold bg-linear-to-b from-gold/15 to-night-3 text-gold-light",
-    running:
-      "border-gold bg-night-3 text-white shadow-[0_0_0_1px_var(--color-gold),0_4px_18px_rgba(201,169,110,0.35)]",
-    waiting: "border-gold bg-linear-to-b from-gold/10 to-night-3 text-gold-light",
-    failed: "border-red bg-night-3 text-cream",
-    pending: "border-gold/25 bg-night-3 text-cream opacity-60"
-  };
-  return (
-    <div
-      className={cn(
-        "relative min-h-[68px] w-[210px] cursor-pointer rounded-lg border-[1.5px] px-3 py-2.5 font-sans shadow-[0_4px_14px_rgba(0,0,0,0.3)] transition hover:-translate-y-px hover:border-gold/75",
-        data.seed ? "border-gold bg-night text-gold" : statusClass[nodeStatusClass(data.status)],
-        data.selected && "shadow-[0_0_0_2px_var(--color-gold),0_10px_28px_rgba(201,169,110,0.28)]"
-      )}
-    >
-      <Handle type="target" position={Position.Top} isConnectable={false} />
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 text-[13.5px] font-semibold leading-tight">{data.label}</div>
-        {data.badge && (
-          <span
-            className={cn(
-              "shrink-0 rounded-lg bg-gold px-2 py-0.5 text-[10.5px] font-extrabold tabular-nums leading-5 text-night",
-              data.status === "failed" && "bg-red text-white",
-              data.status === "pending" && "bg-gold/40"
-            )}
-          >
-            {data.badge}
-          </span>
-        )}
-      </div>
-      <div className="mt-1 text-[11px] text-cream/45">{data.sub}</div>
-      <Handle type="source" position={Position.Bottom} isConnectable={false} />
-    </div>
-  );
-}
-
-const nodeTypes = { stage: StageNode };
-
-export function PipelineFlow({
-  data,
-  selectedStageId = "src",
-  onSelectStage,
-  stages = WORKSHOP_STAGES,
-  edges = WORKSHOP_STAGE_EDGES
-}: {
-  data: PipelineData;
-  selectedStageId?: string;
-  onSelectStage?: (stageId: string) => void;
-  stages?: StageDef[];
-  edges?: Array<[string, string]>;
-}) {
-  const { t } = useI18n();
-  const positions = useMemo(() => computeLayout(stages, edges), [edges, stages]);
-  const agg = useMemo(() => aggregateWorkshopStages(data.nodes, stages), [data.nodes, stages]);
-
-  const nodes = useMemo<StageFlowNode[]>(
-    () =>
-      stages.map((stage) => {
-        const stat = agg[stage.id];
-        const labelKey = `stage.${stage.id}.label`;
-        const subKey = `stage.${stage.id}.sub`;
-        const label = t(labelKey);
-        const sub = t(subKey);
-        return {
-          id: stage.id,
-          type: "stage",
-          position: positions[stage.id],
-          width: NODE_W,
-          height: NODE_H,
-          draggable: false,
-          data: {
-            label: label === labelKey ? stage.label : label,
-            sub: sub === subKey ? stage.sub : sub,
-            status: stat.status,
-            seed: Boolean(stage.seed),
-            selected: selectedStageId === stage.id,
-            badge:
-              stat.status === "waiting"
-                ? t("status.waiting").toLowerCase()
-                : stat.total > 1
-                  ? `${stat.done}/${stat.total}`
-                  : ""
-          }
-        };
-      }),
-    [agg, positions, selectedStageId, stages, t]
-  );
-
-  const flowEdges = useMemo<Edge[]>(
-    () =>
-      edges.map(([source, target]) => {
-        const running = agg[target]?.status === "running" || agg[target]?.status === "waiting";
-        const stroke = running ? STATUS_STROKE.running : STATUS_STROKE.pending;
-        return {
-          id: `${source}-${target}`,
-          source,
-          target,
-          animated: running,
-          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: stroke },
-          style: { stroke, strokeWidth: running ? 2 : 1.5 }
-        };
-      }),
-    [agg, edges]
-  );
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="grid gap-2 border-b border-gold/15 bg-night-2 px-5 py-3.5">
-        <div className="flex items-baseline justify-between">
-          <span className="text-xs uppercase tracking-[1px] text-cream/50">Progress</span>
-          <b className="text-2xl font-semibold text-gold">{data.percent}%</b>
-        </div>
-        <div
-          className="h-[7px] overflow-hidden rounded-full bg-night-3"
-          role="progressbar"
-          aria-valuenow={data.percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <span
-            className="block h-full bg-linear-to-r from-gold-dim to-gold transition-[width] duration-300"
-            style={{ width: `${data.percent}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-xs text-cream/45">
-          <span>
-            {data.completed}/{data.total} parts{data.failed > 0 ? ` · ${data.failed} paused` : ""}
-          </span>
-          <span>{formatDuration(data.durationSeconds)}</span>
-        </div>
-      </div>
-      <div className="flow-canvas relative min-h-0 flex-1">
-        <ReactFlow
-          nodes={nodes}
-          edges={flowEdges}
-          nodeTypes={nodeTypes}
-          onNodeClick={(_, node) => onSelectStage?.(node.id)}
-          fitView
-          fitViewOptions={{ padding: 0.18 }}
-          onInit={(instance) => instance.fitView({ padding: 0.18 })}
-          minZoom={0.3}
-          maxZoom={2}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#3A2F20" />
-          <Controls showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            maskColor="rgba(15,12,9,0.7)"
-            nodeColor={(node) => STATUS_STROKE[(node.data as StageData).status] ?? "#4A3E2C"}
-          />
-        </ReactFlow>
-      </div>
-    </div>
-  );
 }

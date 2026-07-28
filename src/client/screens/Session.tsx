@@ -21,12 +21,11 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { AccountCenter } from "../components/AccountCenter";
+import { ChartRevealProgress } from "../components/ChartRevealProgress";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import {
   aggregateWorkshopStages,
-  PipelineFlow,
   WORKSHOP_STAGES,
-  WORKSHOP_STAGE_EDGES,
   type StageDef,
   type StageStatus
 } from "../components/PipelineFlow";
@@ -42,6 +41,7 @@ import {
   type PipelineData,
   type PipelineNode
 } from "../lib/pipeline";
+import { deriveChartRevealState } from "../lib/chartRevealMapping";
 import { getReportSections, titleForArtifact } from "../lib/report";
 import { cn } from "../lib/cn";
 import { useI18n } from "../i18n/provider";
@@ -312,11 +312,6 @@ const BAZI_WORKSHOP_STAGES: StageDef[] = [
   }
 ];
 
-const BAZI_WORKSHOP_STAGE_EDGES: Array<[string, string]> = [
-  ["src", "bazi_chart"],
-  ["bazi_chart", "bazi_report"]
-];
-
 const PRECISION_LABELS: Record<string, string> = {
   exact: "Exact minute",
   approximate: "About ±15 minutes",
@@ -443,7 +438,6 @@ export function Session() {
     [baziMode, baziPipelineData, coreJob, runMetrics, session, readerRunning]
   );
   const pipelineStages = baziMode ? BAZI_WORKSHOP_STAGES : WORKSHOP_STAGES;
-  const pipelineEdges = baziMode ? BAZI_WORKSHOP_STAGE_EDGES : WORKSHOP_STAGE_EDGES;
   const jobActive = !baziMode && (coreJob?.status === "queued" || coreJob?.status === "running");
   const complete = baziMode
     ? session?.stage === "bazi_complete"
@@ -722,7 +716,7 @@ export function Session() {
       )}
 
       {tab === "reading" ? (
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(480px,0.95fr)_minmax(420px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto bg-night lg:grid-cols-[minmax(440px,0.78fr)_minmax(520px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]">
           <WorkshopDetailPanel
             selectedStageId={selectedStageId}
             stages={pipelineStages}
@@ -745,24 +739,13 @@ export function Session() {
             authLoaded={authLoaded}
             isSignedIn={Boolean(isSignedIn)}
           />
-          <div className="relative min-w-0 bg-night-2 max-lg:min-h-[70vh] lg:min-h-0 lg:overflow-hidden">
-            {pipelineData ? (
-              <PipelineFlow
-                data={pipelineData}
-                selectedStageId={selectedStageId}
-                onSelectStage={setSelectedStageId}
-                stages={pipelineStages}
-                edges={pipelineEdges}
-              />
-            ) : (
-              <div className="grid h-full min-h-[420px] place-items-center text-cream/50">
-                <div className="text-center">
-                  <LoaderCircle className="mx-auto size-7 animate-spin" />
-                  <p className="mt-2.5">{t("session.map.loading")}</p>
-                </div>
-              </div>
-            )}
-          </div>
+          <ReadingRevealPanel
+            pipelineData={pipelineData}
+            selectedStageId={selectedStageId}
+            stages={pipelineStages}
+            baziMode={baziMode}
+            onSelectStage={setSelectedStageId}
+          />
         </div>
       ) : complete && reportSections.length > 0 ? (
         <div className="report-doc grid h-[calc(100vh-57px)] grid-cols-1 lg:grid-cols-[1fr_260px]">
@@ -911,6 +894,279 @@ function SessionAuthControls() {
       </SignedIn>
     </div>
   );
+}
+
+function ReadingRevealPanel({
+  pipelineData,
+  selectedStageId,
+  stages,
+  baziMode,
+  onSelectStage
+}: {
+  pipelineData: PipelineData | null;
+  selectedStageId: string;
+  stages: StageDef[];
+  baziMode: boolean;
+  onSelectStage: (stageId: string) => void;
+}) {
+  const { t } = useI18n();
+  const stageAgg = useMemo(
+    () => (pipelineData ? aggregateWorkshopStages(pipelineData.nodes, stages) : null),
+    [pipelineData, stages]
+  );
+  const activeStage = useMemo(
+    () => (stageAgg ? activeStageFromAggregation(stages, stageAgg) : stages[0]),
+    [stageAgg, stages]
+  );
+  const revealState = useMemo(
+    () => (baziMode ? null : deriveChartRevealState(pipelineData)),
+    [baziMode, pipelineData]
+  );
+  const baziReveal = useMemo(
+    () => (baziMode ? deriveBaziRevealCopy(pipelineData) : null),
+    [baziMode, pipelineData]
+  );
+  const title = revealState?.title ?? baziReveal?.title ?? t("session.map.loading");
+  const caption = revealState?.caption ?? baziReveal?.caption ?? "";
+  const progressLabel = revealState?.progressLabel ?? baziReveal?.progressLabel ?? "0/0";
+  const percent = pipelineData?.percent ?? 0;
+
+  return (
+    <section className="relative min-w-0 overflow-hidden bg-night text-cream max-lg:min-h-[720px] lg:min-h-0">
+      <div className="pointer-events-none absolute inset-0 opacity-90">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(201,169,110,0.16),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(237,217,163,0.08),transparent_28%),linear-gradient(180deg,rgba(15,12,9,0.78),rgba(28,22,16,0.96))]" />
+        <div className="absolute left-1/2 top-[48%] h-[720px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold/10 shadow-[0_0_120px_rgba(201,169,110,0.08)]" />
+        <div className="absolute left-1/2 top-[48%] h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold/10" />
+      </div>
+
+      <div className="relative z-[1] mx-auto flex min-h-full max-w-[760px] flex-col justify-center gap-6 px-5 py-8 sm:px-8 lg:h-full lg:overflow-y-auto">
+        <div className="text-center">
+          <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold/72">
+            Reading reveal
+          </div>
+          <h2 className="mx-auto max-w-[620px] text-[25px] font-light leading-tight tracking-normal text-cream sm:text-[32px]">
+            {baziMode ? "Classical chart workspace" : "Your chart is being revealed"}
+          </h2>
+          <p className="mx-auto mt-3 max-w-[520px] text-[13.5px] leading-[1.8] text-cream/62">
+            {baziMode
+              ? "We keep the BaZi calculation separate from interpretation, then turn the verified chart facts into the classical report."
+              : "The system is calculating the chart, checking lived signals, and then opening each layer of the reading without exposing the internal graph."}
+          </p>
+        </div>
+
+        <div className="flex justify-center">
+          {pipelineData ? (
+            baziMode ? (
+              <BaziRevealProgress data={pipelineData} />
+            ) : (
+              <ChartRevealProgress state={revealState ?? undefined} />
+            )
+          ) : (
+            <div className="grid min-h-[360px] place-items-center text-center text-cream/58">
+              <div>
+                <LoaderCircle className="mx-auto size-8 animate-spin text-gold" />
+                <p className="mt-3 text-sm">{t("session.map.loading")}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-[18px] border border-gold/25 bg-[rgba(16,12,22,0.68)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-[2px] text-gold/75">
+                Current focus
+              </div>
+              <h3 className="m-0 text-base font-semibold tracking-normal text-cream">{title}</h3>
+            </div>
+            <Badge variant={statusBadgeVariant(stageAgg?.[activeStage.id]?.status ?? "pending")}>
+              {t(`status.${stageAgg?.[activeStage.id]?.status ?? "pending"}`)}
+            </Badge>
+          </div>
+          <p className="m-0 text-[13px] leading-[1.75] text-cream/66">{caption}</p>
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[1.4px] text-cream/45">
+              <span>{progressLabel}</span>
+              <span>{percent}%</span>
+            </div>
+            <div
+              className="h-[7px] overflow-hidden rounded-full bg-white/8"
+              role="progressbar"
+              aria-valuenow={percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <span
+                className="block h-full rounded-full bg-linear-to-r from-gold-dim via-gold to-gold-light transition-[width] duration-500"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {pipelineData && stageAgg && (
+          <details className="rounded-[18px] border border-gold/18 bg-[rgba(16,12,22,0.46)] p-4 backdrop-blur-xl">
+            <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[2px] text-gold/72 outline-none">
+              Calculation details
+            </summary>
+            <div className="mt-4 grid gap-2">
+              {stages.map((stage, index) => {
+                const stat = stageAgg[stage.id] ?? { status: "pending", done: 0, total: 0 };
+                const selected = selectedStageId === stage.id;
+                const active = activeStage.id === stage.id;
+                return (
+                  <button
+                    type="button"
+                    key={stage.id}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition",
+                      selected
+                        ? "border-gold bg-gold/15 text-cream shadow-[0_0_0_1px_rgba(201,169,110,0.24)]"
+                        : "border-gold/16 bg-white/[0.035] text-cream/68 hover:border-gold/40 hover:bg-gold/8"
+                    )}
+                    onClick={() => onSelectStage(stage.id)}
+                  >
+                    <span
+                      className={cn(
+                        "grid size-7 shrink-0 place-items-center rounded-full border text-[11px] font-semibold tabular-nums",
+                        active
+                          ? "border-gold bg-gold text-night"
+                          : selected
+                            ? "border-gold/70 bg-gold/20 text-gold-light"
+                            : "border-gold/25 bg-night-3 text-cream/48"
+                      )}
+                    >
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-cream">
+                        {stageLabelFor(stage, t)}
+                      </span>
+                      <span className="mt-0.5 block text-[12px] text-cream/45">
+                        {stageSubFor(stage, t)}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right text-[11px] uppercase tracking-[1px] text-cream/45">
+                      {stageProgressLabel(stat, t)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </details>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BaziRevealProgress({ data }: { data: PipelineData }) {
+  const hasChart = data.nodes.some(
+    (node) => node.id === "bazi_chart" && node.status === "completed"
+  );
+  const hasReport = data.nodes.some(
+    (node) => node.id === "bazi_report" && node.status === "completed"
+  );
+  const pillars = ["Year", "Month", "Day", "Hour"];
+  return (
+    <div className="w-full max-w-[460px] rounded-[22px] border border-gold/18 bg-[rgba(16,12,22,0.36)] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+      <div className="grid grid-cols-4 gap-3">
+        {pillars.map((pillar, index) => (
+          <div
+            key={pillar}
+            className={cn(
+              "relative min-h-[150px] overflow-hidden rounded-xl border px-3 py-4 text-center transition",
+              hasChart
+                ? "border-gold/35 bg-gold/10 text-gold-light"
+                : "border-gold/16 bg-white/[0.035] text-cream/38"
+            )}
+          >
+            <div className="absolute inset-x-3 top-3 h-px bg-gold/25" />
+            <div className="mt-5 text-[10px] uppercase tracking-[1.7px] text-current/70">
+              {pillar}
+            </div>
+            <div className="mt-5 text-2xl font-light">{hasChart ? "柱" : "·"}</div>
+            <div className="mt-4 text-[11px] text-current/58">{index + 1}/4</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 rounded-xl border border-gold/20 bg-night/55 px-4 py-3 text-center">
+        <div className="text-[10px] uppercase tracking-[2px] text-gold/70">BaZi reveal</div>
+        <div className="mt-1 text-sm font-semibold text-cream">
+          {hasReport
+            ? "Classical report ready"
+            : hasChart
+              ? "Four pillars verified"
+              : "Calculating pillars"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function activeStageFromAggregation(
+  stages: StageDef[],
+  stageAgg: Record<string, { status: StageStatus; done: number; total: number }>
+): StageDef {
+  const active = stages.find(
+    (stage) => stageAgg[stage.id]?.status === "running" || stageAgg[stage.id]?.status === "waiting"
+  );
+  if (active) return active;
+  return [...stages].reverse().find((stage) => stageAgg[stage.id]?.status === "done") ?? stages[0];
+}
+
+function deriveBaziRevealCopy(data: PipelineData | null) {
+  if (!data) {
+    return {
+      title: "Preparing BaZi workspace",
+      caption: "Waiting for the chart calculation to start.",
+      progressLabel: "0/0"
+    };
+  }
+  const chart = data.nodes.find((node) => node.id === "bazi_chart");
+  const report = data.nodes.find((node) => node.id === "bazi_report");
+  if (report?.status === "completed") {
+    return {
+      title: "Classical report ready",
+      caption: "The verified four-pillar chart has been converted into the classical report.",
+      progressLabel: `${data.completed}/${data.total}`
+    };
+  }
+  if (report?.status === "running" || report?.status === "waiting") {
+    return {
+      title: "Generating classical interpretation",
+      caption: "The chart facts are ready. The system is applying the BaZi classics to the report.",
+      progressLabel: `${data.completed}/${data.total}`
+    };
+  }
+  if (chart?.status === "completed") {
+    return {
+      title: "Four pillars verified",
+      caption: "The deterministic BaZi chart workspace is ready for the classical reading.",
+      progressLabel: `${data.completed}/${data.total}`
+    };
+  }
+  return {
+    title: "Calculating four pillars",
+    caption:
+      "The system is turning the birth date, time, calendar type, and place into the BaZi chart facts.",
+    progressLabel: `${data.completed}/${data.total}`
+  };
+}
+
+function stageSubFor(stage: StageDef, t: Translate) {
+  const key = `stage.${stage.id}.sub`;
+  const text = t(key);
+  return text === key ? stage.sub : text;
+}
+
+function stageProgressLabel(
+  stat: { status: StageStatus; done: number; total: number },
+  t: Translate
+) {
+  if (stat.status === "waiting") return t("status.waiting");
+  if (stat.total > 1) return `${stat.done}/${stat.total}`;
+  return t(`status.${stat.status}`);
 }
 
 function WorkshopDetailPanel({
