@@ -16,7 +16,10 @@ import {
   Info,
   ListChecks,
   LoaderCircle,
+  MapPinned,
   RefreshCw,
+  Sparkles,
+  Target,
   Workflow
 } from "lucide-react";
 import { api } from "../api";
@@ -130,11 +133,18 @@ type RectificationState = {
 };
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
+type ReadingProductPhaseStatus = "done" | "active" | "pending";
+type ReadingProductPhase = {
+  id: "input" | "calibration" | "chart" | "reveal" | "report";
+  label: string;
+  detail: string;
+  status: ReadingProductPhaseStatus;
+};
 
 const STAGE_COPY: Record<string, StageCopy> = {
   src: {
     purpose: "Keeps your birth details fixed for the rest of the reading.",
-    userResult: "The reading uses one clear set of date, time, place, and time-confidence details.",
+    userResult: "The reading uses one clear set of date, time, place, and time certainty details.",
     userAction: "Review the details. If something is wrong, start a fresh reading.",
     expected: "Usually seconds. If the city cannot be found, choose it again from search."
   },
@@ -313,13 +323,13 @@ const BAZI_WORKSHOP_STAGES: StageDef[] = [
 ];
 
 const PRECISION_LABELS: Record<string, string> = {
-  exact: "Exact minute",
-  approximate: "About ±15 minutes",
-  part_of_day: "Only known hour",
-  unknown: "Unknown",
-  精确到分钟: "Exact minute",
-  约略时间: "Approximate time",
-  仅知道时段: "Only known part of day",
+  exact: "Official record",
+  approximate: "Close memory",
+  part_of_day: "Known hour",
+  unknown: "Unknown time",
+  精确到分钟: "Official record",
+  约略时间: "Close memory",
+  仅知道时段: "Known hour",
   未知出生时间: "Unknown"
 };
 
@@ -345,7 +355,7 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
 
 const EFFECTIVE_PRECISION_LABELS: Record<string, string> = {
   "±分钟级": "± minute-level",
-  按出生时间精度降级解释: "Downgraded by birth-time confidence"
+  按出生时间精度降级解释: "Downgraded by birth-time certainty"
 };
 
 const VALIDATION_CHOICES: Array<{
@@ -451,6 +461,33 @@ export function Session() {
     readerPrevalidation &&
     !hasCurrentValidationFeedback(readerPrevalidation, feedbackArtifact) &&
     !complete
+  );
+  const productPhases = useMemo(
+    () =>
+      deriveReadingProductPhases({
+        baziMode,
+        session,
+        pipelineData,
+        readerRunning,
+        awaitingValidationFeedback,
+        jobActive,
+        complete,
+        reportReady: complete && reportSections.length > 0,
+        baziRunning,
+        t
+      }),
+    [
+      awaitingValidationFeedback,
+      baziMode,
+      baziRunning,
+      complete,
+      jobActive,
+      pipelineData,
+      readerRunning,
+      reportSections.length,
+      session,
+      t
+    ]
   );
 
   const setTab = useCallback(
@@ -715,6 +752,8 @@ export function Session() {
         </div>
       )}
 
+      <ReadingJourneyBar phases={productPhases} />
+
       {tab === "reading" ? (
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto bg-night lg:grid-cols-[minmax(440px,0.78fr)_minmax(520px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]">
           <WorkshopDetailPanel
@@ -748,7 +787,7 @@ export function Session() {
           />
         </div>
       ) : complete && reportSections.length > 0 ? (
-        <div className="report-doc grid h-[calc(100vh-57px)] grid-cols-1 lg:grid-cols-[1fr_260px]">
+        <div className="report-doc grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_260px]">
           <main className="report-main overflow-y-auto bg-cream px-6 py-9 pb-20 sm:px-11">
             <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
               <h1 className="text-[28px] font-light tracking-normal">
@@ -806,7 +845,7 @@ export function Session() {
           </nav>
         </div>
       ) : (
-        <div className="grid min-h-[calc(100vh-57px)] place-items-center px-6 py-10 text-center">
+        <div className="grid min-h-0 flex-1 place-items-center px-6 py-10 text-center">
           <div>
             <div className="mx-auto mb-5 size-11 animate-spin rounded-full border-[3px] border-gold/25 border-t-gold" />
             <h2 className="mb-2 text-2xl font-light">
@@ -867,6 +906,151 @@ export function Session() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function deriveReadingProductPhases({
+  baziMode,
+  session,
+  pipelineData,
+  readerRunning,
+  awaitingValidationFeedback,
+  jobActive,
+  complete,
+  reportReady,
+  baziRunning,
+  t
+}: {
+  baziMode: boolean;
+  session: SkillSessionResponse | null;
+  pipelineData: PipelineData | null;
+  readerRunning: boolean;
+  awaitingValidationFeedback: boolean;
+  jobActive: boolean;
+  complete: boolean;
+  reportReady: boolean;
+  baziRunning: boolean;
+  t: Translate;
+}): ReadingProductPhase[] {
+  const hasSession = Boolean(session);
+  const hasVedicChart = Boolean(
+    findArtifact(session, "structured_data.md") ||
+    findArtifact(session, BIRTH_CHART_FACTS_JSON) ||
+    findArtifact(session, LEGACY_STRUCTURED_DATA_JSON)
+  );
+  const hasBaziChart = Boolean(findArtifact(session, "bazi_structured_data.md"));
+  const hasChart = baziMode ? hasBaziChart : hasVedicChart;
+  const readerArtifact = findArtifact(session, "reader_prevalidation.md");
+  const feedbackArtifact = findArtifact(session, "user_context.md");
+  const calibrationDone =
+    baziMode || hasCurrentValidationFeedback(readerArtifact, feedbackArtifact);
+  const revealStarted = Boolean(
+    complete ||
+    jobActive ||
+    baziRunning ||
+    (pipelineData && pipelineData.completed > (baziMode ? 1 : 2))
+  );
+
+  const calibrationActive = !baziMode && (readerRunning || awaitingValidationFeedback);
+  return [
+    {
+      id: "input",
+      label: t("session.phase.input"),
+      detail: hasSession ? t("session.phase.input.done") : t("session.phase.input.waiting"),
+      status: hasSession ? "done" : "active"
+    },
+    {
+      id: "calibration",
+      label: baziMode ? t("session.phase.calibration.bazi") : t("session.phase.calibration"),
+      detail: baziMode
+        ? t("session.phase.calibration.baziDone")
+        : calibrationDone
+          ? t("session.phase.calibration.done")
+          : calibrationActive
+            ? t("session.phase.calibration.active")
+            : t("session.phase.calibration.preparing"),
+      status: calibrationDone ? "done" : calibrationActive || hasSession ? "active" : "pending"
+    },
+    {
+      id: "chart",
+      label: t("session.phase.chart"),
+      detail: hasChart ? t("session.phase.chart.ready") : t("session.phase.chart.calculating"),
+      status: hasChart ? "done" : hasSession ? "active" : "pending"
+    },
+    {
+      id: "reveal",
+      label: t("session.phase.reveal"),
+      detail: complete
+        ? t("session.phase.reveal.complete")
+        : revealStarted
+          ? t("session.phase.reveal.running")
+          : t("session.phase.reveal.next"),
+      status: complete ? "done" : revealStarted ? "active" : "pending"
+    },
+    {
+      id: "report",
+      label: t("session.phase.report"),
+      detail: reportReady ? t("session.phase.report.ready") : t("session.phase.report.final"),
+      status: reportReady ? "done" : complete ? "active" : "pending"
+    }
+  ];
+}
+
+function ReadingJourneyBar({ phases }: { phases: ReadingProductPhase[] }) {
+  return (
+    <div className="relative z-10 shrink-0 border-b border-gold/18 bg-night/88 px-4 py-3 text-cream shadow-[0_14px_44px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:px-8">
+      <div className="mx-auto grid max-w-[1220px] gap-2 sm:grid-cols-5">
+        {phases.map((phase, index) => {
+          const Icon =
+            phase.id === "input"
+              ? CheckCircle2
+              : phase.id === "calibration"
+                ? Target
+                : phase.id === "chart"
+                  ? MapPinned
+                  : phase.id === "reveal"
+                    ? Sparkles
+                    : BookOpen;
+          return (
+            <div
+              key={phase.id}
+              className={cn(
+                "relative flex min-w-0 items-center gap-3 rounded-[14px] border px-3 py-2.5 transition",
+                phase.status === "done"
+                  ? "border-gold/22 bg-gold/10"
+                  : phase.status === "active"
+                    ? "border-gold/42 bg-white/[0.075] shadow-[0_0_34px_rgba(201,169,110,0.08)]"
+                    : "border-gold/10 bg-white/[0.026] opacity-72"
+              )}
+            >
+              {index > 0 ? (
+                <div className="absolute -left-2 top-1/2 hidden h-px w-4 -translate-y-1/2 bg-gold/18 sm:block" />
+              ) : null}
+              <span
+                className={cn(
+                  "grid size-8 shrink-0 place-items-center rounded-full border",
+                  phase.status === "done"
+                    ? "border-gold/30 bg-gold text-night"
+                    : phase.status === "active"
+                      ? "border-gold/45 bg-gold/15 text-gold-light"
+                      : "border-gold/15 bg-white/[0.035] text-cream/35"
+                )}
+              >
+                <Icon className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[12.5px] font-semibold leading-tight text-cream">
+                  {phase.label}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] leading-tight text-cream/45">
+                  {phase.detail}
+                </span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1239,6 +1423,7 @@ function WorkshopDetailPanel({
         <ChartFactsDetail
           session={session}
           status={status}
+          birthInfo={birthInfo}
           readerRunning={readerRunning}
           onStartReaderValidation={onStartReaderValidation}
         />
@@ -1442,11 +1627,13 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
 function ChartFactsDetail({
   session,
   status,
+  birthInfo,
   readerRunning,
   onStartReaderValidation
 }: {
   session: SkillSessionResponse | null;
   status: StageStatus;
+  birthInfo: BirthInfo;
   readerRunning: boolean;
   onStartReaderValidation: () => Promise<void>;
 }) {
@@ -1477,9 +1664,17 @@ function ChartFactsDetail({
         coreInterrupted={false}
       />
 
-      <section className="my-5 border-t border-gold/25 pt-4">
-        <DetailSubtitle>{t("session.chart.sourceFiles")}</DetailSubtitle>
-        <div className="flex flex-wrap gap-2">
+      <ChartConfirmationCard
+        birthInfo={birthInfo}
+        hasChartFacts={Boolean(structuredData)}
+        rectificationState={rectificationState}
+      />
+
+      <details className="my-5 rounded-xl border border-gold/18 bg-cream-2 px-4 py-3">
+        <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[1.4px] text-muted outline-none">
+          {t("session.chart.sourceFiles")}
+        </summary>
+        <div className="mt-3 flex flex-wrap gap-2">
           {[
             structuredData?.path,
             inputContext?.path,
@@ -1489,14 +1684,14 @@ function ChartFactsDetail({
             .filter((path): path is string => Boolean(path))
             .map((path) => (
               <span
-                className="rounded-full border border-gold/25 bg-cream-2 px-2.5 py-1 text-[11px] font-medium text-muted"
+                className="rounded-full border border-gold/25 bg-cream px-2.5 py-1 text-[11px] font-medium text-muted"
                 key={path}
               >
                 {path}
               </span>
             ))}
         </div>
-      </section>
+      </details>
 
       {rectificationState && (
         <ChartRectificationSummary
@@ -1537,6 +1732,89 @@ function ChartFactsDetail({
   );
 }
 
+function ChartConfirmationCard({
+  birthInfo,
+  hasChartFacts,
+  rectificationState
+}: {
+  birthInfo: BirthInfo;
+  hasChartFacts: boolean;
+  rectificationState: RectificationState | null;
+}) {
+  const { t } = useI18n();
+  const hasCoordinates =
+    typeof birthInfo.latitude === "number" &&
+    Number.isFinite(birthInfo.latitude) &&
+    typeof birthInfo.longitude === "number" &&
+    Number.isFinite(birthInfo.longitude);
+  const locationMode = hasCoordinates
+    ? t("session.chart.location.coordinatesReady")
+    : t("session.chart.location.placeRecorded");
+  const timeMode = birthInfo.timePrecision || t("session.chart.time.recorded");
+  const gateAllowed = rectificationState?.reportGate?.fullReportAllowed === true;
+  const chartReady = hasChartFacts && (gateAllowed || !rectificationState);
+  const statusLabel = chartReady
+    ? t("session.chart.readiness.ready")
+    : hasChartFacts
+      ? t("session.chart.readiness.checks")
+      : t("session.chart.readiness.preparing");
+
+  return (
+    <section className="my-5 overflow-hidden rounded-[16px] border border-gold/30 bg-[linear-gradient(135deg,rgba(201,169,110,0.14),rgba(255,255,255,0.035))] shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
+      <div className="border-b border-gold/18 px-4 py-3">
+        <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.7px] text-gold">
+          <MapPinned className="size-4" /> {t("session.chart.confirmed.title")}
+        </div>
+        <p className="m-0 text-[13px] leading-[1.65] text-body">
+          {t("session.chart.confirmed.body")}
+        </p>
+      </div>
+      <div className="grid gap-2 p-4">
+        <ChartConfirmationRow
+          label={t("session.chart.confirmed.time")}
+          value={birthInfo.time || "—"}
+          detail={timeMode}
+        />
+        <ChartConfirmationRow
+          label={t("session.chart.confirmed.place")}
+          value={birthInfo.place || "—"}
+          detail={locationMode}
+        />
+        <ChartConfirmationRow
+          label={t("session.chart.confirmed.coordinates")}
+          value={hasCoordinates ? `${birthInfo.longitude}, ${birthInfo.latitude}` : "—"}
+          detail={t("session.chart.confirmed.coordinatesDetail")}
+        />
+        <ChartConfirmationRow
+          label={t("session.chart.confirmed.readiness")}
+          value={statusLabel}
+          detail={rectificationState?.reportGate?.nextStep || t("session.chart.confirmed.next")}
+        />
+      </div>
+    </section>
+  );
+}
+
+function ChartConfirmationRow({
+  label,
+  value,
+  detail
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-gold/18 bg-cream/60 px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-[1.25px] text-muted">{label}</div>
+        <div className="mt-0.5 truncate text-sm font-semibold text-ink">{value}</div>
+      </div>
+      <div className="max-w-[44%] text-right text-[12px] leading-[1.45] text-muted">{detail}</div>
+    </div>
+  );
+}
+
 function ChartRectificationSummary({
   state,
   readerRunning,
@@ -1547,36 +1825,51 @@ function ChartRectificationSummary({
   onStartReaderValidation: () => Promise<void>;
 }) {
   const candidates = state.candidates ?? [];
-  const active = state.activeCandidateId || "—";
-  const selected = state.selectedCandidateId || "—";
   const revision = state.activeChartRevision?.revision ?? 0;
   const gateAllowed = state.reportGate?.fullReportAllowed === true;
   const canGenerateNextRound =
     !gateAllowed &&
     ["needs_more_feedback", "needs_candidate_bound_checks"].includes(state.status ?? "");
+  const { t } = useI18n();
+  const confidenceLabel = gateAllowed
+    ? state.status === "corrected_chart_ready"
+      ? t("session.rectification.corrected")
+      : t("session.rectification.accepted")
+    : canGenerateNextRound
+      ? t("session.rectification.moreChecks")
+      : t("session.rectification.waiting");
+  const confidenceBody = gateAllowed
+    ? t("session.rectification.body.ready")
+    : t("session.rectification.body.more");
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
-      <DetailSubtitle>Chart correction state</DetailSubtitle>
+      <DetailSubtitle>{t("session.rectification.title")}</DetailSubtitle>
       <div className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Badge variant={gateAllowed ? "done" : "neutral"}>
-            {formatRectificationStatus(state.status)}
+          <Badge variant={gateAllowed ? "done" : canGenerateNextRound ? "gold" : "neutral"}>
+            {confidenceLabel}
           </Badge>
           <span className="text-[12px] text-muted">
-            {state.riskLevel || "unknown"} risk · {candidates.length} candidate
-            {candidates.length === 1 ? "" : "s"} · active {active}
+            {t("session.rectification.reviewMeta", {
+              risk: state.riskLevel || "standard",
+              revision
+            })}
           </span>
         </div>
-        <div className="grid gap-2 text-[12.5px] leading-[1.6] text-body">
-          <InfoRow label="Selected candidate" value={selected} />
-          <InfoRow label="Chart revision" value={String(revision)} />
+        <p className="m-0 text-[13px] leading-[1.7] text-body">{confidenceBody}</p>
+
+        <div className="mt-3 grid gap-2 text-[12.5px] leading-[1.6] text-body">
           <InfoRow
-            label="Candidate-bound checks"
-            value={String(state.candidateBoundAnchorCount ?? 0)}
+            label={t("session.rectification.anchors")}
+            value={String(state.feedbackAnchorCount ?? state.candidateBoundAnchorCount ?? 0)}
           />
-          <InfoRow label="Next step" value={state.reportGate?.nextStep || "—"} />
+          <InfoRow
+            label={t("session.rectification.nextStep")}
+            value={state.reportGate?.nextStep || t("session.rectification.continue")}
+          />
         </div>
+
         {state.reportGate?.reason && (
           <p className="m-0 mt-3 text-[12.5px] leading-[1.65] text-muted">
             {state.reportGate.reason}
@@ -1590,37 +1883,48 @@ function ChartRectificationSummary({
           >
             {readerRunning ? (
               <>
-                <LoaderCircle className="size-4 animate-spin" /> Generating next check...
+                <LoaderCircle className="size-4 animate-spin" />{" "}
+                {t("session.rectification.preparingNext")}
               </>
             ) : (
               <>
-                <CheckCircle2 size={15} /> Generate next check
+                <CheckCircle2 size={15} /> {t("session.rectification.continueCheck")}
               </>
             )}
           </Button>
         )}
-        {candidates.length > 1 && (
-          <div className="mt-3 grid gap-2">
-            {candidates.slice(0, 4).map((candidate) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-lg border border-gold/20 bg-cream px-3 py-2 text-[12px]"
-                key={candidate.candidateId}
-              >
-                <div className="min-w-0">
-                  <span className="font-semibold text-ink">{candidate.candidateId}</span>
-                  {candidate.isBase && <span className="ml-1 text-muted">(base)</span>}
-                  {candidate.changedFromBase?.length ? (
-                    <span className="ml-2 text-muted">
-                      {candidate.changedFromBase.slice(0, 3).join(", ")}
-                    </span>
-                  ) : null}
+
+        {candidates.length > 0 && (
+          <details className="mt-3 rounded-lg border border-gold/18 bg-cream/60 px-3 py-2">
+            <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[1.2px] text-muted outline-none">
+              {t("session.rectification.advanced")}
+            </summary>
+            <div className="mt-3 grid gap-2">
+              {candidates.slice(0, 4).map((candidate) => (
+                <div
+                  className="flex items-center justify-between gap-3 rounded-lg border border-gold/20 bg-cream px-3 py-2 text-[12px]"
+                  key={candidate.candidateId}
+                >
+                  <div className="min-w-0">
+                    <span className="font-semibold text-ink">{candidate.candidateId}</span>
+                    {candidate.isBase && (
+                      <span className="ml-1 text-muted">
+                        ({t("session.rectification.baseCandidate")})
+                      </span>
+                    )}
+                    {candidate.changedFromBase?.length ? (
+                      <span className="ml-2 text-muted">
+                        {candidate.changedFromBase.slice(0, 3).join(", ")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 tabular-nums text-muted">
+                    {t("session.rectification.score", { score: candidate.score ?? 0 })}
+                  </span>
                 </div>
-                <span className="shrink-0 tabular-nums text-muted">
-                  score {candidate.score ?? 0}
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
     </section>
@@ -1739,12 +2043,20 @@ function ReaderDetail({
         <form className="mt-4 grid gap-4" onSubmit={onSubmitFeedback}>
           <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
             <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
-              <CheckCircle2 className="size-4" />
-              {t("session.reader.required")}
+              <Target className="size-4" />
+              {t("session.reader.roundTitle", { round: 1 })}
             </div>
             <p className="m-0 text-[13px] leading-[1.65] text-body">
-              {t("session.reader.requiredBody")}
+              {t("session.reader.roundBody")}
             </p>
+            {anchors.length > 0 && (
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-cream/60">
+                <span
+                  className="block h-full rounded-full bg-gold transition-[width] duration-300"
+                  style={{ width: `${Math.round((answeredCount / anchors.length) * 100)}%` }}
+                />
+              </div>
+            )}
           </div>
 
           {activeAnchor ? (
@@ -1755,7 +2067,7 @@ function ReaderDetail({
                     {t("session.reader.check")}
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-ink">
-                    {t("session.reader.questionOf", {
+                    {t("session.reader.cardOf", {
                       current: activeAnchorIndex + 1,
                       total: anchors.length
                     })}
@@ -2709,7 +3021,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
         navState.birth.birthTimePrecision === "exact" &&
         navState.birth.timeSource === "出生证/医院记录"
           ? "± minute-level"
-          : "Adjusted by time confidence",
+          : "Adjusted by time certainty",
       concern: navState.concern?.trim() ?? ""
     };
   }
@@ -2814,20 +3126,6 @@ function parseRectificationState(content: string): RectificationState | null {
   } catch {
     return null;
   }
-}
-
-function formatRectificationStatus(status?: string) {
-  const labels: Record<string, string> = {
-    not_required: "No correction needed",
-    candidate_feedback_pending: "Needs first-check feedback",
-    needs_candidate_bound_checks: "Needs candidate-bound checks",
-    needs_more_feedback: "Needs more feedback",
-    needs_boundary_scan: "Needs deeper scan",
-    needs_recalculation: "Recalculation required",
-    base_confirmed: "Base chart confirmed",
-    corrected_chart_ready: "Corrected chart ready"
-  };
-  return labels[status ?? ""] ?? status ?? "Unknown";
 }
 
 function objectValue(value: unknown, key: string): Record<string, unknown> | null {
