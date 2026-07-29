@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
 
 import json
 import pytest
 
-from app.schemas import BirthInput
+from app.schemas import BirthInput, SkillArtifact, SkillRunInput
 from app.services.place_service import ResolvedPlace
 from app.services.chart_rectification import ChartRectificationService
 from app.services.life_event_rectification import parse_life_event_ledger
@@ -1158,6 +1159,10 @@ def test_reader_prompt_uses_backend_rectification_plan() -> None:
     assert "discriminatingFields" in prompt
     assert "timeWindow" in prompt
     assert "Do not invent candidate IDs" in prompt
+    assert "user-answerable lived-experience question" in prompt
+    assert "keep all candidate and field terminology out of the visible question" in prompt
+    assert "Stop analysis as soon as" in prompt
+    assert "For a minor" in prompt
 
 
 def test_reader_artifact_validation_rejects_unexpected_artifacts() -> None:
@@ -1199,7 +1204,7 @@ def test_reader_artifact_validation_rejects_missing_candidate_field_lines() -> N
     )
     runtime.rectification = service
 
-    with pytest.raises(ValueError, match="candidate-bound validation"):
+    with pytest.raises(ValueError, match="output failed validation"):
         runtime._validate_skill_artifacts(
             "session",
             "vedic-reader",
@@ -1217,6 +1222,98 @@ def test_reader_artifact_validation_rejects_missing_candidate_field_lines() -> N
                 ]
             },
         )
+
+
+def test_reader_run_retries_once_after_output_contract_rejection() -> None:
+    invalid = json.dumps(
+        {
+            "chatMessage": "retry",
+            "artifacts": [
+                {
+                    "path": "reader_prevalidation.md",
+                    "content": "**1.** Saturn in the 7th house indicates pressure.\n\n> Derivation: test",
+                }
+            ],
+        }
+    )
+    valid_content = """
+**1.** Did you move once between 2018 and 2020?
+
+> Derivation: test
+
+**2.** Did your education have one clear interruption?
+
+> Derivation: test
+
+**3.** Did your family make one major financial adjustment before 2015?
+
+> Derivation: test
+"""
+    valid = json.dumps(
+        {
+            "chatMessage": "ready",
+            "artifacts": [{"path": "reader_prevalidation.md", "content": valid_content}],
+        }
+    )
+
+    class FakeAgentRuntime:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def run_skill_prompt_task(self, _task: str, prompt: str, **_kwargs: object):
+            self.prompts.append(prompt)
+            return SimpleNamespace(raw_text=[invalid, valid][len(self.prompts) - 1])
+
+    class FakeWorkspace:
+        def __init__(self) -> None:
+            self.artifacts: list[SkillArtifact] = []
+
+        def require_session_dir(self, _session_id: str) -> None:
+            return None
+
+        def read_artifacts(self, _session_id: str) -> list[SkillArtifact]:
+            return self.artifacts
+
+        def write_artifact(self, _session_id: str, path: str, content: str) -> None:
+            self.artifacts = [
+                SkillArtifact(
+                    path=path,
+                    title=path,
+                    content=content,
+                    updatedAt="2026-07-29T00:00:00Z",
+                )
+            ]
+
+        def mark_artifact_checkpoint(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.agent_runtime = FakeAgentRuntime()
+    runtime.workspace = FakeWorkspace()
+    runtime.rectification = ChartRectificationService()
+    runtime._artifact_prompt_for = lambda _input: "base prompt"
+    runtime._write_prevalidation_result = lambda *_args, **_kwargs: None
+
+    async def no_sync(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    runtime._sync_metadata = no_sync
+
+    response = asyncio.run(
+        runtime.run_skill(
+            SkillRunInput(
+                sessionId="session",
+                skill="vedic-reader",
+                userMessage="start",
+                locale="en",
+            )
+        )
+    )
+
+    assert response.chat_message == "ready"
+    assert len(runtime.agent_runtime.prompts) == 2
+    assert "previous artifact was rejected" in runtime.agent_runtime.prompts[1]
+    assert runtime.workspace.artifacts[0].content.strip() == valid_content.strip()
 
 
 def test_life_event_ledger_parses_dated_major_events() -> None:
@@ -1341,7 +1438,19 @@ def test_reader_contract_requires_event_line_when_life_event_focus_exists() -> N
     errors = service.validate_prevalidation_contract(
         state,
         """
-**1.** Candidate B marriage timing anchor.
+**1.** Around 2018, did you experience one major change in your relationship status?
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+
+**2.** Around 2020, did you make one major move away from your previous home?
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+
+**3.** Did your education have one clear interruption before graduation?
 
 > Derivation: test
 > Candidate: B
@@ -1353,7 +1462,21 @@ def test_reader_contract_requires_event_line_when_life_event_focus_exists() -> N
     valid_errors = service.validate_prevalidation_contract(
         state,
         f"""
-**1.** Candidate B marriage timing anchor.
+**1.** Around 2018, did you experience one major change in your relationship status?
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+> Event: {event_id}
+
+**2.** Around 2018, did you move away from your previous home?
+
+> Derivation: test
+> Candidate: B
+> Field: d9Lagna
+> Event: {event_id}
+
+**3.** Around 2018, did your education have one clear interruption?
 
 > Derivation: test
 > Candidate: B
@@ -1364,3 +1487,28 @@ def test_reader_contract_requires_event_line_when_life_event_focus_exists() -> N
 
     assert any("Event line" in error for error in errors)
     assert valid_errors == []
+
+
+def test_prevalidation_contract_rejects_visible_astrology_and_non_questions() -> None:
+    service = ChartRectificationService()
+
+    errors = service.validate_prevalidation_contract(
+        {},
+        """
+**1.** Saturn in the 7th house indicates relationship pressure.
+
+> Derivation: Saturn=L7
+
+**2.** 木星落入九宫，学业应该不低。
+
+> 推导：Jupiter=L9
+
+**3.** Did you move once between 2018 and 2020?
+
+> Derivation: L4 activated
+""",
+        enforce_user_facing_quality=True,
+    )
+
+    assert any("direct question" in error for error in errors)
+    assert any("astrology or candidate terminology" in error for error in errors)

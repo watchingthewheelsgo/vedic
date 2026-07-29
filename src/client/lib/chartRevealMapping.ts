@@ -47,6 +47,28 @@ export interface ChartRevealState {
   progressLabel: string;
 }
 
+export interface ChartRevealCoordinates {
+  lagnaLongitude: number;
+  planetLongitudes: Partial<Record<PlanetKey, number>>;
+}
+
+export function chartRevealCoordinatesFromFacts(
+  facts: Record<string, unknown> | null
+): ChartRevealCoordinates | null {
+  const rashi = objectRecord(facts?.rashi);
+  const lagna = objectRecord(rashi?.lagna);
+  const planets = objectRecord(rashi?.planets);
+  const lagnaLongitude = finiteNumber(lagna?.longitude);
+  if (lagnaLongitude == null || !planets) return null;
+
+  const planetLongitudes: Partial<Record<PlanetKey, number>> = {};
+  for (const planet of Object.keys(PLANET_SLUG).map((slug) => PLANET_SLUG[slug])) {
+    const longitude = finiteNumber(objectRecord(planets[planet])?.longitude);
+    if (longitude != null) planetLongitudes[planet] = longitude;
+  }
+  return { lagnaLongitude, planetLongitudes };
+}
+
 // Generic per-stage messaging for stages that aren't further subdivided by a
 // specific planet/house. Stage ids match WORKSHOP_STAGES exactly.
 const STAGE_MESSAGING: Record<string, { title: string; caption: string; focus: ChartRevealFocus }> =
@@ -228,4 +250,14 @@ export function deriveChartRevealState(data: PipelineData | null): ChartRevealSt
     housesCompleted,
     progressLabel: `${data.completed}/${data.total}`
   };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { format } from "date-fns";
+import { format, type Locale } from "date-fns";
 import { CalendarDays } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button } from "./button";
@@ -13,6 +13,7 @@ type DatePickerProps = {
   onChange: (date: Date | null) => void;
   placeholder?: string;
   formatPattern?: string;
+  locale?: Locale;
   invalid?: boolean;
   disabled?: CalendarProps["disabled"];
   startMonth?: CalendarProps["startMonth"];
@@ -24,7 +25,8 @@ export function DatePicker({
   value,
   onChange,
   placeholder = "Select date",
-  formatPattern = "MMMM d, yyyy",
+  formatPattern = "PPP",
+  locale,
   invalid = false,
   disabled,
   startMonth,
@@ -49,7 +51,7 @@ export function DatePicker({
         >
           <CalendarDays className="size-4 shrink-0 text-gold-dim" />
           <span className={cn("min-w-0 flex-1 truncate", value ? "text-cream" : "text-cream/40")}>
-            {value ? format(value, formatPattern) : placeholder}
+            {value ? format(value, formatPattern, { locale }) : placeholder}
           </span>
         </Button>
       </PopoverTrigger>
@@ -65,6 +67,7 @@ export function DatePicker({
           captionLayout="dropdown"
           startMonth={startMonth}
           endMonth={endMonth}
+          locale={locale}
         />
       </PopoverContent>
     </Popover>

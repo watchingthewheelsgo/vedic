@@ -1,13 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import {
-  Check,
-  Crosshair,
-  Database,
-  LocateFixed,
-  LoaderCircle,
-  MapPin,
-  Search
-} from "lucide-react";
+import { Check, Crosshair, LocateFixed, LoaderCircle, MapPin, Search } from "lucide-react";
 import { api } from "../api";
 import { useI18n } from "../i18n/provider";
 import { cn } from "../lib/cn";
@@ -17,7 +9,6 @@ import {
   validateCoordinateParts
 } from "../lib/coordinates";
 import type { PlaceOption, PlaceSearchLevel, PrecisePlaceOption } from "../../shared/domain";
-import { Badge } from "./ui/badge";
 import { Field } from "./ui/field";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
@@ -30,6 +21,13 @@ type PlaceReadout = {
   latitude: number;
   longitude: number;
   timezone?: string | null;
+};
+
+export type BirthPlaceVisualState = {
+  latitude: number;
+  longitude: number;
+  label?: string | null;
+  exact?: boolean;
 };
 
 type PreciseLookupState = {
@@ -55,10 +53,12 @@ const emptyLookupState: PreciseLookupState = {
 export function PlacePicker({
   value,
   onChange,
+  onVisualStateChange,
   error
 }: {
   value: string;
   onChange: (value: string) => void;
+  onVisualStateChange?: (value: BirthPlaceVisualState | null) => void;
   error?: string;
 }) {
   const { t } = useI18n();
@@ -107,19 +107,21 @@ export function PlacePicker({
   }, []);
 
   useEffect(() => {
+    const visualState = readout
+      ? {
+          latitude: readout.latitude,
+          longitude: readout.longitude,
+          label: readout.label,
+          exact: readout.kind === "manual" || readout.kind === "precise"
+        }
+      : null;
+    onVisualStateChange?.(visualState);
     window.dispatchEvent(
       new CustomEvent("birth-place-coordinates", {
-        detail: readout
-          ? {
-              latitude: readout.latitude,
-              longitude: readout.longitude,
-              label: readout.label,
-              exact: readout.kind === "manual" || readout.kind === "precise"
-            }
-          : null
+        detail: visualState
       })
     );
-  }, [readout]);
+  }, [onVisualStateChange, readout]);
 
   useEffect(() => {
     if (!poiLoading) {
@@ -320,43 +322,9 @@ export function PlacePicker({
     poiQuery.trim().length >= 2 &&
     !poiLoading &&
     !(preciseSelection && poiQuery.trim() === preciseSelection.label.trim());
-  const showPoiDiagnostics =
-    Boolean(preciseSelection) ||
-    poiLoading ||
-    poiLookupStarted ||
-    lookupState.agentAttempted ||
-    Boolean(lookupState.verificationBase) ||
-    Boolean(lookupState.agentError);
-
   return (
-    <Field
-      label={t("place.label")}
-      icon={mode === "coordinates" ? <LocateFixed size={16} /> : <MapPin size={16} />}
-      error={fieldError}
-      hint={mode === "coordinates" ? t("place.coordinates.hint") : undefined}
-    >
+    <Field label="" error={fieldError} className="mb-0">
       <div className="grid gap-3">
-        <div className="birth-input-mode-switch inline-grid w-fit grid-cols-2 rounded-full border border-gold/25 bg-white/5 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-          <button
-            type="button"
-            onClick={() => switchMode("city")}
-            data-active={mode === "city"}
-            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium text-cream/50 transition hover:text-cream focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15 data-[active=true]:bg-gold data-[active=true]:text-white"
-          >
-            <MapPin className="size-3.5" />
-            {t("place.mode.city")}
-          </button>
-          <button
-            type="button"
-            onClick={() => switchMode("coordinates")}
-            data-active={mode === "coordinates"}
-            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium text-cream/50 transition hover:text-cream focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15 data-[active=true]:bg-gold data-[active=true]:text-white"
-          >
-            <LocateFixed className="size-3.5" />
-            {t("place.mode.coordinates")}
-          </button>
-        </div>
-
         {mode === "city" ? (
           <div className="grid gap-3">
             <div className="grid gap-2">
@@ -377,11 +345,7 @@ export function PlacePicker({
                   onClear={clearCity}
                   t={t}
                 />
-              ) : (
-                <p className="text-xs leading-relaxed text-cream/50">
-                  {t("place.citySearch.help")}
-                </p>
-              )}
+              ) : null}
             </div>
 
             {cityReady ? (
@@ -396,10 +360,12 @@ export function PlacePicker({
                   </span>
                   <div className="flex h-[50px] items-center gap-3 rounded-[10px] border border-gold/25 bg-white/5 px-4 text-cream/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition focus-within:border-gold focus-within:bg-white/10 focus-within:ring-4 focus-within:ring-gold/15">
                     <input
+                      name="birthPoi"
                       value={poiQuery}
                       onChange={(event) => updatePoiQuery(event.target.value)}
                       onKeyDown={onPoiKeyDown}
                       placeholder={t("place.poi.placeholder")}
+                      autoComplete="street-address"
                       className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[15px] text-cream outline-none placeholder:text-cream/35"
                     />
                     <button
@@ -421,63 +387,19 @@ export function PlacePicker({
                 </label>
 
                 {poiLookupStarted || poiLoading || preciseSelection ? (
-                  <PlaceLookupProgress
-                    cityReady={cityReady}
-                    query={poiQuery}
-                    lookupStarted={poiLookupStarted}
-                    loading={poiLoading}
-                    elapsedSeconds={poiElapsedSeconds}
-                    lookupState={lookupState}
-                    options={poiOptions}
-                    selected={preciseSelection}
-                    poiError={poiError}
-                    t={t}
-                  />
-                ) : null}
-
-                {showPoiDiagnostics ? (
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                    <Badge variant="done" className="gap-1">
-                      <Database className="size-3" />
-                      {t("precisePlace.source.local")}
-                    </Badge>
-                    {lookupState.fallbackEnabled ? (
-                      <Badge variant="done" className="gap-1">
-                        <MapPin className="size-3" />
-                        {t("precisePlace.source.amap.enabled")}
-                      </Badge>
-                    ) : null}
-                    {lookupState.agentFallbackEnabled || lookupState.agentAttempted ? (
-                      <Badge
-                        variant={lookupState.agentAttempted ? "done" : "neutral"}
-                        className="gap-1"
-                      >
-                        <Crosshair className="size-3" />
-                        {lookupState.agentAttempted
-                          ? t("precisePlace.source.agent.attempted")
-                          : t("precisePlace.source.agent.enabled")}
-                      </Badge>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {lookupState.verificationBase ? (
-                  <div className="rounded-[10px] border border-gold/20 bg-white/5 px-3 py-2 text-xs leading-relaxed text-cream/70">
-                    {t("precisePlace.verification.base")}: {lookupState.verificationBase}
-                    {lookupState.rejectedCount > 0
-                      ? ` · ${t("precisePlace.verification.rejected")} ${lookupState.rejectedCount}`
-                      : ""}
-                  </div>
-                ) : null}
-                {lookupState.agentError ? (
-                  <div className="rounded-[10px] border border-gold/20 bg-white/5 px-3 py-2 text-xs leading-relaxed text-cream/55">
-                    {t("precisePlace.source.agent.error")}:{" "}
-                    {friendlyLookupError(lookupState.agentError, t)}
-                  </div>
-                ) : null}
-                {poiError ? (
-                  <div className="rounded-[10px] border border-red/25 bg-red/10 px-4 py-3 text-sm text-red">
-                    {poiError}
+                  <div aria-live="polite">
+                    <PlaceLookupProgress
+                      cityReady={cityReady}
+                      query={poiQuery}
+                      lookupStarted={poiLookupStarted}
+                      loading={poiLoading}
+                      elapsedSeconds={poiElapsedSeconds}
+                      lookupState={lookupState}
+                      options={poiOptions}
+                      selected={preciseSelection}
+                      poiError={poiError}
+                      t={t}
+                    />
                   </div>
                 ) : null}
 
@@ -494,12 +416,7 @@ export function PlacePicker({
                   t={t}
                 />
               </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-[10px] border border-gold/15 bg-white/[0.03] px-3 py-2 text-xs leading-relaxed text-cream/45">
-                <Crosshair className="size-3.5 shrink-0 text-gold-dim" />
-                <span>{t("place.poi.afterCity")}</span>
-              </div>
-            )}
+            ) : null}
           </div>
         ) : (
           <div
@@ -551,6 +468,14 @@ export function PlacePicker({
             </button>
           </div>
         ) : null}
+        <button
+          type="button"
+          onClick={() => switchMode(mode === "city" ? "coordinates" : "city")}
+          className="inline-flex w-fit items-center gap-1.5 text-xs text-cream/45 underline-offset-4 transition-colors hover:text-gold-light hover:underline focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15"
+        >
+          {mode === "city" ? <LocateFixed className="size-3.5" /> : <MapPin className="size-3.5" />}
+          {mode === "city" ? t("place.coordinates.manualLink") : t("place.mode.city")}
+        </button>
       </div>
     </Field>
   );
@@ -593,8 +518,6 @@ function ResolvedPlaceSummary({
   );
 }
 
-type LookupStepStatus = "pending" | "active" | "done" | "error";
-
 function PlaceLookupProgress({
   cityReady,
   query,
@@ -622,31 +545,7 @@ function PlaceLookupProgress({
   if (!cityReady || trimmed.length < 2 || !lookupStarted) return null;
 
   const hasOptions = options.length > 0;
-  const hasAgentEvidence =
-    lookupState.agentAttempted ||
-    lookupState.attemptedSources.includes("agent") ||
-    options.some((option) => option.source === "agent");
-  const hasVerifiedResult =
-    Boolean(selected) ||
-    options.some((option) => option.verificationStatus === "verified") ||
-    options.some((option) => option.verificationStatus === "city-fallback");
   const hasError = Boolean(poiError || lookupState.agentError);
-  const localStatus: LookupStepStatus = loading ? (elapsedSeconds < 3 ? "active" : "done") : "done";
-  const agentStatus: LookupStepStatus = lookupState.agentError
-    ? "error"
-    : hasAgentEvidence
-      ? "done"
-      : loading && elapsedSeconds >= 3
-        ? "active"
-        : "pending";
-  const verifyStatus: LookupStepStatus =
-    hasError && !hasOptions
-      ? "error"
-      : hasVerifiedResult
-        ? "done"
-        : loading && elapsedSeconds >= 8
-          ? "active"
-          : "pending";
   const caption = loading
     ? t("place.lookup.progress.running", { seconds: elapsedSeconds, timeout: 120 })
     : selected
@@ -657,77 +556,29 @@ function PlaceLookupProgress({
           ? t("place.lookup.progress.retry")
           : t("place.lookup.progress.waiting");
 
-  const steps: Array<{ key: string; label: string; status: LookupStepStatus }> = [
-    { key: "scope", label: t("place.lookup.progress.scope"), status: "done" },
-    { key: "local", label: t("place.lookup.progress.local"), status: localStatus },
-    { key: "agent", label: t("place.lookup.progress.agent"), status: agentStatus },
-    { key: "verify", label: t("place.lookup.progress.verify"), status: verifyStatus }
-  ];
-
   return (
-    <div className="overflow-hidden rounded-[12px] border border-gold/20 bg-black/15">
-      <div className="flex items-center justify-between gap-3 border-b border-gold/10 px-3 py-2">
-        <div className="min-w-0 text-[11px] uppercase tracking-[1.1px] text-muted">
-          {t("place.lookup.progress.title")}
-        </div>
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-[11px] border px-3 py-2.5 text-xs leading-relaxed",
+        hasError && !hasOptions
+          ? "border-red/25 bg-red/8 text-red"
+          : "border-gold/18 bg-black/12 text-cream/58"
+      )}
+    >
+      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border border-gold/25 bg-gold/10 text-gold-light">
         {loading ? (
-          <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-gold/25 bg-gold/10 px-2 py-0.5 text-[11px] text-gold-light">
-            <span className="size-1.5 rounded-full bg-gold shadow-[0_0_10px_rgba(213,178,104,0.85)] animate-pulse" />
-            {t("place.lookup.progress.live")}
-          </div>
-        ) : null}
-      </div>
-      <div className="grid gap-2 px-3 py-3 sm:grid-cols-4">
-        {steps.map((step, index) => (
-          <div key={step.key} className="relative flex min-w-0 items-center gap-2 sm:block">
-            {index > 0 ? (
-              <div className="absolute left-[-50%] top-[13px] hidden h-px w-full bg-gold/15 sm:block" />
-            ) : null}
-            <div className="relative z-10 flex items-center gap-2 sm:grid sm:justify-items-center sm:gap-1.5">
-              <LookupStatusDot status={step.status} />
-              <div className="min-w-0 truncate text-xs text-cream/70 sm:text-center">
-                {step.label}
-              </div>
-              <div className="hidden text-[10px] uppercase tracking-[0.8px] text-cream/35 sm:block">
-                {t(`place.lookup.progress.status.${step.status}`)}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="border-t border-gold/10 px-3 py-2 text-xs leading-relaxed text-cream/55">
-        {caption}
+          <LoaderCircle className="size-3.5 animate-spin" />
+        ) : hasError && !hasOptions ? (
+          <Crosshair className="size-3.5" />
+        ) : (
+          <Check className="size-3.5" />
+        )}
+      </span>
+      <div className="min-w-0">
+        <div className="font-medium text-cream/82">{t("place.lookup.progress.title")}</div>
+        <div className="mt-0.5">{caption}</div>
       </div>
     </div>
-  );
-}
-
-function LookupStatusDot({ status }: { status: LookupStepStatus }) {
-  if (status === "done") {
-    return (
-      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-gold/40 bg-gold/20 text-gold-light">
-        <Check className="size-3.5" />
-      </span>
-    );
-  }
-  if (status === "active") {
-    return (
-      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-gold/50 bg-gold/15 text-gold-light shadow-[0_0_18px_rgba(213,178,104,0.18)]">
-        <LoaderCircle className="size-3.5 animate-spin" />
-      </span>
-    );
-  }
-  if (status === "error") {
-    return (
-      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-red/35 bg-red/10 text-red">
-        <Crosshair className="size-3.5" />
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-gold/15 bg-white/[0.03]">
-      <span className="size-1.5 rounded-full bg-cream/30" />
-    </span>
   );
 }
 
@@ -763,6 +614,7 @@ function PlaceSearchBox({
   const [focused, setFocused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<PlaceOption[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (disabled || !focused) {
@@ -811,6 +663,7 @@ function PlaceSearchBox({
             )}
           >
             <input
+              ref={inputRef}
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               onFocus={() => setFocused(true)}
@@ -849,8 +702,10 @@ function PlaceSearchBox({
                     role="option"
                     onMouseDown={(event) => {
                       event.preventDefault();
-                      onSelect(option);
+                      setFocused(false);
                       setOpen(false);
+                      inputRef.current?.blur();
+                      onSelect(option);
                     }}
                     className="flex items-baseline justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-cream/55 outline-none transition hover:bg-gold/15 hover:text-cream focus:bg-gold/15 focus:text-cream focus-visible:ring-4 focus-visible:ring-gold/15"
                   >
@@ -894,7 +749,7 @@ function PreciseOptionsList({
 }) {
   const trimmed = query.trim();
   if (!cityReady) return null;
-  if (trimmed.length === 0) return <InlineHint text={t("place.poi.prompt")} />;
+  if (trimmed.length === 0) return null;
   if (trimmed.length < 2) return <InlineHint text={t("precisePlace.search.minLength")} />;
   if (!lookupStarted && !selected) return <InlineHint text={t("precisePlace.search.ready")} />;
   if (loading) return <InlineHint text={t("precisePlace.search.loading")} />;
@@ -920,32 +775,14 @@ function PreciseOptionsList({
           data-active={selected?.id === option.id}
           className="grid gap-1 rounded-[10px] border border-gold/20 bg-white/5 px-4 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] outline-none transition hover:border-gold/50 hover:bg-gold/10 focus-visible:ring-4 focus-visible:ring-gold/20 data-[active=true]:border-gold data-[active=true]:bg-gold/15"
         >
-          <div className="flex items-start justify-between gap-3">
-            <span className="min-w-0 font-medium text-cream">{option.label}</span>
-            <span className="shrink-0 rounded-full border border-gold/25 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-normal text-gold-light">
-              {labelForSource(option.source)}
-            </span>
-          </div>
+          <span className="min-w-0 font-medium text-cream">{option.label}</span>
           <span className="text-xs leading-relaxed text-cream/70">
             {option.address || option.meta}
           </span>
-          <span className="font-mono text-[11px] text-cream/50">
+          <span className="text-[11px] tabular-nums text-cream/48">
             {formatCoordinateNumber(option.longitude)}, {formatCoordinateNumber(option.latitude)} ·{" "}
-            {option.coordinateSystem}
+            {t("place.readout.verifiedCoordinates")}
           </span>
-          {option.verificationReason ? (
-            <span className="text-[11px] leading-relaxed text-cream/50">
-              {option.verificationReason}
-            </span>
-          ) : null}
-          {option.rawEvidence ? (
-            <details className="mt-1 text-[11px] leading-relaxed text-cream/50">
-              <summary className="cursor-pointer select-none text-gold-light/80 outline-none">
-                {t("precisePlace.evidence.show")}
-              </summary>
-              <span className="mt-1 block line-clamp-3">{option.rawEvidence}</span>
-            </details>
-          ) : null}
         </button>
       ))}
     </div>
@@ -1019,26 +856,12 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-function friendlyLookupError(error: string, t: Translator) {
-  if (/tool_use|timeout|timed out|cancel|abort/i.test(error)) {
-    return t("precisePlace.source.agent.errorFriendly");
-  }
-  return error;
-}
-
 function formatLatitude(value: number) {
   return `${formatCoordinateNumber(value)} ${value >= 0 ? "N" : "S"}`;
 }
 
 function formatLongitude(value: number) {
   return `${formatCoordinateNumber(value)} ${value >= 0 ? "E" : "W"}`;
-}
-
-function labelForSource(source: PrecisePlaceOption["source"]) {
-  if (source === "amap") return "AMap";
-  if (source === "agent") return "Agent";
-  if (source === "geonames-local") return "GeoNames";
-  return "Manual";
 }
 
 function isFiniteNumber(value: unknown): value is number {

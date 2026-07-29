@@ -384,11 +384,10 @@ class ChartRectificationService:
         self,
         state: dict[str, Any],
         prevalidation_markdown: str,
+        *,
+        enforce_user_facing_quality: bool = False,
     ) -> list[str]:
-        """Return contract errors for high-risk candidate-bound reader output."""
-
-        if not self._requires_candidate_bound_anchors(state):
-            return []
+        """Return user-facing quality and candidate-binding contract errors."""
 
         raw_candidates = state.get("candidates")
         candidates = raw_candidates if isinstance(raw_candidates, list) else []
@@ -401,6 +400,31 @@ class ChartRectificationService:
         errors: list[str] = []
         if not anchors:
             return ["reader_prevalidation.md does not contain numbered validation anchors."]
+        if enforce_user_facing_quality:
+            if not 3 <= len(anchors) <= 5:
+                errors.append("reader_prevalidation.md must contain 3 to 5 validation questions.")
+
+            for anchor in anchors:
+                index = int(anchor["index"])
+                block = str(anchor["block"])
+                statement = self._statement_from_anchor_block(block)
+                if len(statement) < 8:
+                    errors.append(
+                        f"Anchor {index} does not contain a concrete user-facing question."
+                    )
+                elif not statement.rstrip().endswith(("?", "？")):
+                    errors.append(f"Anchor {index} must be written as a direct question.")
+                if len(statement) > 180:
+                    errors.append(f"Anchor {index} visible question is too long.")
+                if self._contains_visible_astrology_terms(statement):
+                    errors.append(
+                        f"Anchor {index} exposes astrology or candidate terminology in the visible question."
+                    )
+                if not re.search(r"(?im)^>\s*(?:推导|Derivation|根拠)\s*[：:]", block):
+                    errors.append(f"Anchor {index} is missing a quoted derivation line.")
+
+        if not self._requires_candidate_bound_anchors(state):
+            return errors
 
         for anchor in anchors:
             index = int(anchor["index"])
@@ -434,11 +458,25 @@ class ChartRectificationService:
                         f"Anchor {index} references unknown event(s): "
                         f"{', '.join(invalid_event_refs)}."
                     )
-            statement = self._statement_from_anchor_block(block)
-            if len(statement) < 12:
-                errors.append(f"Anchor {index} does not contain a concrete user-facing claim.")
-
         return errors
+
+    @staticmethod
+    def _contains_visible_astrology_terms(statement: str) -> bool:
+        return bool(
+            re.search(
+                r"(?:"
+                r"(?:Sun|Moon|Mars|Mercury|Jupiter|Venus|Saturn|Rahu|Ketu)\b|"
+                r"(?:planet|zodiac|ascendant|lagna|nakshatra|dasha|yoga|varga)\b|"
+                r"\bD(?:1|2|3|4|5|7|9|10|12|16|20|24|27|30|60)\b|"
+                r"\b(?:candidate|field)\s*[A-Za-z0-9_-]*\b|"
+                r"\b\d+(?:st|nd|rd|th)\s+house\b|"
+                r"行星|星座|上升|宫位|分盘|大运|小运|星宿|候选盘|"
+                r"太阳|月亮|火星|水星|木星|金星|土星|罗喉|计都"
+                r")",
+                statement,
+                re.IGNORECASE,
+            )
+        )
 
     def _candidate_groups(self, sensitivity_scan: dict[str, Any]) -> list[dict[str, Any]]:
         groups = sensitivity_scan.get("candidateGroups")

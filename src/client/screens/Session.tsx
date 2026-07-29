@@ -18,7 +18,6 @@ import {
   LoaderCircle,
   MapPinned,
   RefreshCw,
-  Sparkles,
   Target,
   Workflow
 } from "lucide-react";
@@ -44,7 +43,7 @@ import {
   type PipelineData,
   type PipelineNode
 } from "../lib/pipeline";
-import { deriveChartRevealState } from "../lib/chartRevealMapping";
+import { chartRevealCoordinatesFromFacts, deriveChartRevealState } from "../lib/chartRevealMapping";
 import { getReportSections, titleForArtifact } from "../lib/report";
 import { cn } from "../lib/cn";
 import { useI18n } from "../i18n/provider";
@@ -104,6 +103,7 @@ type ResultPreviewSection = {
 };
 
 type RectificationState = {
+  rectificationRound?: number;
   status?: string;
   riskLevel?: string;
   reportReadinessMode?: string;
@@ -462,6 +462,8 @@ export function Session() {
     !hasCurrentValidationFeedback(readerPrevalidation, feedbackArtifact) &&
     !complete
   );
+  const calibrationDone = baziMode || canStartFullReading(session);
+  const calibrationFocus = Boolean(session) && !baziMode && !calibrationDone && !complete;
   const productPhases = useMemo(
     () =>
       deriveReadingProductPhases({
@@ -472,6 +474,7 @@ export function Session() {
         awaitingValidationFeedback,
         jobActive,
         complete,
+        calibrationDone,
         reportReady: complete && reportSections.length > 0,
         baziRunning,
         t
@@ -481,6 +484,7 @@ export function Session() {
       baziMode,
       baziRunning,
       complete,
+      calibrationDone,
       jobActive,
       pipelineData,
       readerRunning,
@@ -611,7 +615,7 @@ export function Session() {
         const hasReader = Boolean(loadedReader);
         if (hasFeedback) {
           if (canStartFullReading(loaded)) void startCoreReport();
-          else setSelectedStageId("chart");
+          else void startReaderValidation({ force: true });
         } else if (hasReader) {
           setSelectedStageId("reader");
         } else {
@@ -712,7 +716,7 @@ export function Session() {
       });
       setSession(updated);
       if (canStartFullReading(updated)) await startCoreReport();
-      else setSelectedStageId("chart");
+      else await startReaderValidation({ force: true });
     } catch (caught) {
       setError(userFacingError(caught, "Could not save your replies. Please try again."));
     } finally {
@@ -747,7 +751,10 @@ export function Session() {
       </div>
 
       {error && (
-        <div className="screen-error mx-5 mt-3 shrink-0 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red sm:mx-8">
+        <div
+          className="screen-error mx-5 mt-3 shrink-0 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red sm:mx-8"
+          role="alert"
+        >
           {error}
         </div>
       )}
@@ -755,7 +762,14 @@ export function Session() {
       <ReadingJourneyBar phases={productPhases} />
 
       {tab === "reading" ? (
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto bg-night lg:grid-cols-[minmax(440px,0.78fr)_minmax(520px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]">
+        <div
+          className={cn(
+            "min-h-0 flex-1 bg-night",
+            calibrationFocus
+              ? "overflow-y-auto px-4 py-6 sm:px-6 sm:py-9"
+              : "grid grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(440px,0.78fr)_minmax(520px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]"
+          )}
+        >
           <WorkshopDetailPanel
             selectedStageId={selectedStageId}
             stages={pipelineStages}
@@ -777,14 +791,18 @@ export function Session() {
             baziRunning={baziRunning}
             authLoaded={authLoaded}
             isSignedIn={Boolean(isSignedIn)}
+            focused={calibrationFocus}
           />
-          <ReadingRevealPanel
-            pipelineData={pipelineData}
-            selectedStageId={selectedStageId}
-            stages={pipelineStages}
-            baziMode={baziMode}
-            onSelectStage={setSelectedStageId}
-          />
+          {!calibrationFocus && (
+            <ReadingRevealPanel
+              session={session}
+              pipelineData={pipelineData}
+              selectedStageId={selectedStageId}
+              stages={pipelineStages}
+              baziMode={baziMode}
+              onSelectStage={setSelectedStageId}
+            />
+          )}
         </div>
       ) : complete && reportSections.length > 0 ? (
         <div className="report-doc grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_260px]">
@@ -918,6 +936,7 @@ function deriveReadingProductPhases({
   awaitingValidationFeedback,
   jobActive,
   complete,
+  calibrationDone,
   reportReady,
   baziRunning,
   t
@@ -929,6 +948,7 @@ function deriveReadingProductPhases({
   awaitingValidationFeedback: boolean;
   jobActive: boolean;
   complete: boolean;
+  calibrationDone: boolean;
   reportReady: boolean;
   baziRunning: boolean;
   t: Translate;
@@ -941,10 +961,6 @@ function deriveReadingProductPhases({
   );
   const hasBaziChart = Boolean(findArtifact(session, "bazi_structured_data.md"));
   const hasChart = baziMode ? hasBaziChart : hasVedicChart;
-  const readerArtifact = findArtifact(session, "reader_prevalidation.md");
-  const feedbackArtifact = findArtifact(session, "user_context.md");
-  const calibrationDone =
-    baziMode || hasCurrentValidationFeedback(readerArtifact, feedbackArtifact);
   const revealStarted = Boolean(
     complete ||
     jobActive ||
@@ -975,8 +991,12 @@ function deriveReadingProductPhases({
     {
       id: "chart",
       label: t("session.phase.chart"),
-      detail: hasChart ? t("session.phase.chart.ready") : t("session.phase.chart.calculating"),
-      status: hasChart ? "done" : hasSession ? "active" : "pending"
+      detail: hasChart
+        ? calibrationDone
+          ? t("session.phase.chart.ready")
+          : t("session.phase.chart.computed")
+        : t("session.phase.chart.calculating"),
+      status: hasChart && calibrationDone ? "done" : calibrationDone ? "active" : "pending"
     },
     {
       id: "reveal",
@@ -998,60 +1018,72 @@ function deriveReadingProductPhases({
 }
 
 function ReadingJourneyBar({ phases }: { phases: ReadingProductPhase[] }) {
+  const activeIndex = Math.max(
+    0,
+    phases.findIndex((phase) => phase.status === "active")
+  );
+  const activePhase = phases[activeIndex] ?? phases[0];
+
   return (
-    <div className="relative z-10 shrink-0 border-b border-gold/18 bg-night/88 px-4 py-3 text-cream shadow-[0_14px_44px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:px-8">
-      <div className="mx-auto grid max-w-[1220px] gap-2 sm:grid-cols-5">
-        {phases.map((phase, index) => {
-          const Icon =
-            phase.id === "input"
-              ? CheckCircle2
-              : phase.id === "calibration"
-                ? Target
-                : phase.id === "chart"
-                  ? MapPinned
-                  : phase.id === "reveal"
-                    ? Sparkles
-                    : BookOpen;
-          return (
+    <nav
+      className="relative z-10 shrink-0 border-b border-gold/18 bg-night/88 px-4 py-3 text-cream shadow-[0_14px_44px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:px-8"
+      aria-label="Reading progress"
+    >
+      <div className="mx-auto max-w-[1120px]">
+        <div className="flex items-center justify-between gap-4 md:hidden">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-[1.8px] text-gold/70">
+              {activeIndex + 1} / {phases.length}
+            </div>
+            <div className="truncate text-sm font-semibold text-cream">{activePhase.label}</div>
+          </div>
+          <div className="truncate text-right text-[12px] text-cream/48">{activePhase.detail}</div>
+        </div>
+        <div className="hidden grid-cols-5 gap-5 md:grid">
+          {phases.map((phase, index) => (
             <div
               key={phase.id}
-              className={cn(
-                "relative flex min-w-0 items-center gap-3 rounded-[14px] border px-3 py-2.5 transition",
-                phase.status === "done"
-                  ? "border-gold/22 bg-gold/10"
-                  : phase.status === "active"
-                    ? "border-gold/42 bg-white/[0.075] shadow-[0_0_34px_rgba(201,169,110,0.08)]"
-                    : "border-gold/10 bg-white/[0.026] opacity-72"
-              )}
+              className={cn("min-w-0", phase.status === "pending" && "opacity-45")}
+              aria-current={phase.status === "active" ? "step" : undefined}
             >
-              {index > 0 ? (
-                <div className="absolute -left-2 top-1/2 hidden h-px w-4 -translate-y-1/2 bg-gold/18 sm:block" />
-              ) : null}
-              <span
-                className={cn(
-                  "grid size-8 shrink-0 place-items-center rounded-full border",
-                  phase.status === "done"
-                    ? "border-gold/30 bg-gold text-night"
-                    : phase.status === "active"
-                      ? "border-gold/45 bg-gold/15 text-gold-light"
-                      : "border-gold/15 bg-white/[0.035] text-cream/35"
-                )}
-              >
-                <Icon className="size-4" />
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-[12.5px] font-semibold leading-tight text-cream">
+              <div className="mb-1 flex items-center gap-2">
+                <span
+                  className={cn(
+                    "grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
+                    phase.status === "done"
+                      ? "border-gold bg-gold text-night"
+                      : phase.status === "active"
+                        ? "border-gold bg-gold/14 text-gold-light"
+                        : "border-gold/25 text-cream/40"
+                  )}
+                >
+                  {phase.status === "done" ? "✓" : index + 1}
+                </span>
+                <span className="truncate text-[12.5px] font-semibold text-cream">
                   {phase.label}
                 </span>
-                <span className="mt-0.5 block truncate text-[11px] leading-tight text-cream/45">
-                  {phase.detail}
-                </span>
-              </span>
+              </div>
+              <div className="truncate pl-7 text-[11px] text-cream/42">{phase.detail}</div>
             </div>
-          );
-        })}
+          ))}
+        </div>
+        <div className="mt-3 grid grid-cols-5 gap-1.5">
+          {phases.map((phase) => (
+            <span
+              key={phase.id}
+              className={cn(
+                "h-0.5 rounded-full",
+                phase.status === "done"
+                  ? "bg-gold"
+                  : phase.status === "active"
+                    ? "bg-gold/65"
+                    : "bg-white/10"
+              )}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+    </nav>
   );
 }
 
@@ -1081,12 +1113,14 @@ function SessionAuthControls() {
 }
 
 function ReadingRevealPanel({
+  session,
   pipelineData,
   selectedStageId,
   stages,
   baziMode,
   onSelectStage
 }: {
+  session: SkillSessionResponse | null;
   pipelineData: PipelineData | null;
   selectedStageId: string;
   stages: StageDef[];
@@ -1105,6 +1139,16 @@ function ReadingRevealPanel({
   const revealState = useMemo(
     () => (baziMode ? null : deriveChartRevealState(pipelineData)),
     [baziMode, pipelineData]
+  );
+  const revealCoordinates = useMemo(
+    () =>
+      baziMode
+        ? null
+        : chartRevealCoordinatesFromFacts(
+            parseJsonArtifact(session, BIRTH_CHART_FACTS_JSON) ??
+              parseJsonArtifact(session, LEGACY_STRUCTURED_DATA_JSON)
+          ),
+    [baziMode, session]
   );
   const baziReveal = useMemo(
     () => (baziMode ? deriveBaziRevealCopy(pipelineData) : null),
@@ -1126,15 +1170,13 @@ function ReadingRevealPanel({
       <div className="relative z-[1] mx-auto flex min-h-full max-w-[760px] flex-col justify-center gap-6 px-5 py-8 sm:px-8 lg:h-full lg:overflow-y-auto">
         <div className="text-center">
           <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold/72">
-            Reading reveal
+            {t("session.reveal.eyebrow")}
           </div>
           <h2 className="mx-auto max-w-[620px] text-[25px] font-light leading-tight tracking-normal text-cream sm:text-[32px]">
-            {baziMode ? "Classical chart workspace" : "Your chart is being revealed"}
+            {baziMode ? t("session.reveal.baziTitle") : t("session.reveal.title")}
           </h2>
           <p className="mx-auto mt-3 max-w-[520px] text-[13.5px] leading-[1.8] text-cream/62">
-            {baziMode
-              ? "We keep the BaZi calculation separate from interpretation, then turn the verified chart facts into the classical report."
-              : "The system is calculating the chart, checking lived signals, and then opening each layer of the reading without exposing the internal graph."}
+            {baziMode ? t("session.reveal.baziBody") : t("session.reveal.body")}
           </p>
         </div>
 
@@ -1143,7 +1185,10 @@ function ReadingRevealPanel({
             baziMode ? (
               <BaziRevealProgress data={pipelineData} />
             ) : (
-              <ChartRevealProgress state={revealState ?? undefined} />
+              <ChartRevealProgress
+                state={revealState ?? undefined}
+                coordinates={revealCoordinates}
+              />
             )
           ) : (
             <div className="grid min-h-[360px] place-items-center text-center text-cream/58">
@@ -1159,7 +1204,7 @@ function ReadingRevealPanel({
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-[2px] text-gold/75">
-                Current focus
+                {t("session.reveal.currentFocus")}
               </div>
               <h3 className="m-0 text-base font-semibold tracking-normal text-cream">{title}</h3>
             </div>
@@ -1191,7 +1236,7 @@ function ReadingRevealPanel({
         {pipelineData && stageAgg && (
           <details className="rounded-[18px] border border-gold/18 bg-[rgba(16,12,22,0.46)] p-4 backdrop-blur-xl">
             <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[2px] text-gold/72 outline-none">
-              Calculation details
+              {t("session.reveal.details")}
             </summary>
             <div className="mt-4 grid gap-2">
               {stages.map((stage, index) => {
@@ -1373,7 +1418,8 @@ function WorkshopDetailPanel({
   coreInterrupted,
   baziRunning,
   authLoaded,
-  isSignedIn
+  isSignedIn,
+  focused = false
 }: {
   selectedStageId: string;
   stages: StageDef[];
@@ -1395,6 +1441,7 @@ function WorkshopDetailPanel({
   baziRunning: boolean;
   authLoaded: boolean;
   isSignedIn: boolean;
+  focused?: boolean;
 }) {
   const { t } = useI18n();
   const stage = stages.find((item) => item.id === selectedStageId) ?? stages[0];
@@ -1407,12 +1454,21 @@ function WorkshopDetailPanel({
   const status = stage.seed ? "done" : (stageAgg?.status ?? "pending");
 
   return (
-    <aside className="relative border-r border-gold/25 bg-cream px-6 py-7 max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto">
-      <StageInfoPopover stageLabel={stageLabel} copy={copy} className="absolute right-6 top-7" />
+    <aside
+      className={cn(
+        "relative bg-cream px-6 py-7",
+        focused
+          ? "mx-auto w-full max-w-[720px] rounded-[20px] border border-gold/22 shadow-[0_30px_100px_rgba(0,0,0,0.32)] sm:px-9 sm:py-9"
+          : "border-r border-gold/25 max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto"
+      )}
+    >
+      {!focused && (
+        <StageInfoPopover stageLabel={stageLabel} copy={copy} className="absolute right-6 top-7" />
+      )}
       <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
-        {t("session.detail.eyebrow")}
+        {focused ? t("session.phase.calibration") : t("session.detail.eyebrow")}
       </div>
-      <div className="mb-5 flex items-start justify-between gap-3 pr-9">
+      <div className={cn("mb-5 flex items-start justify-between gap-3", !focused && "pr-9")}>
         <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stageLabel}</h3>
         <Badge variant={statusBadgeVariant(status)}>{t(`status.${status}`)}</Badge>
       </div>
@@ -1742,11 +1798,13 @@ function ChartConfirmationCard({
   rectificationState: RectificationState | null;
 }) {
   const { t } = useI18n();
+  const latitude = Number(birthInfo.latitude);
+  const longitude = Number(birthInfo.longitude);
   const hasCoordinates =
-    typeof birthInfo.latitude === "number" &&
-    Number.isFinite(birthInfo.latitude) &&
-    typeof birthInfo.longitude === "number" &&
-    Number.isFinite(birthInfo.longitude);
+    birthInfo.latitude.trim() !== "" &&
+    birthInfo.longitude.trim() !== "" &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude);
   const locationMode = hasCoordinates
     ? t("session.chart.location.coordinatesReady")
     : t("session.chart.location.placeRecorded");
@@ -1964,6 +2022,14 @@ function ReaderDetail({
     () => parseValidationAnchors(prevalidation?.content ?? ""),
     [prevalidation?.content]
   );
+  const rectificationState = useMemo(
+    () =>
+      parseRectificationState(
+        findArtifact(session, "chart_rectification_state.json")?.content ?? ""
+      ),
+    [session]
+  );
+  const roundNumber = Math.max(1, (rectificationState?.rectificationRound ?? 0) + 1);
   const [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
   const [anchorFeedback, setAnchorFeedback] = useState<
     Record<number, { answer?: ValidationAnswer; note: string }>
@@ -1971,7 +2037,6 @@ function ReaderDetail({
   const activeAnchor = anchors[activeAnchorIndex];
   const answeredCount = anchors.filter((anchor) => anchorFeedback[anchor.index]?.answer).length;
   const allAnswered = anchors.length > 0 && answeredCount === anchors.length;
-  const anonymousLocked = authLoaded && !isSignedIn && anchors.length > 1 && activeAnchorIndex > 0;
   const recordedFeedback = useMemo(
     () => parseRecordedValidationFeedback(feedback?.content ?? ""),
     [feedback?.content]
@@ -2031,6 +2096,20 @@ function ReaderDetail({
     );
   }
 
+  if (readerRunning && feedback) {
+    return (
+      <div className="my-8 text-center" aria-live="polite">
+        <LoaderCircle className="mx-auto size-7 animate-spin text-gold" />
+        <h4 className="mb-1 mt-4 text-base font-semibold text-ink">
+          {t("session.reader.preparingNextRound")}
+        </h4>
+        <p className="m-0 text-[13px] leading-[1.7] text-body">
+          {t("session.reader.preparingNextRoundBody")}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <>
       {feedback ? (
@@ -2044,13 +2123,19 @@ function ReaderDetail({
           <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
             <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
               <Target className="size-4" />
-              {t("session.reader.roundTitle", { round: 1 })}
+              {t("session.reader.roundTitle", { round: roundNumber })}
             </div>
             <p className="m-0 text-[13px] leading-[1.65] text-body">
               {t("session.reader.roundBody")}
             </p>
             {anchors.length > 0 && (
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-cream/60">
+              <div
+                className="mt-3 h-1.5 overflow-hidden rounded-full bg-cream/60"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={anchors.length}
+                aria-valuenow={answeredCount}
+              >
                 <span
                   className="block h-full rounded-full bg-gold transition-[width] duration-300"
                   style={{ width: `${Math.round((answeredCount / anchors.length) * 100)}%` }}
@@ -2088,56 +2173,53 @@ function ReaderDetail({
                 {activeAnchor.statement}
               </div>
 
-              {anonymousLocked ? (
-                <AnonymousCheckpointGate questionNumber={activeAnchorIndex + 1} />
-              ) : (
-                <>
-                  <div className="mt-4 grid gap-2">
-                    {VALIDATION_CHOICES.map((choice) => {
-                      const selected = anchorFeedback[activeAnchor.index]?.answer === choice.value;
-                      return (
-                        <button
-                          type="button"
-                          key={choice.value}
-                          className={cn(
-                            "rounded-lg border px-3.5 py-3 text-left transition",
-                            selected
-                              ? "border-gold bg-gold text-white shadow-sm"
-                              : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
-                          )}
-                          onClick={() =>
-                            updateAnchorFeedback(activeAnchor, { answer: choice.value })
-                          }
-                        >
-                          <span className="block text-sm font-semibold">{t(choice.labelKey)}</span>
-                          <span
-                            className={cn(
-                              "mt-0.5 block text-[12.5px]",
-                              selected ? "text-white/80" : "text-muted"
-                            )}
-                          >
-                            {t(choice.descriptionKey)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+              <div className="mt-4 grid gap-2">
+                {VALIDATION_CHOICES.map((choice) => {
+                  const selected = anchorFeedback[activeAnchor.index]?.answer === choice.value;
+                  return (
+                    <button
+                      type="button"
+                      key={choice.value}
+                      className={cn(
+                        "rounded-lg border px-3.5 py-3 text-left transition",
+                        selected
+                          ? "border-gold bg-gold text-white shadow-sm"
+                          : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
+                      )}
+                      onClick={() => updateAnchorFeedback(activeAnchor, { answer: choice.value })}
+                    >
+                      <span className="block text-sm font-semibold">{t(choice.labelKey)}</span>
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-[12.5px]",
+                          selected ? "text-white/80" : "text-muted"
+                        )}
+                      >
+                        {t(choice.descriptionKey)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
 
-                  <label className="mt-4 block">
-                    <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
-                      {t("session.reader.optionalNote")}
-                    </span>
-                    <Textarea
-                      rows={4}
-                      value={anchorFeedback[activeAnchor.index]?.note ?? ""}
-                      onChange={(event) =>
-                        updateAnchorFeedback(activeAnchor, { note: event.target.value })
-                      }
-                      placeholder={t("session.reader.notePlaceholder")}
-                    />
-                  </label>
-                </>
-              )}
+              <label className="mt-4 block">
+                <span className="mb-1.5 block text-[11px] uppercase tracking-[1.4px] text-muted">
+                  {t("session.reader.optionalNote")}
+                </span>
+                <Textarea
+                  rows={4}
+                  value={anchorFeedback[activeAnchor.index]?.note ?? ""}
+                  onChange={(event) =>
+                    updateAnchorFeedback(activeAnchor, { note: event.target.value })
+                  }
+                  placeholder={t("session.reader.notePlaceholder")}
+                />
+              </label>
+
+              {activeAnchorIndex === anchors.length - 1 &&
+                allAnswered &&
+                authLoaded &&
+                !isSignedIn && <AnonymousCheckpointGate />}
 
               <div className="mt-4 flex items-center justify-between gap-3">
                 <Button
@@ -2149,7 +2231,7 @@ function ReaderDetail({
                 >
                   <ChevronLeft size={14} /> {t("session.reader.previous")}
                 </Button>
-                {anonymousLocked ? null : activeAnchorIndex < anchors.length - 1 ? (
+                {activeAnchorIndex < anchors.length - 1 ? (
                   <Button
                     type="button"
                     size="sm"
@@ -2158,7 +2240,7 @@ function ReaderDetail({
                   >
                     {t("session.reader.next")} <ChevronRight size={14} />
                   </Button>
-                ) : (
+                ) : isSignedIn ? (
                   <Button
                     disabled={
                       submittingFeedback ||
@@ -2170,7 +2252,7 @@ function ReaderDetail({
                   >
                     {submittingFeedback ? t("session.reader.saving") : t("session.reader.save")}
                   </Button>
-                )}
+                ) : null}
               </div>
             </div>
           ) : (
@@ -2190,6 +2272,9 @@ function ReaderDetail({
               >
                 {submittingFeedback ? t("session.reader.saving") : t("session.reader.save")}
               </Button>
+              {authLoaded && !isSignedIn && validationFeedback.trim() && (
+                <AnonymousCheckpointGate />
+              )}
             </div>
           )}
         </form>
@@ -2285,7 +2370,7 @@ function ReaderCompletedDetail({
   );
 }
 
-function AnonymousCheckpointGate({ questionNumber }: { questionNumber: number }) {
+function AnonymousCheckpointGate() {
   const { t } = useI18n();
   return (
     <div className="mt-4 rounded-xl border border-gold/35 bg-cream px-4 py-4 shadow-[0_18px_42px_rgba(44,31,15,0.08)]">
@@ -2293,7 +2378,7 @@ function AnonymousCheckpointGate({ questionNumber }: { questionNumber: number })
         {t("session.reader.accountCheckpoint")}
       </div>
       <h4 className="m-0 text-base font-semibold tracking-normal text-ink">
-        {t("session.reader.signInQuestion", { number: questionNumber })}
+        {t("session.reader.signInToSave")}
       </h4>
       <p className="mb-4 mt-2 text-[13px] leading-[1.7] text-body">
         {t("session.reader.signInBody")}

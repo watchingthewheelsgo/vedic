@@ -1,10 +1,28 @@
 import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/clerk-react";
-import { FormEvent, SetStateAction, useMemo, useState, type ReactNode } from "react";
-import { CheckCircle2, Clock3, MapPin, Sparkles, UserRound } from "lucide-react";
+import {
+  FormEvent,
+  SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode
+} from "react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  MapPin,
+  Sparkles,
+  UserRound
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { AccountCenter } from "../components/AccountCenter";
 import { BirthInputLayout } from "../components/BirthInputLayout";
+import { BirthInputAstroVisual } from "../components/BirthInputAstroVisual";
+import type { BirthPlaceVisualState } from "../components/PlacePicker";
 import {
   BirthDateTimeFields,
   BirthGenderField,
@@ -15,7 +33,7 @@ import {
 } from "../components/BirthDetailsFields";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { Button } from "../components/ui/button";
-import { Field } from "../components/ui/field";
+import { Field, FieldHint } from "../components/ui/field";
 import {
   Select,
   SelectContent,
@@ -24,7 +42,7 @@ import {
   SelectValue
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
-import { formatBirthDate } from "../lib/birth-details";
+import { formatBirthDate, TIME_SOURCE_OPTIONS } from "../lib/birth-details";
 import { formatBirthTime, normalizeTimeForPrecision } from "../lib/birth-time";
 import { useI18n } from "../i18n/provider";
 import { cn } from "../lib/cn";
@@ -47,10 +65,11 @@ const RELATIONSHIP_OPTIONS: SelectOption[] = [
 
 export function Intake() {
   const navigate = useNavigate();
-  const { locale, t } = useI18n();
+  const { formatDate, locale, t } = useI18n();
   const [birthDate, setBirthDate] = useState<Date | null>(null);
   const [birthTime, setBirthTime] = useState<Date | null>(null);
   const [place, setPlace] = useState("");
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [name, setName] = useState("");
   const [gender, setGender] = useState("");
   const [relationship, setRelationship] = useState("");
@@ -59,6 +78,10 @@ export function Intake() {
   const [timeSource, setTimeSource] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [busy, setBusy] = useState(false);
+  const [visualLocation, setVisualLocation] = useState<BirthPlaceVisualState | null>(null);
+  const handleVisualLocationChange = useCallback((next: BirthPlaceVisualState | null) => {
+    setVisualLocation(next);
+  }, []);
 
   const currentBirth = useMemo(
     () =>
@@ -86,10 +109,30 @@ export function Intake() {
     ]
   );
   const birthTimeReady = timePrecision === "unknown" || Boolean(birthTime);
-  const timeSourceReady = timePrecision !== "exact" || Boolean(timeSource);
+  const timeSourceReady = timePrecision === "unknown" || Boolean(timeSource);
   const birthMomentReady = Boolean(birthDate) && birthTimeReady && timeSourceReady;
-  const locationReady = Boolean(place);
+  const locationReady = Boolean(place) && locationConfirmed;
   const optionalProfileTouched = Boolean(name || gender || relationship || lifeEvents.trim());
+  const currentStep = !birthMomentReady ? 1 : !locationReady ? 2 : 3;
+  const birthMomentSummary = birthDate
+    ? `${formatDate(birthDate, { year: "numeric", month: "short", day: "numeric" })} · ${
+        timePrecision === "unknown"
+          ? t("intake.precision.unknown.label")
+          : formatBirthTime(birthTime, timePrecision)
+      }`
+    : "";
+  const timeSourceOption = TIME_SOURCE_OPTIONS.find((option) => option.value === timeSource);
+  const birthMomentDetail = [
+    t(`intake.precision.${timePrecision}.label`),
+    timeSourceOption?.labelKey ? t(timeSourceOption.labelKey) : ""
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const locationSummary = place.split("|", 1)[0]?.trim() ?? "";
+  const locationDetail = visualLocation
+    ? t(visualLocation.exact ? "place.readout.status.precise" : "place.readout.status.city")
+    : "";
+  const visualTimeReady = Boolean(birthDate) && birthTimeReady;
 
   async function onStart(event: FormEvent) {
     event.preventDefault();
@@ -100,7 +143,7 @@ export function Intake() {
       nextErrors.birthTime =
         timePrecision === "part_of_day" ? t("intake.error.birthHour") : t("intake.error.birthTime");
     }
-    if (timePrecision === "exact" && !timeSource) {
+    if (timePrecision !== "unknown" && !timeSource) {
       nextErrors.timeSource = t("intake.error.timeSource");
     }
     if (!place) nextErrors.place = t("intake.error.place");
@@ -136,18 +179,37 @@ export function Intake() {
       subtitle={t("intake.subtitle")}
       icon={<UserRound size={18} />}
       steps={[
-        { active: !birthMomentReady, label: t("intake.step.birth"), index: 1 },
-        { active: birthMomentReady && !locationReady, label: t("intake.step.location"), index: 2 },
         {
-          active: birthMomentReady && locationReady,
-          label: t("intake.step.calibration"),
-          index: 3
+          active: currentStep === 1,
+          complete: currentStep > 1,
+          label: t("intake.step.birth"),
+          index: 1
         },
-        { label: t("intake.step.report"), index: 4 }
+        {
+          active: currentStep === 2,
+          complete: currentStep > 2,
+          label: t("intake.step.location"),
+          index: 2
+        },
+        { active: currentStep === 3, label: t("intake.step.review"), index: 3 }
       ]}
+      visual={
+        <BirthInputAstroVisual
+          theme="cosmic"
+          embedded
+          birthDate={visualTimeReady ? birthDate : null}
+          birthTime={birthTime}
+          timePrecision={timePrecision}
+          location={visualLocation}
+          timeTitle={t("intake.step.birth")}
+          locationTitle={t("intake.step.location")}
+          timeLabel={visualTimeReady ? birthMomentSummary : undefined}
+          locationLabel={visualLocation?.label || locationSummary || undefined}
+        />
+      }
       onBack={() => navigate("/")}
     >
-      <form className="grid gap-5" onSubmit={onStart} noValidate>
+      <form className="grid gap-4" onSubmit={onStart} noValidate>
         <IntakeFlowSection
           index={1}
           title={t("intake.flow.birth.title")}
@@ -155,6 +217,8 @@ export function Intake() {
           icon={<Clock3 size={17} />}
           active={!birthMomentReady}
           complete={birthMomentReady}
+          summary={birthMomentSummary}
+          summaryDetail={birthMomentDetail}
         >
           <BirthDateTimeFields
             birthDate={birthDate}
@@ -176,17 +240,15 @@ export function Intake() {
             onChange={(next) => {
               setTimePrecision(next);
               setBirthTime((current) => normalizeTimeForPrecision(current, next));
-              if (next !== "exact") {
-                setTimeSource("");
-                clearError(setErrors, "timeSource");
-              }
               if (next === "unknown") {
+                setTimeSource("");
                 clearError(setErrors, "birthTime");
+                clearError(setErrors, "timeSource");
               }
             }}
           />
 
-          {timePrecision === "exact" && (
+          {timePrecision !== "unknown" && (
             <BirthTimeSourceField
               value={timeSource}
               error={errors.timeSource}
@@ -202,11 +264,9 @@ export function Intake() {
               {t("intake.unknownNotice")}
             </div>
           )}
-
-          {!birthMomentReady && <NextStepHint text={t("intake.flow.birth.next")} />}
         </IntakeFlowSection>
 
-        {birthMomentReady ? (
+        {birthMomentReady && (
           <IntakeFlowSection
             index={2}
             title={t("intake.flow.place.title")}
@@ -214,23 +274,28 @@ export function Intake() {
             icon={<MapPin size={17} />}
             active={!locationReady}
             complete={locationReady}
+            summary={locationSummary}
+            summaryDetail={locationDetail}
           >
             <BirthPlaceField
               value={place}
+              onVisualStateChange={handleVisualLocationChange}
               onChange={(value) => {
                 setPlace(value);
+                setLocationConfirmed(false);
                 if (value) clearError(setErrors, "place");
               }}
               error={errors.place}
             />
-            {!locationReady && <NextStepHint text={t("intake.flow.place.next")} />}
+            <Button
+              type="button"
+              variant="gold"
+              disabled={!place}
+              onClick={() => setLocationConfirmed(true)}
+            >
+              {t("intake.flow.place.confirm")}
+            </Button>
           </IntakeFlowSection>
-        ) : (
-          <LockedIntakeStep
-            index={2}
-            title={t("intake.flow.place.title")}
-            body={t("intake.flow.place.locked")}
-          />
         )}
 
         {locationReady && (
@@ -247,7 +312,12 @@ export function Intake() {
             <div className="grid gap-4 md:grid-cols-2">
               <BirthGenderField value={gender} onChange={setGender} />
 
-              <Field label={t("intake.relationship.label")} hint={t("intake.relationship.hint")}>
+              <Field
+                label={t("intake.relationship.label")}
+                hint={t("intake.relationship.hint")}
+                hintDisplay="tooltip"
+                className="mb-0"
+              >
                 <Select value={relationship} onValueChange={setRelationship}>
                   <SelectTrigger>
                     <SelectValue placeholder={t("intake.select")} />
@@ -263,12 +333,17 @@ export function Intake() {
               </Field>
             </div>
 
-            <details className="rounded-[14px] border border-gold/20 bg-white/[0.035] p-4">
+            <details className="rounded-[12px] border border-gold/18 bg-white/[0.025] p-3.5">
               <summary className="cursor-pointer select-none text-[12px] font-semibold uppercase tracking-[1.4px] text-gold-light outline-none">
                 {t("intake.flow.profile.optional")}
               </summary>
               <div className="mt-4">
-                <Field label={t("intake.lifeEvents.label")} hint={t("intake.lifeEvents.hint")}>
+                <Field
+                  label={t("intake.lifeEvents.label")}
+                  hint={t("intake.lifeEvents.hint")}
+                  hintDisplay="tooltip"
+                  className="mb-0"
+                >
                   <Textarea
                     value={lifeEvents}
                     onChange={(event) => setLifeEvents(event.target.value)}
@@ -289,7 +364,13 @@ export function Intake() {
 
         {locationReady && (
           <Button className="w-full" size="lg" disabled={busy}>
-            {busy ? t("intake.submit.busy") : t("intake.submit")}
+            {busy ? (
+              t("intake.submit.busy")
+            ) : (
+              <>
+                {t("intake.submit")} <ArrowRight className="size-4" />
+              </>
+            )}
           </Button>
         )}
       </form>
@@ -304,6 +385,8 @@ function IntakeFlowSection({
   icon,
   active = false,
   complete = false,
+  summary = "",
+  summaryDetail = "",
   children
 }: {
   index: number;
@@ -312,65 +395,84 @@ function IntakeFlowSection({
   icon: ReactNode;
   active?: boolean;
   complete?: boolean;
+  summary?: string;
+  summaryDetail?: string;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const collapsible = complete && !active;
+  const collapsed = collapsible && !editing;
+
+  useEffect(() => {
+    if (collapsible) setEditing(false);
+  }, [collapsible]);
+
+  const header = (
+    <>
+      <div
+        className={cn(
+          "grid size-9 shrink-0 place-items-center rounded-full border text-[13px] font-semibold tabular-nums",
+          complete
+            ? "border-gold/35 bg-gold text-night"
+            : active
+              ? "border-gold/45 bg-gold/15 text-gold-light"
+              : "border-gold/18 bg-white/[0.035] text-cream/42"
+        )}
+      >
+        {complete ? <CheckCircle2 className="size-4" /> : index}
+      </div>
+      <div className="min-w-0 flex-1 text-left">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <span className="text-gold-light">{icon}</span>
+          <h2 className="m-0 text-base font-semibold tracking-normal text-cream">{title}</h2>
+          <FieldHint text={body} />
+        </div>
+        {collapsed && summary ? (
+          <div className="space-y-0.5">
+            <p className="m-0 truncate text-[13px] text-cream/68">{summary}</p>
+            {summaryDetail ? (
+              <p className="m-0 truncate text-[11.5px] text-cream/40">{summaryDetail}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {collapsible && (
+        <span className="flex shrink-0 items-center gap-1 text-xs text-gold-light/72">
+          {collapsed ? t("intake.flow.edit") : t("intake.flow.done")}
+          <ChevronDown
+            className={cn("size-3.5 transition-transform", !collapsed && "rotate-180")}
+          />
+        </span>
+      )}
+    </>
+  );
+
   return (
     <section
       className={cn(
-        "rounded-[18px] border p-4 transition duration-300 sm:p-5",
-        active
-          ? "border-gold/35 bg-white/[0.055] shadow-[0_22px_70px_rgba(0,0,0,0.28),0_0_36px_rgba(201,169,110,0.08)]"
-          : "border-gold/18 bg-white/[0.028]",
-        complete && "border-gold/28 bg-gold/8"
+        "border-t border-gold/18 pt-5 transition duration-300",
+        active && "border-gold/30",
+        complete && "border-gold/24"
       )}
     >
-      <div className="mb-4 flex items-start gap-3">
-        <div
+      {collapsible ? (
+        <button
+          type="button"
           className={cn(
-            "grid size-9 shrink-0 place-items-center rounded-full border text-[13px] font-semibold tabular-nums",
-            complete
-              ? "border-gold/35 bg-gold text-night"
-              : active
-                ? "border-gold/45 bg-gold/15 text-gold-light"
-                : "border-gold/18 bg-white/[0.035] text-cream/42"
+            "flex w-full items-start gap-3 rounded-md text-left outline-none focus-visible:ring-4 focus-visible:ring-gold/15",
+            !collapsed && "mb-4"
           )}
+          aria-expanded={!collapsed}
+          onClick={() => setEditing((current) => !current)}
         >
-          {complete ? <CheckCircle2 className="size-4" /> : index}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            <span className="text-gold-light">{icon}</span>
-            <h2 className="m-0 text-base font-semibold tracking-normal text-cream">{title}</h2>
-          </div>
-          <p className="m-0 max-w-[520px] text-[13px] leading-[1.65] text-cream/58">{body}</p>
-        </div>
-      </div>
-      <div className="grid gap-4">{children}</div>
+          {header}
+        </button>
+      ) : (
+        <div className="mb-4 flex items-start gap-3">{header}</div>
+      )}
+      {!collapsed && <div className="grid gap-4">{children}</div>}
     </section>
-  );
-}
-
-function LockedIntakeStep({ index, title, body }: { index: number; title: string; body: string }) {
-  return (
-    <section className="rounded-[18px] border border-gold/12 bg-white/[0.018] px-4 py-4 text-cream/42 sm:px-5">
-      <div className="flex items-center gap-3">
-        <div className="grid size-8 shrink-0 place-items-center rounded-full border border-gold/15 bg-white/[0.025] text-[12px] tabular-nums">
-          {index}
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-cream/54">{title}</div>
-          <p className="m-0 mt-0.5 text-[12.5px] leading-[1.6] text-cream/38">{body}</p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function NextStepHint({ text }: { text: string }) {
-  return (
-    <div className="rounded-[12px] border border-gold/16 bg-night/24 px-3 py-2 text-[12.5px] leading-relaxed text-cream/48">
-      {text}
-    </div>
   );
 }
 
@@ -432,7 +534,7 @@ function buildBirthInput({
   if (!birthDate) return null;
   if (!place) return null;
   if (timePrecision !== "unknown" && !birthTime) return null;
-  if (timePrecision === "exact" && !timeSource) return null;
+  if (timePrecision !== "unknown" && !timeSource) return null;
 
   return {
     birthDate: formatBirthDate(birthDate),
@@ -442,7 +544,7 @@ function buildBirthInput({
     gender: gender || "未提供",
     relationship: relationship || "未提供",
     lifeEvents: lifeEvents.trim(),
-    timeSource: timePrecision === "exact" ? timeSource : "未追问",
+    timeSource: timePrecision === "unknown" ? "时间未知" : timeSource,
     locale
   };
 }

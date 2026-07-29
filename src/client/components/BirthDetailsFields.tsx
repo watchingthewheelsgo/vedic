@@ -1,4 +1,5 @@
 import { CalendarDays, Clock3, ShieldCheck, UserRound } from "lucide-react";
+import { enUS, ja, zhCN } from "date-fns/locale";
 import type { BirthTimePrecision } from "../../shared/domain";
 import { useI18n } from "../i18n/provider";
 import {
@@ -12,7 +13,7 @@ import { Input } from "./ui/input";
 import { Field } from "./ui/field";
 import { DatePicker } from "./ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { PlacePicker } from "./PlacePicker";
+import { PlacePicker, type BirthPlaceVisualState } from "./PlacePicker";
 import { BirthTimePicker } from "./BirthTimePicker";
 
 export function BirthDateTimeFields({
@@ -30,7 +31,8 @@ export function BirthDateTimeFields({
   onBirthDateChange: (date: Date | null) => void;
   onBirthTimeChange: (date: Date | null) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
+  const calendarLocale = locale === "zh" ? zhCN : locale === "ja" ? ja : enUS;
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -38,10 +40,14 @@ export function BirthDateTimeFields({
         label={t("intake.date.label")}
         icon={<CalendarDays size={16} />}
         hint={t("intake.date.hint")}
+        hintDisplay="tooltip"
+        className="mb-0"
         error={errors.birthDate}
       >
         <DatePicker
           value={birthDate}
+          locale={calendarLocale}
+          placeholder={t("intake.date.placeholder")}
           invalid={Boolean(errors.birthDate)}
           disabled={{ after: new Date() }}
           startMonth={new Date(1900, 0)}
@@ -60,6 +66,8 @@ export function BirthDateTimeFields({
               ? t("intake.time.hint.partOfDay")
               : t("intake.time.hint.default")
         }
+        hintDisplay="tooltip"
+        className="mb-0"
         error={errors.birthTime}
       >
         <BirthTimePicker
@@ -89,6 +97,8 @@ export function BirthTimePrecisionField({
       label={t("intake.precision.label")}
       icon={<ShieldCheck size={16} />}
       hint={t(`intake.precision.${selectedOption.value}.description`)}
+      hintDisplay="tooltip"
+      className="mb-0"
     >
       <Select value={value} onValueChange={(next) => onChange(next as BirthTimePrecision)}>
         <SelectTrigger>
@@ -102,6 +112,9 @@ export function BirthTimePrecisionField({
           ))}
         </SelectContent>
       </Select>
+      <p className="mb-0 mt-2.5 text-xs leading-relaxed text-cream/48">
+        {t(`intake.precision.${selectedOption.value}.description`)}
+      </p>
     </Field>
   );
 }
@@ -118,7 +131,13 @@ export function BirthTimeSourceField({
   const { t } = useI18n();
 
   return (
-    <Field label={t("intake.source.label")} hint={t("intake.source.hint")} error={error}>
+    <Field
+      label={t("intake.source.label")}
+      hint={t("intake.source.hint")}
+      hintDisplay="below"
+      className="mb-0"
+      error={error}
+    >
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger aria-invalid={Boolean(error)}>
           <SelectValue placeholder={t("intake.source.placeholder")} />
@@ -138,13 +157,22 @@ export function BirthTimeSourceField({
 export function BirthPlaceField({
   value,
   error,
+  onVisualStateChange,
   onChange
 }: {
   value: string;
   error?: string;
+  onVisualStateChange?: (value: BirthPlaceVisualState | null) => void;
   onChange: (value: string) => void;
 }) {
-  return <PlacePicker value={value} onChange={onChange} error={error} />;
+  return (
+    <PlacePicker
+      value={value}
+      onChange={onChange}
+      onVisualStateChange={onVisualStateChange}
+      error={error}
+    />
+  );
 }
 
 export function BirthNameField({
@@ -157,7 +185,12 @@ export function BirthNameField({
   const { t } = useI18n();
 
   return (
-    <Field label={t("intake.name.label")} hint={t("intake.name.hint")}>
+    <Field
+      label={t("intake.name.label")}
+      hint={t("intake.name.hint")}
+      hintDisplay="tooltip"
+      className="mb-0"
+    >
       <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -187,6 +220,8 @@ export function BirthGenderField({
       label={t("intake.gender.label")}
       icon={<UserRound size={16} />}
       hint={hint ?? t("intake.gender.hint")}
+      hintDisplay="tooltip"
+      className="mb-0"
       error={error}
     >
       <Select value={value} onValueChange={onChange}>

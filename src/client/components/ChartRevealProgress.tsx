@@ -14,7 +14,11 @@ import {
   Wind,
   type LucideIcon
 } from "lucide-react";
-import type { ChartRevealState, PlanetKey } from "../lib/chartRevealMapping";
+import type {
+  ChartRevealCoordinates,
+  ChartRevealState,
+  PlanetKey
+} from "../lib/chartRevealMapping";
 
 /**
  * Pure presentational component. Takes a single ChartRevealState — produced
@@ -38,7 +42,7 @@ const PLANET_GLYPH: Record<PlanetKey, string> = {
 
 // Fixed demo layout — 9 grahas placed around the wheel. Real angles come
 // from the actual chart once this is wired to structured_data facts.
-const PLANET_ANGLES: Record<PlanetKey, number> = {
+const DEMO_PLANET_ANGLES: Record<PlanetKey, number> = {
   Sun: 15,
   Moon: 55,
   Mars: 95,
@@ -167,11 +171,14 @@ const DEMO_STATES: ChartRevealState[] = [
 
 export function ChartRevealProgress({
   state,
+  coordinates,
   demo = false,
   demoIntervalMs = 2600
 }: {
   /** Real usage: pass deriveChartRevealState(pipelineData) here. */
   state?: ChartRevealState;
+  /** Real chart coordinates from birth_chart_facts.json. */
+  coordinates?: ChartRevealCoordinates | null;
   /** Preview usage: cycle through DEMO_STATES instead of using `state`. */
   demo?: boolean;
   demoIntervalMs?: number;
@@ -195,6 +202,10 @@ export function ChartRevealProgress({
   const d9Active = current.focus.kind === "d9";
   const synthesisActive = current.focus.kind === "synthesis";
   const housesCompleted = new Set(current.housesCompleted);
+  const lagnaLongitude = coordinates?.lagnaLongitude ?? 0;
+  const planetAngles = demo
+    ? DEMO_PLANET_ANGLES
+    : relativePlanetAngles(coordinates?.planetLongitudes, lagnaLongitude);
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -297,12 +308,13 @@ export function ChartRevealProgress({
               chip backdrop so an active planet reads as its own marker, not
               a highlighted house icon. Revealed once chart_facts completes. */}
           {current.planetsRevealed &&
-            (Object.keys(PLANET_GLYPH) as PlanetKey[]).map((planet) => {
-              const angle = PLANET_ANGLES[planet];
+            (Object.keys(planetAngles) as PlanetKey[]).map((planet) => {
+              const angle = planetAngles[planet];
+              if (angle == null) return null;
               const point = polarToCartesian(200, 200, 146, angle);
               const active = focusPlanet === planet;
               return (
-                <g key={planet} style={{ transition: "all 500ms ease" }}>
+                <g key={planet}>
                   {active && (
                     <circle
                       cx={point.x}
@@ -381,7 +393,7 @@ export function ChartRevealProgress({
             fill={synthesisActive ? "url(#crp-glow)" : "rgba(240,232,216,0.02)"}
             stroke={synthesisActive ? "rgba(237,217,163,0.9)" : "rgba(201,169,110,0.2)"}
             strokeWidth={synthesisActive ? 1.8 : 1}
-            style={{ transition: "all 700ms ease" }}
+            style={{ transition: "fill 700ms ease, stroke 700ms ease, stroke-width 700ms ease" }}
           />
         </svg>
       </div>
@@ -395,6 +407,20 @@ export function ChartRevealProgress({
       </div>
     </div>
   );
+}
+
+function relativePlanetAngles(
+  longitudes: Partial<Record<PlanetKey, number>> | undefined,
+  lagnaLongitude: number
+) {
+  const result: Partial<Record<PlanetKey, number>> = {};
+  if (!longitudes) return result;
+  for (const planet of Object.keys(longitudes) as PlanetKey[]) {
+    const longitude = longitudes[planet];
+    if (longitude == null) continue;
+    result[planet] = (longitude - lagnaLongitude + 360) % 360;
+  }
+  return result;
 }
 
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {

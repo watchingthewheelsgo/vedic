@@ -1,6 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import type { BirthTimePrecision } from "../../shared/domain";
+import { Clock3, MapPin } from "lucide-react";
 
 type BirthInputTheme = "classic" | "cosmic";
+type AstroVisualPlacement = "default" | "right";
 
 const ZODIAC = "♈♉♊♋♌♍♎♏♐♑♒♓".split("");
 const TAU = Math.PI * 2;
@@ -32,7 +35,31 @@ type CityInfo = {
   exact?: boolean;
 };
 
-export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
+export function BirthInputAstroVisual({
+  theme,
+  placement = "default",
+  embedded = false,
+  birthDate = null,
+  birthTime = null,
+  timePrecision = "exact",
+  location = null,
+  timeTitle,
+  locationTitle,
+  timeLabel,
+  locationLabel
+}: {
+  theme: BirthInputTheme;
+  placement?: AstroVisualPlacement;
+  embedded?: boolean;
+  birthDate?: Date | null;
+  birthTime?: Date | null;
+  timePrecision?: BirthTimePrecision;
+  location?: CityInfo | null;
+  timeTitle?: string;
+  locationTitle?: string;
+  timeLabel?: string;
+  locationLabel?: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -53,7 +80,7 @@ export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
     let edges: Array<[Star, Star]> = [];
     const meteors: Meteor[] = [];
     const globePoints: Array<[number, number]> = [];
-    let cityInfo: CityInfo | null = null;
+    let cityInfo: CityInfo | null = location;
     const motion = {
       spin: 0,
       cityAngle: 0,
@@ -69,22 +96,31 @@ export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
       pitch: -0.32,
       pitchTarget: -0.32,
       globe: 0,
-      globeTarget: 0
+      globeTarget: cityInfo ? 1 : 0
     };
+
+    if (cityInfo) {
+      motion.cityAngle = (cityInfo.longitude / 180) * Math.PI;
+      motion.cityAngleTarget = motion.cityAngle;
+      motion.yaw = (-cityInfo.longitude * Math.PI) / 180;
+      motion.yawTarget = motion.yaw;
+      motion.pitch = Math.max(-0.85, Math.min(0.85, (cityInfo.latitude * Math.PI) / 180));
+      motion.pitchTarget = motion.pitch;
+    }
 
     for (let lat = -80; lat <= 80; lat += 10) {
       for (let lon = 0; lon < 360; lon += 10) globePoints.push([lat, lon]);
     }
 
     function rebuild() {
+      canvasElement.style.width = embedded ? "100%" : "100vw";
+      canvasElement.style.height = embedded ? "100%" : "100vh";
       const rect = canvasElement.getBoundingClientRect();
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = Math.max(320, rect.width) * dpr;
       height = Math.max(460, rect.height) * dpr;
       canvasElement.width = width;
       canvasElement.height = height;
-      canvasElement.style.width = `${rect.width}px`;
-      canvasElement.style.height = `${rect.height}px`;
 
       const count = Math.round((width * height) / 9000);
       stars = Array.from({ length: count }, () => {
@@ -159,10 +195,16 @@ export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
 
       const dark = theme === "cosmic";
       const wide = width / dpr > 980;
-      const centerX = wide ? width * 0.71 : width * 0.5;
-      const centerY = height * 0.5;
-      const globeRadius = Math.min(width * (wide ? 0.22 : 0.32), height * 0.32);
-      const ringRadius = globeRadius * 1.6;
+      const centerX = embedded
+        ? width * 0.5
+        : wide
+          ? width * (placement === "right" ? 0.78 : 0.71)
+          : width * 0.5;
+      const centerY = height * (embedded ? 0.47 : 0.5);
+      const globeRadius = embedded
+        ? Math.min(width * 0.31, height * 0.29)
+        : Math.min(width * (wide ? 0.22 : 0.32), height * 0.32);
+      const ringRadius = globeRadius * (embedded ? 1.58 : 1.6);
       const ease = Math.min(dt * 2, 1);
 
       motion.spin += dt * 0.02;
@@ -261,6 +303,43 @@ export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
       ctx.arc(0, 0, globeRadius, 0, TAU);
       ctx.stroke();
       ctx.restore();
+
+      if (birthDate) {
+        const outerRadius = ringRadius * 1.08;
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.lineCap = "round";
+        for (let hour = 0; hour < 24; hour += 1) {
+          const angle = (hour / 24) * TAU - Math.PI / 2;
+          const major = hour % 6 === 0;
+          const inner = outerRadius - (major ? 10 : 5) * dpr;
+          ctx.strokeStyle = dark
+            ? `rgba(237,217,163,${major ? 0.55 : 0.22})`
+            : `rgba(154,122,74,${major ? 0.42 : 0.18})`;
+          ctx.lineWidth = (major ? 1.2 : 0.7) * dpr;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+          ctx.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+          ctx.stroke();
+        }
+
+        if (birthTime && timePrecision !== "unknown") {
+          const minutes = birthTime.getHours() * 60 + birthTime.getMinutes();
+          const angle = (minutes / 1440) * TAU - Math.PI / 2;
+          const pulse = 0.72 + Math.sin(time * 2.2) * 0.12;
+          ctx.strokeStyle = `rgba(245,220,158,${pulse})`;
+          ctx.lineWidth = 1.5 * dpr;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(angle) * globeRadius * 1.04, Math.sin(angle) * globeRadius * 1.04);
+          ctx.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+          ctx.stroke();
+          ctx.fillStyle = "rgba(255,242,205,0.95)";
+          ctx.beginPath();
+          ctx.arc(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius, 3.2 * dpr, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
 
       ctx.save();
       ctx.translate(centerX, centerY);
@@ -374,6 +453,7 @@ export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
 
     const observer = new ResizeObserver(rebuild);
     observer.observe(canvasElement);
+    window.addEventListener("resize", rebuild);
     window.addEventListener("birth-place-coordinates", onCity);
     rebuild();
     animation = requestAnimationFrame(draw);
@@ -381,15 +461,87 @@ export function BirthInputAstroVisual({ theme }: { theme: BirthInputTheme }) {
     return () => {
       cancelAnimationFrame(animation);
       observer.disconnect();
+      window.removeEventListener("resize", rebuild);
       window.removeEventListener("birth-place-coordinates", onCity);
     };
-  }, [theme]);
+  }, [birthDate, birthTime, embedded, location, placement, theme, timePrecision]);
 
-  return (
+  const canvas = (
     <canvas
       ref={canvasRef}
-      className="pointer-events-none fixed inset-0 z-0 h-screen w-screen"
+      className={
+        embedded
+          ? "pointer-events-none absolute inset-0 size-full"
+          : "pointer-events-none fixed inset-0 z-0 h-screen w-screen"
+      }
       aria-hidden
     />
+  );
+
+  if (!embedded) return canvas;
+
+  return (
+    <div
+      className="relative mx-auto aspect-square w-full"
+      style={{ maxWidth: "min(640px, calc(100vh - 112px))" }}
+      aria-live="polite"
+    >
+      {canvas}
+      <div className="pointer-events-none absolute inset-x-8 top-7 flex items-center justify-between text-[10px] font-medium uppercase tracking-[1.8px] text-gold/60">
+        <span>01 · {timeTitle || "Time"}</span>
+        <span>02 · {locationTitle || "Place"}</span>
+      </div>
+      <div className="pointer-events-none absolute inset-x-8 bottom-8 flex items-end justify-between gap-6">
+        <VisualReadout
+          icon={<Clock3 size={14} />}
+          active={Boolean(birthDate)}
+          label={timeTitle}
+          value={timeLabel}
+        />
+        <VisualReadout
+          icon={<MapPin size={14} />}
+          active={Boolean(location)}
+          label={locationTitle}
+          value={locationLabel}
+          align="right"
+        />
+      </div>
+    </div>
+  );
+}
+
+function VisualReadout({
+  icon,
+  active,
+  label,
+  value,
+  align = "left"
+}: {
+  icon: ReactNode;
+  active: boolean;
+  label?: string;
+  value?: string;
+  align?: "left" | "right";
+}) {
+  return (
+    <div className={align === "right" ? "min-w-0 text-right" : "min-w-0 text-left"}>
+      <div
+        className={
+          "mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-[1.4px] " +
+          (active ? "text-gold-light" : "text-cream/30") +
+          (align === "right" ? " justify-end" : "")
+        }
+      >
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div
+        className={
+          active ? "max-w-[190px] truncate text-xs text-cream/72" : "text-xs text-cream/28"
+        }
+      >
+        {active && value ? value : "—"}
+      </div>
+    </div>
   );
 }

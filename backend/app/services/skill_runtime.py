@@ -314,15 +314,32 @@ class SkillRuntime:
         if input_data.skill == "vedic-core":
             return await self._run_core(input_data, owner_user_id=owner_user_id)
 
-        prompt = self._artifact_prompt_for(input_data)
-        result = await self.agent_runtime.run_skill_prompt_task(
-            input_data.skill,
-            prompt,
-            skills=[input_data.skill],
-            max_turns=self._max_turns_for(input_data.skill),
-        )
-        parsed = self._parse_artifact_response(result.raw_text)
-        self._validate_skill_artifacts(input_data.session_id, input_data.skill, parsed)
+        base_prompt = self._artifact_prompt_for(input_data)
+        prompt = base_prompt
+        max_attempts = 2 if input_data.skill == "vedic-reader" else 1
+        parsed: dict[str, object] | None = None
+        for attempt in range(max_attempts):
+            result = await self.agent_runtime.run_skill_prompt_task(
+                input_data.skill,
+                prompt,
+                skills=[input_data.skill],
+                max_turns=self._max_turns_for(input_data.skill),
+            )
+            try:
+                parsed = self._parse_artifact_response(result.raw_text)
+                self._validate_skill_artifacts(input_data.session_id, input_data.skill, parsed)
+                break
+            except ValueError as exc:
+                if attempt + 1 >= max_attempts:
+                    raise
+                prompt = (
+                    f"{base_prompt}\n\n"
+                    "The previous artifact was rejected by the deterministic output contract. "
+                    "Regenerate it from scratch and fix every issue below; do not explain the retry:\n"
+                    f"- {exc}"
+                )
+        if parsed is None:
+            raise ValueError(f"{input_data.skill} did not return an artifact response")
         for artifact in parsed["artifacts"]:
             artifact_path = str(artifact["path"])
             self.workspace.write_artifact(
@@ -1127,10 +1144,15 @@ class SkillRuntime:
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: 在进入完整分析之前，我先验证几个时间锚点来确认出生数据的精度——
   - Output 3 to 5 numbered items only.
-  - Each item uses bold markdown number, e.g. **1.** 推断正文.
+  - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question in Chinese, e.g. **1.** 2018年前后，您是否经历过一次工作方向的明显变化？
+  - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Prefer a dated major event when evidence supports one.
+  - Keep the visible question to one short sentence, ideally no more than 45 Chinese characters, and end it with ？.
+  - Never put planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning in the visible numbered question.
+  - Do not ask flattering personality generalities, leading questions, or bundle multiple unrelated events in one item.
+  - For a minor, never ask about adult marriage, career, or childbirth; use already-observable family, development, education, or care facts.
   - Each item is followed by one blank line and a quoted derivation line: > 推导：...
   - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
-  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
+  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields through a lived-experience difference; keep all candidate and field terminology out of the visible question.
   - For rectification_required anchors, add quoted machine lines after 推导 using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
   - End with: 请逐条回复：**准 / 不准 / 部分准**"""
         if locale == "ja":
@@ -1138,20 +1160,25 @@ class SkillRuntime:
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: 完全な分析に入る前に、出生データの精度を確認するため、いくつかの時間アンカーを検証します——
   - Output 3 to 5 numbered items only.
-  - Each item uses bold markdown number, e.g. **1.** 推論本文.
+  - Each item uses a bold markdown number followed by one short, direct lived-experience question in Japanese, ending with ？.
+  - The visible question must cover exactly one concrete or dated fact and must not expose planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning.
+  - Do not ask flattering personality generalities or bundle unrelated events. For a minor, do not ask adult marriage, career, or childbirth questions.
   - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
-  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
+  - If sensitivity_scan.reportReadiness.mode=rectification_required, distinguish candidates through a lived-experience difference while keeping candidate and field terminology out of the visible question.
   - For rectification_required anchors, add quoted machine lines after 根拠 using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
   - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
         return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: Before entering the full analysis, I will first validate several timing anchors to check the precision of the birth data—
   - Output 3 to 5 numbered items only.
-  - Each item uses bold markdown number, e.g. **1.** Inference text.
+  - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question, e.g. **1.** Around 2018, did you make one major change in your work direction?
+  - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Keep it to one short sentence, ideally no more than 35 words.
+  - Never put planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning in the visible question.
+  - Do not ask flattering personality generalities, leading questions, or bundle unrelated events. For a minor, do not ask about adult marriage, career, or childbirth.
   - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
-  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields rather than validate generic personality.
+  - If sensitivity_scan.reportReadiness.mode=rectification_required, distinguish candidates through a lived-experience difference while keeping candidate and field terminology out of the visible question.
   - For rectification_required anchors, add quoted machine lines after Derivation using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
   - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
 
@@ -1189,11 +1216,13 @@ class SkillRuntime:
             for artifact in self.workspace.read_artifacts(session_id)
         }
         state = self._json_dict(existing.get("chart_rectification_state.json", ""))
-        errors = self.rectification.validate_prevalidation_contract(state, prevalidation)
+        errors = self.rectification.validate_prevalidation_contract(
+            state,
+            prevalidation,
+            enforce_user_facing_quality=True,
+        )
         if errors:
-            raise ValueError(
-                "vedic-reader output failed candidate-bound validation: " + "; ".join(errors[:4])
-            )
+            raise ValueError("vedic-reader output failed validation: " + "; ".join(errors[:4]))
 
     @staticmethod
     def _allowed_output_artifacts(skill: str) -> set[str] | None:
@@ -1847,6 +1876,7 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 - When rectificationPlan.lifeEventFocus is non-empty, build validation anchors from those dated events first. Each such anchor must include a machine-readable > Event: line using an eventId or category from chart_rectification_state.lifeEventLedger.
 - When rectificationPlan.eventCollectionRequired is true and lifeEventFocus is empty, still produce candidate-bound anchors using available chart differences, but keep them low-confidence and do not claim complete birth-time rectification.
 - If chart_rectification_state.status is needs_more_feedback or needs_candidate_bound_checks, generate a new rectification round from rectificationPlan. Use prior feedbackAnchors, roundHistory, and candidate scores to ask narrower candidate-discriminating anchors; do not repeat anchors that already failed to separate candidates.
+- Stop analysis as soon as you have the required number of concrete, non-duplicative questions that satisfy the format contract. Do not keep expanding the visible reading after sufficient evidence exists.
 - Do not invent candidate IDs, event IDs, times, coordinates, or fields outside chart_rectification_state.rectificationPlan.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.

@@ -50,7 +50,7 @@ export function App() {
   }, [anonymousId]);
 
   return (
-    <div className="cosmic-site relative min-h-screen overflow-x-hidden bg-night text-cream">
+    <div className="cosmic-site relative min-h-screen overflow-x-clip bg-night text-cream">
       <CosmicBackdrop />
       {sessionExpired && (
         <div className="fixed inset-x-4 top-4 z-[90] mx-auto flex max-w-[720px] flex-col gap-3 rounded-lg border border-gold/30 bg-[rgba(16,12,22,0.88)] px-4 py-3 text-cream shadow-[0_18px_48px_rgba(0,0,0,0.36)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
