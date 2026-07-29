@@ -471,7 +471,8 @@ export function PlacePicker({
                 ) : null}
                 {lookupState.agentError ? (
                   <div className="rounded-[10px] border border-gold/20 bg-white/5 px-3 py-2 text-xs leading-relaxed text-cream/55">
-                    {t("precisePlace.source.agent.error")}: {lookupState.agentError}
+                    {t("precisePlace.source.agent.error")}:{" "}
+                    {friendlyLookupError(lookupState.agentError, t)}
                   </div>
                 ) : null}
                 {poiError ? (
@@ -938,9 +939,12 @@ function PreciseOptionsList({
             </span>
           ) : null}
           {option.rawEvidence ? (
-            <span className="line-clamp-2 text-[11px] leading-relaxed text-cream/50">
-              {option.rawEvidence}
-            </span>
+            <details className="mt-1 text-[11px] leading-relaxed text-cream/50">
+              <summary className="cursor-pointer select-none text-gold-light/80 outline-none">
+                {t("precisePlace.evidence.show")}
+              </summary>
+              <span className="mt-1 block line-clamp-3">{option.rawEvidence}</span>
+            </details>
           ) : null}
         </button>
       ))}
@@ -1013,6 +1017,13 @@ function EmptyState({ text }: { text: string }) {
       {text}
     </div>
   );
+}
+
+function friendlyLookupError(error: string, t: Translator) {
+  if (/tool_use|timeout|timed out|cancel|abort/i.test(error)) {
+    return t("precisePlace.source.agent.errorFriendly");
+  }
+  return error;
 }
 
 function formatLatitude(value: number) {

@@ -119,7 +119,7 @@ export function BirthTimeSourceField({
 
   return (
     <Field label={t("intake.source.label")} hint={t("intake.source.hint")} error={error}>
-      <Select value={value || undefined} onValueChange={onChange}>
+      <Select value={value} onValueChange={onChange}>
         <SelectTrigger aria-invalid={Boolean(error)}>
           <SelectValue placeholder={t("intake.source.placeholder")} />
         </SelectTrigger>
@@ -189,7 +189,7 @@ export function BirthGenderField({
       hint={hint ?? t("intake.gender.hint")}
       error={error}
     >
-      <Select value={value || undefined} onValueChange={onChange}>
+      <Select value={value} onValueChange={onChange}>
         <SelectTrigger aria-invalid={Boolean(error)}>
           <SelectValue placeholder={t("intake.select")} />
         </SelectTrigger>
