@@ -8,6 +8,13 @@ description: 吠陀占星排盘计算引擎。当用户提供出生时间和地�
 > 基于pysweph天文引擎 + dashaflow算法模块，直接从出生时间计算完整星盘数据。
 > 输出格式完全兼容vedic-reader的structured_data.md，可直接交给vedic-core分析。
 
+## VedicDust 运行时契约
+
+- calculator 的正式输出是 `chart_record.json`，符合 `vedicdust-chart-record/1.0.0`。
+- `reading_session.json` 保存稳定会话、盘主和 active revision。
+- `chart_audit.json` 决定下一步能否校正、解读或生成报告。
+- `structured_data.md` 仅是兼容现有报告步骤的可读投影。
+
 ## 服务化边界
 
 本 skill 只定义排盘流程、输入输出契约、校验规则和 structured_data.md 的语义。

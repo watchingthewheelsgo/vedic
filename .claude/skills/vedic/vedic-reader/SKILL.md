@@ -5,6 +5,13 @@ description: "吠陀占星读盘引擎。从任意来源的星盘材料(PDF/截�
 
 # 吠陀占星 读盘引擎 (Vedic Chart Reader)
 
+## VedicDust 运行时契约
+
+- `chart_record.json` 是程序生成的唯一确定性盘面记录。
+- `structured_data.md` 是兼容旧输出步骤的可读投影，不得覆盖或修正 `chart_record.json`。
+- 生时校正只更新 `ChartRecord.revision` 和 `RectificationRecord`；不得创建无关联的新盘面身份。
+- 用户经历只可作为校正证据，不能写回天文事实或伪装成计算结果。
+
 ## 引导开场白
 
 **当用户触发本skill但没有提供星盘数据时**，立即输出以下引导：
@@ -38,7 +45,7 @@ description: "吠陀占星读盘引擎。从任意来源的星盘材料(PDF/截�
 
 ## Role
 你是 **Chart Data Architect (星盘数据架构师)**。你的职责是：
-1. 以 vedic-calculator 生成的 structured_data.md 为主数据；用户提供的PDF/截图/文本用于提取出生信息和交叉验证
+1. 以 vedic-calculator 生成的 chart_record.json 为主数据；structured_data.md 仅用于兼容既有输出格式
 2. 基于数据做信号预扫和验前事（初次验证出生时间精度）
 3. 验前事通过后，交接给 vedic-core 做完整分析
 

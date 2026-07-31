@@ -1,7 +1,15 @@
 # Architecture
 
-The app is a browser workspace for `vedic-astro-skills`. It does not define a
-new astrology methodology in v1.
+The product currently contains two architecture generations.
+
+- The legacy production workflow was originally built around
+  `vedic-astro-skills` compatibility.
+- VedicDust is the product-owned evidence pipeline defined in
+  `docs/vedicdust/`. It runs in parallel until its independent calculation,
+  rule, rectification, and golden-reference gates pass.
+
+The legacy workflow does not define a new astrology methodology. VedicDust does, through a
+versioned Calculation Profile, source registry, Rule Catalog, and Claim Graph.
 
 ## Boundaries
 
@@ -21,8 +29,27 @@ Backend responsibilities:
 - call original synastry scripts for `synastry_data.md`
 - invoke Claude Agent SDK with the selected original skill
 
-The original skills remain authoritative for phase order, prompts, file names,
-and markdown style.
+The original skills remain authoritative only inside the legacy compatibility
+workflow. They are not authoritative for VedicDust.
+
+## VedicDust Boundaries
+
+```text
+Birth Assertion
+  -> Canonical Birth Moment
+  -> Astronomy Snapshot
+  -> Chart Record
+  -> Chart Audit
+  -> Rectification Record (when required)
+  -> Claim Graph
+  -> Consultation Report
+```
+
+The deterministic engine owns calculation facts, Method Rule evaluation,
+sensitivity boundaries, and candidate scoring. VedicDust skills may audit a Chart Record, ask
+questions from engine-provided discriminators, build Claims from registered
+rules, and render approved Claims. Skills cannot invent placements, settings,
+rules, or rectified timestamps.
 
 ## Runtime Flow
 
@@ -30,7 +57,8 @@ and markdown style.
 POST /api/skill-sessions
   BirthInput
   -> VedicCalculator.calculate()
-  -> structured_data.md
+  -> chart_record.json + chart_audit.json + reading_session.json
+  -> structured_data.md (compatibility projection)
 
 POST /api/skill-runs
   sessionId + skill name + optional userMessage
@@ -58,6 +86,9 @@ POST /api/skill-synastry-subject
 - `backend/app/agents/claude_runtime.py`
 - `src/client/App.tsx`
 - `.claude/skills/*`
+- `backend/app/vedicdust/`
+- `docs/vedicdust/`
+- `CONTEXT.md`
 
 ## Agent Contract
 
@@ -78,7 +109,7 @@ The backend currently uses a transport JSON wrapper:
 The wrapper is not product output. It exists only so the backend can persist
 artifacts predictably after an Agent SDK run.
 
-## Non-Goals For V1
+## Legacy Non-Goals
 
 - no payment or checkout flow
 - no app-specific report cards

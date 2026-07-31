@@ -1,0 +1,192 @@
+{
+  "$defs": {
+    "EvidenceClass": {
+      "enum": [
+        "astronomical_authority",
+        "classical_text",
+        "lineage_commentary",
+        "software_reference",
+        "product_hypothesis",
+        "user_testimony"
+      ],
+      "title": "EvidenceClass",
+      "type": "string"
+    },
+    "MethodRule": {
+      "additionalProperties": false,
+      "properties": {
+        "ruleId": {
+          "pattern": "^[a-z0-9][a-z0-9._-]+$",
+          "title": "Ruleid",
+          "type": "string"
+        },
+        "ruleVersion": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Ruleversion",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "ruleKind": {
+          "enum": ["derivation", "judgement", "workflow_gate"],
+          "title": "Rulekind",
+          "type": "string"
+        },
+        "methodProfileIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Methodprofileids",
+          "type": "array"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        },
+        "requiredEvidenceLayers": {
+          "items": {
+            "enum": ["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"],
+            "type": "string"
+          },
+          "title": "Requiredevidencelayers",
+          "type": "array"
+        },
+        "allOf": {
+          "items": {
+            "$ref": "#/$defs/RulePredicate"
+          },
+          "title": "Allof",
+          "type": "array"
+        },
+        "anyOf": {
+          "items": {
+            "$ref": "#/$defs/RulePredicate"
+          },
+          "title": "Anyof",
+          "type": "array"
+        },
+        "noneOf": {
+          "items": {
+            "$ref": "#/$defs/RulePredicate"
+          },
+          "title": "Noneof",
+          "type": "array"
+        },
+        "outputCode": {
+          "title": "Outputcode",
+          "type": "string"
+        },
+        "evidenceClass": {
+          "$ref": "#/$defs/EvidenceClass"
+        },
+        "sourceIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sourceids",
+          "type": "array"
+        },
+        "status": {
+          "enum": ["draft", "provisional", "validated", "retired"],
+          "title": "Status",
+          "type": "string"
+        },
+        "validationFixtureIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Validationfixtureids",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ruleId",
+        "ruleVersion",
+        "title",
+        "ruleKind",
+        "methodProfileIds",
+        "topic",
+        "outputCode",
+        "evidenceClass",
+        "sourceIds",
+        "status"
+      ],
+      "title": "MethodRule",
+      "type": "object"
+    },
+    "RulePredicate": {
+      "additionalProperties": false,
+      "properties": {
+        "factType": {
+          "title": "Facttype",
+          "type": "string"
+        },
+        "subjectSelector": {
+          "title": "Subjectselector",
+          "type": "string"
+        },
+        "operator": {
+          "enum": [
+            "equals",
+            "not_equals",
+            "greater_than",
+            "less_than",
+            "contains",
+            "exists",
+            "not_exists"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        }
+      },
+      "required": ["factType", "subjectSelector", "operator"],
+      "title": "RulePredicate",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-rule-catalog/1.0.0",
+      "default": "vedicdust-rule-catalog/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "catalogVersion": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "title": "Catalogversion",
+      "type": "string"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/MethodRule"
+      },
+      "title": "Rules",
+      "type": "array"
+    }
+  },
+  "required": ["catalogVersion", "rules"],
+  "title": "RuleCatalog",
+  "type": "object"
+}

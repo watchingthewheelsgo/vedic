@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "vedicdust-source-registry/1.0.0",
+  "sources": [
+    {
+      "sourceId": "astro.swisseph.programmer-manual",
+      "evidenceClass": "astronomical_authority",
+      "title": "Swiss Ephemeris Programmer's Manual",
+      "locator": "Current programmer documentation",
+      "edition": null,
+      "url": "https://www.astro.com/swisseph/swephprg.htm",
+      "citationStatus": "pinned"
+    },
+    {
+      "sourceId": "time.iana.tzdb",
+      "evidenceClass": "astronomical_authority",
+      "title": "IANA Time Zone Database",
+      "locator": "Release pinned by deployment lockfile",
+      "edition": null,
+      "url": "https://www.iana.org/time-zones",
+      "citationStatus": "pinned"
+    },
+    {
+      "sourceId": "classic.bphs.pending-edition",
+      "evidenceClass": "classical_text",
+      "title": "Brihat Parashara Hora Shastra",
+      "locator": null,
+      "edition": null,
+      "url": null,
+      "citationStatus": "pending-edition-pin"
+    },
+    {
+      "sourceId": "classic.brihat-jataka.pending-edition",
+      "evidenceClass": "classical_text",
+      "title": "Brihat Jataka",
+      "locator": null,
+      "edition": null,
+      "url": null,
+      "citationStatus": "pending-edition-pin"
+    },
+    {
+      "sourceId": "classic.phaladeepika.pending-edition",
+      "evidenceClass": "classical_text",
+      "title": "Phaladeepika",
+      "locator": null,
+      "edition": null,
+      "url": null,
+      "citationStatus": "pending-edition-pin"
+    },
+    {
+      "sourceId": "classic.jaimini-sutras.pending-edition",
+      "evidenceClass": "classical_text",
+      "title": "Jaimini Sutras",
+      "locator": null,
+      "edition": null,
+      "url": null,
+      "citationStatus": "pending-edition-pin"
+    },
+    {
+      "sourceId": "lineage.pvr-integrated-approach.pending-edition",
+      "evidenceClass": "lineage_commentary",
+      "title": "Vedic Astrology: An Integrated Approach",
+      "locator": null,
+      "edition": null,
+      "url": null,
+      "citationStatus": "pending-edition-pin"
+    },
+    {
+      "sourceId": "software.pyjhora.compatibility",
+      "evidenceClass": "software_reference",
+      "title": "PyJHora compatibility reference",
+      "locator": "Version pinned by deployment lockfile",
+      "edition": null,
+      "url": "https://github.com/naturalstupid/PyJHora",
+      "citationStatus": "informational"
+    },
+    {
+      "sourceId": "product.vedicdust-consultation-standard-1",
+      "evidenceClass": "product_hypothesis",
+      "title": "VedicDust Consultation Standard 1.0",
+      "locator": "docs/vedicdust/methodology.md",
+      "edition": "1.0",
+      "url": null,
+      "citationStatus": "pinned"
+    }
+  ]
+}

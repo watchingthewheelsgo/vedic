@@ -16,10 +16,26 @@ from app.schemas import (
 from app.services.chart_rectification import ChartRectificationService
 from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
-from app.services.vedic_calculator import VedicCalculator
+from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
 from app.tools.registry import BackendToolRunner
+from app.utils.ids import make_id
+from app.vedicdust.models import (
+    ChartRecord,
+    ConfidenceGrade,
+    DiscriminatorOption,
+    ReadingSession,
+    RectificationAnswer,
+    RectificationAnswerBatch,
+    RectificationQuestion,
+    RectificationQuestionSet,
+)
+from app.vedicdust.orchestrator import audit_chart_record
 
 BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json"
+CHART_RECORD_JSON = "chart_record.json"
+READING_SESSION_JSON = "reading_session.json"
+CHART_AUDIT_JSON = "chart_audit.json"
+LEGACY_VEDICDUST_CASE_JSON = "vedicdust_case.json"
 LEGACY_STRUCTURED_DATA_JSON = "structured_data.json"
 BIRTH_CHART_FACTS_B_JSON = "birth_chart_facts_B.json"
 LEGACY_STRUCTURED_DATA_B_JSON = "structured_data_B.json"
@@ -47,7 +63,12 @@ class SkillRuntime:
     ) -> SkillSessionResponse:
         session_id = self.workspace.create_session()
         started = datetime.now(timezone.utc)
-        calculation = self.calculator.calculate(input_data)
+        identity = ChartRecordIdentity(
+            reading_session_id=session_id,
+            chart_record_id=make_id("chart"),
+            subject_id=make_id("subject"),
+        )
+        calculation = self.calculator.calculate(input_data, identity=identity)
         finished = datetime.now(timezone.utc)
         self.workspace.write_artifact(session_id, "structured_data.md", calculation.structured_data)
         self.workspace.write_artifact(
@@ -65,6 +86,19 @@ class SkillRuntime:
             "sensitivity_scan.json",
             calculation.sensitivity_scan_json,
         )
+        self.workspace.write_artifact(
+            session_id,
+            CHART_RECORD_JSON,
+            calculation.chart_record_json,
+        )
+        self._write_reading_session(
+            session_id,
+            identity=identity,
+            locale=input_data.locale,
+            stage="chart_ready",
+            rectification_status=self._chart_rectification_status(calculation.chart_record_json),
+        )
+        self._write_chart_audit(session_id, calculation.chart_record_json)
         self._write_initial_rectification_state(
             session_id,
             calculation.birth_input_context_json,
@@ -102,6 +136,15 @@ class SkillRuntime:
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "sensitivity_scan.json", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, CHART_RECORD_JSON, producer="vedicdust-chart-calculation"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, READING_SESSION_JSON, producer="vedicdust-reading-orchestrator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, CHART_AUDIT_JSON, producer="vedicdust-chart-audit"
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "chart_rectification_state.json", producer="chart-rectification"
@@ -224,6 +267,7 @@ class SkillRuntime:
         )
 
     def load_session(self, session_id: str) -> SkillSessionResponse:
+        self._ensure_runtime_contracts(session_id)
         artifacts = self.workspace.read_artifacts(session_id)
         paths = {artifact.path for artifact in artifacts}
         if "bazi_life_report.md" in paths:
@@ -354,6 +398,7 @@ class SkillRuntime:
             )
         if input_data.skill == "vedic-reader":
             self._write_prevalidation_result(input_data.session_id, feedback_markdown="")
+            self._write_rectification_question_set(input_data.session_id)
         stage = self._stage_for(input_data.skill)
         await self._sync_metadata(
             input_data.session_id,
@@ -400,6 +445,17 @@ class SkillRuntime:
 
     def assert_core_readiness(self, session_id: str) -> None:
         session_dir = self.workspace.require_session_dir(session_id)
+        read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
+        if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
+            self._ensure_runtime_contracts(session_id)
+            chart_audit = self._json_dict(read_artifact_text(session_id, CHART_AUDIT_JSON) or "")
+            permitted = chart_audit.get("permittedNextSteps")
+            if not isinstance(permitted, list) or "judge" not in permitted:
+                findings = chart_audit.get("findings")
+                raise ValueError(
+                    "当前盘面尚未通过确定性审计，不能生成完整报告。"
+                    f" 审计结果：{findings if isinstance(findings, list) else 'unknown'}"
+                )
         result_path = session_dir / "prevalidation_result.json"
         if not result_path.exists():
             raise ValueError(
@@ -550,7 +606,7 @@ class SkillRuntime:
         existing = ""
         artifacts = {
             artifact.path: artifact.content
-            for artifact in self.workspace.read_artifacts(session_id)
+            for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
         }
         if "user_context.md" in artifacts:
             existing = artifacts["user_context.md"].rstrip() + "\n\n"
@@ -567,6 +623,7 @@ class SkillRuntime:
         prevalidation_result = self._write_prevalidation_result(
             session_id, feedback_markdown=feedback_markdown
         )
+        self._write_rectification_answer_batch(session_id, feedback_markdown)
         if prevalidation_result is not None:
             self._apply_rectification_feedback(
                 session_id,
@@ -606,6 +663,7 @@ class SkillRuntime:
         status: str,
         owner_user_id: str | None = None,
     ) -> None:
+        self._sync_reading_session_stage(session_id, stage)
         if self.metadata_store is None:
             return
         await self.metadata_store.sync_session_from_files(
@@ -737,14 +795,20 @@ class SkillRuntime:
             if rectified_input is not None:
                 chart_revision = self._next_chart_revision(updated_state)
                 self._archive_current_chart_artifacts(session_id, chart_revision - 1, artifacts)
-                calculation = self.calculator.calculate(rectified_input)
+                identity = self._chart_record_identity(
+                    session_id,
+                    revision=chart_revision,
+                )
+                calculation = self.calculator.calculate(rectified_input, identity=identity)
                 self._write_chart_calculation(
                     session_id,
                     calculation.structured_data,
                     calculation.birth_chart_facts_json,
                     calculation.birth_input_context_json,
                     calculation.sensitivity_scan_json,
+                    calculation.chart_record_json,
                     producer="calculator:rectification",
+                    identity=identity,
                 )
                 self.workspace.write_session_manifest(
                     session_id, locale=self.workspace.read_session_locale(session_id)
@@ -772,6 +836,7 @@ class SkillRuntime:
             "chart_rectification_state.json",
             producer="chart-rectification",
         )
+        self._sync_chart_record_rectification(session_id, updated_state)
 
         decision = prevalidation_result.get("decision")
         if isinstance(decision, dict):
@@ -797,18 +862,40 @@ class SkillRuntime:
         birth_chart_facts_json: str,
         birth_input_context_json: str,
         sensitivity_scan_json: str,
+        chart_record_json: str,
         *,
         producer: str,
+        identity: ChartRecordIdentity | None = None,
     ) -> None:
         chart_artifacts = {
             "structured_data.md": structured_data,
             BIRTH_CHART_FACTS_JSON: birth_chart_facts_json,
             "birth_input_context.json": birth_input_context_json,
             "sensitivity_scan.json": sensitivity_scan_json,
+            CHART_RECORD_JSON: chart_record_json,
         }
         for path, content in chart_artifacts.items():
             self.workspace.write_artifact(session_id, path, content)
             self.workspace.mark_artifact_checkpoint(session_id, path, producer=producer)
+        if identity is not None:
+            self._write_reading_session(
+                session_id,
+                identity=identity,
+                locale=self.workspace.read_session_locale(session_id),
+                stage="rectification",
+                rectification_status=self._chart_rectification_status(chart_record_json),
+            )
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                READING_SESSION_JSON,
+                producer="vedicdust-reading-orchestrator",
+            )
+            self._write_chart_audit(session_id, chart_record_json)
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                CHART_AUDIT_JSON,
+                producer="vedicdust-chart-audit",
+            )
 
     def _archive_current_chart_artifacts(
         self,
@@ -822,6 +909,8 @@ class SkillRuntime:
             LEGACY_STRUCTURED_DATA_JSON,
             "birth_input_context.json",
             "sensitivity_scan.json",
+            CHART_RECORD_JSON,
+            LEGACY_VEDICDUST_CASE_JSON,
         ]:
             content = artifacts.get(path)
             if content is None:
@@ -831,6 +920,239 @@ class SkillRuntime:
                 f".runtime/chart_revisions/rev_{revision}/{path}",
                 content,
             )
+
+    def _ensure_runtime_contracts(self, session_id: str) -> None:
+        current = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if current is not None:
+            if self.workspace.read_artifact_text(session_id, CHART_AUDIT_JSON) is None:
+                self._write_chart_audit(session_id, current)
+            if self.workspace.read_artifact_text(session_id, READING_SESSION_JSON) is None:
+                record = ChartRecord.model_validate_json(current)
+                identity = ChartRecordIdentity(
+                    reading_session_id=session_id,
+                    chart_record_id=record.chart_record_id,
+                    subject_id=record.subject.subject_id,
+                    revision=record.revision,
+                )
+                self._write_reading_session(
+                    session_id,
+                    identity=identity,
+                    locale=self.workspace.read_session_locale(session_id),
+                    stage="chart_ready",
+                    rectification_status=self._chart_rectification_status(current),
+                )
+            return
+        legacy = self.workspace.read_artifact_text(session_id, LEGACY_VEDICDUST_CASE_JSON)
+        if legacy is None:
+            return
+        payload = self._json_dict(legacy)
+        legacy_id = str(payload.pop("caseId", "") or make_id("chart"))
+        payload["schemaVersion"] = "vedicdust-chart-record/1.0.0"
+        payload["chartRecordId"] = legacy_id
+        payload["readingSessionId"] = session_id
+        payload["revision"] = 1
+        record = ChartRecord.model_validate(payload)
+        content = record.model_dump_json(by_alias=True, indent=2) + "\n"
+        self.workspace.write_artifact(session_id, CHART_RECORD_JSON, content)
+        self._write_chart_audit(session_id, content)
+        self._write_reading_session(
+            session_id,
+            identity=ChartRecordIdentity(
+                reading_session_id=session_id,
+                chart_record_id=record.chart_record_id,
+                subject_id=record.subject.subject_id,
+                revision=record.revision,
+            ),
+            locale=record.subject.locale,
+            stage="chart_ready",
+            rectification_status=self._chart_rectification_status(content),
+        )
+
+    def _chart_record_identity(
+        self,
+        session_id: str,
+        *,
+        revision: int,
+    ) -> ChartRecordIdentity:
+        self._ensure_runtime_contracts(session_id)
+        content = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if content is None:
+            raise ValueError("Session is missing chart_record.json")
+        record = ChartRecord.model_validate_json(content)
+        return ChartRecordIdentity(
+            reading_session_id=session_id,
+            chart_record_id=record.chart_record_id,
+            subject_id=record.subject.subject_id,
+            revision=revision,
+        )
+
+    def _write_reading_session(
+        self,
+        session_id: str,
+        *,
+        identity: ChartRecordIdentity,
+        locale: str,
+        stage: str,
+        rectification_status: str,
+        report_status: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        existing = self.workspace.read_artifact_text(session_id, READING_SESSION_JSON)
+        created_at = now
+        resolved_report_status = report_status or "not_started"
+        if existing:
+            previous = ReadingSession.model_validate_json(existing)
+            created_at = previous.created_at
+            resolved_report_status = report_status or previous.report_status
+        reading = ReadingSession(
+            reading_session_id=session_id,
+            subject_id=identity.subject_id,
+            chart_record_id=identity.chart_record_id,
+            active_chart_revision=identity.revision,
+            created_at=created_at,
+            updated_at=now,
+            locale=locale if locale in {"zh", "en", "ja"} else "en",
+            stage=stage,
+            rectification_status=rectification_status,
+            report_status=resolved_report_status,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            READING_SESSION_JSON,
+            reading.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+
+    @staticmethod
+    def _chart_rectification_status(chart_record_json: str) -> str:
+        record = ChartRecord.model_validate_json(chart_record_json)
+        if record.rectification is None:
+            return "not_required"
+        return record.rectification.decision.status
+
+    def _write_chart_audit(self, session_id: str, chart_record_json: str) -> None:
+        record = ChartRecord.model_validate_json(chart_record_json)
+        audit = audit_chart_record(record)
+        self.workspace.write_artifact(
+            session_id,
+            CHART_AUDIT_JSON,
+            audit.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+
+    def _sync_chart_record_rectification(
+        self,
+        session_id: str,
+        state: dict[str, object],
+    ) -> None:
+        content = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if content is None:
+            return
+        record = ChartRecord.model_validate_json(content)
+        if record.rectification is None:
+            return
+        compatibility_status = str(state.get("status") or "")
+        if compatibility_status == "not_required":
+            decision_status = "not_required"
+        elif compatibility_status in {"base_confirmed", "corrected_chart_ready"}:
+            decision_status = "bounded_interval"
+        elif compatibility_status == "needs_recalculation":
+            decision_status = "comparing_candidates"
+        else:
+            decision_status = "collecting_evidence"
+        selected = state.get("selectedCandidateId")
+        record.rectification.decision.status = decision_status
+        record.rectification.decision.selected_candidate_ids = [str(selected)] if selected else []
+        record.rectification.decision.confidence = self._selection_confidence(
+            state.get("selectionConfidence")
+        )
+        raw_report_gate = state.get("reportGate")
+        report_gate: dict[str, object] = (
+            raw_report_gate if isinstance(raw_report_gate, dict) else {}
+        )
+        record.rectification.decision.reasons = [
+            str(
+                report_gate.get("reason")
+                or f"Rectification compatibility state: {compatibility_status or 'unknown'}."
+            )
+        ]
+        if decision_status == "bounded_interval":
+            record.status = "rectified"
+            record.rectification.decision.unresolved_questions = []
+        elif decision_status == "not_required":
+            record.status = "ready_for_judgement"
+        else:
+            record.status = "rectification_required"
+        updated = record.model_dump_json(by_alias=True, indent=2) + "\n"
+        self.workspace.write_artifact(session_id, CHART_RECORD_JSON, updated)
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CHART_RECORD_JSON,
+            producer="vedicdust-rectification-orchestrator",
+        )
+        self._write_chart_audit(session_id, updated)
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CHART_AUDIT_JSON,
+            producer="vedicdust-chart-audit",
+        )
+
+    @staticmethod
+    def _selection_confidence(value: object) -> ConfidenceGrade:
+        normalized = str(value or "").lower()
+        if normalized == "high":
+            return ConfidenceGrade.CORROBORATED
+        if normalized == "medium":
+            return ConfidenceGrade.PROVISIONAL
+        return ConfidenceGrade.PROVISIONAL
+
+    def _sync_reading_session_stage(self, session_id: str, legacy_stage: str) -> None:
+        if self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON) is None:
+            return
+        identity = self._chart_record_identity(
+            session_id,
+            revision=self._active_chart_revision(session_id),
+        )
+        record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON) or ""
+        rectification_status = self._chart_rectification_status(record_json)
+        stage_map = {
+            "reader_ready": "chart_ready",
+            "reader_validation": (
+                "ready_for_judgement"
+                if rectification_status in {"not_required", "bounded_interval"}
+                else "rectification"
+            ),
+            "core_in_progress": "report_in_progress",
+            "core_complete": "report_ready",
+            "career_complete": "report_ready",
+            "love_complete": "report_ready",
+            "rectifier_complete": "ready_for_judgement",
+            "qa_complete": "report_ready",
+            "error": "blocked",
+        }
+        report_status_map = {
+            "core_in_progress": "in_progress",
+            "core_complete": "ready",
+            "career_complete": "ready",
+            "love_complete": "ready",
+            "qa_complete": "ready",
+            "error": "blocked",
+        }
+        self._write_reading_session(
+            session_id,
+            identity=identity,
+            locale=self.workspace.read_session_locale(session_id),
+            stage=stage_map.get(legacy_stage, "chart_ready"),
+            rectification_status=rectification_status,
+            report_status=report_status_map.get(legacy_stage),
+        )
+
+    def _active_chart_revision(self, session_id: str) -> int:
+        content = self.workspace.read_artifact_text(session_id, READING_SESSION_JSON)
+        if content:
+            return ReadingSession.model_validate_json(content).active_chart_revision
+        record = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if record:
+            return ChartRecord.model_validate_json(record).revision
+        return 1
 
     @staticmethod
     def _next_chart_revision(state: dict[str, object]) -> int:
@@ -959,6 +1281,169 @@ class SkillRuntime:
             if match:
                 answers[int(match.group(1))] = self._normalize_prevalidation_answer(match.group(2))
         return answers
+
+    def _write_rectification_question_set(self, session_id: str) -> None:
+        read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
+        if not callable(read_artifact_text):
+            return
+        chart_record_json = read_artifact_text(session_id, CHART_RECORD_JSON)
+        prevalidation = read_artifact_text(session_id, "reader_prevalidation.md")
+        state_json = read_artifact_text(session_id, "chart_rectification_state.json")
+        if not chart_record_json or not prevalidation or not state_json:
+            return
+        state = self._json_dict(state_json)
+        candidates = state.get("candidates")
+        if not isinstance(candidates, list):
+            return
+        candidate_ids = [
+            str(candidate.get("candidateId"))
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("candidateId")
+        ]
+        if len(candidate_ids) < 2:
+            return
+        parsed_anchors = self.rectification._parse_candidate_anchors(prevalidation, "")
+        blocks = {
+            int(item["index"]): str(item["block"])
+            for item in self.rectification._parse_prevalidation_blocks(prevalidation)
+        }
+        record = ChartRecord.model_validate_json(chart_record_json)
+        round_number = int(state.get("rectificationRound") or 0) + 1
+        questions: list[RectificationQuestion] = []
+        for anchor in parsed_anchors:
+            supported = [
+                str(candidate_id)
+                for candidate_id in anchor.get("candidateIds", [])
+                if str(candidate_id) in candidate_ids
+            ]
+            fields = [str(value) for value in anchor.get("unstableFields", [])]
+            if not supported or not fields:
+                continue
+            index = int(anchor["index"])
+            contradicted = [
+                candidate_id for candidate_id in candidate_ids if candidate_id not in supported
+            ]
+            questions.append(
+                RectificationQuestion(
+                    question_id=f"rectification.r{round_number}.q{index}",
+                    prompt=self.rectification._statement_from_anchor_block(blocks.get(index, "")),
+                    answer_kind="single_choice",
+                    discriminating_fact_ids=[
+                        self._discriminating_fact_id(field) for field in fields
+                    ],
+                    candidate_ids=candidate_ids,
+                    options=[
+                        DiscriminatorOption(
+                            option_id="accurate",
+                            label="准确",
+                            supports_candidate_ids=supported,
+                            contradicts_candidate_ids=contradicted,
+                        ),
+                        DiscriminatorOption(
+                            option_id="partly",
+                            label="部分准确",
+                        ),
+                        DiscriminatorOption(
+                            option_id="inaccurate",
+                            label="不准确",
+                            supports_candidate_ids=contradicted,
+                            contradicts_candidate_ids=supported,
+                        ),
+                        DiscriminatorOption(
+                            option_id="unknown",
+                            label="不确定",
+                        ),
+                    ],
+                    why_asked=(
+                        "This answer distinguishes chart candidates that differ on "
+                        + ", ".join(fields)
+                        + "."
+                    ),
+                    prohibited_inference=(
+                        "The answer may score only the supplied candidates and cannot create "
+                        "a chart fact."
+                    ),
+                )
+            )
+        if not questions:
+            return
+        question_set = RectificationQuestionSet(
+            chart_record_id=record.chart_record_id,
+            round=round_number,
+            questions=questions[:5],
+            completion_condition=(
+                "Submit one observable answer per question, including unknown when memory "
+                "is insufficient; the backend then reevaluates all candidates."
+            ),
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "rectification_question_set.json",
+            question_set.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            "rectification_question_set.json",
+            producer="vedicdust-rectification-dialogue",
+        )
+
+    def _write_rectification_answer_batch(
+        self,
+        session_id: str,
+        feedback_markdown: str,
+    ) -> None:
+        read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
+        if not callable(read_artifact_text):
+            return
+        question_set_json = read_artifact_text(session_id, "rectification_question_set.json")
+        if not question_set_json:
+            return
+        question_set = RectificationQuestionSet.model_validate_json(question_set_json)
+        feedback = self._parse_prevalidation_feedback(feedback_markdown)
+        answers: list[RectificationAnswer] = []
+        for question in question_set.questions:
+            match = re.search(r"\.q(\d+)$", question.question_id)
+            if match is None:
+                continue
+            normalized = feedback.get(int(match.group(1)), "recorded")
+            selected = (
+                normalized if normalized in {"accurate", "partly", "inaccurate"} else "unknown"
+            )
+            answers.append(
+                RectificationAnswer(
+                    question_id=question.question_id,
+                    selected_option_ids=[selected],
+                    confidence=(
+                        "uncertain" if selected in {"partly", "unknown"} else "fairly_certain"
+                    ),
+                )
+            )
+        if not answers:
+            return
+        batch = RectificationAnswerBatch(
+            chart_record_id=question_set.chart_record_id,
+            round=question_set.round,
+            answers=answers,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "rectification_answer_batch.json",
+            batch.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            "rectification_answer_batch.json",
+            producer="vedicdust-rectification-feedback",
+        )
+
+    @staticmethod
+    def _discriminating_fact_id(field: str) -> str:
+        match = re.fullmatch(r"d(\d+)Lagna", field)
+        if match:
+            return f"fact.D{match.group(1)}.Lagna.position"
+        if field in {"moonSign", "moonNakshatra", "moonPada", "currentDasha"}:
+            return "fact.D1.Moon.position"
+        return "fact.D1.Lagna.position"
 
     def _normalize_prevalidation_answer(self, raw: str) -> str:
         value = raw.strip().lower()
@@ -1253,7 +1738,7 @@ class SkillRuntime:
     def _artifact_prompt_for(self, input_data: SkillRunInput) -> str:
         artifacts = self._artifacts_for_skill(
             input_data.skill,
-            self.workspace.read_artifacts(input_data.session_id),
+            self.workspace.read_artifacts(input_data.session_id, include_internal=True),
         )
         base_prompt = self._prompt_for(input_data)
         return self._artifact_prompt(base_prompt, artifacts)
@@ -1651,7 +2136,8 @@ Rules:
 - Follow the current report quality rules: user-facing life blocks prioritize plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
 - Do not inherit old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - {language_instruction}
-- Use structured_data.md as the calculation source of truth.
+- Use chart_record.json as the deterministic calculation source of truth.
+- Use structured_data.md only as a compatibility projection for the requested Markdown files.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json when present; use them only as the input-confidence, active chart revision, and report-readiness gate.
 - Obey sensitivity_scan.reportReadiness.llmContract: never use mustNotUseAsPrimaryEvidence fields as primary conclusion anchors, and downgrade or omit unstable divisional/timing claims.
 - Obey chart_rectification_state.rectificationPlan.advancedVargaPolicy: D16/D20/D24/D27/D30 are corroboration-only until the time window is narrow; D60 is final-confirmation-only, never a first-pass report anchor.
@@ -1844,6 +2330,7 @@ User message:
             content = str(getattr(artifact, "content"))
             if (
                 path in {BIRTH_CHART_FACTS_JSON, LEGACY_STRUCTURED_DATA_JSON}
+                or path == LEGACY_VEDICDUST_CASE_JSON
                 or path.endswith(f"/{BIRTH_CHART_FACTS_B_JSON}")
                 or path.endswith(f"/{LEGACY_STRUCTURED_DATA_B_JSON}")
             ):
@@ -1863,13 +2350,15 @@ User message:
     def _reader_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-reader in Calc mode.
 
-Workspace already contains structured_data.md generated by vedic-calculator.
+Workspace contains chart_record.json generated by the VedicDust calculation engine.
+structured_data.md is a compatibility projection for the existing reader output format.
 
 Follow the original vedic-reader workflow exactly, but because this is a web adapter:
 - {self._language_instruction(locale)}
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
-- Use the provided structured_data.md content.
+- Treat chart_record.json as the authoritative deterministic record.
+- Use structured_data.md only as a compatibility view when the existing output format needs it.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
 - If sensitivity_scan.reportReadiness.mode is rectification_required, make each anchor support one explicit candidate ID from chart_rectification_state.json and focus on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
 - Use chart_rectification_state.rectificationPlan as the backend-owned next-round plan: targetCandidateIds, discriminatingFields, focusAxes, timeWindow, placeWindow, lifeEventFocus, eventCollectionRequired, and requiredAnchorCount are hard constraints.
@@ -1891,12 +2380,14 @@ User message:
     def _core_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-core exactly as the original skill.
 
-Workspace contains structured_data.md, birth_input_context.json, sensitivity_scan.json,
+Workspace contains chart_record.json, structured_data.md, birth_input_context.json, sensitivity_scan.json,
 chart_rectification_state.json, and may contain user_context.md / reader_prevalidation.md.
 
 Rules:
 - {self._language_instruction(locale)}
 - Follow vedic-core Step 0 through Step 5.
+- Treat chart_record.json as the authoritative deterministic record. structured_data.md is
+  only a compatibility projection and must not override the record.
 - Preserve blind-audit rules: Step 1-3 must not use user_context.md.
 - Use prevalidation_result.json and chart_rectification_state.json, when present, as the structured source for validation score, active chart revision, time confidence, and report gating. Do not reinterpret missed anchors as hits.
 - Obey sensitivity_scan.reportReadiness.llmContract: do not use restricted evidence as a primary conclusion anchor, and downgrade or omit unstable divisional/timing claims.
@@ -1912,11 +2403,12 @@ User message:
     def _career_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-career exactly as the original skill.
 
-Workspace contains structured_data.md and may contain the core report files.
+Workspace contains chart_record.json, structured_data.md, and may contain the core report files.
 
 Rules:
 - {self._language_instruction(locale)}
-- Use only structured_data.md and core report files as allowed by the skill.
+- Use chart_record.json as the authoritative deterministic record and the core report files
+  as prior interpretation. structured_data.md is compatibility-only.
 - Follow all four career phases.
 - Follow the current report quality rules: plain career conclusions, concise evidence, limitations/risks, and actionable guidance. Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - Write the original expected markdown outputs, including career_phase4a.md, career_phase4b.md, and career_phase4c.md when Phase 4 is reached.
@@ -1929,11 +2421,12 @@ User message:
     def _love_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-love exactly as the original skill.
 
-Workspace contains structured_data.md and may contain the core report files.
+Workspace contains chart_record.json, structured_data.md, and may contain the core report files.
 
 Rules:
 - {self._language_instruction(locale)}
-- Use only structured_data.md and allowed report files.
+- Use chart_record.json as the authoritative deterministic record and allowed report files.
+  structured_data.md is compatibility-only.
 - Follow the original love timing workflow and output file rules.
 - Follow the current report quality rules: plain relationship conclusions, concise evidence, limitations/risks, and actionable guidance. Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
 - Chat response should only report progress/completion and file paths.
@@ -1945,11 +2438,12 @@ User message:
     def _rectifier_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-rectifier exactly as the original skill.
 
-Workspace contains structured_data.md and user_context.md if feedback/events exist.
+Workspace contains chart_record.json, structured_data.md, and user_context.md if feedback/events exist.
 
 Rules:
 - {self._language_instruction(locale)}
 - This skill is interactive.
+- Use chart_record.json and its RectificationRecord as the deterministic boundary.
 - Write rectification_report.md.
 - If the birth time should be changed, clearly state the candidate time and what needs confirmation.
 - Do not run shell commands. If recalculation is needed, request recalculation as the next backend step.

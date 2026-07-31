@@ -1,0 +1,100 @@
+{
+  "$defs": {
+    "AuditFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "findingId": {
+          "title": "Findingid",
+          "type": "string"
+        },
+        "severity": {
+          "enum": ["blocking", "warning", "information"],
+          "title": "Severity",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "birth_evidence",
+            "civil_time",
+            "place",
+            "calculation_profile",
+            "calculation",
+            "sensitivity",
+            "rectification",
+            "provenance",
+            "audience"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "fieldRefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fieldrefs",
+          "type": "array"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "requiredAction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requiredaction"
+        }
+      },
+      "required": ["findingId", "severity", "category", "message"],
+      "title": "AuditFinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-chart-audit/1.0.0",
+      "default": "vedicdust-chart-audit/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "chartRecordId": {
+      "title": "Chartrecordid",
+      "type": "string"
+    },
+    "auditedAt": {
+      "format": "date-time",
+      "title": "Auditedat",
+      "type": "string"
+    },
+    "status": {
+      "enum": ["passed", "passed_with_limits", "blocked"],
+      "title": "Status",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/AuditFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "permittedNextSteps": {
+      "items": {
+        "enum": ["canonicalize", "calculate", "rectify", "judge", "render_report", "collect_input"],
+        "type": "string"
+      },
+      "title": "Permittednextsteps",
+      "type": "array"
+    }
+  },
+  "required": ["chartRecordId", "auditedAt", "status"],
+  "title": "ChartAudit",
+  "type": "object"
+}

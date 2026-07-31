@@ -1,0 +1,87 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-reading-session/1.0.0",
+      "default": "vedicdust-reading-session/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "readingSessionId": {
+      "title": "Readingsessionid",
+      "type": "string"
+    },
+    "subjectId": {
+      "title": "Subjectid",
+      "type": "string"
+    },
+    "chartRecordId": {
+      "title": "Chartrecordid",
+      "type": "string"
+    },
+    "activeChartRevision": {
+      "minimum": 1,
+      "title": "Activechartrevision",
+      "type": "integer"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    },
+    "updatedAt": {
+      "format": "date-time",
+      "title": "Updatedat",
+      "type": "string"
+    },
+    "locale": {
+      "default": "en",
+      "enum": ["zh", "en", "ja"],
+      "title": "Locale",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "intake",
+        "chart_ready",
+        "rectification",
+        "ready_for_judgement",
+        "report_in_progress",
+        "report_ready",
+        "blocked"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "rectificationStatus": {
+      "enum": [
+        "not_required",
+        "collecting_evidence",
+        "comparing_candidates",
+        "bounded_interval",
+        "multiple_equivalent",
+        "underdetermined"
+      ],
+      "title": "Rectificationstatus",
+      "type": "string"
+    },
+    "reportStatus": {
+      "default": "not_started",
+      "enum": ["not_started", "in_progress", "ready", "blocked"],
+      "title": "Reportstatus",
+      "type": "string"
+    }
+  },
+  "required": [
+    "readingSessionId",
+    "subjectId",
+    "chartRecordId",
+    "activeChartRevision",
+    "createdAt",
+    "updatedAt",
+    "stage",
+    "rectificationStatus"
+  ],
+  "title": "ReadingSession",
+  "type": "object"
+}

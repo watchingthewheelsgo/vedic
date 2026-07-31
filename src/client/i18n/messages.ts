@@ -137,7 +137,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.hero.title": "By Vedic light, ",
     "landing.hero.strong": "read the turning of time",
     "landing.hero.body":
-      "Share your birth details. VedaLight prepares a structured Jyotish reading, checks a few lived-experience signals with you, then turns the chart into guidance, cautions, and themes to reflect on.",
+      "Share your birth details. VedicDust prepares a structured Jyotish reading, checks a few lived-experience signals with you, then turns the chart into guidance, cautions, and themes to reflect on.",
     "landing.meta.pages": "Page Reading",
     "landing.meta.planets": "Planetary Signals",
     "landing.meta.lifeAreas": "Life Areas",
@@ -203,7 +203,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.faq.strong": "Questions",
     "landing.faq.q1": "How is Vedic Astrology different from Western Astrology?",
     "landing.faq.a1":
-      "Vedic Astrology (Jyotish) uses the sidereal zodiac and puts strong weight on the Ascendant (Lagna), planetary strength, and Dasha timing. In VedaLight, those methods are used for reflective guidance, timing awareness, and practical reminders - not fixed answers.",
+      "Vedic Astrology (Jyotish) uses the sidereal zodiac and puts strong weight on the Ascendant (Lagna), planetary strength, and Dasha timing. In VedicDust, those methods are used for reflective guidance, timing awareness, and practical reminders - not fixed answers.",
     "landing.faq.q2": "Do I need my exact birth time?",
     "landing.faq.a2":
       "The more precise, the better. Exact birth time makes the reading sharper, especially for timing and deeper chart layers. If you only know an approximate time, you can still continue; the reading will treat uncertain areas more carefully.",
@@ -820,7 +820,7 @@ const zhOverrides: Dict = {
   "landing.hero.title": "借吠陀之光，",
   "landing.hero.strong": "知时运之往",
   "landing.hero.body":
-    "输入出生信息后，VedaLight 会准备结构化 Jyotish 读盘，先与你核对几个真实经历信号，再把命盘转化为可反思的主题、提醒与谨慎点。",
+    "输入出生信息后，VedicDust 会准备结构化 Jyotish 读盘，先与你核对几个真实经历信号，再把命盘转化为可反思的主题、提醒与谨慎点。",
   "landing.meta.pages": "页报告",
   "landing.meta.planets": "行星信号",
   "landing.meta.lifeAreas": "人生领域",
@@ -882,7 +882,7 @@ const zhOverrides: Dict = {
   "landing.faq.strong": "问题",
   "landing.faq.q1": "吠陀占星和西方占星有什么不同？",
   "landing.faq.a1":
-    "吠陀占星（Jyotish）使用恒星黄道，并重视上升点（Lagna）、行星力量和 Dasha 时间周期。在 VedaLight 中，这些方法用于反思指引、时间感知和实际提醒，而不是固定答案。",
+    "吠陀占星（Jyotish）使用恒星黄道，并重视上升点（Lagna）、行星力量和 Dasha 时间周期。在 VedicDust 中，这些方法用于反思指引、时间感知和实际提醒，而不是固定答案。",
   "landing.faq.q2": "我一定需要准确出生时间吗？",
   "landing.faq.a2":
     "越准确越好。准确出生时间会让读盘更清晰，尤其是时间和分盘相关部分。如果你只知道大概时间，也可以继续，报告会对不确定部分更谨慎。",
@@ -1259,7 +1259,7 @@ const zhOverrides: Dict = {
   "stage.copy.src.action": "检查这些信息。如果有误，请重新开始一次读盘。",
   "stage.copy.src.expected": "通常只需数秒。如果城市无法找到，请重新从搜索结果选择。",
   "stage.copy.chart.purpose": "在任何 LLM 解读开始前，先计算并保存基本盘事实。",
-  "stage.copy.chart.result": "你可以查看后续阶段会使用的 structured_data 各个组成部分。",
+  "stage.copy.chart.result": "你可以查看后续阶段会使用的基础盘面信息。",
   "stage.copy.chart.action": "检查基本盘信息。首次校验会以这些事实为来源。",
   "stage.copy.chart.expected": "出生信息被接受后立即生成。",
   "stage.copy.reader.purpose": "完整读盘开始前，先核对几个真实经历信号。",
@@ -1411,7 +1411,7 @@ const jaOverrides: Dict = {
   "landing.hero.title": "ヴェーダの光で、",
   "landing.hero.strong": "時運の流れを読む",
   "landing.hero.body":
-    "出生情報を入力すると、VedaLight が構造化された Jyotish リーディングを準備し、いくつかの実体験シグナルを確認したうえで、チャートを内省のテーマ、注意点、実用的なヒントへ翻訳します。",
+    "出生情報を入力すると、VedicDust が構造化された Jyotish リーディングを準備し、いくつかの実体験シグナルを確認したうえで、チャートを内省のテーマ、注意点、実用的なヒントへ翻訳します。",
   "landing.meta.pages": "ページのリーディング",
   "landing.meta.planets": "惑星シグナル",
   "landing.meta.lifeAreas": "人生領域",
@@ -1476,7 +1476,7 @@ const jaOverrides: Dict = {
   "landing.faq.strong": "質問",
   "landing.faq.q1": "ヴェーダ占星術は西洋占星術とどう違いますか？",
   "landing.faq.a1":
-    "ヴェーダ占星術（Jyotish）は恒星黄道を用い、アセンダント（Lagna）、惑星の強さ、Dasha の時期を重視します。VedaLight では、固定的な予言ではなく、内省、タイミング理解、実用的な注意点として扱います。",
+    "ヴェーダ占星術（Jyotish）は恒星黄道を用い、アセンダント（Lagna）、惑星の強さ、Dasha の時期を重視します。VedicDust では、固定的な予言ではなく、内省、タイミング理解、実用的な注意点として扱います。",
   "landing.faq.q2": "正確な出生時刻は必要ですか？",
   "landing.faq.a2":
     "正確であるほど読みは鋭くなります。特に時期や分割図に関わる部分で重要です。おおよその時刻でも続行でき、不確かな部分は慎重に扱います。",
@@ -1850,7 +1850,7 @@ const jaOverrides: Dict = {
   "stage.copy.src.expected":
     "通常は数秒です。都市が見つからない場合は検索結果から選び直してください。",
   "stage.copy.chart.purpose": "LLM による解釈の前に、基本チャート事実を計算して保存します。",
-  "stage.copy.chart.result": "後続ステージが使用する structured_data の各構成部分を確認できます。",
+  "stage.copy.chart.result": "後続ステージで使用する基本チャート情報を確認できます。",
   "stage.copy.chart.action":
     "チャート事実を確認してください。最初のチェックはこの事実をソースにします。",
   "stage.copy.chart.expected": "出生情報が受理されるとすぐに生成されます。",

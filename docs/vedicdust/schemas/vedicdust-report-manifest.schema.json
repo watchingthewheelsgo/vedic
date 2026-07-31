@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "ReportSection": {
+      "additionalProperties": false,
+      "properties": {
+        "sectionId": {
+          "title": "Sectionid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "claimIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claimids",
+          "type": "array"
+        },
+        "confidenceDisclosureRequired": {
+          "default": false,
+          "title": "Confidencedisclosurerequired",
+          "type": "boolean"
+        }
+      },
+      "required": ["sectionId", "title", "purpose"],
+      "title": "ReportSection",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-report-manifest/1.0.0",
+      "default": "vedicdust-report-manifest/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "chartRecordId": {
+      "title": "Chartrecordid",
+      "type": "string"
+    },
+    "claimGraphVersion": {
+      "const": "vedicdust-claim-graph/1.0.0",
+      "title": "Claimgraphversion",
+      "type": "string"
+    },
+    "locale": {
+      "enum": ["zh", "en", "ja"],
+      "title": "Locale",
+      "type": "string"
+    },
+    "audience": {
+      "enum": ["self", "parent", "partner", "family", "professional"],
+      "title": "Audience",
+      "type": "string"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/ReportSection"
+      },
+      "title": "Sections",
+      "type": "array"
+    },
+    "omittedClaimIds": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Omittedclaimids",
+      "type": "object"
+    },
+    "releaseStatus": {
+      "enum": ["draft", "approved", "blocked"],
+      "title": "Releasestatus",
+      "type": "string"
+    }
+  },
+  "required": [
+    "chartRecordId",
+    "claimGraphVersion",
+    "locale",
+    "audience",
+    "sections",
+    "releaseStatus"
+  ],
+  "title": "ConsultationReportManifest",
+  "type": "object"
+}
