@@ -109,7 +109,8 @@ Effect:
 
 - Installs frontend dependencies from `package-lock.json`.
 - Creates/syncs the backend uv environment.
-- Installs backend-owned astrology runtime dependencies into `backend/.venv`.
+- Installs the exact backend-owned astrology distributions pinned by
+  `backend/astrology-runtime.lock` into `backend/.venv`.
 - Installs Playwright Chromium for PDF export.
 - Validates `.env`, LLM config, Clerk config, and `claude-agent-sdk`.
 - Starts FastAPI on `http://127.0.0.1:8787`.
@@ -584,7 +585,7 @@ tests before commits. Pull requests run the same core checks in GitHub Actions.
 
 `npm run backend:dev` runs `backend:ensure` before starting uvicorn. The backend
 startup preflight fails fast if calculator dependencies, PyJHora data, bundled
-ephemeris files, `.env`, or LLM settings are not ready. Run
+ephemeris files, exact locked distribution versions, `.env`, or LLM settings are not ready. Run
 `npm run backend:setup` after a fresh clone or whenever `backend/.venv` is
 rebuilt.
 
@@ -654,7 +655,8 @@ search-result text and still requires city-distance verification before use.
   `vedic_backend_tools` MCP server; it is not allowed to run arbitrary Bash.
 - `chart_record.json` is the canonical, versioned chart contract. It includes the birth
   assertion, canonical moment, method profile, astronomy snapshot, vargas, derived facts,
-  timing periods, quality checks, and rectification state.
+  timing periods, quality checks, and rectification state. Its astronomy snapshot
+  records exact provider versions, tzdb version, and the active ephemeris fingerprint.
 - `birth_input_context.json` records the original birth-time/place facts,
   resolved coordinates, timezone, coordinate source, place accuracy, radius, and
   rectification guardrails.
@@ -666,7 +668,9 @@ search-result text and still requires city-distance verification before use.
   and which factors must be downgraded or omitted.
 - Aspect facts use Vedic whole-sign contact + Graha Drishti. Western
   degree-angle aspects are not part of the calculation fact source.
-- `vedic-core` runs the native judgement and consultation DAG. Intermediate JSON contracts
+- `vedic-core` runs the native judgement and consultation DAG. Backend-issued
+  Judgement Units constrain every model-written claim to permitted facts, rules,
+  output codes, scope, certainty, and limitations. Intermediate JSON contracts
   are validated before the deterministic renderer creates `consultation_report.md`.
 - Vedic runtime artifacts must be declared by the current VedicDust contracts.
 - The JSON wrapper used between backend and Claude Agent SDK is transport only;

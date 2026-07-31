@@ -1,5 +1,17 @@
 {
   "$defs": {
+    "EvidenceClass": {
+      "enum": [
+        "astronomical_authority",
+        "classical_text",
+        "lineage_commentary",
+        "software_reference",
+        "product_hypothesis",
+        "user_testimony"
+      ],
+      "title": "EvidenceClass",
+      "type": "string"
+    },
     "JudgementRuleContext": {
       "additionalProperties": false,
       "properties": {
@@ -14,6 +26,21 @@
         "topic": {
           "title": "Topic",
           "type": "string"
+        },
+        "outputCode": {
+          "title": "Outputcode",
+          "type": "string"
+        },
+        "evidenceClass": {
+          "$ref": "#/$defs/EvidenceClass"
+        },
+        "sourceIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sourceids",
+          "type": "array"
         },
         "requiredEvidenceLayers": {
           "items": {
@@ -55,7 +82,16 @@
           "type": "array"
         }
       },
-      "required": ["ruleId", "title", "topic", "status", "evaluationStatus"],
+      "required": [
+        "ruleId",
+        "title",
+        "topic",
+        "outputCode",
+        "evidenceClass",
+        "sourceIds",
+        "status",
+        "evaluationStatus"
+      ],
       "title": "JudgementRuleContext",
       "type": "object"
     },
@@ -155,6 +191,108 @@
       "title": "JudgementTopicContext",
       "type": "object"
     },
+    "JudgementUnit": {
+      "additionalProperties": false,
+      "description": "Backend-owned semantic allowance for one consultation topic.",
+      "properties": {
+        "unitId": {
+          "pattern": "^unit\\.[a-z0-9._-]+$",
+          "title": "Unitid",
+          "type": "string"
+        },
+        "topicId": {
+          "title": "Topicid",
+          "type": "string"
+        },
+        "primaryRuleId": {
+          "title": "Primaryruleid",
+          "type": "string"
+        },
+        "permittedRuleIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Permittedruleids",
+          "type": "array"
+        },
+        "allowedOutputCodes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowedoutputcodes",
+          "type": "array"
+        },
+        "allowedScopes": {
+          "items": {
+            "enum": ["natal_promise", "capacity", "timing", "rectification", "context"],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowedscopes",
+          "type": "array"
+        },
+        "natalFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Natalfactids",
+          "type": "array"
+        },
+        "capacityFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Capacityfactids",
+          "type": "array"
+        },
+        "vargaFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Vargafactids",
+          "type": "array"
+        },
+        "timingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingfactids",
+          "type": "array"
+        },
+        "timingPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingperiodids",
+          "type": "array"
+        },
+        "certaintyCap": {
+          "enum": ["high", "moderate", "low"],
+          "title": "Certaintycap",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "unitId",
+        "topicId",
+        "primaryRuleId",
+        "permittedRuleIds",
+        "allowedOutputCodes",
+        "allowedScopes",
+        "certaintyCap"
+      ],
+      "title": "JudgementUnit",
+      "type": "object"
+    },
     "QualityCheck": {
       "additionalProperties": false,
       "properties": {
@@ -200,8 +338,8 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-judgement-context/1.0.0",
-      "default": "vedicdust-judgement-context/1.0.0",
+      "const": "vedicdust-judgement-context/1.1.0",
+      "default": "vedicdust-judgement-context/1.1.0",
       "title": "Schemaversion",
       "type": "string"
     },
@@ -257,6 +395,14 @@
       "title": "Topics",
       "type": "array"
     },
+    "units": {
+      "items": {
+        "$ref": "#/$defs/JudgementUnit"
+      },
+      "minItems": 1,
+      "title": "Units",
+      "type": "array"
+    },
     "restrictedFactIds": {
       "items": {
         "type": "string"
@@ -286,7 +432,8 @@
     "generatedAt",
     "rulePackVersion",
     "rules",
-    "topics"
+    "topics",
+    "units"
   ],
   "title": "JudgementContext",
   "type": "object"

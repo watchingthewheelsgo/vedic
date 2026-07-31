@@ -7,35 +7,7 @@ from typing import Any
 
 import pytz
 
-
-SIGNS = [
-    "Aries",
-    "Taurus",
-    "Gemini",
-    "Cancer",
-    "Leo",
-    "Virgo",
-    "Libra",
-    "Scorpio",
-    "Sagittarius",
-    "Capricorn",
-    "Aquarius",
-    "Pisces",
-]
-SIGN_LORDS = [
-    "Mars",
-    "Venus",
-    "Mercury",
-    "Moon",
-    "Sun",
-    "Mercury",
-    "Venus",
-    "Mars",
-    "Jupiter",
-    "Saturn",
-    "Saturn",
-    "Jupiter",
-]
+from app.calculator.constants import SIGNS, SIGN_LORDS
 
 
 EVENT_RULES: dict[str, dict[str, Any]] = {
@@ -231,8 +203,12 @@ def score_candidate_events(
     if not events:
         return {"evidenceScores": [], "aggregateScore": None, "holdoutScore": None}
 
-    event_moments = [_event_midpoint(event) for event in events]
     local_timezone = pytz.timezone(timezone_id)
+    event_local_moments = [_event_midpoint(event) for event in events]
+    event_utc_moments = [
+        local_timezone.localize(moment, is_dst=None).astimezone(timezone.utc)
+        for moment in event_local_moments
+    ]
     localized_birth = local_timezone.localize(representative_moment, is_dst=None)
     from app.calculator.dasha_pyjhora import calculate_dasha_lords_at
     from app.calculator.engine import calc_transits
@@ -246,47 +222,59 @@ def score_candidate_events(
         latitude,
         longitude,
         localized_birth.utcoffset().total_seconds() / 3600.0,
-        event_moments,
+        event_local_moments,
     )
     lagna_sign = str(signature.get("lagnaSign") or "")
     lagna_index = SIGNS.index(lagna_sign) if lagna_sign in SIGNS else 0
     planet_signs = signature.get("planetSignIndices") or {}
     evidence_scores: list[dict[str, Any]] = []
-    for event, event_moment, periods in zip(events, event_moments, dasha_lords, strict=True):
+    for event, event_local, event_utc, periods in zip(
+        events, event_local_moments, event_utc_moments, dasha_lords, strict=True
+    ):
         rules = event.get("rectificationRules") or EVENT_RULES["unknown"]
         relevant_houses = {int(value) for value in rules.get("houses") or []}
         karakas = {str(value) for value in rules.get("karakas") or []}
         relevant_vargas = [str(value) for value in rules.get("vargas") or []]
         support_ids: list[str] = []
+        neutral_ids: list[str] = []
         contributions = 0.0
-        period_lords = [
-            str(periods.get(level))
-            for level in ("mahadasha", "antardasha", "pratyantardasha")
+        period_entries = [
+            (short_level, str(periods[level]))
+            for short_level, level in (
+                ("md", "mahadasha"),
+                ("ad", "antardasha"),
+                ("pd", "pratyantardasha"),
+            )
             if periods.get(level)
         ]
-        for level, lord in zip(("md", "ad", "pd"), period_lords, strict=False):
+        period_lords = [lord for _, lord in period_entries]
+        for level, lord in period_entries:
             weight = {"md": 0.12, "ad": 0.16, "pd": 0.1}[level]
+            matched_dimensions: list[str] = []
             if lord in karakas:
-                contributions += weight
-                support_ids.append(
-                    f"rectification.{candidate_id}.{event['eventId']}.{level}.karaka"
-                )
+                matched_dimensions.append("karaka")
             sign_index = planet_signs.get(lord)
             if sign_index is not None:
                 occupied_house = (int(sign_index) - lagna_index) % 12 + 1
                 if occupied_house in relevant_houses:
-                    contributions += weight
-                    support_ids.append(
-                        f"rectification.{candidate_id}.{event['eventId']}.{level}.occupant"
-                    )
+                    matched_dimensions.append("occupant")
             ruled_houses = {
                 house
                 for house in relevant_houses
                 if SIGN_LORDS[(lagna_index + house - 1) % 12] == lord
             }
             if ruled_houses:
+                matched_dimensions.append("lord")
+            if matched_dimensions:
                 contributions += weight
-                support_ids.append(f"rectification.{candidate_id}.{event['eventId']}.{level}.lord")
+                support_ids.extend(
+                    f"rectification.{candidate_id}.{event['eventId']}.{level}.{dimension}"
+                    for dimension in matched_dimensions
+                )
+            else:
+                neutral_ids.append(
+                    f"rectification.{candidate_id}.{event['eventId']}.{level}.no_match"
+                )
 
         for varga in relevant_vargas:
             factor_field = f"d{varga[1:]}Lagna"
@@ -296,16 +284,24 @@ def score_candidate_events(
                 support_ids.append(
                     f"rectification.{candidate_id}.{event['eventId']}.{varga.lower()}.lagna_lord"
                 )
+            else:
+                neutral_ids.append(
+                    f"rectification.{candidate_id}.{event['eventId']}.{varga.lower()}.no_match"
+                )
 
         transit = calc_transits(
             lagna_index,
             int(planet_signs.get("Moon", lagna_index)),
-            as_of=event_moment.replace(tzinfo=timezone.utc),
+            as_of=event_utc,
         )
         activated = relevant_houses & set(transit.get("double_transit_houses") or [])
         if activated:
             contributions += 0.22
             support_ids.append(f"rectification.{candidate_id}.{event['eventId']}.double_transit")
+        else:
+            neutral_ids.append(
+                f"rectification.{candidate_id}.{event['eventId']}.double_transit.no_match"
+            )
 
         score = round(min(contributions, 1.0), 3)
         evidence_scores.append(
@@ -315,11 +311,14 @@ def score_candidate_events(
                 "score": score,
                 "supportingFactIds": support_ids,
                 "contradictingFactIds": [],
+                "neutralEvidenceIds": neutral_ids,
                 "ruleIds": ["rectification.event-evidence.v1"],
                 "explanation": (
                     f"{event.get('categoryLabel')}: Dasha lords {period_lords or ['unavailable']}; "
                     f"relevant vargas {relevant_vargas or ['none']}; "
                     f"double-transit houses {transit.get('double_transit_houses') or []}."
+                    f" Event date interpreted at local noon in {timezone_id} "
+                    f"({event_local.isoformat()}) before UTC conversion."
                 ),
             }
         )
@@ -330,7 +329,7 @@ def score_candidate_events(
         "evidenceScores": evidence_scores,
         "aggregateScore": round(sum(calibration) / len(calibration), 3) if calibration else None,
         "holdoutScore": round(sum(holdout) / len(holdout), 3) if holdout else None,
-        "scoringPolicy": "transparent_product_hypothesis_v1",
+        "scoringPolicy": "transparent_product_hypothesis_v2_correlated-match-cap",
     }
 
 

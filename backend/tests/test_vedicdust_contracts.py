@@ -193,6 +193,9 @@ def test_complete_astronomy_snapshot_requires_unique_nine_grahas() -> None:
         calculation_provider="Swiss Ephemeris + PyJHora",
         calculation_adapter_version="test-adapter",
         ephemeris_version="test",
+        provider_versions={"PyJHora": "test", "pysweph": "test"},
+        timezone_database_version="test",
+        ephemeris_data_fingerprint="sha256:" + "0" * 64,
         ayanamsa_value_deg=23.7,
         ascendant=_position(),
         grahas=grahas,
@@ -208,6 +211,9 @@ def test_complete_astronomy_snapshot_requires_unique_nine_grahas() -> None:
             calculation_provider="Swiss Ephemeris + PyJHora",
             calculation_adapter_version="test-adapter",
             ephemeris_version="test",
+            provider_versions={"PyJHora": "test", "pysweph": "test"},
+            timezone_database_version="test",
+            ephemeris_data_fingerprint="sha256:" + "0" * 64,
             ayanamsa_value_deg=23.7,
             ascendant=_position(),
             grahas=[grahas[0], grahas[0]],
@@ -301,6 +307,16 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
         facts=[fact, capacity_fact],
         status="intake",
     )
+    catalog = load_rule_catalog()
+    judgement_context = build_judgement_context(
+        record,
+        catalog,
+        now=datetime(2026, 7, 31, tzinfo=UTC),
+    )
+    validate_judgement_context(record, judgement_context, catalog)
+    foundation_unit = next(
+        unit for unit in judgement_context.units if unit.topic_id == "foundation"
+    )
     graph = ClaimGraph(
         chart_record_id=record.chart_record_id,
         method_profile_id=profile.profile_id,
@@ -310,28 +326,20 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
             Claim(
                 claim_id=f"claim-{index}",
                 topic="foundation",
-                plain_statement=(
-                    "The chart contains a provisional relationship promise."
-                    if index == 1
-                    else f"Relationship synthesis {index} remains provisional."
-                ),
-                technical_statement="D1 promise is present; confirmation is still required.",
+                judgement_unit_id=foundation_unit.unit_id,
+                judgement_code="synthesize_chart_foundation",
+                plain_statement=f"Foundation synthesis {index} remains provisional.",
+                technical_statement="D1 foundation and capacity evidence are present.",
                 supporting_fact_ids=[fact.fact_id, capacity_fact.fact_id],
                 rule_ids=["judge.foundation.integrated"],
                 certainty="low",
                 scope="natal_promise",
+                limitations=foundation_unit.limitations,
             )
             for index in range(1, 6)
         ],
     )
 
-    catalog = load_rule_catalog()
-    judgement_context = build_judgement_context(
-        record,
-        catalog,
-        now=datetime(2026, 7, 31, tzinfo=UTC),
-    )
-    validate_judgement_context(record, judgement_context, catalog)
     foundation_context = next(
         topic for topic in judgement_context.topics if topic.topic_id == "foundation"
     )
@@ -411,7 +419,7 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     validate_agent_context(record, graph, dossier, context)
     report = render_consultation_report(record, graph, dossier)
     assert "# VedicDust Consultation" in report
-    assert "The chart contains a provisional relationship promise." in report
+    assert "Foundation synthesis 1 remains provisional." in report
     assert context.topic_index == {
         "foundation": [
             "claim-1",
@@ -426,6 +434,11 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     invalid.claims[0].supporting_fact_ids = ["fact.missing"]
     with pytest.raises(ValueError, match="unknown fact"):
         validate_claim_graph(record, invalid, load_rule_catalog())
+
+    invalid_semantics = graph.model_copy(deep=True)
+    invalid_semantics.claims[0].judgement_code = "synthesize_relationship_d1_capacity_d9"
+    with pytest.raises(ValueError, match="output code .* outside judgement unit"):
+        validate_claim_graph(record, invalid_semantics, catalog, judgement_context)
 
     invalid_record = record.model_copy(deep=True)
     invalid_record.facts[0].provenance.source_ids = ["product.vedicdust-consultation-standard-1"]

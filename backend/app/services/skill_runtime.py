@@ -1960,10 +1960,15 @@ Use only the listed typed contracts. Do not use any prior prose as evidence.
 
 Write exactly one file: {CLAIM_GRAPH_JSON}
 The file must be valid camelCase JSON conforming to
-vedicdust-claim-graph/1.0.0. Do not write Markdown or any other file.
+vedicdust-claim-graph/1.1.0. Do not write Markdown or any other file.
 
 Hard contract:
 - Copy chartRecordId, chartRevision, and methodProfileId exactly.
+- Every Claim must bind to exactly one backend-generated Judgement Unit using
+  judgementUnitId. Copy judgementCode from that unit's allowedOutputCodes.
+- Use only that unit's permittedRuleIds, allowed scopes, fact IDs, timing IDs,
+  and timing period IDs. The unit's certaintyCap is an absolute maximum.
+- Copy every limitation carried by the Judgement Unit into a released Claim.
 - Use only topic IDs, fact IDs, timingPeriodIds, and rule IDs exposed by
   judgement_context.json. A rule is usable only when evaluationStatus is
   eligible; matchedFactIds and the topic evidence lists are hard boundaries.
@@ -1988,7 +1993,7 @@ Hard contract:
 - For omitted requested topics, add an explicit omittedTopics reason.
 
 Each Claim must contain:
-claimId, topic, title, plainStatement, technicalStatement,
+claimId, topic, judgementUnitId, judgementCode, title, plainStatement, technicalStatement,
 realWorldExpressions, userRelevance, conditions, supportingFactIds,
 counterFactIds, timingFactIds, timingPeriodIds, ruleIds, certainty, scope,
 status, timeScope, practicalImplications, limitations.

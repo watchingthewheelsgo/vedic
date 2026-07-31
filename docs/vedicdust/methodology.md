@@ -42,9 +42,11 @@ profile.
 
 Swiss Ephemeris and PyJHora are Calculation Providers. Their native output is
 accepted only through a VedicDust Calculation Adapter that records the active
-profile, provider version, registered derivation rule, validation status, and
-fact confidence. Reusing a provider does not delegate product methodology or
-report semantics to that provider.
+profile, exact provider versions, time-zone database version, ephemeris-data
+fingerprint, registered derivation rule, validation status, and fact confidence.
+The calculation distributions are pinned in `backend/astrology-runtime.lock`.
+Reusing a provider does not delegate product methodology or report semantics to
+that provider.
 
 ## Consultation SOP
 
@@ -53,6 +55,12 @@ report semantics to that provider.
 Verify the Birth Assertion, evidence source, time window, place precision,
 historical time-zone resolvability, subject age, audience, and consented topic.
 Stop when the civil time is impossible or the location cannot be resolved.
+
+The time source changes the minimum search radius, not the direction of a time
+correction: a certificate or hospital record has a two-minute minimum radius,
+clear family memory ten minutes, and approximate family memory thirty minutes.
+These are VedicDust product priors, not empirical error distributions. Explicit
+user precision may widen the radius; the source never moves the center by itself.
 
 ### 2. Calculation qualification
 
@@ -70,6 +78,9 @@ no varga can create a promise absent from the foundation.
 
 Assess strength measures and relevant vargas. Use only vargas allowed by the
 Chart Record's time-confidence gate. Record confirming and contradicting facts.
+Each varga carries its own whole-sign house and house-lord structure. A D1 house
+lord must never be reused as the lord of the same numbered house in D9, D10, or
+another varga.
 
 ### 5. Temporal activation
 
@@ -86,6 +97,15 @@ events, preserve holdout events for validation, and allow an underdetermined
 result. D60 is unavailable as primary evidence until the input is already
 stable enough for D60 to remain meaningful.
 
+When an event has only year or month precision, the calculator evaluates its
+midpoint at local noon in the birth-place IANA time zone and converts that
+instant to UTC for transit calculation. Dasha, varga-lagna, and double-transit
+matches are transparent ranking features under
+`transparent_product_hypothesis_v2_correlated-match-cap`: correlated matches
+within one Dasha level contribute that level's weight once, and a missing match
+is neutral rather than contradictory. The score ranks candidates; it is not a
+probability or proof that an event was astrologically caused.
+
 ### 7. Claim synthesis
 
 The backend first builds a Judgement Context for the active Chart Record
@@ -95,8 +115,10 @@ health, meaning, and family. Requested topics receive priority; remaining
 topics are ranked by deterministic chart salience. Restricted facts and timing
 periods are removed before model access.
 
-Build Claims from the Judgement Context and rule evaluations. Each Claim must contain supporting facts,
-counter-facts, certainty, scope, source references, likely real-world
+Build Claims from exactly one backend-issued Judgement Unit and its rule
+evaluations. A unit fixes the topic, permitted rules, output codes, scopes,
+evidence IDs, certainty cap, and mandatory limitations before the model sees the
+task. Each Claim must contain supporting facts, counter-facts, certainty, scope, source references, likely real-world
 expressions, conditions, user relevance, practical implications, and explicit
 limitations. Prefer a small number of decision-relevant synthesis Claims over a
 planet-by-planet or house-by-house catalogue. User testimony may validate

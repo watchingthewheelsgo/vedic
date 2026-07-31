@@ -43,19 +43,24 @@ inside the matching topic bundle.
 
 For each requested or high-priority topic in `judgement_context.json`:
 
-1. Resolve Method Rules whose backend evaluation is `eligible`; do not invent
-   or rehabilitate an ineligible rule.
-2. Record supporting, contradicting, and timing fact IDs.
-3. Require natal promise plus capacity for a strong structural Claim.
-4. Require natal promise, capacity, and an exact `timingPeriodId` for a forecast
+1. Select exactly one backend-generated `JudgementUnit`. It is the semantic
+   allowance for the Claim, not a suggestion.
+2. Copy its `unitId` to `judgementUnitId` and one of its
+   `allowedOutputCodes` to `judgementCode`.
+3. Use only its permitted rules, scopes, facts, timing facts, and periods. Its
+   `certaintyCap` is absolute and all unit limitations must be preserved.
+4. Do not invent or rehabilitate an ineligible rule.
+5. Record supporting, contradicting, and timing fact IDs.
+6. Require natal promise plus capacity for a structural Claim.
+7. Require natal promise, capacity, and an exact `timingPeriodId` for a forecast
    Claim. The period must already exist in the Chart Record.
-5. Assign `high`, `moderate`, `low`, or `withheld` from evidence completeness,
+8. Assign `high`, `moderate`, `low`, or `withheld` from evidence completeness,
    not rhetorical confidence.
-6. Add plain meaning, likely real-world expressions, user relevance, conditions,
+9. Add plain meaning, likely real-world expressions, user relevance, conditions,
    practical implications, and limitations without adding a new chart fact.
-7. Set `supported`, `tentative`, or `withheld` independently from topic
+10. Set `supported`, `tentative`, or `withheld` independently from topic
    importance. `withheld` status and certainty must agree.
-8. Write `claim_graph.json` conforming to `vedicdust-claim-graph/1.0.0`.
+11. Write `claim_graph.json` conforming to `vedicdust-claim-graph/1.1.0`.
    Copy `rulePackVersion` from `judgement_context.json`.
 
 Use only canonical topic IDs exposed by the context. Produce 5 to 10 synthesis

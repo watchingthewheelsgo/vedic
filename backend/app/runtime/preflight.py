@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from importlib.metadata import PackageNotFoundError, version as distribution_version
 import os
 import shutil
 from dataclasses import dataclass
@@ -143,6 +144,23 @@ def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:
             + "\nRun `npm run backend:setup` from the project root."
         )
 
+    expected_versions = _runtime_lock_versions(project_root / "backend" / "astrology-runtime.lock")
+    version_drift: list[str] = []
+    for distribution, expected in expected_versions.items():
+        try:
+            actual = distribution_version(distribution)
+        except PackageNotFoundError:
+            version_drift.append(f"{distribution}: missing (expected {expected})")
+            continue
+        if actual != expected:
+            version_drift.append(f"{distribution}: {actual} (expected {expected})")
+    if version_drift:
+        raise RuntimeError(
+            "Calculation runtime version drift:\n"
+            + "\n".join(f"- {item}" for item in version_drift)
+            + "\nRun `npm run backend:setup` to restore backend/astrology-runtime.lock."
+        )
+
     swisseph_version = versions.get("swisseph", "")
     if swisseph_version == "0.0.0":
         raise RuntimeError(
@@ -164,6 +182,21 @@ def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:
         ephemeris_files=[path.name for path in ephemeris_files],
         geonames_path=str(geonames_path),
     )
+
+
+def _runtime_lock_versions(path: Path) -> dict[str, str]:
+    if not path.exists():
+        raise RuntimeError(f"Calculation runtime lock is missing: {path}")
+    result: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        package, separator, package_version = line.partition("==")
+        if not separator or not package or not package_version:
+            raise RuntimeError(f"Invalid calculation runtime lock entry: {line}")
+        result[package] = package_version
+    return result
 
 
 def ensure_jhora_ephemeris(project_root: Path, jhora_root: Path) -> list[Path]:

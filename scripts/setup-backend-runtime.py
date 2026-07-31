@@ -29,20 +29,29 @@ MIN_PYTHON = (3, 11)
 # Upper bound only used when searching for a fallback interpreter; the runtime
 # supports 3.11 and newer.
 MAX_PYTHON = (3, 13)
+RUNTIME_LOCK = BACKEND_DIR / "astrology-runtime.lock"
 
-REQUIRED_PACKAGES: tuple[tuple[str, str, list[str]], ...] = (
-    ("pysweph", ">=2.10.3.5", []),
-    ("pytz", ">=2024.1", []),
-    ("numpy", "", []),
-    ("geocoder", "", []),
-    ("geopy", "", []),
-    ("requests", "", []),
-    ("timezonefinder", "", []),
-    ("python-dateutil", "", []),
-    ("dashaflow", ">=0.3", ["--no-deps"]),
-    ("PyJHora", "==4.8.6", []),
-    ("markdown", ">=3.6", []),
-)
+
+def load_required_packages() -> tuple[tuple[str, str, list[str]], ...]:
+    packages: list[tuple[str, str, list[str]]] = []
+    for raw_line in RUNTIME_LOCK.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        package, separator, package_version = line.partition("==")
+        if not separator or not package or not package_version:
+            raise RuntimeError(f"Invalid runtime lock entry: {line}")
+        packages.append(
+            (
+                package,
+                f"=={package_version}",
+                ["--no-deps"] if package == "dashaflow" else [],
+            )
+        )
+    return tuple(packages)
+
+
+REQUIRED_PACKAGES = load_required_packages()
 
 
 def log(message: str, level: str = "INFO") -> None:

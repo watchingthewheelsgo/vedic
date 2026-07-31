@@ -113,6 +113,7 @@
             "relationship.same_sign",
             "varga.lagna.position",
             "varga.graha.position",
+            "varga.house.lord",
             "varga.vargottama",
             "strength.dignity",
             "strength.shadbala",

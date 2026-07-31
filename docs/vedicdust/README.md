@@ -40,7 +40,8 @@ tasks.
 - `chart_audit.json`: deterministic permission gate for rectification,
   judgement, and report rendering.
 - `judgement_context.json`: backend-selected evidence bundles, active rules,
-  varga eligibility, and restricted evidence for the active chart revision.
+  varga eligibility, restricted evidence, and bounded Judgement Units for the
+  active chart revision.
 - `claim_graph.json`: evidence-linked judgements for the active chart revision.
 - `consultation_dossier.json`: approved reading scope, section plan, timing
   windows, and unresolved questions.

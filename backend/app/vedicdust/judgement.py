@@ -10,6 +10,8 @@ from .models import (
     JudgementContext,
     JudgementRuleContext,
     JudgementTopicContext,
+    JudgementUnit,
+    MethodRule,
     QualityCheck,
     RuleCatalog,
 )
@@ -187,6 +189,9 @@ def build_judgement_context(
             rule_id=rule.rule_id,
             title=rule.title,
             topic=rule.topic,
+            output_code=rule.output_code,
+            evidence_class=rule.evidence_class,
+            source_ids=rule.source_ids,
             required_evidence_layers=rule.required_evidence_layers,
             status=rule.status,
             evaluation_status=rule_evaluations[rule.rule_id]["evaluationStatus"],
@@ -212,6 +217,7 @@ def build_judgement_context(
         and rule_evaluations[definition.rule_id]["evaluationStatus"] == "eligible"
     ]
     topics.sort(key=lambda item: (-item.priority_score, item.topic_id))
+    units = [_build_judgement_unit(topic, active_rules, rule_evaluations) for topic in topics]
 
     checks = [
         QualityCheck(
@@ -244,9 +250,71 @@ def build_judgement_context(
             and rule_evaluations[rule_id]["evaluationStatus"] == "eligible"
         ],
         topics=topics,
+        units=units,
         restricted_fact_ids=sorted(restricted & facts_by_id.keys()),
         restricted_timing_period_ids=relevant_period_ids if restrict_timing else [],
         quality_checks=checks,
+    )
+
+
+def _build_judgement_unit(
+    topic: JudgementTopicContext,
+    active_rules: dict[str, MethodRule],
+    rule_evaluations: dict[str, dict[str, object]],
+) -> JudgementUnit:
+    """Compile one topic into the exact semantic allowance exposed to the model."""
+
+    primary_rule = active_rules[topic.rule_ids[0]]
+    permitted_rules = [primary_rule.rule_id]
+    output_codes = [primary_rule.output_code]
+    allowed_scopes = ["natal_promise", "capacity"]
+
+    eligible_varga_facts = [
+        fact_id
+        for fact_id in topic.varga_fact_ids
+        if any(fact_id.startswith(f"fact.{varga_id}.") for varga_id in topic.eligible_vargas)
+    ]
+    promise_gate = active_rules.get("sop.promise-before-varga")
+    if (
+        eligible_varga_facts
+        and promise_gate is not None
+        and rule_evaluations[promise_gate.rule_id]["evaluationStatus"] == "eligible"
+    ):
+        permitted_rules.append(promise_gate.rule_id)
+
+    timing_rule = active_rules.get("judge.timing.vimshottari-activation")
+    timing_gate = active_rules.get("sop.promise-capacity-before-timing")
+    timing_is_eligible = all(
+        rule is not None and rule_evaluations[rule.rule_id]["evaluationStatus"] == "eligible"
+        for rule in (timing_rule, timing_gate)
+    )
+    if timing_is_eligible and topic.timing_fact_ids and topic.timing_period_ids:
+        assert timing_rule is not None and timing_gate is not None
+        permitted_rules.extend([timing_rule.rule_id, timing_gate.rule_id])
+        output_codes.append(timing_rule.output_code)
+        allowed_scopes.append("timing")
+
+    certainty_cap = "moderate" if primary_rule.status == "provisional" else "high"
+    limitations = list(dict.fromkeys([*primary_rule.limitations, *topic.limitations]))
+    if primary_rule.status == "provisional":
+        limitations.append(
+            "This domain synthesis is a provisional VedicDust product rule and cannot be high certainty."
+        )
+
+    return JudgementUnit(
+        unit_id=f"unit.{topic.topic_id}.{primary_rule.rule_id}",
+        topic_id=topic.topic_id,
+        primary_rule_id=primary_rule.rule_id,
+        permitted_rule_ids=list(dict.fromkeys(permitted_rules)),
+        allowed_output_codes=list(dict.fromkeys(output_codes)),
+        allowed_scopes=allowed_scopes,
+        natal_fact_ids=topic.natal_fact_ids,
+        capacity_fact_ids=topic.capacity_fact_ids,
+        varga_fact_ids=eligible_varga_facts,
+        timing_fact_ids=topic.timing_fact_ids if "timing" in allowed_scopes else [],
+        timing_period_ids=topic.timing_period_ids if "timing" in allowed_scopes else [],
+        certainty_cap=certainty_cap,
+        limitations=list(dict.fromkeys(limitations)),
     )
 
 
@@ -295,8 +363,8 @@ def _build_topic(
             subject_ref in house_refs or subject_ref in relevant_graha_refs
         ):
             capacity.append(fact_id)
-        elif layer == "varga_confirmation" and any(
-            subject_ref.startswith(f"{varga_id}.") for varga_id in definition.vargas
+        elif layer == "varga_confirmation" and _varga_fact_matches_topic(
+            fact, definition, house_refs, relevant_graha_refs
         ):
             varga.append(fact_id)
         elif layer == "timing":
@@ -378,6 +446,22 @@ def _relationship_mentions_any(subject_ref: str, graha_refs: set[str]) -> bool:
         left, right = subject_ref.split("~", 1)
         return left in graha_refs or f"D1.{right}" in graha_refs
     return False
+
+
+def _varga_fact_matches_topic(
+    fact: JyotishFact,
+    definition: TopicDefinition,
+    house_refs: set[str],
+    graha_refs: set[str],
+) -> bool:
+    varga_id, separator, subject = fact.subject_ref.partition(".")
+    if not separator or varga_id not in definition.vargas:
+        return False
+    if subject == "Lagna":
+        return True
+    if subject.startswith("H"):
+        return f"D1.{subject}" in house_refs
+    return f"D1.{subject}" in graha_refs
 
 
 def _normalize_requested_topics(values: list[str]) -> set[str]:

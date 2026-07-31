@@ -14,7 +14,7 @@
       "sourceId": "time.iana.tzdb",
       "evidenceClass": "astronomical_authority",
       "title": "IANA Time Zone Database",
-      "locator": "Release pinned by deployment lockfile",
+      "locator": "Release recorded in each ChartRecord and pinned by backend/astrology-runtime.lock",
       "edition": null,
       "url": "https://www.iana.org/time-zones",
       "citationStatus": "pinned"
@@ -68,7 +68,7 @@
       "sourceId": "software.pyjhora.compatibility",
       "evidenceClass": "software_reference",
       "title": "PyJHora compatibility reference",
-      "locator": "Version pinned by deployment lockfile",
+      "locator": "Provider version recorded in each ChartRecord and pinned by backend/astrology-runtime.lock",
       "edition": null,
       "url": "https://github.com/naturalstupid/PyJHora",
       "citationStatus": "informational"

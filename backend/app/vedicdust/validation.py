@@ -68,12 +68,79 @@ def validate_claim_graph(
         else set()
     )
     context_topics = {topic.topic_id: topic for topic in context.topics} if context else {}
+    context_units = {unit.unit_id: unit for unit in context.units} if context else {}
     released_claims = [claim for claim in graph.claims if claim.status != "withheld"]
     if context is not None and len(released_claims) < 5:
         errors.append("claim graph requires at least five released synthesis claims")
     if any(check.status == "failed" for check in graph.quality_checks):
         errors.append("claim graph contains failed quality checks")
     for claim in graph.claims:
+        unit = context_units.get(claim.judgement_unit_id) if context is not None else None
+        if context is not None and unit is None:
+            errors.append(
+                f"claim {claim.claim_id} references unknown judgement unit "
+                f"{claim.judgement_unit_id}"
+            )
+        elif unit is not None:
+            if claim.topic != unit.topic_id:
+                errors.append(
+                    f"claim {claim.claim_id} topic {claim.topic} does not match "
+                    f"judgement unit {unit.topic_id}"
+                )
+            if claim.judgement_code not in unit.allowed_output_codes:
+                errors.append(
+                    f"claim {claim.claim_id} uses output code {claim.judgement_code} "
+                    f"outside judgement unit"
+                )
+            if claim.scope not in unit.allowed_scopes:
+                errors.append(
+                    f"claim {claim.claim_id} uses scope {claim.scope} outside judgement unit"
+                )
+            invalid_rules = sorted(set(claim.rule_ids) - set(unit.permitted_rule_ids))
+            if invalid_rules:
+                errors.append(
+                    f"claim {claim.claim_id} uses rules outside judgement unit: "
+                    + ", ".join(invalid_rules)
+                )
+            if unit.primary_rule_id not in claim.rule_ids:
+                errors.append(
+                    f"claim {claim.claim_id} must cite primary rule {unit.primary_rule_id}"
+                )
+            allowed_domain_facts = set(
+                unit.natal_fact_ids + unit.capacity_fact_ids + unit.varga_fact_ids
+            )
+            invalid_domain_facts = sorted(
+                set(claim.supporting_fact_ids + claim.counter_fact_ids) - allowed_domain_facts
+            )
+            if invalid_domain_facts:
+                errors.append(
+                    f"claim {claim.claim_id} uses facts outside judgement unit: "
+                    + ", ".join(invalid_domain_facts)
+                )
+            invalid_timing_facts = sorted(set(claim.timing_fact_ids) - set(unit.timing_fact_ids))
+            if invalid_timing_facts:
+                errors.append(
+                    f"claim {claim.claim_id} uses timing facts outside judgement unit: "
+                    + ", ".join(invalid_timing_facts)
+                )
+            invalid_periods = sorted(set(claim.timing_period_ids) - set(unit.timing_period_ids))
+            if invalid_periods:
+                errors.append(
+                    f"claim {claim.claim_id} uses timing periods outside judgement unit: "
+                    + ", ".join(invalid_periods)
+                )
+            certainty_rank = {"withheld": -1, "low": 0, "moderate": 1, "high": 2}
+            if certainty_rank[claim.certainty] > certainty_rank[unit.certainty_cap]:
+                errors.append(
+                    f"claim {claim.claim_id} exceeds judgement unit certainty cap "
+                    f"{unit.certainty_cap}"
+                )
+            missing_limitations = sorted(set(unit.limitations) - set(claim.limitations))
+            if claim.status != "withheld" and missing_limitations:
+                errors.append(
+                    f"claim {claim.claim_id} omits judgement unit limitations: "
+                    + " | ".join(missing_limitations)
+                )
         referenced_facts = [
             facts_by_id[fact_id]
             for fact_id in claim.supporting_fact_ids
@@ -239,6 +306,9 @@ def validate_judgement_context(
         elif (
             rule.title != source.title
             or rule.topic != source.topic
+            or rule.output_code != source.output_code
+            or rule.evidence_class != source.evidence_class
+            or rule.source_ids != source.source_ids
             or rule.required_evidence_layers != source.required_evidence_layers
             or rule.status != source.status
             or rule.limitations != source.limitations
@@ -270,6 +340,38 @@ def validate_judgement_context(
                 errors.append(
                     f"topic {topic.topic_id} references unknown timing period {period_id}"
                 )
+    topics_by_id = {topic.topic_id: topic for topic in context.topics}
+    for unit in context.units:
+        topic = topics_by_id.get(unit.topic_id)
+        if topic is None:
+            errors.append(f"judgement unit {unit.unit_id} references unknown topic")
+            continue
+        primary_rule = catalog_rules.get(unit.primary_rule_id)
+        if primary_rule is None or primary_rule.rule_kind != "judgement":
+            errors.append(f"judgement unit {unit.unit_id} has an invalid primary rule")
+        elif primary_rule.output_code not in unit.allowed_output_codes:
+            errors.append(f"judgement unit {unit.unit_id} omits its primary output code")
+        topic_fact_ids = set(
+            topic.natal_fact_ids
+            + topic.capacity_fact_ids
+            + topic.varga_fact_ids
+            + topic.timing_fact_ids
+        )
+        unit_fact_ids = set(
+            unit.natal_fact_ids
+            + unit.capacity_fact_ids
+            + unit.varga_fact_ids
+            + unit.timing_fact_ids
+        )
+        if unit_fact_ids - topic_fact_ids:
+            errors.append(f"judgement unit {unit.unit_id} contains facts outside its topic")
+        if set(unit.timing_period_ids) - set(topic.timing_period_ids):
+            errors.append(f"judgement unit {unit.unit_id} contains periods outside its topic")
+        for rule_id in unit.permitted_rule_ids:
+            rule = catalog_rules.get(rule_id)
+            context_rule = next((item for item in context.rules if item.rule_id == rule_id), None)
+            if rule is None or context_rule is None or context_rule.evaluation_status != "eligible":
+                errors.append(f"judgement unit {unit.unit_id} permits an ineligible rule {rule_id}")
     if set(context.restricted_fact_ids) - fact_ids:
         errors.append("judgement context contains unknown restricted facts")
     if set(context.restricted_timing_period_ids) - period_ids:

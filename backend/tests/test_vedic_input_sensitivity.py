@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -11,7 +11,7 @@ import pytest
 from app.schemas import BirthInput, SkillArtifact, SkillRunInput
 from app.services.place_service import ResolvedPlace
 from app.services.chart_rectification import ChartRectificationService
-from app.services.life_event_rectification import parse_life_event_ledger
+from app.services.life_event_rectification import parse_life_event_ledger, score_candidate_events
 from app.services.skill_runtime import SkillRuntime
 from app.services.vedic_calculator import VedicCalculator
 
@@ -1395,6 +1395,73 @@ def test_life_event_ledger_parses_dated_major_events() -> None:
     assert events[3]["rectificationRules"]["fields"][0] == "d7Lagna"
 
 
+def test_rectification_caps_correlated_matches_and_localizes_event_time(monkeypatch) -> None:
+    observed_transit_times: list[datetime] = []
+
+    def fake_dasha(*args, **kwargs):
+        return [{"mahadasha": "Venus", "antardasha": None, "pratyantardasha": None}]
+
+    def fake_transits(lagna_index, moon_index, *, as_of):
+        observed_transit_times.append(as_of)
+        return {"double_transit_houses": []}
+
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    result = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Venus": 6, "Moon": 0},
+            "d9Lagna": "Taurus",
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )
+
+    score = result["evidenceScores"][0]
+    assert score["score"] == 0.2  # MD counts once, even across three matching dimensions.
+    assert len([item for item in score["supportingFactIds"] if ".md." in item]) == 3
+    assert score["contradictingFactIds"] == []
+    assert score["neutralEvidenceIds"]
+    assert observed_transit_times == [datetime(2018, 10, 15, 4, tzinfo=timezone.utc)]
+    assert result["scoringPolicy"] == ("transparent_product_hypothesis_v2_correlated-match-cap")
+
+
+def test_rectification_preserves_dasha_level_when_an_outer_lord_is_missing(monkeypatch) -> None:
+    def fake_dasha(*args, **kwargs):
+        return [{"mahadasha": None, "antardasha": "Venus", "pratyantardasha": None}]
+
+    def fake_transits(lagna_index, moon_index, *, as_of):
+        return {"double_transit_houses": []}
+
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
+
+    result = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Venus": 6, "Moon": 0},
+            "d9Lagna": "Taurus",
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=parse_life_event_ledger("2018年10月 结婚"),
+    )
+
+    score = result["evidenceScores"][0]
+    assert score["score"] == 0.24  # AD 0.16 plus the D9 confirmation 0.08.
+    assert any(".ad.karaka" in item for item in score["supportingFactIds"])
+    assert not any(".md." in item for item in score["supportingFactIds"])
+
+
 def test_birth_input_context_includes_life_event_ledger() -> None:
     calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
     place = ResolvedPlace(
@@ -1425,6 +1492,22 @@ def test_birth_input_context_includes_life_event_ledger() -> None:
     assert context["lifeEvents"]["schemaVersion"] == "life-event-ledger/v1"
     assert context["lifeEvents"]["events"][0]["category"] == "marriage"
     assert context["lifeEvents"]["events"][1]["category"] == "career"
+
+
+def test_time_source_sets_a_conservative_minimum_radius_without_directional_shift() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    payload = _birth_payload()
+
+    documented = calculator._time_window(payload, "exact", "出生证/医院记录")
+    family_clear = calculator._time_window(payload, "exact", "家人明确记忆")
+    family_approximate = calculator._time_window(payload, "approximate", "家人大概回忆")
+
+    assert documented["radiusMinutes"] == 2
+    assert family_clear["radiusMinutes"] == 10
+    assert family_approximate["radiusMinutes"] == 30
+    assert family_clear["sourcePolicy"]["directionalBiasApplied"] is False
+    assert family_approximate["start"] == "1990-01-01 08:00"
+    assert family_approximate["end"] == "1990-01-01 09:00"
 
 
 def test_rectification_plan_uses_life_event_focus() -> None:

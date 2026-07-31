@@ -13,6 +13,7 @@ FactType: TypeAlias = Literal[
     "relationship.same_sign",
     "varga.lagna.position",
     "varga.graha.position",
+    "varga.house.lord",
     "varga.vargottama",
     "strength.dignity",
     "strength.shadbala",
@@ -95,6 +96,13 @@ FACT_CATALOG: dict[FactType, FactDefinition] = {
     "varga.graha.position": FactDefinition(
         fact_type="varga.graha.position",
         subject_pattern=rf"{VARGA_PATTERN}\.{GRAHA_PATTERN}",
+        value_kind="object",
+        derivation_rule_id="derive.varga.parashara-method-1",
+        evidence_layer="varga_confirmation",
+    ),
+    "varga.house.lord": FactDefinition(
+        fact_type="varga.house.lord",
+        subject_pattern=rf"{VARGA_PATTERN}\.{HOUSE_PATTERN}",
         value_kind="object",
         derivation_rule_id="derive.varga.parashara-method-1",
         evidence_layer="varga_confirmation",

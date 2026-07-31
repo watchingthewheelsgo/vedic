@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 import pytz
 import json
 
+from .constants import SIGNS, SIGN_LORDS
+
 # dashaflow — 仅用于 dignity/jaimini（这些无 PyJHora bug，不需要修正）
 from dashaflow.dignity import get_dignity, get_compound_relationship, check_combustion, get_digbala
 from dashaflow.jaimini import calculate_jaimini_karakas
@@ -89,20 +91,6 @@ if _missing:
 swe.set_ephe_path(os.path.join(os.path.dirname(__file__), "ephe"))
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-SIGNS = [
-    "Aries",
-    "Taurus",
-    "Gemini",
-    "Cancer",
-    "Leo",
-    "Virgo",
-    "Libra",
-    "Scorpio",
-    "Sagittarius",
-    "Capricorn",
-    "Aquarius",
-    "Pisces",
-]
 SIGN_ABBR = ["Ar", "Ta", "Ge", "Cn", "Le", "Vi", "Li", "Sc", "Sg", "Cp", "Aq", "Pi"]
 
 PLANETS_SWE = {
@@ -113,21 +101,6 @@ PLANETS_SWE = {
     "Jupiter": swe.JUPITER,
     "Venus": swe.VENUS,
     "Saturn": swe.SATURN,
-}
-
-SIGN_LORDS = {
-    0: "Mars",
-    1: "Venus",
-    2: "Mercury",
-    3: "Moon",
-    4: "Sun",
-    5: "Mercury",
-    6: "Venus",
-    7: "Mars",
-    8: "Jupiter",
-    9: "Saturn",
-    10: "Saturn",
-    11: "Jupiter",
 }
 
 NAKSHATRAS = [

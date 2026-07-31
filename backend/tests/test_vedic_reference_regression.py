@@ -12,9 +12,11 @@ import pytest
 import pytz
 import swisseph as swe
 
-from app.calculator.engine import PLANETS_SWE, SIGNS, calculate_full_chart
+from app.calculator.engine import PLANETS_SWE, SIGNS, SIGN_LORDS, calculate_full_chart
+from app.calculator.provenance import calculation_runtime_provenance
 from app.calculator.pyjhora_compat import ensure_pyjhora_swe_compat
 from app.vedicdust.chart_record_builder import ChartRecordBuildInput, build_chart_record
+from app.vedicdust.judgement import build_judgement_context
 from app.vedicdust.source_registry import load_rule_catalog
 
 
@@ -37,6 +39,26 @@ def _reference_cases() -> list[dict[str, Any]]:
     payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
     assert payload["calculationProfile"] == "LAHIRI mean nodes whole-sign PyJHora chart_method=1"
     return list(payload["cases"])
+
+
+def test_calculation_runtime_provenance_matches_the_pinned_runtime() -> None:
+    expected = {}
+    lock_path = Path(__file__).parents[1] / "astrology-runtime.lock"
+    for raw_line in lock_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, package_version = line.split("==", maxsplit=1)
+        expected[name] = package_version
+
+    provenance = calculation_runtime_provenance()
+
+    assert provenance.provider_versions == {
+        name: expected[name] for name in ("PyJHora", "pysweph", "pytz", "numpy", "python-dateutil")
+    }
+    assert provenance.timezone_database_version
+    assert provenance.ephemeris_data_fingerprint.startswith("sha256:")
+    assert len(provenance.ephemeris_data_fingerprint) == 71
 
 
 @pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
@@ -194,6 +216,9 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
             place_matched=None,
             calculation_version="test",
             ephemeris_version="test",
+            provider_versions={"PyJHora": "4.8.6", "pysweph": "2.10.3.6"},
+            timezone_database_version="test",
+            ephemeris_data_fingerprint="sha256:" + "0" * 64,
             chart=chart,
             input_context={
                 "time": {
@@ -235,6 +260,16 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
         30,
         60,
     }
+    for varga in result.charts:
+        assert [entry.house for entry in varga.house_lords] == list(range(1, 13))
+        assert all(entry.lord_house is not None for entry in varga.house_lords)
+        placement_houses = {placement.object_id: placement.house for placement in varga.placements}
+        for entry in varga.house_lords:
+            expected_sign = (varga.lagna.position.sign_index + entry.house - 1) % 12
+            expected_lord = SIGN_LORDS[expected_sign]
+            assert entry.sign_index == expected_sign
+            assert entry.lord == expected_lord
+            assert entry.lord_house == placement_houses[expected_lord]
     assert not any(check.status == "failed" for check in result.quality_checks)
     assert any(
         check.check_id == "varga.d1-provider-sign-alignment" for check in result.quality_checks
@@ -250,6 +285,7 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     assert {period.provenance.rule_id for period in result.timing_periods} <= registered_rules
     fact_types = {fact.fact_type for fact in result.facts}
     assert "rashi.house.occupant" in fact_types
+    assert "varga.house.lord" in fact_types
     assert "relationship.same_sign" in fact_types
     assert "ashtakavarga.bav.graha" in fact_types
     assert "karaka.chara" in fact_types
@@ -262,6 +298,34 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     assert any(period.level == "pratyantardasha" for period in result.timing_periods)
     assert result.rectification is not None
     assert result.rectification.decision.status == "not_required"
+
+    judgement_context = build_judgement_context(
+        result,
+        load_rule_catalog(),
+        now=datetime.now(timezone.utc),
+    )
+    facts_by_id = {fact.fact_id: fact for fact in result.facts}
+    career_unit = next(unit for unit in judgement_context.units if unit.topic_id == "career")
+    required_varga_subjects = {
+        "D10.Lagna",
+        "D10.Sun",
+        "D10.Mercury",
+        "D10.Jupiter",
+        "D10.Saturn",
+        "D10.H2",
+        "D10.H6",
+        "D10.H10",
+        "D10.H11",
+    }
+    varga_subjects = {facts_by_id[fact_id].subject_ref for fact_id in career_unit.varga_fact_ids}
+    assert required_varga_subjects <= varga_subjects
+    assert {subject for subject in varga_subjects if subject.startswith("D10.H")} == {
+        "D10.H2",
+        "D10.H6",
+        "D10.H10",
+        "D10.H11",
+    }
+    assert len(varga_subjects) < 22
 
 
 def test_calculator_rejects_ambiguous_civil_time() -> None:

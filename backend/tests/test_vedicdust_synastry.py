@@ -7,6 +7,7 @@ from app.vedicdust.models import (
     ChartRecord,
     SubjectContext,
     VargaChart,
+    VargaHouseLord,
     ZodiacPosition,
 )
 from app.vedicdust.profiles import parashari_lahiri_profile
@@ -90,6 +91,15 @@ def _record(
                 position=_position(graha_sign),
                 house=((graha_sign - lagna_sign) % 12) + 1,
             )
+        ],
+        house_lords=[
+            VargaHouseLord(
+                house=house,
+                sign=_position((lagna_sign + house - 1) % 12).sign,
+                sign_index=(lagna_sign + house - 1) % 12,
+                lord="Mars",
+            )
+            for house in range(1, 13)
         ],
         confidence="verified",
         eligible_as_primary_evidence=True,

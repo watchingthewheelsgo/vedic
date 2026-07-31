@@ -28,6 +28,22 @@
           "title": "Ephemerisversion",
           "type": "string"
         },
+        "providerVersions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Providerversions",
+          "type": "object"
+        },
+        "timezoneDatabaseVersion": {
+          "title": "Timezonedatabaseversion",
+          "type": "string"
+        },
+        "ephemerisDataFingerprint": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Ephemerisdatafingerprint",
+          "type": "string"
+        },
         "ayanamsaValueDeg": {
           "exclusiveMaximum": 30,
           "minimum": 0,
@@ -57,6 +73,9 @@
         "calculationProvider",
         "calculationAdapterVersion",
         "ephemerisVersion",
+        "providerVersions",
+        "timezoneDatabaseVersion",
+        "ephemerisDataFingerprint",
         "ayanamsaValueDeg",
         "ascendant",
         "grahas",
@@ -297,6 +316,13 @@
             "type": "string"
           },
           "title": "Contradictingfactids",
+          "type": "array"
+        },
+        "neutralEvidenceIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Neutralevidenceids",
           "type": "array"
         },
         "ruleIds": {
@@ -585,6 +611,7 @@
             "relationship.same_sign",
             "varga.lagna.position",
             "varga.graha.position",
+            "varga.house.lord",
             "varga.vargottama",
             "strength.dignity",
             "strength.shadbala",
@@ -1157,6 +1184,15 @@
           "title": "Placements",
           "type": "array"
         },
+        "houseLords": {
+          "items": {
+            "$ref": "#/$defs/VargaHouseLord"
+          },
+          "maxItems": 12,
+          "minItems": 12,
+          "title": "Houselords",
+          "type": "array"
+        },
         "confidence": {
           "$ref": "#/$defs/ConfidenceGrade"
         },
@@ -1171,10 +1207,54 @@
         "method",
         "lagna",
         "placements",
+        "houseLords",
         "confidence",
         "eligibleAsPrimaryEvidence"
       ],
       "title": "VargaChart",
+      "type": "object"
+    },
+    "VargaHouseLord": {
+      "additionalProperties": false,
+      "properties": {
+        "house": {
+          "maximum": 12,
+          "minimum": 1,
+          "title": "House",
+          "type": "integer"
+        },
+        "sign": {
+          "title": "Sign",
+          "type": "string"
+        },
+        "signIndex": {
+          "maximum": 11,
+          "minimum": 0,
+          "title": "Signindex",
+          "type": "integer"
+        },
+        "lord": {
+          "enum": ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"],
+          "title": "Lord",
+          "type": "string"
+        },
+        "lordHouse": {
+          "anyOf": [
+            {
+              "maximum": 12,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lordhouse"
+        }
+      },
+      "required": ["house", "sign", "signIndex", "lord"],
+      "title": "VargaHouseLord",
       "type": "object"
     },
     "ZodiacPosition": {

@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 import pytz
 
+from app.calculator.constants import SIGNS, SIGN_LORDS
+
 from .fact_catalog import FactType, fact_definition
 from .models import (
     AstronomySnapshot,
@@ -33,6 +35,7 @@ from .models import (
     TimeRange,
     TimingPeriod,
     VargaChart,
+    VargaHouseLord,
     ChartRecord,
     ZodiacPosition,
 )
@@ -98,6 +101,9 @@ class ChartRecordBuildInput:
     place_matched: Mapping[str, str] | None
     calculation_version: str
     ephemeris_version: str
+    provider_versions: Mapping[str, str]
+    timezone_database_version: str
+    ephemeris_data_fingerprint: str
     chart: Mapping[str, Any]
     input_context: Mapping[str, Any]
     sensitivity_scan: Mapping[str, Any]
@@ -217,6 +223,9 @@ def _astronomy_snapshot(source: ChartRecordBuildInput) -> AstronomySnapshot:
         calculation_provider="Swiss Ephemeris + PyJHora",
         calculation_adapter_version=source.calculation_version,
         ephemeris_version=source.ephemeris_version,
+        provider_versions=dict(source.provider_versions),
+        timezone_database_version=source.timezone_database_version,
+        ephemeris_data_fingerprint=source.ephemeris_data_fingerprint,
         ayanamsa_value_deg=float(chart["ayanamsa"]),
         ascendant=_zodiac_position(chart["lagna"]),
         grahas=[
@@ -253,6 +262,14 @@ def _varga_charts(
         if factor == 1:
             lagna = chart["lagna"]
             lagna_index = int(lagna["sign_idx"])
+            placements = [
+                ChartPlacement(
+                    object_id=name,
+                    position=_zodiac_position(chart["planets"][name]),
+                    house=((int(chart["planets"][name]["sign_idx"]) - lagna_index) % 12) + 1,
+                )
+                for name in GRAHAS
+            ]
             result.append(
                 VargaChart(
                     varga_id=key,
@@ -263,15 +280,8 @@ def _varga_charts(
                         position=_zodiac_position(lagna),
                         house=1,
                     ),
-                    placements=[
-                        ChartPlacement(
-                            object_id=name,
-                            position=_zodiac_position(chart["planets"][name]),
-                            house=((int(chart["planets"][name]["sign_idx"]) - lagna_index) % 12)
-                            + 1,
-                        )
-                        for name in GRAHAS
-                    ],
+                    placements=placements,
+                    house_lords=_varga_house_lords(lagna_index, placements),
                     confidence=ConfidenceGrade.VERIFIED,
                     eligible_as_primary_evidence=True,
                 )
@@ -279,6 +289,15 @@ def _varga_charts(
             continue
         lagna = raw["Lagna"]
         lagna_index = int(lagna["sign_idx"])
+        placements = [
+            ChartPlacement(
+                object_id=name,
+                position=_varga_position(raw[name]),
+                house=((int(raw[name]["sign_idx"]) - lagna_index) % 12) + 1,
+            )
+            for name in GRAHAS
+            if isinstance(raw.get(name), Mapping)
+        ]
         result.append(
             VargaChart(
                 varga_id=key,
@@ -289,15 +308,8 @@ def _varga_charts(
                     position=_varga_position(lagna),
                     house=1,
                 ),
-                placements=[
-                    ChartPlacement(
-                        object_id=name,
-                        position=_varga_position(raw[name]),
-                        house=((int(raw[name]["sign_idx"]) - lagna_index) % 12) + 1,
-                    )
-                    for name in GRAHAS
-                    if isinstance(raw.get(name), Mapping)
-                ],
+                placements=placements,
+                house_lords=_varga_house_lords(lagna_index, placements),
                 confidence=_division_confidence(confidence_entry),
                 eligible_as_primary_evidence=(
                     True
@@ -307,6 +319,23 @@ def _varga_charts(
             )
         )
     return result
+
+
+def _varga_house_lords(
+    lagna_sign_index: int, placements: list[ChartPlacement]
+) -> list[VargaHouseLord]:
+    placement_houses = {placement.object_id: placement.house for placement in placements}
+    return [
+        VargaHouseLord(
+            house=house,
+            sign=SIGNS[sign_index],
+            sign_index=sign_index,
+            lord=SIGN_LORDS[sign_index],
+            lord_house=placement_houses.get(SIGN_LORDS[sign_index]),
+        )
+        for house in range(1, 13)
+        for sign_index in [(lagna_sign_index + house - 1) % 12]
+    ]
 
 
 def _facts(
@@ -382,6 +411,17 @@ def _facts(
                     fact_type="varga.graha.position",
                     subject_ref=f"{varga.varga_id}.{placement.object_id}",
                     value=placement.position.model_dump(by_alias=True),
+                    method_profile_id=method_profile_id,
+                    confidence=varga.confidence,
+                )
+            )
+        for house_lord in varga.house_lords:
+            facts.append(
+                _fact(
+                    fact_id=f"fact.{varga.varga_id}.H{house_lord.house}.lord",
+                    fact_type="varga.house.lord",
+                    subject_ref=f"{varga.varga_id}.H{house_lord.house}",
+                    value=house_lord.model_dump(by_alias=True),
                     method_profile_id=method_profile_id,
                     confidence=varga.confidence,
                 )
@@ -926,6 +966,9 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                         ],
                         contradicting_fact_ids=[
                             str(value) for value in score.get("contradictingFactIds") or []
+                        ],
+                        neutral_evidence_ids=[
+                            str(value) for value in score.get("neutralEvidenceIds") or []
                         ],
                         rule_ids=[str(value) for value in score.get("ruleIds") or []],
                         explanation=str(score.get("explanation") or "No explanation supplied."),

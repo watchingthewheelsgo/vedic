@@ -18,6 +18,7 @@ from app.schemas import (
     PlanetFact,
     StrengthFact,
 )
+from app.calculator.provenance import calculation_runtime_provenance
 from app.services.life_event_rectification import (
     parse_life_event_ledger,
     score_candidate_events,
@@ -117,7 +118,6 @@ DIVISIONAL_POLICIES: dict[int, dict[str, str]] = {
 
 DIVISIONAL_FINGERPRINT_FACTORS = [2, 3, 4, 5, 7, 9, 10, 12]
 CALCULATION_VERSION = "vedic-calculator-pyjhora-0.5"
-EPHEMERIS_VERSION = "Swiss Ephemeris via pysweph + PyJHora 4.8.6"
 HIGH_RISK_CHANGED_FIELDS = {
     "lagnaSign",
     "moonNakshatra",
@@ -127,6 +127,17 @@ HIGH_RISK_CHANGED_FIELDS = {
     "d10Lagna",
 }
 CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+TIME_SOURCE_MIN_RADIUS_MINUTES = {
+    "出生证/医院记录": 2,
+    "birth certificate / hospital record": 2,
+    "birth certificate": 2,
+    "hospital record": 2,
+    "家人明确记忆": 10,
+    "clear family memory": 10,
+    "家人大概回忆": 30,
+    "approximate family memory": 30,
+    "family memory": 30,
+}
 
 
 @dataclass(frozen=True)
@@ -173,6 +184,7 @@ class VedicCalculator:
         birth_time = self._parse_birth_time(intake.birth_time, intake.birth_time_precision)
         place = self.place_service.resolve(intake.birth_place)
         payload = self._calculator_payload(intake, birth_date, birth_time, place)
+        runtime_provenance = calculation_runtime_provenance()
         (
             birth_input_context_json,
             sensitivity_scan_json,
@@ -186,7 +198,10 @@ class VedicCalculator:
             calculation_version=CALCULATION_VERSION,
             ayanamsa="Lahiri",
             house_system="whole-sign",
-            ephemeris_version=EPHEMERIS_VERSION,
+            ephemeris_version=runtime_provenance.summary,
+            provider_versions=runtime_provenance.provider_versions,
+            timezone_database_version=runtime_provenance.timezone_database_version,
+            ephemeris_data_fingerprint=runtime_provenance.ephemeris_data_fingerprint,
             timezone_source=place.timezone,
             geo_source=place.source,
             input_precision=intake.birth_time_precision,
@@ -212,6 +227,7 @@ class VedicCalculator:
             )
 
             calculated_at = datetime.now(timezone.utc)
+            runtime_provenance = calculation_runtime_provenance()
             chart = calculate_full_chart(
                 year=int(payload["year"]),
                 month=int(payload["month"]),
@@ -263,7 +279,10 @@ class VedicCalculator:
                     place_confidence=place.confidence,
                     place_matched=place.matched,
                     calculation_version=CALCULATION_VERSION,
-                    ephemeris_version=EPHEMERIS_VERSION,
+                    ephemeris_version=runtime_provenance.summary,
+                    provider_versions=runtime_provenance.provider_versions,
+                    timezone_database_version=runtime_provenance.timezone_database_version,
+                    ephemeris_data_fingerprint=runtime_provenance.ephemeris_data_fingerprint,
                     chart=chart,
                     input_context=input_context,
                     sensitivity_scan=sensitivity_scan,
@@ -288,7 +307,7 @@ class VedicCalculator:
         intake: BirthInput,
         place: ResolvedPlace,
     ) -> dict[str, Any]:
-        time_window = self._time_window(payload, intake.birth_time_precision)
+        time_window = self._time_window(payload, intake.birth_time_precision, intake.time_source)
         place_radius = round(float(place.radius_km), 3)
         place_rectification_allowed = self._place_rectification_allowed(place)
         life_event_ledger = parse_life_event_ledger(str(payload.get("life_events") or ""))
@@ -348,6 +367,7 @@ class VedicCalculator:
             base_signature,
             payload,
             intake.birth_time_precision,
+            intake.time_source,
             calculate_signature=calculate_signature,
         )
         place_variants = self._place_scan_variants(
@@ -738,7 +758,9 @@ class VedicCalculator:
             },
         }
 
-    def _time_window(self, payload: dict[str, Any], precision: str) -> dict[str, Any]:
+    def _time_window(
+        self, payload: dict[str, Any], precision: str, time_source: str
+    ) -> dict[str, Any]:
         base = datetime(
             int(payload["year"]),
             int(payload["month"]),
@@ -756,8 +778,9 @@ class VedicCalculator:
                 "radiusMinutes": 720,
                 "scanMode": "continuous_minute_grid",
                 "resolutionMinutes": 1,
+                "sourcePolicy": self._time_source_policy(time_source),
             }
-        radius = {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
+        radius = self._time_radius_minutes(precision, time_source)
         return {
             "start": (base - timedelta(minutes=radius)).strftime("%Y-%m-%d %H:%M"),
             "end": (base + timedelta(minutes=radius)).strftime("%Y-%m-%d %H:%M"),
@@ -765,6 +788,7 @@ class VedicCalculator:
             "radiusMinutes": radius,
             "scanMode": "continuous_minute_grid",
             "resolutionMinutes": 1,
+            "sourcePolicy": self._time_source_policy(time_source),
         }
 
     def _time_scan_variants(
@@ -774,6 +798,7 @@ class VedicCalculator:
         base_signature: dict[str, Any],
         payload: dict[str, Any],
         precision: str,
+        time_source: str,
         *,
         calculate_signature: Any | None = None,
     ) -> list[dict[str, Any]]:
@@ -788,7 +813,7 @@ class VedicCalculator:
             start = base_dt.replace(hour=0, minute=0)
             end = base_dt.replace(hour=23, minute=59)
         else:
-            radius = {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
+            radius = self._time_radius_minutes(precision, time_source)
             start = base_dt - timedelta(minutes=radius)
             end = base_dt + timedelta(minutes=radius)
 
@@ -837,6 +862,28 @@ class VedicCalculator:
                 )
             sample += timedelta(minutes=1)
         return self._coalesce_time_points(points, base_dt, base_signature)
+
+    @staticmethod
+    def _time_radius_minutes(precision: str, time_source: str) -> int:
+        if precision == "unknown":
+            return 720
+        precision_radius = {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
+        source_radius = TIME_SOURCE_MIN_RADIUS_MINUTES.get(time_source.strip().lower(), 0)
+        return max(precision_radius, source_radius)
+
+    @staticmethod
+    def _time_source_policy(time_source: str) -> dict[str, Any]:
+        source_radius = TIME_SOURCE_MIN_RADIUS_MINUTES.get(time_source.strip().lower())
+        return {
+            "source": time_source,
+            "minimumRadiusMinutes": source_radius,
+            "directionalBiasApplied": False,
+            "status": "recognized_product_prior" if source_radius is not None else "unclassified",
+            "limitation": (
+                "The source adjusts only the minimum uncertainty radius; it never shifts the "
+                "reported time earlier or later without user evidence."
+            ),
+        }
 
     def _coalesce_time_points(
         self,

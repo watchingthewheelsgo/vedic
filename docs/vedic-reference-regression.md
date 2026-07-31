@@ -7,25 +7,32 @@ whether the computed chart data still matches the declared calculation profile.
 ## Calculation Profile
 
 - Zodiac: sidereal
-- Ayanamsa: `TRUE_CITRA` / True Chitrapaksha
+- Ayanamsa: Lahiri (`swe.SIDM_LAHIRI` and PyJHora `LAHIRI`)
 - Nodes: mean Rahu/Ketu
 - Rashi house mapping: whole sign from Lagna sign
 - Ephemeris: Swiss Ephemeris through `pysweph`
 - Varga, Ashtakavarga and Vimsottari reference: PyJHora, `chart_method=1`
+- Runtime: exact distribution versions pinned by `backend/astrology-runtime.lock`;
+  every Chart Record stores provider versions, IANA/tzdb version, and a SHA-256
+  fingerprint of the active ephemeris files
 
 ## Test Layers
 
-`backend/tests/test_vedic_reference_regression.py` performs three checks:
+`backend/tests/test_vedic_reference_regression.py` performs four checks:
 
 1. Swiss Ephemeris core positions
    - Compares ayanamsa, ascendant, seven classical planets, Rahu and Ketu
      directly against `swisseph`.
 2. PyJHora Jyotish structures
-   - Compares D4/D5/D9/D10 signs and degrees, SAV, and the first three
-     Vimshottari Mahadashas against direct PyJHora calls.
+   - Compares D1, D2, D3, D4, D5, D7, D9, D10, D12, D16, D20, D24, D27,
+     D30, and D60 signs and degrees, SAV, and the first three Vimshottari
+     Mahadashas against direct PyJHora calls.
 3. Product snapshot fixture
    - Locks selected high-signal output fields from the current backend profile
      so unexpected drift is caught in CI.
+4. Runtime provenance
+   - Confirms the provider versions match the runtime lock and that the active
+     ephemeris directory has a non-empty SHA-256 fingerprint.
 
 The fixture lives at:
 
@@ -40,16 +47,18 @@ This is not a claim that every astrologer or every software package will produce
 identical results. Vedic software differs by ayanamsa, node mode, varga method,
 house/bhava settings, sunrise conventions and dasha options.
 
-This suite proves that the backend remains internally consistent with the
-declared profile and with two external computation sources used by that profile:
-Swiss Ephemeris and PyJHora.
+This suite demonstrates that the backend remains internally consistent with the
+declared profile and with two computation providers used by that profile: Swiss
+Ephemeris and PyJHora. Because the adapter and direct-reference paths still use
+the same provider libraries, this is compatibility evidence, not an independent
+astrologer or commercial-software gold standard.
 
 ## Future JHora Export Fixtures
 
 For full product-grade parity, add a separate fixture set exported from
 Jagannatha Hora v8.0 with the same settings:
 
-- True Chitrapaksha / Lahiri-compatible ayanamsa
+- Lahiri ayanamsa with the exact displayed value recorded
 - Mean nodes
 - Matching varga preferences
 - Shadbala and Ashtakavarga tables included in the export

@@ -408,6 +408,9 @@ class CalculationSnapshot(ApiModel):
     ayanamsa: str
     house_system: str = Field(alias="houseSystem")
     ephemeris_version: str = Field(alias="ephemerisVersion")
+    provider_versions: dict[str, str] = Field(alias="providerVersions")
+    timezone_database_version: str = Field(alias="timezoneDatabaseVersion")
+    ephemeris_data_fingerprint: str = Field(alias="ephemerisDataFingerprint")
     timezone_source: str = Field(alias="timezoneSource")
     geo_source: str = Field(alias="geoSource")
     input_precision: BirthTimePrecision = Field(alias="inputPrecision")

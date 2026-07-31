@@ -192,6 +192,9 @@ class AstronomySnapshot(ContractModel):
     calculation_provider: str
     calculation_adapter_version: str
     ephemeris_version: str
+    provider_versions: dict[str, str]
+    timezone_database_version: str
+    ephemeris_data_fingerprint: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
     ayanamsa_value_deg: float = Field(ge=0, lt=30)
     ascendant: ZodiacPosition
     grahas: list[GrahaPosition]
@@ -223,12 +226,21 @@ class ChartPlacement(ContractModel):
     house: int = Field(ge=1, le=12)
 
 
+class VargaHouseLord(ContractModel):
+    house: int = Field(ge=1, le=12)
+    sign: str
+    sign_index: int = Field(ge=0, le=11)
+    lord: Literal["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]
+    lord_house: int | None = Field(default=None, ge=1, le=12)
+
+
 class VargaChart(ContractModel):
     varga_id: str = Field(pattern=r"^D\d+$")
     factor: int = Field(ge=1, le=360)
     method: str
     lagna: ChartPlacement
     placements: list[ChartPlacement]
+    house_lords: list[VargaHouseLord] = Field(min_length=12, max_length=12)
     confidence: ConfidenceGrade
     eligible_as_primary_evidence: bool
 
@@ -239,6 +251,9 @@ class VargaChart(ContractModel):
         object_ids = [placement.object_id for placement in self.placements]
         if len(object_ids) != len(set(object_ids)):
             raise ValueError("varga chart cannot contain duplicate placements")
+        houses = [entry.house for entry in self.house_lords]
+        if sorted(houses) != list(range(1, 13)):
+            raise ValueError("varga chart requires exactly one lord entry for each house")
         return self
 
 
@@ -346,6 +361,7 @@ class CandidateEvidenceScore(ContractModel):
     score: float = Field(ge=-1, le=1)
     supporting_fact_ids: list[str] = Field(default_factory=list)
     contradicting_fact_ids: list[str] = Field(default_factory=list)
+    neutral_evidence_ids: list[str] = Field(default_factory=list)
     rule_ids: list[str] = Field(default_factory=list)
     explanation: str
 
@@ -625,6 +641,8 @@ class ChartAudit(ContractModel):
 class Claim(ContractModel):
     claim_id: str
     topic: str
+    judgement_unit_id: str
+    judgement_code: str
     title: str | None = None
     plain_statement: str
     technical_statement: str
@@ -665,7 +683,7 @@ class Claim(ContractModel):
 
 
 class ClaimGraph(ContractModel):
-    schema_version: Literal["vedicdust-claim-graph/1.0.0"] = "vedicdust-claim-graph/1.0.0"
+    schema_version: Literal["vedicdust-claim-graph/1.1.0"] = "vedicdust-claim-graph/1.1.0"
     chart_record_id: str
     chart_revision: int = Field(default=1, ge=1)
     method_profile_id: str
@@ -687,6 +705,9 @@ class JudgementRuleContext(ContractModel):
     rule_id: str
     title: str
     topic: str
+    output_code: str
+    evidence_class: EvidenceClass
+    source_ids: list[str] = Field(min_length=1)
     required_evidence_layers: list[
         Literal["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"]
     ] = Field(default_factory=list)
@@ -716,9 +737,53 @@ class JudgementTopicContext(ContractModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class JudgementUnit(ContractModel):
+    """Backend-owned semantic allowance for one consultation topic."""
+
+    unit_id: str = Field(pattern=r"^unit\.[a-z0-9._-]+$")
+    topic_id: str
+    primary_rule_id: str
+    permitted_rule_ids: list[str] = Field(min_length=1)
+    allowed_output_codes: list[str] = Field(min_length=1)
+    allowed_scopes: list[
+        Literal["natal_promise", "capacity", "timing", "rectification", "context"]
+    ] = Field(min_length=1)
+    natal_fact_ids: list[str] = Field(default_factory=list)
+    capacity_fact_ids: list[str] = Field(default_factory=list)
+    varga_fact_ids: list[str] = Field(default_factory=list)
+    timing_fact_ids: list[str] = Field(default_factory=list)
+    timing_period_ids: list[str] = Field(default_factory=list)
+    certainty_cap: Literal["high", "moderate", "low"]
+    limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unit_contract(self) -> JudgementUnit:
+        if self.primary_rule_id not in self.permitted_rule_ids:
+            raise ValueError("judgement unit must permit its primary rule")
+        for label, values in (
+            ("permitted rules", self.permitted_rule_ids),
+            ("output codes", self.allowed_output_codes),
+            ("scopes", self.allowed_scopes),
+            ("natal facts", self.natal_fact_ids),
+            ("capacity facts", self.capacity_fact_ids),
+            ("varga facts", self.varga_fact_ids),
+            ("timing facts", self.timing_fact_ids),
+            ("timing periods", self.timing_period_ids),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"judgement unit contains duplicate {label}")
+        if not self.natal_fact_ids or not self.capacity_fact_ids:
+            raise ValueError("judgement unit requires natal-promise and capacity facts")
+        if "timing" in self.allowed_scopes and not (
+            self.timing_fact_ids and self.timing_period_ids
+        ):
+            raise ValueError("timing-enabled judgement unit requires facts and periods")
+        return self
+
+
 class JudgementContext(ContractModel):
-    schema_version: Literal["vedicdust-judgement-context/1.0.0"] = (
-        "vedicdust-judgement-context/1.0.0"
+    schema_version: Literal["vedicdust-judgement-context/1.1.0"] = (
+        "vedicdust-judgement-context/1.1.0"
     )
     chart_record_id: str
     chart_revision: int = Field(ge=1)
@@ -729,6 +794,7 @@ class JudgementContext(ContractModel):
     rules: list[JudgementRuleContext] = Field(min_length=1)
     global_gate_rule_ids: list[str] = Field(default_factory=list)
     topics: list[JudgementTopicContext] = Field(min_length=1)
+    units: list[JudgementUnit] = Field(min_length=1)
     restricted_fact_ids: list[str] = Field(default_factory=list)
     restricted_timing_period_ids: list[str] = Field(default_factory=list)
     quality_checks: list[QualityCheck] = Field(default_factory=list)
@@ -747,6 +813,27 @@ class JudgementContext(ContractModel):
         )
         if unknown:
             raise ValueError("judgement context references unknown rules: " + ", ".join(unknown))
+        topic_ids = {topic.topic_id for topic in self.topics}
+        unit_ids = [unit.unit_id for unit in self.units]
+        if len(unit_ids) != len(set(unit_ids)):
+            raise ValueError("judgement context contains duplicate unit ids")
+        unknown_unit_topics = sorted({unit.topic_id for unit in self.units} - topic_ids)
+        if unknown_unit_topics:
+            raise ValueError(
+                "judgement units reference unknown topics: " + ", ".join(unknown_unit_topics)
+            )
+        unknown_unit_rules = sorted(
+            {
+                rule_id
+                for unit in self.units
+                for rule_id in unit.permitted_rule_ids
+                if rule_id not in rule_ids
+            }
+        )
+        if unknown_unit_rules:
+            raise ValueError(
+                "judgement units reference unknown rules: " + ", ".join(unknown_unit_rules)
+            )
         return self
 
 
@@ -809,7 +896,7 @@ class ConsultationReportManifest(ContractModel):
     dossier_id: str | None = None
     chart_record_id: str
     chart_revision: int = Field(default=1, ge=1)
-    claim_graph_version: Literal["vedicdust-claim-graph/1.0.0"]
+    claim_graph_version: Literal["vedicdust-claim-graph/1.1.0"]
     generated_at: datetime | None = None
     locale: Literal["zh", "en", "ja"]
     audience: Literal["self", "parent", "partner", "family", "professional"]
@@ -826,7 +913,7 @@ class ConsultationDossier(ContractModel):
     chart_record_id: str
     chart_revision: int = Field(ge=1)
     method_profile_id: str
-    claim_graph_version: Literal["vedicdust-claim-graph/1.0.0"]
+    claim_graph_version: Literal["vedicdust-claim-graph/1.1.0"]
     generated_at: datetime
     locale: Literal["zh", "en", "ja"]
     audience: Literal["self", "parent", "partner", "family", "professional"]
