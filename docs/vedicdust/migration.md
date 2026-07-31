@@ -5,15 +5,16 @@
 The VedicDust domain language, method SOP, Calculation Profile, source registry,
 Rule Catalog, Fact Catalog, machine contracts, JSON Schemas, and four language
 skills exist. The production calculator now emits a provenance-validated
-`vedicdust_case.json` alongside legacy compatibility artifacts on initial
-calculation and every rectification recalculation.
+`chart_record.json`, a stable `reading_session.json`, and a deterministic
+`chart_audit.json` on initial calculation and every rectification recalculation.
 
 The active adapter uses Swiss Ephemeris as the canonical D1 position provider
 and PyJHora for D2-D60, Shadbala, Ashtakavarga, and Vimshottari. It records the
 provider and adapter versions, rejects ambiguous or nonexistent civil times,
-and blocks cases that fail deterministic quality gates. The production
-rectification, judgement, and report runtimes still use legacy artifacts and
-skills; VedicDust has not cut over those stages.
+and blocks chart records that fail deterministic quality gates. Rectification
+recalculation preserves `chartRecordId` and increments `revision`. The existing
+question UI and Markdown report files remain compatibility adapters; LLM
+prompts and skills treat `chart_record.json` as the deterministic source.
 
 ## Phase 1: provider-backed spacetime and astronomy
 
@@ -23,7 +24,7 @@ Build a VedicDust adapter over the pinned Swiss Ephemeris and PyJHora providers
 behind one calculation interface:
 
 ```python
-calculate_case(birth_assertion, calculation_profile) -> VedicDustCase
+build_chart_record(birth_assertion, calculation_profile) -> ChartRecord
 ```
 
 Acceptance requires strict ambiguous/nonexistent civil-time handling, pinned
@@ -47,7 +48,9 @@ calculation derivations. Each implementation requires:
 
 ## Phase 3: evidence-based rectification
 
-**Status: not implemented in the VedicDust runtime.**
+**Status: identity, audit, sensitivity gates, and revision lifecycle are
+implemented. Candidate-interval scoring remains on the compatibility
+rectification adapter.**
 
 Replace timestamp sampling with chart-boundary Candidate Intervals. Build the
 same evidence matrix for every candidate, reserve holdout Life Events, measure
@@ -56,7 +59,9 @@ known-time cases. Do not ship second-level claims.
 
 ## Phase 4: judgement and report runtime
 
-**Status: contracts and skills exist; production orchestration is not implemented.**
+**Status: Chart Record and Chart Audit are wired into production orchestration.
+The approved Rule Catalog still needs enough validated judgement rules before
+the legacy Markdown report renderer can be removed.**
 
 Execute the Rule Catalog to produce a Claim Graph, invoke the four VedicDust skills by
 explicit workflow step, validate every cross-artifact reference, and render the

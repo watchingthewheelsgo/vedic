@@ -13,6 +13,18 @@ from app.utils.ids import make_id
 class SkillWorkspace:
     """File-backed workspace that mirrors the original skill artifact model."""
 
+    INTERNAL_ARTIFACTS = {
+        "chart_record.json",
+        "reading_session.json",
+        "vedicdust_case.json",
+        "chart_audit.json",
+        "case_audit.json",
+        "claim_graph.json",
+        "consultation_report_manifest.json",
+        "rectification_question_set.json",
+        "rectification_answer_batch.json",
+    }
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.assert_no_project_runtime_artifacts()
@@ -45,7 +57,12 @@ class SkillWorkspace:
         target.write_text(content, encoding="utf-8")
         return self._artifact_from_path(session_dir, target)
 
-    def read_artifacts(self, session_id: str) -> list[SkillArtifact]:
+    def read_artifacts(
+        self,
+        session_id: str,
+        *,
+        include_internal: bool = False,
+    ) -> list[SkillArtifact]:
         session_dir = self.require_session_dir(session_id)
         files = [
             path
@@ -53,9 +70,20 @@ class SkillWorkspace:
             if path.is_file()
             and path.suffix.lower() in [".md", ".txt", ".json"]
             and not any(part.startswith(".") for part in path.relative_to(session_dir).parts)
+            and (
+                include_internal
+                or path.relative_to(session_dir).as_posix() not in self.INTERNAL_ARTIFACTS
+            )
         ]
         files.sort(key=lambda path: (self._artifact_rank(path.name), path.name))
         return [self._artifact_from_path(session_dir, path) for path in files]
+
+    def read_artifact_text(self, session_id: str, path: str) -> str | None:
+        session_dir = self.require_session_dir(session_id)
+        target = self._safe_artifact_path(session_dir, path)
+        if not target.exists() or not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8")
 
     def write_session_manifest(self, session_id: str, *, locale: str = "en") -> None:
         session_dir = self.require_session_dir(session_id)
@@ -181,7 +209,7 @@ class SkillWorkspace:
         return digest.hexdigest()
 
     def _artifact_from_path(self, session_dir: Path, path: Path) -> SkillArtifact:
-        relative = path.relative_to(session_dir).as_posix()
+        relative = path.resolve().relative_to(session_dir.resolve()).as_posix()
         kind = "json" if path.suffix == ".json" else "text" if path.suffix == ".txt" else "markdown"
         return SkillArtifact(
             path=relative,
@@ -193,6 +221,8 @@ class SkillWorkspace:
 
     def _artifact_rank(self, name: str) -> int:
         order = [
+            "reading_session.json",
+            "chart_record.json",
             "vedicdust_case.json",
             "structured_data.md",
             "birth_chart_facts.json",

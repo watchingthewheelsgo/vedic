@@ -1,23 +1,25 @@
 """VedicDust contracts, evidence models, and method profiles."""
 
 from .models import (
-    CaseAudit,
+    ChartAudit,
+    ChartRecord,
     ClaimGraph,
     ConsultationReportManifest,
-    VedicDustCase,
+    ReadingSession,
     RectificationAnswerBatch,
     RectificationQuestionSet,
 )
-from .case_builder import CaseBuildInput, build_case
+from .chart_record_builder import ChartRecordBuildInput, build_chart_record
 from .profiles import parashari_lahiri_profile
 
 __all__ = [
-    "CaseAudit",
+    "ChartAudit",
+    "ChartRecord",
     "ClaimGraph",
     "ConsultationReportManifest",
-    "VedicDustCase",
-    "CaseBuildInput",
-    "build_case",
+    "ReadingSession",
+    "ChartRecordBuildInput",
+    "build_chart_record",
     "RectificationAnswerBatch",
     "RectificationQuestionSet",
     "parashari_lahiri_profile",

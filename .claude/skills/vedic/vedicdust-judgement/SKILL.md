@@ -8,13 +8,13 @@ disable-model-invocation: true
 
 ## Purpose
 
-Apply an approved rule pack to a qualified case. This skill produces structured
+Apply an approved rule pack to a qualified chart record. This skill produces structured
 judgements, not report prose.
 
 ## Inputs
 
-- `vedicdust_case.json` with status `ready_for_judgement`
-- `case_audit.json` authorizing `judge`
+- `chart_record.json` with status `ready_for_judgement`
+- `chart_audit.json` authorizing `judge`
 - The exact Method Rule pack named by the Calculation Profile
 - Source registry and rule-specific references
 

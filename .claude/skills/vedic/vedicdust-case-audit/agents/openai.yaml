@@ -1,4 +1,0 @@
-interface:
-  display_name: "VedicDust Case Audit"
-  short_description: "Gate a Jyotish case using explicit evidence and contracts"
-  default_prompt: "Use $vedicdust-case-audit to audit this VedicDust case."

@@ -12,14 +12,14 @@ from app.vedicdust.models import (
     AuditFinding,
     BirthAssertion,
     CandidateInterval,
-    CaseAudit,
+    ChartAudit,
+    ChartRecord,
     Claim,
     ClaimGraph,
     ConfidenceGrade,
     EvidenceClass,
     EvidenceItem,
     GrahaPosition,
-    VedicDustCase,
     JyotishFact,
     RuleProvenance,
     SubjectContext,
@@ -33,7 +33,7 @@ from app.vedicdust.source_registry import (
     validate_profile_source_ids,
     validate_rule_catalog_sources,
 )
-from app.vedicdust.validation import validate_case_provenance, validate_claim_graph
+from app.vedicdust.validation import validate_chart_record_provenance, validate_claim_graph
 
 
 UTC = timezone.utc
@@ -164,7 +164,7 @@ def test_complete_astronomy_snapshot_requires_unique_nine_grahas() -> None:
         )
 
 
-def test_case_audit_status_must_match_blocking_findings() -> None:
+def test_chart_audit_status_must_match_blocking_findings() -> None:
     finding = AuditFinding(
         finding_id="missing-timezone",
         severity="blocking",
@@ -175,8 +175,8 @@ def test_case_audit_status_must_match_blocking_findings() -> None:
     )
 
     with pytest.raises(ValidationError, match="must agree with blocking findings"):
-        CaseAudit(
-            case_id="case-1",
+        ChartAudit(
+            chart_record_id="chart-1",
             audited_at=datetime.now(UTC),
             status="passed_with_limits",
             findings=[finding],
@@ -185,13 +185,13 @@ def test_case_audit_status_must_match_blocking_findings() -> None:
 
 
 def test_schema_uses_canonical_camel_case_language() -> None:
-    schema = CaseAudit.model_json_schema(by_alias=True)
+    schema = ChartAudit.model_json_schema(by_alias=True)
     assert "schemaVersion" in schema["properties"]
     assert "permittedNextSteps" in schema["properties"]
     assert "permitted_next_steps" not in schema["properties"]
 
 
-def test_claim_graph_references_case_facts_and_registered_rules() -> None:
+def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     profile = parashari_lahiri_profile()
     testimony = EvidenceItem(
         evidence_id="birth-record",
@@ -214,8 +214,10 @@ def test_claim_graph_references_case_facts_and_registered_rules() -> None:
             confidence=ConfidenceGrade.VERIFIED,
         ),
     )
-    case = VedicDustCase(
-        case_id="case-claim",
+    record = ChartRecord(
+        chart_record_id="chart-claim",
+        reading_session_id="session-claim",
+        revision=1,
         created_at=datetime.now(UTC),
         subject=SubjectContext(subject_id="subject-1"),
         birth_assertion=BirthAssertion(
@@ -234,14 +236,14 @@ def test_claim_graph_references_case_facts_and_registered_rules() -> None:
         status="intake",
     )
     graph = ClaimGraph(
-        case_id=case.case_id,
+        chart_record_id=record.chart_record_id,
         method_profile_id=profile.profile_id,
         generated_at=datetime.now(UTC),
         claims=[
             Claim(
                 claim_id="claim-1",
                 topic="relationship",
-                plain_statement="The case contains a provisional relationship promise.",
+                plain_statement="The chart contains a provisional relationship promise.",
                 technical_statement="D1 promise is present; confirmation is still required.",
                 supporting_fact_ids=[fact.fact_id],
                 rule_ids=["sop.promise-before-varga"],
@@ -251,31 +253,33 @@ def test_claim_graph_references_case_facts_and_registered_rules() -> None:
         ],
     )
 
-    validate_claim_graph(case, graph, load_rule_catalog())
-    validate_case_provenance(case, load_rule_catalog())
+    validate_claim_graph(record, graph, load_rule_catalog())
+    validate_chart_record_provenance(record, load_rule_catalog())
 
     invalid = graph.model_copy(deep=True)
     invalid.claims[0].supporting_fact_ids = ["fact.missing"]
     with pytest.raises(ValueError, match="unknown fact"):
-        validate_claim_graph(case, invalid, load_rule_catalog())
+        validate_claim_graph(record, invalid, load_rule_catalog())
 
-    invalid_case = case.model_copy(deep=True)
-    invalid_case.facts[0].provenance.source_ids = ["product.vedicdust-consultation-standard-1"]
+    invalid_record = record.model_copy(deep=True)
+    invalid_record.facts[0].provenance.source_ids = ["product.vedicdust-consultation-standard-1"]
     with pytest.raises(ValueError, match="source drift"):
-        validate_case_provenance(invalid_case, load_rule_catalog())
+        validate_chart_record_provenance(invalid_record, load_rule_catalog())
 
 
 def test_generated_json_schemas_are_current() -> None:
     from app.vedicdust.models import (
         ConsultationReportManifest,
+        ReadingSession,
         RectificationAnswerBatch,
         RectificationQuestionSet,
         RuleCatalog,
     )
 
     models = {
-        "vedicdust-case.schema.json": VedicDustCase,
-        "vedicdust-case-audit.schema.json": CaseAudit,
+        "vedicdust-chart-record.schema.json": ChartRecord,
+        "vedicdust-reading-session.schema.json": ReadingSession,
+        "vedicdust-chart-audit.schema.json": ChartAudit,
         "vedicdust-question-set.schema.json": RectificationQuestionSet,
         "vedicdust-answer-batch.schema.json": RectificationAnswerBatch,
         "vedicdust-claim-graph.schema.json": ClaimGraph,

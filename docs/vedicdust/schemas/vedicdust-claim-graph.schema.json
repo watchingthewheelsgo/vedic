@@ -130,8 +130,8 @@
       "title": "Schemaversion",
       "type": "string"
     },
-    "caseId": {
-      "title": "Caseid",
+    "chartRecordId": {
+      "title": "Chartrecordid",
       "type": "string"
     },
     "methodProfileId": {
@@ -165,7 +165,7 @@
       "type": "array"
     }
   },
-  "required": ["caseId", "methodProfileId", "generatedAt", "claims"],
+  "required": ["chartRecordId", "methodProfileId", "generatedAt", "claims"],
   "title": "ClaimGraph",
   "type": "object"
 }

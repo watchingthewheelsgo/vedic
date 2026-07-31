@@ -27,12 +27,12 @@ from .models import (
     TimeRange,
     TimingPeriod,
     VargaChart,
-    VedicDustCase,
+    ChartRecord,
     ZodiacPosition,
 )
 from .profiles import parashari_lahiri_profile
 from .source_registry import load_rule_catalog
-from .validation import validate_case_provenance
+from .validation import validate_chart_record_provenance
 
 
 GRAHAS = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"]
@@ -68,8 +68,10 @@ NAKSHATRAS = [
 
 
 @dataclass(frozen=True)
-class CaseBuildInput:
-    case_id: str
+class ChartRecordBuildInput:
+    chart_record_id: str
+    reading_session_id: str
+    revision: int
     subject_id: str
     created_at: datetime
     locale: str
@@ -93,7 +95,7 @@ class CaseBuildInput:
     sensitivity_scan: Mapping[str, Any]
 
 
-def build_case(source: CaseBuildInput) -> VedicDustCase:
+def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
     profile = parashari_lahiri_profile()
     local_moment = _local_moment(source.birth_date, source.birth_time, source.timezone_id)
     utc_moment = local_moment.astimezone(pytz.utc)
@@ -101,7 +103,7 @@ def build_case(source: CaseBuildInput) -> VedicDustCase:
     birth_confidence = _birth_confidence(source.birth_time_precision)
 
     place_evidence = EvidenceItem(
-        evidence_id=f"{source.case_id}.place-resolution",
+        evidence_id=f"{source.chart_record_id}.place-resolution",
         evidence_class=_place_evidence_class(source.place_source),
         source_label=source.place_source,
         observed_value=(
@@ -112,7 +114,7 @@ def build_case(source: CaseBuildInput) -> VedicDustCase:
         notes=_matched_place_note(source.place_matched),
     )
     birth_evidence = EvidenceItem(
-        evidence_id=f"{source.case_id}.birth-assertion",
+        evidence_id=f"{source.chart_record_id}.birth-assertion",
         evidence_class=EvidenceClass.USER_TESTIMONY,
         source_label=source.time_source or "user-input",
         observed_value=f"{source.birth_date} {source.birth_time} @ {source.birth_place}",
@@ -156,11 +158,13 @@ def build_case(source: CaseBuildInput) -> VedicDustCase:
         if has_failed_check
         else "rectification_required"
         if requires_rectification
-        else "calculated"
+        else "ready_for_judgement"
     )
 
-    result = VedicDustCase(
-        case_id=source.case_id,
+    result = ChartRecord(
+        chart_record_id=source.chart_record_id,
+        reading_session_id=source.reading_session_id,
+        revision=source.revision,
         created_at=source.created_at,
         subject=SubjectContext(
             subject_id=source.subject_id,
@@ -189,15 +193,15 @@ def build_case(source: CaseBuildInput) -> VedicDustCase:
         rectification=rectification,
         status=status,
     )
-    validate_case_provenance(result, load_rule_catalog())
+    validate_chart_record_provenance(result, load_rule_catalog())
     return result
 
 
-def _astronomy_snapshot(source: CaseBuildInput) -> AstronomySnapshot:
+def _astronomy_snapshot(source: ChartRecordBuildInput) -> AstronomySnapshot:
     chart = source.chart
     planets = chart.get("planets") or {}
     return AstronomySnapshot(
-        snapshot_id=f"{source.case_id}.astronomy",
+        snapshot_id=f"{source.chart_record_id}.astronomy.r{source.revision}",
         calculated_at=source.created_at,
         julian_day_ut=float(chart["julian_day_ut"]),
         calculation_provider="Swiss Ephemeris + PyJHora",
@@ -567,7 +571,7 @@ def _d1_provider_sign_mismatches(chart: Mapping[str, Any]) -> list[dict[str, Any
 
 
 def _rectification(
-    source: CaseBuildInput, birth_confidence: ConfidenceGrade
+    source: ChartRecordBuildInput, birth_confidence: ConfidenceGrade
 ) -> RectificationRecord | None:
     reported_window = _reported_window(source.input_context, source.timezone_id)
     readiness = source.sensitivity_scan.get("reportReadiness") or {}

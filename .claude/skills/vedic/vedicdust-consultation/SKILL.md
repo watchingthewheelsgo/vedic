@@ -13,8 +13,8 @@ meaning, certainty, scope, or evidence.
 
 ## Inputs
 
-- `vedicdust_case.json`
-- `case_audit.json` authorizing `render_report`
+- `chart_record.json`
+- `chart_audit.json` authorizing `render_report`
 - `claim_graph.json`
 - Requested locale and reader relationship
 
@@ -32,7 +32,7 @@ meaning, certainty, scope, or evidence.
 - `high`: "The chart consistently supports..."
 - `moderate`: "Several factors support..., with this limitation..."
 - `low`: "This is a possible expression, not a firm conclusion..."
-- `withheld`: explain why the case cannot determine the topic
+- `withheld`: explain why the chart record cannot determine the topic
 
 Use localized plain language for the reader. Keep canonical IDs and Sanskrit or
 English technical terms in the appendix. Define a technical term on first use.

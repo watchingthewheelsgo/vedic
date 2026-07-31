@@ -14,7 +14,7 @@ import swisseph as swe
 
 from app.calculator.engine import PLANETS_SWE, SIGNS, calculate_full_chart
 from app.calculator.structured_schema import build_structured_schema
-from app.vedicdust.case_builder import CaseBuildInput, build_case
+from app.vedicdust.chart_record_builder import ChartRecordBuildInput, build_chart_record
 from app.vedicdust.source_registry import load_rule_catalog
 
 
@@ -163,7 +163,7 @@ def test_birth_chart_facts_schema_uses_lahiri_and_exposes_calculation_context(
 
 
 @pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
-def test_reference_calculation_builds_a_typed_vedicdust_case(case: dict[str, Any]) -> None:
+def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any]) -> None:
     chart = _calculate_case(case)
     birth_date = f"{int(case['year']):04d}-{int(case['month']):02d}-{int(case['day']):02d}"
     birth_time = f"{int(case['hour']):02d}:{int(case['minute']):02d}"
@@ -171,9 +171,11 @@ def test_reference_calculation_builds_a_typed_vedicdust_case(case: dict[str, Any
         f"D{factor}": {"confidence": "high", "useAsPrimaryEvidence": factor != 60}
         for factor in [1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]
     }
-    result = build_case(
-        CaseBuildInput(
-            case_id=f"case.{case['id']}",
+    result = build_chart_record(
+        ChartRecordBuildInput(
+            chart_record_id=f"chart.{case['id']}",
+            reading_session_id=f"session.{case['id']}",
+            revision=1,
             subject_id=f"subject.{case['id']}",
             created_at=datetime.now(timezone.utc),
             locale="en",
@@ -211,7 +213,7 @@ def test_reference_calculation_builds_a_typed_vedicdust_case(case: dict[str, Any
         )
     )
 
-    assert result.status == "calculated"
+    assert result.status == "ready_for_judgement"
     assert result.astronomy is not None
     assert result.astronomy.calculation_provider == "Swiss Ephemeris + PyJHora"
     assert result.astronomy.calculation_adapter_version == "test"

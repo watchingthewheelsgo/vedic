@@ -1183,14 +1183,23 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-case/1.0.0",
-      "default": "vedicdust-case/1.0.0",
+      "const": "vedicdust-chart-record/1.0.0",
+      "default": "vedicdust-chart-record/1.0.0",
       "title": "Schemaversion",
       "type": "string"
     },
-    "caseId": {
-      "title": "Caseid",
+    "chartRecordId": {
+      "title": "Chartrecordid",
       "type": "string"
+    },
+    "readingSessionId": {
+      "title": "Readingsessionid",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
     },
     "createdAt": {
       "format": "date-time",
@@ -1288,7 +1297,16 @@
       "type": "string"
     }
   },
-  "required": ["caseId", "createdAt", "subject", "birthAssertion", "calculationProfile", "status"],
-  "title": "VedicDustCase",
+  "required": [
+    "chartRecordId",
+    "readingSessionId",
+    "revision",
+    "createdAt",
+    "subject",
+    "birthAssertion",
+    "calculationProfile",
+    "status"
+  ],
+  "title": "ChartRecord",
   "type": "object"
 }

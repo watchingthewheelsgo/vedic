@@ -38,14 +38,15 @@ workflow. They are not authoritative for VedicDust.
 Birth Assertion
   -> Canonical Birth Moment
   -> Astronomy Snapshot
-  -> VedicDust Case
+  -> Chart Record
+  -> Chart Audit
   -> Rectification Record (when required)
   -> Claim Graph
   -> Consultation Report
 ```
 
 The deterministic engine owns calculation facts, Method Rule evaluation,
-sensitivity boundaries, and candidate scoring. VedicDust skills may audit a case, ask
+sensitivity boundaries, and candidate scoring. VedicDust skills may audit a Chart Record, ask
 questions from engine-provided discriminators, build Claims from registered
 rules, and render approved Claims. Skills cannot invent placements, settings,
 rules, or rectified timestamps.
@@ -56,7 +57,8 @@ rules, or rectified timestamps.
 POST /api/skill-sessions
   BirthInput
   -> VedicCalculator.calculate()
-  -> structured_data.md
+  -> chart_record.json + chart_audit.json + reading_session.json
+  -> structured_data.md (compatibility projection)
 
 POST /api/skill-runs
   sessionId + skill name + optional userMessage

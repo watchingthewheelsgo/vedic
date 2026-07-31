@@ -74,8 +74,8 @@
       "title": "Schemaversion",
       "type": "string"
     },
-    "caseId": {
-      "title": "Caseid",
+    "chartRecordId": {
+      "title": "Chartrecordid",
       "type": "string"
     },
     "round": {
@@ -93,7 +93,7 @@
       "type": "array"
     }
   },
-  "required": ["caseId", "round", "answers"],
+  "required": ["chartRecordId", "round", "answers"],
   "title": "RectificationAnswerBatch",
   "type": "object"
 }

@@ -20,7 +20,8 @@ Rules:
   sources and `bazi-calculator` artifacts.
 - Preserve original file names, phase order, markdown style, and chat-progress
   behavior.
-- Treat `structured_data.md` as the calculation source of truth.
+- Treat `chart_record.json` as the deterministic calculation source of truth.
+  `structured_data.md` is a compatibility projection for existing report files.
 - Do not add app-specific claims, daily notes, checkout flows, cards, JSON
   report sections, or extra frameworks.
 - The web app may wrap outputs for transport, but the user-facing artifact

@@ -22,7 +22,7 @@ from app.services.life_event_rectification import parse_life_event_ledger
 from app.services.place_service import PlaceService, ResolvedPlace
 from app.settings import Settings
 from app.utils.ids import make_id
-from app.vedicdust.case_builder import CaseBuildInput, build_case
+from app.vedicdust.chart_record_builder import ChartRecordBuildInput, build_chart_record
 
 
 PRECISION_STATUS: dict[str, str] = {
@@ -140,6 +140,14 @@ class BirthTime:
     normalized: str
 
 
+@dataclass(frozen=True)
+class ChartRecordIdentity:
+    reading_session_id: str
+    chart_record_id: str
+    subject_id: str
+    revision: int = 1
+
+
 class VedicCalculator:
     """Adapter over the backend-owned Vedic calculation engine."""
 
@@ -147,7 +155,17 @@ class VedicCalculator:
         self.settings = settings
         self.place_service = place_service
 
-    def calculate(self, intake: BirthInput) -> CalculationSnapshot:
+    def calculate(
+        self,
+        intake: BirthInput,
+        *,
+        identity: ChartRecordIdentity | None = None,
+    ) -> CalculationSnapshot:
+        identity = identity or ChartRecordIdentity(
+            reading_session_id=make_id("reading"),
+            chart_record_id=make_id("chart"),
+            subject_id=make_id("subject"),
+        )
         birth_date = self._parse_birth_date(intake.birth_date)
         birth_time = self._parse_birth_time(intake.birth_time, intake.birth_time_precision)
         place = self.place_service.resolve(intake.birth_place)
@@ -157,9 +175,9 @@ class VedicCalculator:
             birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
-            vedicdust_case_json,
+            chart_record_json,
             facts,
-        ) = self._run_engine(payload, intake, place)
+        ) = self._run_engine(payload, intake, place, identity)
 
         return CalculationSnapshot(
             snapshot_id=make_id("calc"),
@@ -176,12 +194,16 @@ class VedicCalculator:
             birth_chart_facts_json=birth_chart_facts_json,
             birth_input_context_json=birth_input_context_json,
             sensitivity_scan_json=sensitivity_scan_json,
-            vedicdust_case_json=vedicdust_case_json,
+            chart_record_json=chart_record_json,
             facts=facts,
         )
 
     def _run_engine(
-        self, payload: dict[str, Any], intake: BirthInput, place: ResolvedPlace
+        self,
+        payload: dict[str, Any],
+        intake: BirthInput,
+        place: ResolvedPlace,
+        identity: ChartRecordIdentity,
     ) -> tuple[str, str, str, str, str, ChartFacts]:
         with redirect_stdout(sys.stderr):
             from app.calculator.engine import SIGNS, calculate_full_chart
@@ -252,10 +274,12 @@ class VedicCalculator:
             sensitivity_scan_json = (
                 json.dumps(sensitivity_scan, ensure_ascii=False, indent=2) + "\n"
             )
-            vedicdust_case = build_case(
-                CaseBuildInput(
-                    case_id=make_id("case"),
-                    subject_id=make_id("subject"),
+            chart_record = build_chart_record(
+                ChartRecordBuildInput(
+                    chart_record_id=identity.chart_record_id,
+                    reading_session_id=identity.reading_session_id,
+                    revision=identity.revision,
+                    subject_id=identity.subject_id,
                     created_at=datetime.now(timezone.utc),
                     locale=intake.locale,
                     birth_date=str(payload["dob"]),
@@ -278,7 +302,7 @@ class VedicCalculator:
                     sensitivity_scan=sensitivity_scan,
                 )
             )
-            vedicdust_case_json = vedicdust_case.model_dump_json(by_alias=True, indent=2) + "\n"
+            chart_record_json = chart_record.model_dump_json(by_alias=True, indent=2) + "\n"
             sav_total = sum(chart["sav"].get(sign, 0) for sign in SIGNS)
             if sav_total != 337:
                 raise RuntimeError(f"SAV validation failed: {sav_total} != 337")
@@ -289,7 +313,7 @@ class VedicCalculator:
             birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
-            vedicdust_case_json,
+            chart_record_json,
             facts,
         )
 

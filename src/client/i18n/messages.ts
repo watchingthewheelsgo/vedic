@@ -1259,7 +1259,7 @@ const zhOverrides: Dict = {
   "stage.copy.src.action": "检查这些信息。如果有误，请重新开始一次读盘。",
   "stage.copy.src.expected": "通常只需数秒。如果城市无法找到，请重新从搜索结果选择。",
   "stage.copy.chart.purpose": "在任何 LLM 解读开始前，先计算并保存基本盘事实。",
-  "stage.copy.chart.result": "你可以查看后续阶段会使用的 structured_data 各个组成部分。",
+  "stage.copy.chart.result": "你可以查看后续阶段会使用的基础盘面信息。",
   "stage.copy.chart.action": "检查基本盘信息。首次校验会以这些事实为来源。",
   "stage.copy.chart.expected": "出生信息被接受后立即生成。",
   "stage.copy.reader.purpose": "完整读盘开始前，先核对几个真实经历信号。",
@@ -1850,7 +1850,7 @@ const jaOverrides: Dict = {
   "stage.copy.src.expected":
     "通常は数秒です。都市が見つからない場合は検索結果から選び直してください。",
   "stage.copy.chart.purpose": "LLM による解釈の前に、基本チャート事実を計算して保存します。",
-  "stage.copy.chart.result": "後続ステージが使用する structured_data の各構成部分を確認できます。",
+  "stage.copy.chart.result": "後続ステージで使用する基本チャート情報を確認できます。",
   "stage.copy.chart.action":
     "チャート事実を確認してください。最初のチェックはこの事実をソースにします。",
   "stage.copy.chart.expected": "出生情報が受理されるとすぐに生成されます。",

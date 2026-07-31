@@ -59,13 +59,13 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-case-audit/1.0.0",
-      "default": "vedicdust-case-audit/1.0.0",
+      "const": "vedicdust-chart-audit/1.0.0",
+      "default": "vedicdust-chart-audit/1.0.0",
       "title": "Schemaversion",
       "type": "string"
     },
-    "caseId": {
-      "title": "Caseid",
+    "chartRecordId": {
+      "title": "Chartrecordid",
       "type": "string"
     },
     "auditedAt": {
@@ -94,7 +94,7 @@
       "type": "array"
     }
   },
-  "required": ["caseId", "auditedAt", "status"],
-  "title": "CaseAudit",
+  "required": ["chartRecordId", "auditedAt", "status"],
+  "title": "ChartAudit",
   "type": "object"
 }

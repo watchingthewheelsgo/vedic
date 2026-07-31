@@ -1,4 +1,4 @@
 interface:
   display_name: "Jyotish Judgement"
   short_description: "Build traceable claims from qualified chart facts"
-  default_prompt: "Use $vedicdust-judgement to build the case Claim Graph."
+  default_prompt: "Use $vedicdust-judgement to build the chart Claim Graph."

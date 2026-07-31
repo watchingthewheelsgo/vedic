@@ -13,8 +13,8 @@ score, or select a birth time.
 
 ## Inputs
 
-- `vedicdust_case.json`
-- `case_audit.json` authorizing `rectify`
+- `chart_record.json`
+- `chart_audit.json` authorizing `rectify`
 - Candidate Intervals and engine-computed discriminating fact IDs
 - Prior `rectification_answer_batch.json` artifacts, if any
 

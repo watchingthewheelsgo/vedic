@@ -69,7 +69,7 @@ no varga can create a promise absent from the foundation.
 ### 4. Capacity and confirmation
 
 Assess strength measures and relevant vargas. Use only vargas allowed by the
-case's time-confidence gate. Record confirming and contradicting facts.
+Chart Record's time-confidence gate. Record confirming and contradicting facts.
 
 ### 5. Temporal activation
 

@@ -5,10 +5,11 @@ import subprocess
 from pathlib import Path
 
 from app.vedicdust.models import (
-    CaseAudit,
+    ChartAudit,
+    ChartRecord,
     ClaimGraph,
     ConsultationReportManifest,
-    VedicDustCase,
+    ReadingSession,
     RectificationAnswerBatch,
     RectificationQuestionSet,
     RuleCatalog,
@@ -18,8 +19,9 @@ from app.vedicdust.models import (
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "docs" / "vedicdust" / "schemas"
 SCHEMAS = {
-    "vedicdust-case.schema.json": VedicDustCase,
-    "vedicdust-case-audit.schema.json": CaseAudit,
+    "vedicdust-chart-record.schema.json": ChartRecord,
+    "vedicdust-reading-session.schema.json": ReadingSession,
+    "vedicdust-chart-audit.schema.json": ChartAudit,
     "vedicdust-question-set.schema.json": RectificationQuestionSet,
     "vedicdust-answer-batch.schema.json": RectificationAnswerBatch,
     "vedicdust-claim-graph.schema.json": ClaimGraph,

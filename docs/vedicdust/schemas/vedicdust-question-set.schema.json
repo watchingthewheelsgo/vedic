@@ -106,8 +106,8 @@
       "title": "Schemaversion",
       "type": "string"
     },
-    "caseId": {
-      "title": "Caseid",
+    "chartRecordId": {
+      "title": "Chartrecordid",
       "type": "string"
     },
     "round": {
@@ -129,7 +129,7 @@
       "type": "string"
     }
   },
-  "required": ["caseId", "round", "questions", "completionCondition"],
+  "required": ["chartRecordId", "round", "questions", "completionCondition"],
   "title": "RectificationQuestionSet",
   "type": "object"
 }

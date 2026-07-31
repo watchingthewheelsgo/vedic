@@ -390,9 +390,11 @@ class RectificationRecord(ContractModel):
     decision: RectificationDecision
 
 
-class VedicDustCase(ContractModel):
-    schema_version: Literal["vedicdust-case/1.0.0"] = "vedicdust-case/1.0.0"
-    case_id: str
+class ChartRecord(ContractModel):
+    schema_version: Literal["vedicdust-chart-record/1.0.0"] = "vedicdust-chart-record/1.0.0"
+    chart_record_id: str
+    reading_session_id: str
+    revision: int = Field(ge=1)
     created_at: datetime
     subject: SubjectContext
     birth_assertion: BirthAssertion
@@ -416,7 +418,7 @@ class VedicDustCase(ContractModel):
     ]
 
     @model_validator(mode="after")
-    def validate_case_state(self) -> VedicDustCase:
+    def validate_record_state(self) -> ChartRecord:
         calculated_states = {
             "calculated",
             "rectification_required",
@@ -426,12 +428,43 @@ class VedicDustCase(ContractModel):
         if self.status in calculated_states and (
             self.canonical_moment is None or self.astronomy is None
         ):
-            raise ValueError("calculated case states require canonical moment and astronomy")
+            raise ValueError("calculated chart records require canonical moment and astronomy")
         if self.status == "ready_for_judgement" and any(
             check.status == "failed" for check in self.quality_checks
         ):
-            raise ValueError("case with failed quality checks cannot be ready for judgement")
+            raise ValueError(
+                "chart record with failed quality checks cannot be ready for judgement"
+            )
         return self
+
+
+class ReadingSession(ContractModel):
+    schema_version: Literal["vedicdust-reading-session/1.0.0"] = "vedicdust-reading-session/1.0.0"
+    reading_session_id: str
+    subject_id: str
+    chart_record_id: str
+    active_chart_revision: int = Field(ge=1)
+    created_at: datetime
+    updated_at: datetime
+    locale: Literal["zh", "en", "ja"] = "en"
+    stage: Literal[
+        "intake",
+        "chart_ready",
+        "rectification",
+        "ready_for_judgement",
+        "report_in_progress",
+        "report_ready",
+        "blocked",
+    ]
+    rectification_status: Literal[
+        "not_required",
+        "collecting_evidence",
+        "comparing_candidates",
+        "bounded_interval",
+        "multiple_equivalent",
+        "underdetermined",
+    ]
+    report_status: Literal["not_started", "in_progress", "ready", "blocked"] = "not_started"
 
 
 class DiscriminatorOption(ContractModel):
@@ -454,7 +487,7 @@ class RectificationQuestion(ContractModel):
 
 class RectificationQuestionSet(ContractModel):
     schema_version: Literal["vedicdust-question-set/1.0.0"] = "vedicdust-question-set/1.0.0"
-    case_id: str
+    chart_record_id: str
     round: int = Field(ge=1)
     questions: list[RectificationQuestion] = Field(min_length=1, max_length=5)
     completion_condition: str
@@ -470,7 +503,7 @@ class RectificationAnswer(ContractModel):
 
 class RectificationAnswerBatch(ContractModel):
     schema_version: Literal["vedicdust-answer-batch/1.0.0"] = "vedicdust-answer-batch/1.0.0"
-    case_id: str
+    chart_record_id: str
     round: int = Field(ge=1)
     answers: list[RectificationAnswer] = Field(min_length=1, max_length=5)
 
@@ -494,9 +527,9 @@ class AuditFinding(ContractModel):
     required_action: str | None = None
 
 
-class CaseAudit(ContractModel):
-    schema_version: Literal["vedicdust-case-audit/1.0.0"] = "vedicdust-case-audit/1.0.0"
-    case_id: str
+class ChartAudit(ContractModel):
+    schema_version: Literal["vedicdust-chart-audit/1.0.0"] = "vedicdust-chart-audit/1.0.0"
+    chart_record_id: str
     audited_at: datetime
     status: Literal["passed", "passed_with_limits", "blocked"]
     findings: list[AuditFinding] = Field(default_factory=list)
@@ -505,7 +538,7 @@ class CaseAudit(ContractModel):
     ] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_blocking_status(self) -> CaseAudit:
+    def validate_blocking_status(self) -> ChartAudit:
         has_blocker = any(finding.severity == "blocking" for finding in self.findings)
         if has_blocker != (self.status == "blocked"):
             raise ValueError("audit status must agree with blocking findings")
@@ -528,7 +561,7 @@ class Claim(ContractModel):
 
 class ClaimGraph(ContractModel):
     schema_version: Literal["vedicdust-claim-graph/1.0.0"] = "vedicdust-claim-graph/1.0.0"
-    case_id: str
+    chart_record_id: str
     method_profile_id: str
     generated_at: datetime
     claims: list[Claim]
@@ -546,7 +579,7 @@ class ReportSection(ContractModel):
 
 class ConsultationReportManifest(ContractModel):
     schema_version: Literal["vedicdust-report-manifest/1.0.0"] = "vedicdust-report-manifest/1.0.0"
-    case_id: str
+    chart_record_id: str
     claim_graph_version: Literal["vedicdust-claim-graph/1.0.0"]
     locale: Literal["zh", "en", "ja"]
     audience: Literal["self", "parent", "partner", "family", "professional"]

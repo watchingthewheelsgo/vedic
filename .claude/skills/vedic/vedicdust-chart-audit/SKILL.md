@@ -1,10 +1,10 @@
 ---
-name: vedicdust-case-audit
-description: Audit a VedicDust case before calculation, rectification, judgement, or report rendering.
+name: vedicdust-chart-audit
+description: Audit a VedicDust chart record before rectification, judgement, or report rendering.
 disable-model-invocation: true
 ---
 
-# VedicDust Case Audit
+# VedicDust Chart Audit
 
 ## Purpose
 
@@ -13,11 +13,11 @@ contracts; it does not calculate a chart or interpret a life.
 
 ## Inputs
 
-- `vedicdust_case.json`, conforming to `vedicdust-case/1.0.0`
+- `chart_record.json`, conforming to `vedicdust-chart-record/1.0.0`
 - `docs/vedicdust/methodology.md`
-- `docs/vedicdust/schemas/vedicdust-case.schema.json`
+- `docs/vedicdust/schemas/vedicdust-chart-record.schema.json`
 
-If the case is missing or fails schema validation, stop with a blocking audit.
+If the chart record is missing or fails schema validation, stop with a blocking audit.
 
 ## Procedure
 
@@ -29,9 +29,9 @@ If the case is missing or fails schema validation, stop with a blocking audit.
 3. Audit Calculation Profile completeness and source IDs.
    Complete when no hidden calculation default remains.
 4. Audit quality checks and sensitivity boundaries.
-   Complete when the case is either eligible for judgement, requires
+   Complete when the chart record is either eligible for judgement, requires
    rectification, or is blocked.
-5. Write `case_audit.json` conforming to `vedicdust-case-audit/1.0.0`.
+5. Write `chart_audit.json` conforming to `vedicdust-chart-audit/1.0.0`.
    Complete when status, findings, and permitted next steps agree.
 
 ## Hard limits

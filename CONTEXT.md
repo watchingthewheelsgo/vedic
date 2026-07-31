@@ -71,7 +71,7 @@ selection.
 
 The auditable result of comparing every Candidate Interval against the same
 evidence set. It may select a bounded interval, preserve multiple candidates,
-or declare the case underdetermined.
+or declare the rectification underdetermined.
 
 ## Claim
 

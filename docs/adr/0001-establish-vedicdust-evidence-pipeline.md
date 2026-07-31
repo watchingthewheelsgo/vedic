@@ -21,12 +21,12 @@ Build VedicDust as an evidence pipeline with five separate artifacts:
 
 1. Canonical Birth Moment
 2. Astronomy Snapshot
-3. VedicDust Case
+3. Chart Record
 4. Rectification Record
 5. Claim Graph
 
 The deterministic engine owns the first three artifacts and all candidate
-scoring. Skills may audit a case, conduct an interview from engine-provided
+scoring. Skills may audit a Chart Record, conduct an interview from engine-provided
 discriminators, and render an approved Claim Graph. Skills may not calculate
 placements, invent Method Rules, or choose a birth time without a Rectification
 Decision.

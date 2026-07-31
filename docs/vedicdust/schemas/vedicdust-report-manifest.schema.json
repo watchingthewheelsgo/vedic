@@ -41,8 +41,8 @@
       "title": "Schemaversion",
       "type": "string"
     },
-    "caseId": {
-      "title": "Caseid",
+    "chartRecordId": {
+      "title": "Chartrecordid",
       "type": "string"
     },
     "claimGraphVersion": {
@@ -80,7 +80,14 @@
       "type": "string"
     }
   },
-  "required": ["caseId", "claimGraphVersion", "locale", "audience", "sections", "releaseStatus"],
+  "required": [
+    "chartRecordId",
+    "claimGraphVersion",
+    "locale",
+    "audience",
+    "sections",
+    "releaseStatus"
+  ],
   "title": "ConsultationReportManifest",
   "type": "object"
 }

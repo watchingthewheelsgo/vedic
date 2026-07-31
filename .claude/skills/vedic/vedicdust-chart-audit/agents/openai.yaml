@@ -1,0 +1,4 @@
+interface:
+  display_name: "VedicDust Chart Audit"
+  short_description: "Gate a Jyotish chart using explicit evidence and contracts"
+  default_prompt: "Use $vedicdust-chart-audit to audit this VedicDust chart record."
