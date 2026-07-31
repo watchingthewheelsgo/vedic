@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jyotish Rectification Dialogue"
+  short_description: "Ask neutral questions from calculated candidate differences"
+  default_prompt: "Use $vedicdust-rectification-dialogue for the next rectification round."

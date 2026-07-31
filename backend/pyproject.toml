@@ -1,7 +1,7 @@
 [project]
-name = "vedic-backend"
+name = "vedicdust-backend"
 version = "0.1.0"
-description = "Python backend for the Vedic advisor product"
+description = "Python backend for VedicDust"
 requires-python = ">=3.11"
 dependencies = [
     "aiosqlite>=0.20.0",
@@ -27,6 +27,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.vedicdust" = ["resources/*.json"]
 
 [tool.uv]
 package = true

@@ -20,6 +20,7 @@ from app.services.vedic_calculator import VedicCalculator
 from app.tools.registry import BackendToolRunner
 
 BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json"
+VEDICDUST_CASE_JSON = "vedicdust_case.json"
 LEGACY_STRUCTURED_DATA_JSON = "structured_data.json"
 BIRTH_CHART_FACTS_B_JSON = "birth_chart_facts_B.json"
 LEGACY_STRUCTURED_DATA_B_JSON = "structured_data_B.json"
@@ -65,6 +66,11 @@ class SkillRuntime:
             "sensitivity_scan.json",
             calculation.sensitivity_scan_json,
         )
+        self.workspace.write_artifact(
+            session_id,
+            VEDICDUST_CASE_JSON,
+            calculation.vedicdust_case_json,
+        )
         self._write_initial_rectification_state(
             session_id,
             calculation.birth_input_context_json,
@@ -102,6 +108,9 @@ class SkillRuntime:
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "sensitivity_scan.json", producer="calculator"
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id, VEDICDUST_CASE_JSON, producer="vedicdust-calculation-adapter"
         )
         self.workspace.mark_artifact_checkpoint(
             session_id, "chart_rectification_state.json", producer="chart-rectification"
@@ -744,6 +753,7 @@ class SkillRuntime:
                     calculation.birth_chart_facts_json,
                     calculation.birth_input_context_json,
                     calculation.sensitivity_scan_json,
+                    calculation.vedicdust_case_json,
                     producer="calculator:rectification",
                 )
                 self.workspace.write_session_manifest(
@@ -797,6 +807,7 @@ class SkillRuntime:
         birth_chart_facts_json: str,
         birth_input_context_json: str,
         sensitivity_scan_json: str,
+        vedicdust_case_json: str,
         *,
         producer: str,
     ) -> None:
@@ -805,6 +816,7 @@ class SkillRuntime:
             BIRTH_CHART_FACTS_JSON: birth_chart_facts_json,
             "birth_input_context.json": birth_input_context_json,
             "sensitivity_scan.json": sensitivity_scan_json,
+            VEDICDUST_CASE_JSON: vedicdust_case_json,
         }
         for path, content in chart_artifacts.items():
             self.workspace.write_artifact(session_id, path, content)
@@ -822,6 +834,7 @@ class SkillRuntime:
             LEGACY_STRUCTURED_DATA_JSON,
             "birth_input_context.json",
             "sensitivity_scan.json",
+            VEDICDUST_CASE_JSON,
         ]:
             content = artifacts.get(path)
             if content is None:

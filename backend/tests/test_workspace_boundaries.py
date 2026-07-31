@@ -38,3 +38,20 @@ def test_report_export_defaults_to_session_exports_directory(tmp_path: Path) -> 
     assert result.pdf_path == session_dir / "exports" / "report.pdf"
     assert result.html_path.exists()
     assert result.pdf_path.exists()
+
+
+def test_vedicdust_case_is_a_first_class_session_artifact(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(session_id, "structured_data.md", "# legacy view\n")
+    workspace.write_artifact(
+        session_id,
+        "vedicdust_case.json",
+        '{"schemaVersion":"vedicdust-case/1.0.0","caseId":"case-1"}\n',
+    )
+
+    artifacts = workspace.read_artifacts(session_id)
+
+    assert artifacts[0].path == "vedicdust_case.json"
+    assert artifacts[0].kind == "json"
+    assert artifacts[1].path == "structured_data.md"

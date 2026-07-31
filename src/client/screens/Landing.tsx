@@ -29,7 +29,7 @@ export function Landing() {
       <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-6 backdrop-blur-xl sm:px-10">
         <div className="mx-auto flex h-16 max-w-[1100px] items-center justify-between">
           <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-            Veda<span>Light</span>
+            Vedic<span>Dust</span>
           </button>
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
@@ -217,7 +217,7 @@ export function Landing() {
 
       <footer className="bg-night px-5 py-8 text-center text-[13px] tracking-[0.3px] text-cream/40">
         <p>
-          © 2026 <span className="text-gold/60">VedaLight</span> &nbsp;·&nbsp; {t("landing.footer")}
+          © 2026 <span className="text-gold/60">VedicDust</span> &nbsp;·&nbsp; {t("landing.footer")}
         </p>
       </footer>
     </div>

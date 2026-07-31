@@ -1,0 +1,1294 @@
+{
+  "$defs": {
+    "AstronomySnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "snapshotId": {
+          "title": "Snapshotid",
+          "type": "string"
+        },
+        "calculatedAt": {
+          "format": "date-time",
+          "title": "Calculatedat",
+          "type": "string"
+        },
+        "julianDayUt": {
+          "title": "Juliandayut",
+          "type": "number"
+        },
+        "calculationProvider": {
+          "title": "Calculationprovider",
+          "type": "string"
+        },
+        "calculationAdapterVersion": {
+          "title": "Calculationadapterversion",
+          "type": "string"
+        },
+        "ephemerisVersion": {
+          "title": "Ephemerisversion",
+          "type": "string"
+        },
+        "ayanamsaValueDeg": {
+          "exclusiveMaximum": 30,
+          "minimum": 0,
+          "title": "Ayanamsavaluedeg",
+          "type": "number"
+        },
+        "ascendant": {
+          "$ref": "#/$defs/ZodiacPosition"
+        },
+        "grahas": {
+          "items": {
+            "$ref": "#/$defs/GrahaPosition"
+          },
+          "title": "Grahas",
+          "type": "array"
+        },
+        "status": {
+          "enum": ["complete", "partial", "failed"],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "calculatedAt",
+        "julianDayUt",
+        "calculationProvider",
+        "calculationAdapterVersion",
+        "ephemerisVersion",
+        "ayanamsaValueDeg",
+        "ascendant",
+        "grahas",
+        "status"
+      ],
+      "title": "AstronomySnapshot",
+      "type": "object"
+    },
+    "AyanamsaSetting": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "enum": ["lahiri", "true_chitra", "raman", "krishnamurti", "custom"],
+          "title": "Model",
+          "type": "string"
+        },
+        "valueDeg": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 30,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valuedeg"
+        },
+        "implementation": {
+          "title": "Implementation",
+          "type": "string"
+        }
+      },
+      "required": ["model", "implementation"],
+      "title": "AyanamsaSetting",
+      "type": "object"
+    },
+    "BirthAssertion": {
+      "additionalProperties": false,
+      "properties": {
+        "localDate": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Localdate",
+          "type": "string"
+        },
+        "reportedLocalTime": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{2}:\\d{2}(:\\d{2})?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reportedlocaltime"
+        },
+        "reportedPlace": {
+          "minLength": 2,
+          "title": "Reportedplace",
+          "type": "string"
+        },
+        "timeCertainty": {
+          "enum": [
+            "documented",
+            "reported_exact",
+            "approximate",
+            "broad_window",
+            "unknown",
+            "rectified"
+          ],
+          "title": "Timecertainty",
+          "type": "string"
+        },
+        "reportedTimeWindow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": ["localDate", "reportedPlace", "timeCertainty", "evidence"],
+      "title": "BirthAssertion",
+      "type": "object"
+    },
+    "CalculationProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "profileId": {
+          "title": "Profileid",
+          "type": "string"
+        },
+        "profileVersion": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Profileversion",
+          "type": "string"
+        },
+        "tradition": {
+          "title": "Tradition",
+          "type": "string"
+        },
+        "zodiac": {
+          "enum": ["sidereal", "tropical"],
+          "title": "Zodiac",
+          "type": "string"
+        },
+        "ayanamsa": {
+          "$ref": "#/$defs/AyanamsaSetting"
+        },
+        "nodeModel": {
+          "enum": ["mean", "true"],
+          "title": "Nodemodel",
+          "type": "string"
+        },
+        "rashiHouseModel": {
+          "const": "whole_sign",
+          "title": "Rashihousemodel",
+          "type": "string"
+        },
+        "bhavaCuspModel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bhavacuspmodel"
+        },
+        "vargaScheme": {
+          "title": "Vargascheme",
+          "type": "string"
+        },
+        "supportedVargas": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Supportedvargas",
+          "type": "array"
+        },
+        "aspectModel": {
+          "title": "Aspectmodel",
+          "type": "string"
+        },
+        "dashaModel": {
+          "title": "Dashamodel",
+          "type": "string"
+        },
+        "dashaYearDays": {
+          "exclusiveMaximum": 400,
+          "exclusiveMinimum": 300,
+          "title": "Dashayeardays",
+          "type": "number"
+        },
+        "coordinateDatum": {
+          "const": "WGS84",
+          "default": "WGS84",
+          "title": "Coordinatedatum",
+          "type": "string"
+        },
+        "ephemerisProvider": {
+          "title": "Ephemerisprovider",
+          "type": "string"
+        },
+        "rulePackVersion": {
+          "title": "Rulepackversion",
+          "type": "string"
+        },
+        "sourceIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sourceids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "profileId",
+        "profileVersion",
+        "tradition",
+        "zodiac",
+        "ayanamsa",
+        "nodeModel",
+        "rashiHouseModel",
+        "vargaScheme",
+        "supportedVargas",
+        "aspectModel",
+        "dashaModel",
+        "dashaYearDays",
+        "ephemerisProvider",
+        "rulePackVersion",
+        "sourceIds"
+      ],
+      "title": "CalculationProfile",
+      "type": "object"
+    },
+    "CandidateEvidenceScore": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "title": "Eventid",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Score",
+          "type": "number"
+        },
+        "supportingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supportingfactids",
+          "type": "array"
+        },
+        "contradictingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradictingfactids",
+          "type": "array"
+        },
+        "ruleIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ruleids",
+          "type": "array"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        }
+      },
+      "required": ["eventId", "score", "explanation"],
+      "title": "CandidateEvidenceScore",
+      "type": "object"
+    },
+    "CandidateInterval": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateId": {
+          "title": "Candidateid",
+          "type": "string"
+        },
+        "interval": {
+          "$ref": "#/$defs/TimeRange"
+        },
+        "representativeMoment": {
+          "format": "date-time",
+          "title": "Representativemoment",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "evidenceScores": {
+          "items": {
+            "$ref": "#/$defs/CandidateEvidenceScore"
+          },
+          "title": "Evidencescores",
+          "type": "array"
+        },
+        "aggregateScore": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aggregatescore"
+        },
+        "eligible": {
+          "default": true,
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "exclusionReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exclusionreason"
+        }
+      },
+      "required": ["candidateId", "interval", "representativeMoment", "fingerprint"],
+      "title": "CandidateInterval",
+      "type": "object"
+    },
+    "CanonicalBirthMoment": {
+      "additionalProperties": false,
+      "properties": {
+        "localDatetime": {
+          "format": "date-time",
+          "title": "Localdatetime",
+          "type": "string"
+        },
+        "utcDatetime": {
+          "format": "date-time",
+          "title": "Utcdatetime",
+          "type": "string"
+        },
+        "timezoneId": {
+          "title": "Timezoneid",
+          "type": "string"
+        },
+        "utcOffsetSeconds": {
+          "maximum": 50400,
+          "minimum": -50400,
+          "title": "Utcoffsetseconds",
+          "type": "integer"
+        },
+        "historicalOffsetStatus": {
+          "enum": ["resolved", "ambiguous", "nonexistent", "unresolved"],
+          "title": "Historicaloffsetstatus",
+          "type": "string"
+        },
+        "place": {
+          "$ref": "#/$defs/PlaceResolution"
+        },
+        "resolutionConfidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        }
+      },
+      "required": [
+        "localDatetime",
+        "utcDatetime",
+        "timezoneId",
+        "utcOffsetSeconds",
+        "historicalOffsetStatus",
+        "place",
+        "resolutionConfidence"
+      ],
+      "title": "CanonicalBirthMoment",
+      "type": "object"
+    },
+    "ChartPlacement": {
+      "additionalProperties": false,
+      "properties": {
+        "objectId": {
+          "title": "Objectid",
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/ZodiacPosition"
+        },
+        "house": {
+          "maximum": 12,
+          "minimum": 1,
+          "title": "House",
+          "type": "integer"
+        }
+      },
+      "required": ["objectId", "position", "house"],
+      "title": "ChartPlacement",
+      "type": "object"
+    },
+    "ConfidenceGrade": {
+      "enum": ["verified", "corroborated", "provisional", "disputed", "unavailable"],
+      "title": "ConfidenceGrade",
+      "type": "string"
+    },
+    "EvidenceClass": {
+      "enum": [
+        "astronomical_authority",
+        "classical_text",
+        "lineage_commentary",
+        "software_reference",
+        "product_hypothesis",
+        "user_testimony"
+      ],
+      "title": "EvidenceClass",
+      "type": "string"
+    },
+    "EvidenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "evidenceId": {
+          "title": "Evidenceid",
+          "type": "string"
+        },
+        "evidenceClass": {
+          "$ref": "#/$defs/EvidenceClass"
+        },
+        "sourceLabel": {
+          "title": "Sourcelabel",
+          "type": "string"
+        },
+        "observedValue": {
+          "title": "Observedvalue",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "sourceUrl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceurl"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        }
+      },
+      "required": ["evidenceId", "evidenceClass", "sourceLabel", "observedValue", "confidence"],
+      "title": "EvidenceItem",
+      "type": "object"
+    },
+    "GeoPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "latitudeDeg": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitudedeg",
+          "type": "number"
+        },
+        "longitudeDeg": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitudedeg",
+          "type": "number"
+        },
+        "datum": {
+          "const": "WGS84",
+          "default": "WGS84",
+          "title": "Datum",
+          "type": "string"
+        }
+      },
+      "required": ["latitudeDeg", "longitudeDeg"],
+      "title": "GeoPoint",
+      "type": "object"
+    },
+    "GrahaPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "graha": {
+          "enum": ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"],
+          "title": "Graha",
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/ZodiacPosition"
+        },
+        "speedDegPerDay": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speeddegperday"
+        },
+        "motion": {
+          "enum": ["direct", "retrograde", "stationary", "not_applicable"],
+          "title": "Motion",
+          "type": "string"
+        }
+      },
+      "required": ["graha", "position", "motion"],
+      "title": "GrahaPosition",
+      "type": "object"
+    },
+    "JyotishFact": {
+      "additionalProperties": false,
+      "properties": {
+        "factId": {
+          "title": "Factid",
+          "type": "string"
+        },
+        "factType": {
+          "enum": [
+            "rashi.lagna.position",
+            "rashi.graha.position",
+            "rashi.house.lord",
+            "varga.lagna.position",
+            "varga.graha.position",
+            "strength.dignity",
+            "strength.shadbala",
+            "ashtakavarga.sav.house",
+            "aspect.graha_drishti"
+          ],
+          "title": "Facttype",
+          "type": "string"
+        },
+        "subjectRef": {
+          "title": "Subjectref",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "provenance": {
+          "$ref": "#/$defs/RuleProvenance"
+        }
+      },
+      "required": ["factId", "factType", "subjectRef", "value", "provenance"],
+      "title": "JyotishFact",
+      "type": "object"
+    },
+    "LifeEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "title": "Eventid",
+          "type": "string"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "interval": {
+          "$ref": "#/$defs/TimeRange"
+        },
+        "datePrecision": {
+          "enum": ["day", "month", "year", "range"],
+          "title": "Dateprecision",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "role": {
+          "enum": ["calibration", "holdout"],
+          "title": "Role",
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceItem"
+        }
+      },
+      "required": [
+        "eventId",
+        "category",
+        "interval",
+        "datePrecision",
+        "description",
+        "role",
+        "evidence"
+      ],
+      "title": "LifeEvent",
+      "type": "object"
+    },
+    "NakshatraPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "index": {
+          "maximum": 26,
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "pada": {
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Pada",
+          "type": "integer"
+        },
+        "lord": {
+          "title": "Lord",
+          "type": "string"
+        }
+      },
+      "required": ["name", "index", "pada", "lord"],
+      "title": "NakshatraPosition",
+      "type": "object"
+    },
+    "PlaceResolution": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "point": {
+          "$ref": "#/$defs/GeoPoint"
+        },
+        "precision": {
+          "enum": ["coordinate", "poi", "address", "district", "city"],
+          "title": "Precision",
+          "type": "string"
+        },
+        "timezoneId": {
+          "title": "Timezoneid",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": ["label", "point", "precision", "timezoneId", "evidence"],
+      "title": "PlaceResolution",
+      "type": "object"
+    },
+    "QualityCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "checkId": {
+          "title": "Checkid",
+          "type": "string"
+        },
+        "status": {
+          "enum": ["passed", "warning", "failed", "not_run"],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "observed": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": ["checkId", "status", "message"],
+      "title": "QualityCheck",
+      "type": "object"
+    },
+    "RectificationDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "not_required",
+            "collecting_evidence",
+            "comparing_candidates",
+            "bounded_interval",
+            "multiple_equivalent",
+            "underdetermined"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "selectedCandidateIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selectedcandidateids",
+          "type": "array"
+        },
+        "resultingInterval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "confidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "holdoutResult": {
+          "default": "not_run",
+          "enum": ["passed", "failed", "not_run"],
+          "title": "Holdoutresult",
+          "type": "string"
+        },
+        "unresolvedQuestions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolvedquestions",
+          "type": "array"
+        }
+      },
+      "required": ["status", "confidence"],
+      "title": "RectificationDecision",
+      "type": "object"
+    },
+    "RectificationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "vedicdust-rectification/1.0.0",
+          "default": "vedicdust-rectification/1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "reportedWindow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lifeEvents": {
+          "items": {
+            "$ref": "#/$defs/LifeEvent"
+          },
+          "title": "Lifeevents",
+          "type": "array"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/CandidateInterval"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "decision": {
+          "$ref": "#/$defs/RectificationDecision"
+        }
+      },
+      "required": ["decision"],
+      "title": "RectificationRecord",
+      "type": "object"
+    },
+    "RuleProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "ruleId": {
+          "pattern": "^[a-z0-9][a-z0-9._-]+$",
+          "title": "Ruleid",
+          "type": "string"
+        },
+        "ruleVersion": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Ruleversion",
+          "type": "string"
+        },
+        "methodProfileId": {
+          "title": "Methodprofileid",
+          "type": "string"
+        },
+        "evidenceClass": {
+          "$ref": "#/$defs/EvidenceClass"
+        },
+        "sourceIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sourceids",
+          "type": "array"
+        },
+        "confidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "implementationNote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Implementationnote"
+        }
+      },
+      "required": [
+        "ruleId",
+        "ruleVersion",
+        "methodProfileId",
+        "evidenceClass",
+        "sourceIds",
+        "confidence"
+      ],
+      "title": "RuleProvenance",
+      "type": "object"
+    },
+    "SensitivityBoundary": {
+      "additionalProperties": false,
+      "properties": {
+        "boundaryId": {
+          "title": "Boundaryid",
+          "type": "string"
+        },
+        "axis": {
+          "enum": ["time", "place", "method_profile"],
+          "title": "Axis",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        },
+        "changedFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Changedfactids",
+          "type": "array"
+        },
+        "beforeFingerprint": {
+          "title": "Beforefingerprint",
+          "type": "string"
+        },
+        "afterFingerprint": {
+          "title": "Afterfingerprint",
+          "type": "string"
+        }
+      },
+      "required": ["boundaryId", "axis", "changedFactIds", "beforeFingerprint", "afterFingerprint"],
+      "title": "SensitivityBoundary",
+      "type": "object"
+    },
+    "SubjectContext": {
+      "additionalProperties": false,
+      "properties": {
+        "subjectId": {
+          "title": "Subjectid",
+          "type": "string"
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displayname"
+        },
+        "locale": {
+          "default": "en",
+          "enum": ["zh", "en", "ja"],
+          "title": "Locale",
+          "type": "string"
+        },
+        "currentAge": {
+          "anyOf": [
+            {
+              "maximum": 130,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentage"
+        },
+        "lifeStage": {
+          "anyOf": [
+            {
+              "enum": ["child", "teen", "young_adult", "adult", "elder"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifestage"
+        },
+        "readerRelationship": {
+          "default": "self",
+          "enum": ["self", "parent", "partner", "family", "professional"],
+          "title": "Readerrelationship",
+          "type": "string"
+        },
+        "consultationTopics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Consultationtopics",
+          "type": "array"
+        }
+      },
+      "required": ["subjectId"],
+      "title": "SubjectContext",
+      "type": "object"
+    },
+    "TimeRange": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["start", "end"],
+      "title": "TimeRange",
+      "type": "object"
+    },
+    "TimingPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "periodId": {
+          "title": "Periodid",
+          "type": "string"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "level": {
+          "enum": ["mahadasha", "antardasha", "pratyantardasha", "other"],
+          "title": "Level",
+          "type": "string"
+        },
+        "lords": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Lords",
+          "type": "array"
+        },
+        "interval": {
+          "$ref": "#/$defs/TimeRange"
+        },
+        "provenance": {
+          "$ref": "#/$defs/RuleProvenance"
+        }
+      },
+      "required": ["periodId", "system", "level", "lords", "interval", "provenance"],
+      "title": "TimingPeriod",
+      "type": "object"
+    },
+    "VargaChart": {
+      "additionalProperties": false,
+      "properties": {
+        "vargaId": {
+          "pattern": "^D\\d+$",
+          "title": "Vargaid",
+          "type": "string"
+        },
+        "factor": {
+          "maximum": 360,
+          "minimum": 1,
+          "title": "Factor",
+          "type": "integer"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "lagna": {
+          "$ref": "#/$defs/ChartPlacement"
+        },
+        "placements": {
+          "items": {
+            "$ref": "#/$defs/ChartPlacement"
+          },
+          "title": "Placements",
+          "type": "array"
+        },
+        "confidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "eligibleAsPrimaryEvidence": {
+          "title": "Eligibleasprimaryevidence",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "vargaId",
+        "factor",
+        "method",
+        "lagna",
+        "placements",
+        "confidence",
+        "eligibleAsPrimaryEvidence"
+      ],
+      "title": "VargaChart",
+      "type": "object"
+    },
+    "ZodiacPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "longitudeDeg": {
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "title": "Longitudedeg",
+          "type": "number"
+        },
+        "sign": {
+          "title": "Sign",
+          "type": "string"
+        },
+        "signIndex": {
+          "maximum": 11,
+          "minimum": 0,
+          "title": "Signindex",
+          "type": "integer"
+        },
+        "degreeInSign": {
+          "exclusiveMaximum": 30,
+          "minimum": 0,
+          "title": "Degreeinsign",
+          "type": "number"
+        },
+        "nakshatra": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NakshatraPosition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": ["longitudeDeg", "sign", "signIndex", "degreeInSign"],
+      "title": "ZodiacPosition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-case/1.0.0",
+      "default": "vedicdust-case/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "caseId": {
+      "title": "Caseid",
+      "type": "string"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    },
+    "subject": {
+      "$ref": "#/$defs/SubjectContext"
+    },
+    "birthAssertion": {
+      "$ref": "#/$defs/BirthAssertion"
+    },
+    "canonicalMoment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CanonicalBirthMoment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "calculationProfile": {
+      "$ref": "#/$defs/CalculationProfile"
+    },
+    "astronomy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AstronomySnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "charts": {
+      "items": {
+        "$ref": "#/$defs/VargaChart"
+      },
+      "title": "Charts",
+      "type": "array"
+    },
+    "facts": {
+      "items": {
+        "$ref": "#/$defs/JyotishFact"
+      },
+      "title": "Facts",
+      "type": "array"
+    },
+    "timingPeriods": {
+      "items": {
+        "$ref": "#/$defs/TimingPeriod"
+      },
+      "title": "Timingperiods",
+      "type": "array"
+    },
+    "qualityChecks": {
+      "items": {
+        "$ref": "#/$defs/QualityCheck"
+      },
+      "title": "Qualitychecks",
+      "type": "array"
+    },
+    "sensitivityBoundaries": {
+      "items": {
+        "$ref": "#/$defs/SensitivityBoundary"
+      },
+      "title": "Sensitivityboundaries",
+      "type": "array"
+    },
+    "rectification": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RectificationRecord"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "status": {
+      "enum": [
+        "intake",
+        "canonicalized",
+        "calculated",
+        "rectification_required",
+        "rectified",
+        "ready_for_judgement",
+        "blocked"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": ["caseId", "createdAt", "subject", "birthAssertion", "calculationProfile", "status"],
+  "title": "VedicDustCase",
+  "type": "object"
+}

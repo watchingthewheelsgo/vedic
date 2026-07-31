@@ -5,7 +5,7 @@ import math
 import sys
 from contextlib import redirect_stdout
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.schemas import (
@@ -22,6 +22,7 @@ from app.services.life_event_rectification import parse_life_event_ledger
 from app.services.place_service import PlaceService, ResolvedPlace
 from app.settings import Settings
 from app.utils.ids import make_id
+from app.vedicdust.case_builder import CaseBuildInput, build_case
 
 
 PRECISION_STATUS: dict[str, str] = {
@@ -112,6 +113,8 @@ DIVISIONAL_POLICIES: dict[int, dict[str, str]] = {
 }
 
 DIVISIONAL_FINGERPRINT_FACTORS = [2, 3, 4, 5, 7, 9, 10, 12]
+CALCULATION_VERSION = "vedic-calculator-pyjhora-0.5"
+EPHEMERIS_VERSION = "Swiss Ephemeris via pysweph + PyJHora 4.8.6"
 HIGH_RISK_CHANGED_FIELDS = {
     "lagnaSign",
     "moonNakshatra",
@@ -154,16 +157,17 @@ class VedicCalculator:
             birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
+            vedicdust_case_json,
             facts,
         ) = self._run_engine(payload, intake, place)
 
         return CalculationSnapshot(
             snapshot_id=make_id("calc"),
             engine="real_vedic",
-            calculation_version="vedic-calculator-pyjhora-0.5",
+            calculation_version=CALCULATION_VERSION,
             ayanamsa="Lahiri",
             house_system="whole-sign",
-            ephemeris_version="Swiss Ephemeris via pysweph + PyJHora",
+            ephemeris_version=EPHEMERIS_VERSION,
             timezone_source=place.timezone,
             geo_source=place.source,
             input_precision=intake.birth_time_precision,
@@ -172,12 +176,13 @@ class VedicCalculator:
             birth_chart_facts_json=birth_chart_facts_json,
             birth_input_context_json=birth_input_context_json,
             sensitivity_scan_json=sensitivity_scan_json,
+            vedicdust_case_json=vedicdust_case_json,
             facts=facts,
         )
 
     def _run_engine(
         self, payload: dict[str, Any], intake: BirthInput, place: ResolvedPlace
-    ) -> tuple[str, str, str, str, ChartFacts]:
+    ) -> tuple[str, str, str, str, str, ChartFacts]:
         with redirect_stdout(sys.stderr):
             from app.calculator.engine import SIGNS, calculate_full_chart
             from app.calculator.formatter import format_structured_data
@@ -247,6 +252,33 @@ class VedicCalculator:
             sensitivity_scan_json = (
                 json.dumps(sensitivity_scan, ensure_ascii=False, indent=2) + "\n"
             )
+            vedicdust_case = build_case(
+                CaseBuildInput(
+                    case_id=make_id("case"),
+                    subject_id=make_id("subject"),
+                    created_at=datetime.now(timezone.utc),
+                    locale=intake.locale,
+                    birth_date=str(payload["dob"]),
+                    birth_time=str(payload["time"]),
+                    birth_place=intake.birth_place,
+                    birth_time_precision=intake.birth_time_precision,
+                    time_source=intake.time_source,
+                    place_label=place.label,
+                    latitude=float(place.lat),
+                    longitude=float(place.lon),
+                    timezone_id=place.timezone,
+                    place_source=place.source,
+                    place_accuracy=place.accuracy,
+                    place_confidence=place.confidence,
+                    place_matched=place.matched,
+                    calculation_version=CALCULATION_VERSION,
+                    ephemeris_version=EPHEMERIS_VERSION,
+                    chart=chart,
+                    input_context=input_context,
+                    sensitivity_scan=sensitivity_scan,
+                )
+            )
+            vedicdust_case_json = vedicdust_case.model_dump_json(by_alias=True, indent=2) + "\n"
             sav_total = sum(chart["sav"].get(sign, 0) for sign in SIGNS)
             if sav_total != 337:
                 raise RuntimeError(f"SAV validation failed: {sav_total} != 337")
@@ -257,6 +289,7 @@ class VedicCalculator:
             birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
+            vedicdust_case_json,
             facts,
         )
 

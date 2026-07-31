@@ -1,0 +1,220 @@
+{
+  "schemaVersion": "vedicdust-rule-catalog/1.0.0",
+  "catalogVersion": "1.0.0",
+  "rules": [
+    {
+      "ruleId": "derive.astronomy.sidereal-position",
+      "ruleVersion": "1.0.0",
+      "title": "Derive sidereal positions from Swiss Ephemeris",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "astronomy",
+      "requiredEvidenceLayers": [],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_sidereal_lagna_and_graha_positions",
+      "evidenceClass": "astronomical_authority",
+      "sourceIds": ["astro.swisseph.programmer-manual"],
+      "status": "validated",
+      "validationFixtureIds": ["vedic-reference.swiss-core-positions"],
+      "limitations": [
+        "The result is valid only under the named Calculation Profile and pinned ephemeris data."
+      ]
+    },
+    {
+      "ruleId": "derive.rashi.whole-sign-house",
+      "ruleVersion": "1.0.0",
+      "title": "Assign whole-sign houses and house lords",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_whole_sign_house_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "validated",
+      "validationFixtureIds": ["contract.rashi.whole-sign-house"],
+      "limitations": [
+        "Bhava Chalit and cusp-based house judgements require a different Calculation Profile."
+      ]
+    },
+    {
+      "ruleId": "derive.varga.parashara-method-1",
+      "ruleVersion": "1.0.0",
+      "title": "Derive divisional charts using Parashara method 1",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "varga",
+      "requiredEvidenceLayers": ["varga_confirmation"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_profile_varga_placements",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "validated",
+      "validationFixtureIds": ["vedic-reference.pyjhora-vargas"],
+      "limitations": [
+        "Compatibility is asserted only for PyJHora chart_method=1 and the factors declared by the profile."
+      ]
+    },
+    {
+      "ruleId": "derive.strength.dignity",
+      "ruleVersion": "1.0.0",
+      "title": "Derive sign dignity and compound relationship",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_dignity_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Classical edition locators and a full boundary fixture set are not yet pinned."
+      ]
+    },
+    {
+      "ruleId": "derive.strength.shadbala-pyjhora",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Shadbala through the pinned PyJHora adapter",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_shadbala_facts",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "validated",
+      "validationFixtureIds": ["vedic-reference.pyjhora-shadbala"],
+      "limitations": [
+        "The adapter includes documented compatibility patches that must remain regression tested."
+      ]
+    },
+    {
+      "ruleId": "derive.ashtakavarga.pyjhora",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Bhinnashtakavarga and Sarvashtakavarga through PyJHora",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_ashtakavarga_facts",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "validated",
+      "validationFixtureIds": ["vedic-reference.pyjhora-ashtakavarga", "invariant.sav-total-337"],
+      "limitations": [
+        "Interpretive thresholds are separate judgement rules and are not defined here."
+      ]
+    },
+    {
+      "ruleId": "derive.aspect.parashari-graha-drishti",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Parashari graha drishti contacts",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_parashari_graha_drishti_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Node aspects are excluded from the baseline and degree gaps grade only an already valid sign aspect."
+      ]
+    },
+    {
+      "ruleId": "derive.timing.vimshottari-pyjhora",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Vimshottari periods through PyJHora",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "timing",
+      "requiredEvidenceLayers": ["timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_vimshottari_periods",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "validated",
+      "validationFixtureIds": ["vedic-reference.pyjhora-vimshottari"],
+      "limitations": [
+        "Period interpretation requires separate promise, capacity, and activation rules."
+      ]
+    },
+    {
+      "ruleId": "sop.promise-before-varga",
+      "ruleVersion": "1.0.0",
+      "title": "A varga confirms rather than creates natal promise",
+      "ruleKind": "workflow_gate",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "evidence_order",
+      "requiredEvidenceLayers": ["natal_promise", "varga_confirmation"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "require_d1_promise_before_varga_confirmation",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "validated",
+      "validationFixtureIds": ["contract.workflow.promise-before-varga"],
+      "limitations": ["This is a product evidence policy, not a quoted classical verse."]
+    },
+    {
+      "ruleId": "sop.promise-capacity-before-timing",
+      "ruleVersion": "1.0.0",
+      "title": "Timing requires natal promise and capacity",
+      "ruleKind": "workflow_gate",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "timing",
+      "requiredEvidenceLayers": ["natal_promise", "capacity", "timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "withhold_timing_without_promise_and_capacity",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "validated",
+      "validationFixtureIds": ["contract.workflow.promise-capacity-before-timing"],
+      "limitations": ["This controls report certainty; it does not assert event causation."]
+    },
+    {
+      "ruleId": "sop.d60-eligibility-gate",
+      "ruleVersion": "1.0.0",
+      "title": "D60 requires a stable high-confidence birth interval",
+      "ruleKind": "workflow_gate",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "rectification",
+      "requiredEvidenceLayers": ["natal_promise", "varga_confirmation"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "withhold_d60_when_interval_is_unstable",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "validated",
+      "validationFixtureIds": ["contract.workflow.d60-eligibility"],
+      "limitations": ["The exact eligibility threshold requires empirical calibration."]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jyotish Consultation"
+  short_description: "Render evidence-bounded Jyotish consultation reports"
+  default_prompt: "Use $vedicdust-consultation to render the approved Claim Graph."

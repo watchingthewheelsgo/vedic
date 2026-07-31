@@ -1160,7 +1160,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vedic-backend"
+name = "vedicdust-backend"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

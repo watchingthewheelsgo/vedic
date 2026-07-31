@@ -416,6 +416,7 @@ class CalculationSnapshot(ApiModel):
     birth_chart_facts_json: str = Field(alias="birthChartFactsJson")
     birth_input_context_json: str = Field(alias="birthInputContextJson")
     sensitivity_scan_json: str = Field(alias="sensitivityScanJson")
+    vedicdust_case_json: str = Field(alias="vedicdustCaseJson")
     facts: ChartFacts
     generated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(), alias="generatedAt"

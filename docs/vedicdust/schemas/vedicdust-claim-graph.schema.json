@@ -1,0 +1,171 @@
+{
+  "$defs": {
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "claimId": {
+          "title": "Claimid",
+          "type": "string"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        },
+        "plainStatement": {
+          "title": "Plainstatement",
+          "type": "string"
+        },
+        "technicalStatement": {
+          "title": "Technicalstatement",
+          "type": "string"
+        },
+        "supportingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Supportingfactids",
+          "type": "array"
+        },
+        "counterFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterfactids",
+          "type": "array"
+        },
+        "timingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingfactids",
+          "type": "array"
+        },
+        "ruleIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Ruleids",
+          "type": "array"
+        },
+        "certainty": {
+          "enum": ["high", "moderate", "low", "withheld"],
+          "title": "Certainty",
+          "type": "string"
+        },
+        "scope": {
+          "enum": ["natal_promise", "capacity", "timing", "rectification", "context"],
+          "title": "Scope",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claimId",
+        "topic",
+        "plainStatement",
+        "technicalStatement",
+        "supportingFactIds",
+        "ruleIds",
+        "certainty",
+        "scope"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "QualityCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "checkId": {
+          "title": "Checkid",
+          "type": "string"
+        },
+        "status": {
+          "enum": ["passed", "warning", "failed", "not_run"],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "observed": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": ["checkId", "status", "message"],
+      "title": "QualityCheck",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-claim-graph/1.0.0",
+      "default": "vedicdust-claim-graph/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "caseId": {
+      "title": "Caseid",
+      "type": "string"
+    },
+    "methodProfileId": {
+      "title": "Methodprofileid",
+      "type": "string"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/Claim"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "omittedTopics": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Omittedtopics",
+      "type": "object"
+    },
+    "qualityChecks": {
+      "items": {
+        "$ref": "#/$defs/QualityCheck"
+      },
+      "title": "Qualitychecks",
+      "type": "array"
+    }
+  },
+  "required": ["caseId", "methodProfileId", "generatedAt", "claims"],
+  "title": "ClaimGraph",
+  "type": "object"
+}

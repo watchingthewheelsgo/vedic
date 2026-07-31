@@ -193,10 +193,26 @@ HOUSE_DOMAINS = {
 
 def to_jd(year, month, day, hour, minute, tz_str):
     tz = pytz.timezone(tz_str)
-    local_dt = tz.localize(datetime(year, month, day, hour, minute))
+    local_dt = _localize_strict(tz, datetime(year, month, day, hour, minute))
     utc_dt = local_dt.astimezone(pytz.utc)
     ut_hour = utc_dt.hour + utc_dt.minute / 60.0 + utc_dt.second / 3600.0
     return swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, ut_hour)
+
+
+def _localize_strict(tz, naive_dt):
+    """Resolve civil time without silently choosing a side of a DST transition."""
+    try:
+        return tz.localize(naive_dt, is_dst=None)
+    except pytz.AmbiguousTimeError as exc:
+        raise ValueError(
+            f"Birth time {naive_dt.isoformat()} is ambiguous in {tz.zone}; "
+            "an explicit UTC offset is required"
+        ) from exc
+    except pytz.NonExistentTimeError as exc:
+        raise ValueError(
+            f"Birth time {naive_dt.isoformat()} does not exist in {tz.zone} "
+            "because of a civil-time transition"
+        ) from exc
 
 
 def calc_planet(jd, planet_id):
@@ -717,7 +733,7 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
 
     # 4. SAV/BAV (PyJHora — no fallback)
     tz = pytz.timezone(tz_str)
-    _tz_dt = tz.localize(datetime(year, month, day, hour, minute))
+    _tz_dt = _localize_strict(tz, datetime(year, month, day, hour, minute))
     _tz_offset = _tz_dt.utcoffset().total_seconds() / 3600.0
     ashtak = _av_pyjhora(year, month, day, hour, minute, lat, lon, _tz_offset)
 
@@ -945,7 +961,7 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
     vargeeya_bala = None
     if any([_bhava_bala_pyjhora, _special_lagnas_pyjhora, _vargeeya_bala_pyjhora]):
         tz = pytz.timezone(tz_str)
-        _tz_dt = tz.localize(datetime(year, month, day, hour, minute))
+        _tz_dt = _localize_strict(tz, datetime(year, month, day, hour, minute))
         _tz_offset = _tz_dt.utcoffset().total_seconds() / 3600.0
         if _bhava_bala_pyjhora:
             try:
@@ -970,6 +986,7 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
                 print(f"⚠️ Vargeeya Bala计算失败，跳过: {exc}", file=sys.stderr)
 
     return {
+        "julian_day_ut": jd,
         "ayanamsa": ayanamsa,
         "ayanamsa_cross_check": ayanamsa_check,
         "lagna": lagna,

@@ -4,7 +4,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,8 @@ import swisseph as swe
 
 from app.calculator.engine import PLANETS_SWE, SIGNS, calculate_full_chart
 from app.calculator.structured_schema import build_structured_schema
+from app.vedicdust.case_builder import CaseBuildInput, build_case
+from app.vedicdust.source_registry import load_rule_catalog
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "vedic_reference" / "reference_cases.json"
@@ -160,6 +162,95 @@ def test_birth_chart_facts_schema_uses_lahiri_and_exposes_calculation_context(
     assert "specialLagnas" in payload["strengths"]
 
 
+@pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
+def test_reference_calculation_builds_a_typed_vedicdust_case(case: dict[str, Any]) -> None:
+    chart = _calculate_case(case)
+    birth_date = f"{int(case['year']):04d}-{int(case['month']):02d}-{int(case['day']):02d}"
+    birth_time = f"{int(case['hour']):02d}:{int(case['minute']):02d}"
+    confidence = {
+        f"D{factor}": {"confidence": "high", "useAsPrimaryEvidence": factor != 60}
+        for factor in [1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]
+    }
+    result = build_case(
+        CaseBuildInput(
+            case_id=f"case.{case['id']}",
+            subject_id=f"subject.{case['id']}",
+            created_at=datetime.now(timezone.utc),
+            locale="en",
+            birth_date=birth_date,
+            birth_time=birth_time,
+            birth_place=str(case["label"]),
+            birth_time_precision="exact",
+            time_source="reference fixture",
+            place_label=str(case["label"]),
+            latitude=float(case["lat"]),
+            longitude=float(case["lon"]),
+            timezone_id=str(case["tz"]),
+            place_source="reference fixture",
+            place_accuracy="coordinate",
+            place_confidence="high",
+            place_matched=None,
+            calculation_version="test",
+            ephemeris_version="test",
+            chart=chart,
+            input_context={
+                "time": {
+                    "window": {
+                        "start": f"{birth_date} {birth_time}",
+                        "end": _one_minute_later(birth_date, birth_time),
+                    }
+                }
+            },
+            sensitivity_scan={
+                "summary": {"divisionalConfidence": confidence},
+                "reportReadiness": {
+                    "mode": "standard_after_prevalidation",
+                    "blockingFactors": [],
+                },
+            },
+        )
+    )
+
+    assert result.status == "calculated"
+    assert result.astronomy is not None
+    assert result.astronomy.calculation_provider == "Swiss Ephemeris + PyJHora"
+    assert result.astronomy.calculation_adapter_version == "test"
+    assert len(result.astronomy.grahas) == 9
+    assert {varga.factor for varga in result.charts} == {
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        9,
+        10,
+        12,
+        16,
+        20,
+        24,
+        27,
+        30,
+        60,
+    }
+    assert all(check.status == "passed" for check in result.quality_checks)
+    assert any(
+        check.check_id == "varga.d1-provider-sign-alignment" for check in result.quality_checks
+    )
+    registered_rules = {rule.rule_id for rule in load_rule_catalog().rules}
+    assert {fact.provenance.rule_id for fact in result.facts} <= registered_rules
+    assert {period.provenance.rule_id for period in result.timing_periods} <= registered_rules
+    assert result.rectification is not None
+    assert result.rectification.decision.status == "not_required"
+
+
+def test_calculator_rejects_ambiguous_civil_time() -> None:
+    from app.calculator.engine import to_jd
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        to_jd(2021, 11, 7, 1, 30, "America/New_York")
+
+
 def test_pyjhora_bundled_reference_baseline_is_available() -> None:
     import jhora
 
@@ -189,6 +280,11 @@ def _calculate_case(case: dict[str, Any]) -> dict[str, Any]:
         float(case["lon"]),
         str(case["tz"]),
     )
+
+
+def _one_minute_later(birth_date: str, birth_time: str) -> str:
+    value = datetime.fromisoformat(f"{birth_date}T{birth_time}")
+    return (value + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
 
 
 def _utc_julian_day(case: dict[str, Any]) -> float:
