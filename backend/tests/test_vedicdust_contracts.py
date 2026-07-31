@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from app.services.skill_runtime import SkillRuntime
 from app.vedicdust.models import (
     AstronomySnapshot,
     AuditFinding,
@@ -62,6 +63,29 @@ def _position(longitude: float = 10.0) -> ZodiacPosition:
     )
 
 
+def test_agent_workspace_boundary_restores_authoritative_inputs(tmp_path: Path) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    chart_path = session_dir / "chart_record.json"
+    chart_path.write_text('{"chartRecordId":"original"}\n', encoding="utf-8")
+    snapshot = SkillRuntime._snapshot_agent_workspace(session_dir, {"claim_graph.json"})
+
+    chart_path.write_text('{"chartRecordId":"tampered"}\n', encoding="utf-8")
+    (session_dir / "unauthorized.json").write_text("{}\n", encoding="utf-8")
+    (session_dir / "claim_graph.json").write_text('{"claims":[]}\n', encoding="utf-8")
+
+    errors = SkillRuntime._restore_agent_workspace_boundary(
+        session_dir,
+        {"claim_graph.json"},
+        snapshot,
+    )
+
+    assert errors == ["created:unauthorized.json", "modified:chart_record.json"]
+    assert chart_path.read_text(encoding="utf-8") == '{"chartRecordId":"original"}\n'
+    assert not (session_dir / "unauthorized.json").exists()
+    assert (session_dir / "claim_graph.json").exists()
+
+
 def test_product_profile_has_no_unregistered_sources() -> None:
     profile = parashari_lahiri_profile()
     validate_profile_source_ids(profile.source_ids)
@@ -86,7 +110,7 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
     catalog = load_rule_catalog()
     validate_rule_catalog_sources(catalog)
 
-    assert catalog.catalog_version == "1.1.0"
+    assert catalog.catalog_version == "1.2.0"
     rule_ids = {rule.rule_id for rule in catalog.rules}
     assert {
         "sop.promise-before-varga",
@@ -280,7 +304,7 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     graph = ClaimGraph(
         chart_record_id=record.chart_record_id,
         method_profile_id=profile.profile_id,
-        rule_pack_version="vedicdust-rules-1.1.0",
+        rule_pack_version="vedicdust-rules-1.2.0",
         generated_at=datetime.now(UTC),
         claims=[
             Claim(
@@ -314,6 +338,16 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     assert fact.fact_id in foundation_context.natal_fact_ids
     assert capacity_fact.fact_id in foundation_context.capacity_fact_ids
     assert foundation_context.rule_ids == ["judge.foundation.integrated"]
+    foundation_rule = next(
+        rule for rule in judgement_context.rules if rule.rule_id == "judge.foundation.integrated"
+    )
+    assert foundation_rule.evaluation_status == "eligible"
+    assert set(foundation_rule.matched_fact_ids) == {fact.fact_id, capacity_fact.fact_id}
+    career_rule = next(
+        rule for rule in judgement_context.rules if rule.rule_id == "judge.career.d1-d10"
+    )
+    assert career_rule.evaluation_status == "ineligible"
+    assert career_rule.failed_predicates
 
     validate_claim_graph(record, graph, catalog, judgement_context)
     validate_chart_record_provenance(record, catalog)
@@ -408,6 +442,7 @@ def test_generated_json_schemas_are_current() -> None:
         RectificationAnswerBatch,
         RectificationQuestionSet,
         RuleCatalog,
+        SynastryContext,
     )
 
     models = {
@@ -422,6 +457,7 @@ def test_generated_json_schemas_are_current() -> None:
         "vedicdust-agent-context.schema.json": AgentContext,
         "vedicdust-report-manifest.schema.json": ConsultationReportManifest,
         "vedicdust-rule-catalog.schema.json": RuleCatalog,
+        "vedicdust-synastry-context.schema.json": SynastryContext,
     }
     schema_root = ROOT / "docs" / "vedicdust" / "schemas"
     for filename, model in models.items():

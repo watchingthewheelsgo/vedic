@@ -1,6 +1,6 @@
 ---
 name: bazi-calculator
-description: "八字排盘 calculator skill。当用户提供出生日期、时间、地点，需要计算四柱、十神、藏干、节气边界、大运、当前大运，或需要生成 bazi_structured_data.md/json 与 bazi_report_context.md 后再运行 bazi-classics-core 时触发。"
+description: "八字排盘 calculator skill。当用户提供出生日期、时间、地点，需要计算四柱、十神、藏干、节气边界、大运、当前大运，或需要生成 bazi_chart_record.json、bazi_chart_foundation.md 与 bazi_report_context.md 后再运行 bazi-classics-core 时触发。"
 ---
 
 # bazi-calculator: 八字排盘入口
@@ -13,7 +13,7 @@ description: "八字排盘 calculator skill。当用户提供出生日期、时�
 
 1. 收集出生信息和报告上下文。
 2. 调用 backend tool `bazi_calculate_chart`。
-3. 确认生成 `bazi_structured_data.md`、`bazi_structured_data.json`、`bazi_report_context.md`。
+3. 确认生成 `bazi_chart_foundation.md`、`bazi_chart_record.json`、`bazi_report_context.md`。
 4. 把结果交给 `bazi-classics-core` 做经典三层审计报告。
 
 ## Boundary
@@ -84,8 +84,8 @@ Execution modes:
 
 The backend tool must produce:
 
-- `bazi_structured_data.json`
-- `bazi_structured_data.md`
+- `bazi_chart_record.json`
+- `bazi_chart_foundation.md`
 - `bazi_report_context.md`
 
 The JSON is the machine-readable source of truth. The Markdown files are prompt artifacts for `bazi-classics-core`.

@@ -54,8 +54,7 @@ English technical terms in the appendix. Define a technical term on first use.
    open.
 6. Let the backend derive `consultation_report_manifest.json`,
    `consultation_report.md`, and `agent_context.json`. Do not hand-write them.
-7. Do not read or reuse legacy p1-p5 reports, appendices, or Markdown audits.
-   The Claim Graph is the complete judgement input.
+7. Treat the Claim Graph as the complete judgement input.
 
 Complete only when the dossier conforms to
 `vedicdust-consultation-dossier/1.0.0` and every released Claim is accounted for.

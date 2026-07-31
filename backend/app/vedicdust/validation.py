@@ -9,6 +9,7 @@ from .models import (
     JudgementContext,
     RuleCatalog,
 )
+from .rule_engine import evaluate_method_rule
 
 
 def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) -> None:
@@ -61,7 +62,11 @@ def validate_claim_graph(
     eligible_vargas = {
         chart.varga_id for chart in record.charts if chart.eligible_as_primary_evidence
     }
-    context_rule_ids = {rule.rule_id for rule in context.rules} if context else set()
+    context_rule_ids = (
+        {rule.rule_id for rule in context.rules if rule.evaluation_status == "eligible"}
+        if context
+        else set()
+    )
     context_topics = {topic.topic_id: topic for topic in context.topics} if context else {}
     released_claims = [claim for claim in graph.claims if claim.status != "withheld"]
     if context is not None and len(released_claims) < 5:
@@ -131,6 +136,29 @@ def validate_claim_graph(
                     errors.append(
                         f"claim {claim.claim_id} uses rules outside topic {claim.topic}: "
                         + ", ".join(invalid_rules)
+                    )
+                permitted_facts = set(
+                    topic.natal_fact_ids
+                    + topic.capacity_fact_ids
+                    + topic.varga_fact_ids
+                    + topic.timing_fact_ids
+                )
+                invalid_facts = sorted(
+                    set(claim.supporting_fact_ids + claim.counter_fact_ids + claim.timing_fact_ids)
+                    - permitted_facts
+                )
+                if invalid_facts:
+                    errors.append(
+                        f"claim {claim.claim_id} uses facts outside topic {claim.topic}: "
+                        + ", ".join(invalid_facts)
+                    )
+                invalid_periods = sorted(
+                    set(claim.timing_period_ids) - set(topic.timing_period_ids)
+                )
+                if invalid_periods:
+                    errors.append(
+                        f"claim {claim.claim_id} uses timing periods outside topic "
+                        f"{claim.topic}: " + ", ".join(invalid_periods)
                     )
         supporting_vargas = {
             facts_by_id[fact_id].subject_ref.split(".", 1)[0]
@@ -216,8 +244,25 @@ def validate_judgement_context(
             or rule.limitations != source.limitations
         ):
             errors.append(f"judgement context rule drift for {rule.rule_id}")
+        if rule.evaluation_status == "eligible" and rule.failed_predicates:
+            errors.append(f"eligible rule {rule.rule_id} contains failed predicates")
+        if rule.evaluation_status == "ineligible" and not rule.failed_predicates:
+            errors.append(f"ineligible rule {rule.rule_id} lacks a failed predicate")
+        if source is not None:
+            expected_evaluation = evaluate_method_rule(source, record)
+            if (
+                rule.evaluation_status != expected_evaluation["evaluationStatus"]
+                or rule.matched_fact_ids != expected_evaluation["matchedFactIds"]
+                or rule.failed_predicates != expected_evaluation["failedPredicates"]
+            ):
+                errors.append(f"judgement context rule evaluation drift for {rule.rule_id}")
     for topic in context.topics:
-        for fact_id in topic.natal_fact_ids + topic.capacity_fact_ids + topic.varga_fact_ids:
+        for fact_id in (
+            topic.natal_fact_ids
+            + topic.capacity_fact_ids
+            + topic.varga_fact_ids
+            + topic.timing_fact_ids
+        ):
             if fact_id not in fact_ids:
                 errors.append(f"topic {topic.topic_id} references unknown fact {fact_id}")
         for period_id in topic.timing_period_ids:

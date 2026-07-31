@@ -11,14 +11,47 @@ from app.utils.ids import make_id
 
 
 class SkillWorkspace:
-    """File-backed workspace that mirrors the original skill artifact model."""
+    """File-backed workspace for the current VedicDust and BaZi contracts."""
 
-    INTERNAL_ARTIFACTS = {
+    ROOT_ARTIFACTS = {
+        "birth_input_context.json",
+        "sensitivity_scan.json",
         "chart_record.json",
         "reading_session.json",
-        "vedicdust_case.json",
         "chart_audit.json",
-        "case_audit.json",
+        "chart_rectification_state.json",
+        "rectification_question_set.json",
+        "rectification_answer_batch.json",
+        "reader_prevalidation.md",
+        "prevalidation_result.json",
+        "user_context.md",
+        "judgement_context.json",
+        "claim_graph.json",
+        "consultation_dossier.json",
+        "consultation_report_manifest.json",
+        "agent_context.json",
+        "consultation_report.md",
+        "career_report.md",
+        "love_report.md",
+        "rectification_report.md",
+        "run_metrics.json",
+    }
+
+    BAZI_ARTIFACTS = {
+        "bazi_chart_record.json",
+        "bazi_chart_foundation.md",
+        "bazi_report_context.md",
+        "bazi_overview.md",
+        "bazi_life_report.md",
+        "bazi_timing_report.md",
+        "bazi_appendix.md",
+        "bazi_data_audit.md",
+        "bazi_classics_audit.md",
+    }
+
+    INTERNAL_ARTIFACTS = {
+        "reading_session.json",
+        "chart_audit.json",
         "judgement_context.json",
         "claim_graph.json",
         "consultation_dossier.json",
@@ -73,6 +106,7 @@ class SkillWorkspace:
             if path.is_file()
             and path.suffix.lower() in [".md", ".txt", ".json"]
             and not any(part.startswith(".") for part in path.relative_to(session_dir).parts)
+            and self.is_current_runtime_file(path.relative_to(session_dir).as_posix())
             and (
                 include_internal
                 or path.relative_to(session_dir).as_posix() not in self.INTERNAL_ARTIFACTS
@@ -80,6 +114,23 @@ class SkillWorkspace:
         ]
         files.sort(key=lambda path: (self._artifact_rank(path.name), path.name))
         return [self._artifact_from_path(session_dir, path) for path in files]
+
+    @staticmethod
+    def is_current_runtime_file(relative_path: str) -> bool:
+        if relative_path in SkillWorkspace.ROOT_ARTIFACTS:
+            return True
+        if relative_path in SkillWorkspace.BAZI_ARTIFACTS:
+            return True
+        if relative_path.startswith(".meta/") or relative_path.startswith("exports/"):
+            return True
+        if relative_path.startswith("synastry_"):
+            suffix = relative_path.split("/", 1)[1] if "/" in relative_path else ""
+            return suffix in {
+                "chart_record_B.json",
+                "synastry_context.json",
+                "reports/relationship_consultation.md",
+            }
+        return False
 
     def read_artifact_text(self, session_id: str, path: str) -> str | None:
         session_dir = self.require_session_dir(session_id)
@@ -95,7 +146,7 @@ class SkillWorkspace:
         payload = {
             "sessionId": session_id,
             "locale": locale,
-            "structuredDataSha256": self.structured_data_sha256(session_id),
+            "chartRecordSha256": self.chart_record_sha256(session_id),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
         manifest_path.write_text(
@@ -132,7 +183,7 @@ class SkillWorkspace:
             "sessionId": session_id,
             "artifactPath": relative_path,
             "producer": producer,
-            "structuredDataSha256": self.structured_data_sha256(session_id),
+            "chartRecordSha256": self.chart_record_sha256(session_id),
             "artifactSha256": self._file_sha256(target),
             "dependencySha256": self._dependency_hashes(session_dir, dependency_paths or []),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
@@ -168,7 +219,7 @@ class SkillWorkspace:
             return False
         if producer is not None and payload.get("producer") != producer:
             return False
-        if payload.get("structuredDataSha256") != self.structured_data_sha256(session_id):
+        if payload.get("chartRecordSha256") != self.chart_record_sha256(session_id):
             return False
         if payload.get("artifactSha256") != self._file_sha256(target):
             return False
@@ -177,12 +228,12 @@ class SkillWorkspace:
             return False
         return True
 
-    def structured_data_sha256(self, session_id: str) -> str:
+    def chart_record_sha256(self, session_id: str) -> str:
         session_dir = self.require_session_dir(session_id)
-        structured_data_path = session_dir / "structured_data.md"
-        if not structured_data_path.exists():
+        chart_record_path = session_dir / "chart_record.json"
+        if not chart_record_path.exists():
             return ""
-        return self._file_sha256(structured_data_path)
+        return self._file_sha256(chart_record_path)
 
     def assert_no_project_runtime_artifacts(self) -> None:
         runtime_dir = self.settings.project_root / ".runtime"
@@ -240,12 +291,7 @@ class SkillWorkspace:
 
     def _artifact_rank(self, name: str) -> int:
         order = [
-            "reading_session.json",
             "chart_record.json",
-            "vedicdust_case.json",
-            "structured_data.md",
-            "birth_chart_facts.json",
-            "structured_data.json",
             "birth_input_context.json",
             "sensitivity_scan.json",
             "chart_rectification_state.json",
@@ -253,20 +299,7 @@ class SkillWorkspace:
             "user_context.md",
             "reader_prevalidation.md",
             "prevalidation_result.json",
-            "p1_overview.md",
-            "p2a_planets.md",
-            "p2b_planets.md",
-            "p2c_planets.md",
-            "p2d_planets.md",
-            "p3a_d9.md",
-            "p3b_divisional.md",
-            "p4a_houses.md",
-            "p4b_houses.md",
-            "p5a_life.md",
-            "p5b_life.md",
             "consultation_report.md",
-            "appendix.md",
-            "report_quality_audit.md",
             "run_metrics.json",
         ]
         return order.index(name) if name in order else 999

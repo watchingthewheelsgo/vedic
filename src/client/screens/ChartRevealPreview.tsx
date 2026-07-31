@@ -8,46 +8,13 @@ import type { PipelineData, PipelineNode } from "../lib/pipeline";
  * Not linked from any nav — visit /dev/chart-reveal directly.
  *
  * The "real pipeline simulation" panel below feeds deriveChartRevealState()
- * a synthetic PipelineData built from the ACTUAL backend node IDs (see
- * backend/app/services/skill_runtime.py: p2_sun, p4_house_01..12, etc.) so
+ * a synthetic PipelineData built from the native VedicDust node IDs so
  * this is the same code path Session.tsx will use once phase 3 wires it to
  * the real getCoreJob poll — only the data source changes, not the mapping.
  */
 
-// Mirrors the real node id scheme + rough dependency order from
-// skill_runtime.py. Exact wave numbers don't matter for this simulation;
-// only the id strings (which WORKSHOP_STAGES/chartRevealMapping match on)
-// and the completion order do.
-const PLANET_SLUGS = [
-  "sun",
-  "moon",
-  "mars",
-  "mercury",
-  "jupiter",
-  "venus",
-  "saturn",
-  "rahu",
-  "ketu"
-];
-
 function buildSimulatedNodeOrder(): string[] {
-  return [
-    "chart_facts",
-    "reader_prevalidation",
-    "p1",
-    "p2_yoga",
-    ...PLANET_SLUGS.map((slug) => `p2_${slug}`),
-    ...PLANET_SLUGS.map((slug) => `p3a_d9_${slug}`),
-    "p3b_d10",
-    "p3b_d4",
-    "p3b_d5",
-    ...Array.from({ length: 12 }, (_, i) => `p4_house_${String(i + 1).padStart(2, "0")}`),
-    "dasha_review",
-    "p4_parivartana",
-    ...Array.from({ length: 10 }, (_, i) => `p5_block_${String(i + 1).padStart(2, "0")}`),
-    "appendix",
-    "report_quality_audit"
-  ];
+  return ["chart_facts", "reader_prevalidation", "vedicdust_judgement", "vedicdust_consultation"];
 }
 
 const SIMULATED_ORDER = buildSimulatedNodeOrder();

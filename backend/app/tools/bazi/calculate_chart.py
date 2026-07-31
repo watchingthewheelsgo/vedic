@@ -162,7 +162,7 @@ def calculate_bazi(input_data: BaziInput) -> dict[str, Any]:
     return payload
 
 
-def render_structured_markdown(payload: dict[str, Any]) -> str:
+def render_chart_foundation_markdown(payload: dict[str, Any]) -> str:
     pillars = payload["pillars"]
     subject = payload["subject"]
     context = payload["reportContext"]
@@ -306,8 +306,8 @@ def render_report_context_markdown(payload: dict[str, Any]) -> str:
 
 def build_artifact_contents(payload: dict[str, Any]) -> dict[str, str]:
     return {
-        "bazi_structured_data.json": json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        "bazi_structured_data.md": render_structured_markdown(payload),
+        "bazi_chart_record.json": json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        "bazi_chart_foundation.md": render_chart_foundation_markdown(payload),
         "bazi_report_context.md": render_report_context_markdown(payload),
     }
 

@@ -1,7 +1,7 @@
 """
-vedic-calculator v0.5 - PyJHora 精确计算引擎
-基于 pysweph 天文核心 + PyJHora 精确算法（含 9 项 Shadbala bug 修正）
-输出完整的 structured_data 所需数据
+vedic-calculator v0.5 - Swiss Ephemeris + PyJHora 计算引擎
+基于 pysweph 天文核心和固定版本 PyJHora 适配器
+输出 VedicDust Chart Record 所需的确定性计算数据
 
 v0.5: 移除所有 dashaflow fallback（错误结果比无结果更糟），fail-fast
 v0.4: Dasha 接入 PyJHora（≤2天）
@@ -21,7 +21,7 @@ except ImportError as e:  # 用错python时给可执行纠正,不再含糊报错
         f"  原始错误: {e}\n"
     )
     raise
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytz
 import json
 
@@ -29,7 +29,7 @@ import json
 from dashaflow.dignity import get_dignity, get_compound_relationship, check_combustion, get_digbala
 from dashaflow.jaimini import calculate_jaimini_karakas
 
-# ── PyJHora 精确模块（必须全部加载，否则 fail-fast）──
+# ── PyJHora 固定版本适配模块（必须全部加载，否则 fail-fast）──
 _SETUP_HINT = (
     "\n╔══════════════════════════════════════════════════════╗\n"
     "║  Backend runtime 未正确安装 PyJHora/依赖。             ║\n"
@@ -608,12 +608,20 @@ def calc_special_points(lagna, planets):
     }
 
 
-def calc_transits(lagna_sign_idx, moon_sign_idx):
+def calc_transits(lagna_sign_idx, moon_sign_idx, *, as_of=None):
     """Calculate current transit positions for slow planets.
     Used by core-pro for Sade Sati, BAV transit calibration, double transit.
     """
-    now = datetime.now()
-    jd_now = swe.julday(now.year, now.month, now.day, now.hour + now.minute / 60)
+    moment = as_of or datetime.now(timezone.utc)
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError("transit as_of must be timezone-aware")
+    now = moment.astimezone(timezone.utc)
+    jd_now = swe.julday(
+        now.year,
+        now.month,
+        now.day,
+        now.hour + now.minute / 60 + now.second / 3600,
+    )
     swe.set_sid_mode(swe.SIDM_LAHIRI)
     flags = swe.FLG_SIDEREAL | swe.FLG_SPEED
 
@@ -669,7 +677,7 @@ def calc_transits(lagna_sign_idx, moon_sign_idx):
 
     double_transit = sorted(sat_houses & jup_houses)
     transits["double_transit_houses"] = double_transit
-    transits["timestamp"] = now.strftime("%Y-%m-%d")
+    transits["as_of_utc"] = now.isoformat()
 
     return transits
 
@@ -677,7 +685,18 @@ def calc_transits(lagna_sign_idx, moon_sign_idx):
 # === 主计算函数 ===
 
 
-def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/Kolkata"):
+def calculate_full_chart(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    lat,
+    lon,
+    tz_str="Asia/Kolkata",
+    *,
+    transit_as_of=None,
+):
     """计算完整星盘数据"""
     # 显式重置sid_mode，不依赖进程内上一次调用留下的全局状态
     # （PyJHora子模块/calc_transits会临时切换sid_mode，必须在每次入口处自愈）
@@ -750,31 +769,12 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
     else:
         divisional_charts = {}
 
-    # Extract d9/d10/d4/d5 in legacy (sign_name, sign_idx) format for backward compat
-    if divisional_charts:
-
-        def _legacy_fmt(chart_key):
-            ch = divisional_charts.get(chart_key, {})
-            return {p: (ch[p]["sign"], ch[p]["sign_idx"]) for p in ch if "error" not in ch}
-
-        d9 = _legacy_fmt("D9")
-        d10 = _legacy_fmt("D10")
-        d4 = _legacy_fmt("D4")
-        d5 = _legacy_fmt("D5")
-    else:
-        d9, d10, d4, d5 = {}, {}, {}, {}
-
     # Vargottama check
+    d9_chart = divisional_charts.get("D9", {})
     vargottama = {}
     for name in planets:
-        d9_sign = d9.get(name, (None, None))
-        d9_sign_name = (
-            d9_sign[0]
-            if isinstance(d9_sign, tuple)
-            else d9_sign.get("sign", None)
-            if isinstance(d9_sign, dict)
-            else None
-        )
+        d9_placement = d9_chart.get(name, {}) if isinstance(d9_chart, dict) else {}
+        d9_sign_name = d9_placement.get("sign") if isinstance(d9_placement, dict) else None
         vargottama[name] = planets[name]["sign"] == d9_sign_name
 
     # 6. Dignity & Compound Relationship (自建，不依赖dashaflow)
@@ -950,12 +950,14 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
     special_points = calc_special_points(lagna, planets)
 
     # 16. Transit positions (current slow planet positions)
-    transits = calc_transits(lagna["sign_idx"], planets["Moon"]["sign_idx"])
+    transits = calc_transits(
+        lagna["sign_idx"],
+        planets["Moon"]["sign_idx"],
+        as_of=transit_as_of,
+    )
 
     # 17. Bhava Bala, Special Lagnas, Vargeeya Bala (via PyJHora)
-    # 三项独立try/except：一项失败不应连带阻断另外两项；失败必须可见(stderr)，
-    # 不能像之前那样静默吞掉——否则structured_data.md里"多分盘综合力量"板块
-    # 会无声无息地整段消失，运维和排查都发现不了。
+    # Keep failures independent and visible. ChartRecord must expose missing strength data.
     bhava_bala = None
     special_lagnas = None
     vargeeya_bala = None
@@ -994,10 +996,6 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
         "sav": ashtak["sarvashtakavarga"],
         "sav_by_house": sav_by_house,
         "bav": ashtak["bhinnashtakavarga"],
-        "d9": d9,
-        "d10": d10,
-        "d4": d4,
-        "d5": d5,
         "divisional_charts": divisional_charts,
         "vargottama": vargottama,
         "dignity": dignity_data,
@@ -1016,6 +1014,74 @@ def calculate_full_chart(year, month, day, hour, minute, lat, lon, tz_str="Asia/
         "special_lagnas": special_lagnas,
         "vargeeya_bala": vargeeya_bala,
     }
+
+
+def calculate_rectification_signature(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    lat,
+    lon,
+    tz_str="Asia/Kolkata",
+    *,
+    chart_factors=None,
+):
+    """Calculate only chart fields that can split a birth-time candidate interval."""
+
+    factors = chart_factors or [1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
+    jd = to_jd(year, month, day, hour, minute, tz_str)
+    lagna = calc_lagna(jd, lat, lon)
+    planets = {name: calc_planet(jd, planet_id) for name, planet_id in PLANETS_SWE.items()}
+    rahu = calc_planet(jd, swe.MEAN_NODE)
+    ketu_longitude = (float(rahu["longitude"]) + 180.0) % 360.0
+    planets["Rahu"] = rahu
+    planets["Ketu"] = {
+        "sign_idx": int(ketu_longitude / 30),
+        "sign": SIGNS[int(ketu_longitude / 30)],
+        "longitude": ketu_longitude,
+        "degree": ketu_longitude % 30,
+    }
+    moon = planets["Moon"]
+    moon_nakshatra = get_nakshatra(moon["longitude"])
+    timezone_info = pytz.timezone(tz_str)
+    localized = _localize_strict(timezone_info, datetime(year, month, day, hour, minute))
+    timezone_offset = localized.utcoffset().total_seconds() / 3600.0
+    divisional_charts = _div_pyjhora(
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        lat,
+        lon,
+        timezone_offset,
+        chart_factors=factors,
+    )
+    signature = {
+        "lagnaSign": lagna.get("sign"),
+        "lagnaDegree": round(float(lagna.get("degree", 0)), 4),
+        "moonSign": moon.get("sign"),
+        "moonNakshatra": moon_nakshatra.get("name"),
+        "moonPada": moon_nakshatra.get("pada"),
+        # Dasha is deliberately omitted from the minute grid. It is expensive and
+        # belongs in dated-event scoring, where each surviving interval is assessed.
+        "currentDasha": None,
+        "planetSignIndices": {
+            name: int(position["sign_idx"]) for name, position in planets.items()
+        },
+    }
+    for factor in factors:
+        if factor == 1:
+            continue
+        raw_chart = divisional_charts.get(f"D{factor}")
+        raw_lagna = raw_chart.get("Lagna") if isinstance(raw_chart, dict) else None
+        signature[f"d{factor}Lagna"] = (
+            raw_lagna.get("sign") if isinstance(raw_lagna, dict) else None
+        )
+    return signature
 
 
 # === TEST ===
@@ -1082,7 +1148,7 @@ if __name__ == "__main__":
         "Rahu",
         "Ketu",
     ]:
-        sign = chart["d9"][name][0]
+        sign = chart["divisional_charts"]["D9"][name]["sign"]
         varg = " ★V" if chart["vargottama"].get(name, False) else ""
         print(f"  {name:<10} → {sign}{varg}")
 

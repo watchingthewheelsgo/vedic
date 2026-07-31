@@ -42,24 +42,27 @@ def test_admin_sessions_lists_database_metadata_and_local_paths(tmp_path: Path) 
             session_id = workspace.create_session()
             workspace.write_artifact(
                 session_id,
-                "birth_chart_facts.json",
+                "chart_record.json",
                 json.dumps(
                     {
+                        "chartRecordId": "chart-admin",
                         "subject": {
-                            "birthDate": "2024-08-02",
-                            "birthTime": "20:57",
-                            "birthPlace": "Pudong, Shanghai, China",
-                            "timePrecision": "精确到分钟",
-                            "timeSource": "出生证/医院记录",
-                            "timezone": "Asia/Shanghai",
-                            "gender": "男",
-                            "relationship": "单身",
-                        }
+                            "genderContext": "男",
+                            "relationshipStatus": "单身",
+                        },
+                        "birthAssertion": {
+                            "localDate": "2024-08-02",
+                            "reportedLocalTime": "20:57",
+                            "reportedPlace": "Pudong, Shanghai, China",
+                        },
+                        "canonicalMoment": {
+                            "timezoneId": "Asia/Shanghai",
+                            "place": {"label": "Pudong, Shanghai, China"},
+                        },
                     }
                 ),
             )
-            workspace.write_artifact(session_id, "structured_data.md", "# data\n")
-            workspace.write_artifact(session_id, "appendix.md", "# appendix\n")
+            workspace.write_artifact(session_id, "consultation_report.md", "# Consultation\n")
             workspace.write_artifact(
                 session_id,
                 "run_metrics.json",
@@ -69,8 +72,16 @@ def test_admin_sessions_lists_database_metadata_and_local_paths(tmp_path: Path) 
                         "status": "completed",
                         "durationSeconds": 12.5,
                         "nodes": [
-                            {"id": "p1", "label": "P1", "status": "completed"},
-                            {"id": "p2", "label": "P2", "status": "skipped"},
+                            {
+                                "id": "vedicdust_judgement",
+                                "label": "Judgement",
+                                "status": "completed",
+                            },
+                            {
+                                "id": "vedicdust_consultation",
+                                "label": "Consultation",
+                                "status": "skipped",
+                            },
                         ],
                     }
                 ),
@@ -158,9 +169,9 @@ def test_metadata_store_filters_sessions_by_owner(tmp_path: Path) -> None:
         try:
             workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
             session_a = workspace.create_session()
-            workspace.write_artifact(session_a, "structured_data.md", "# user a\n")
+            workspace.write_artifact(session_a, "chart_record.json", '{"subject":{}}\n')
             session_b = workspace.create_session()
-            workspace.write_artifact(session_b, "structured_data.md", "# user b\n")
+            workspace.write_artifact(session_b, "chart_record.json", '{"subject":{}}\n')
 
             metadata_store = MetadataStore(workspace)
             await metadata_store.sync_session_from_files(session_a, owner_user_id="user_a")
@@ -193,7 +204,7 @@ def test_metadata_store_claims_anonymous_session_for_clerk_user(tmp_path: Path) 
         try:
             workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
             session_id = workspace.create_session()
-            workspace.write_artifact(session_id, "structured_data.md", "# anonymous\n")
+            workspace.write_artifact(session_id, "chart_record.json", '{"subject":{}}\n')
 
             metadata_store = MetadataStore(workspace)
             await metadata_store.sync_session_from_files(

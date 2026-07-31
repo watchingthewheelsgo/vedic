@@ -861,10 +861,7 @@ Schema:
 
     def _backend_tool_names(self) -> list[str]:
         return [
-            "mcp__vedic_backend_tools__vedic_synastry_validate",
-            "mcp__vedic_backend_tools__vedic_synastry_build",
             "mcp__vedic_backend_tools__vedic_rectifier_time_scan",
-            "mcp__vedic_backend_tools__vedic_report_builder",
             "mcp__vedic_backend_tools__bazi_calculate_chart",
         ]
 

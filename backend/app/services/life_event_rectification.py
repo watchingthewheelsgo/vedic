@@ -2,7 +2,40 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Any
+
+import pytz
+
+
+SIGNS = [
+    "Aries",
+    "Taurus",
+    "Gemini",
+    "Cancer",
+    "Leo",
+    "Virgo",
+    "Libra",
+    "Scorpio",
+    "Sagittarius",
+    "Capricorn",
+    "Aquarius",
+    "Pisces",
+]
+SIGN_LORDS = [
+    "Mars",
+    "Venus",
+    "Mercury",
+    "Moon",
+    "Sun",
+    "Mercury",
+    "Venus",
+    "Mars",
+    "Jupiter",
+    "Saturn",
+    "Saturn",
+    "Jupiter",
+]
 
 
 EVENT_RULES: dict[str, dict[str, Any]] = {
@@ -157,6 +190,11 @@ def parse_life_event_ledger(raw: str) -> dict[str, Any]:
         if event is not None:
             events.append(event)
 
+    events.sort(key=lambda event: str(event.get("date") or ""))
+    for event in events:
+        event["role"] = "calibration"
+    if len(events) >= 3:
+        events[-1]["role"] = "holdout"
     category_counts = Counter(str(event.get("category") or "unknown") for event in events)
     return {
         "schemaVersion": "life-event-ledger/v1",
@@ -171,6 +209,139 @@ def parse_life_event_ledger(raw: str) -> dict[str, Any]:
             else "Ask the user for 2-5 dated life events before deep rectification."
         ),
     }
+
+
+def score_candidate_events(
+    *,
+    candidate_id: str,
+    signature: dict[str, Any],
+    representative_moment: datetime,
+    latitude: float,
+    longitude: float,
+    timezone_id: str,
+    ledger: dict[str, Any],
+) -> dict[str, Any]:
+    """Score dated events with explicit, inspectable Jyotish evidence gates.
+
+    The weights are product hypotheses. They rank candidates; they do not prove an
+    event or license a deterministic life claim.
+    """
+
+    events = [event for event in ledger.get("events") or [] if isinstance(event, dict)]
+    if not events:
+        return {"evidenceScores": [], "aggregateScore": None, "holdoutScore": None}
+
+    event_moments = [_event_midpoint(event) for event in events]
+    local_timezone = pytz.timezone(timezone_id)
+    localized_birth = local_timezone.localize(representative_moment, is_dst=None)
+    from app.calculator.dasha_pyjhora import calculate_dasha_lords_at
+    from app.calculator.engine import calc_transits
+
+    dasha_lords = calculate_dasha_lords_at(
+        representative_moment.year,
+        representative_moment.month,
+        representative_moment.day,
+        representative_moment.hour,
+        representative_moment.minute,
+        latitude,
+        longitude,
+        localized_birth.utcoffset().total_seconds() / 3600.0,
+        event_moments,
+    )
+    lagna_sign = str(signature.get("lagnaSign") or "")
+    lagna_index = SIGNS.index(lagna_sign) if lagna_sign in SIGNS else 0
+    planet_signs = signature.get("planetSignIndices") or {}
+    evidence_scores: list[dict[str, Any]] = []
+    for event, event_moment, periods in zip(events, event_moments, dasha_lords, strict=True):
+        rules = event.get("rectificationRules") or EVENT_RULES["unknown"]
+        relevant_houses = {int(value) for value in rules.get("houses") or []}
+        karakas = {str(value) for value in rules.get("karakas") or []}
+        relevant_vargas = [str(value) for value in rules.get("vargas") or []]
+        support_ids: list[str] = []
+        contributions = 0.0
+        period_lords = [
+            str(periods.get(level))
+            for level in ("mahadasha", "antardasha", "pratyantardasha")
+            if periods.get(level)
+        ]
+        for level, lord in zip(("md", "ad", "pd"), period_lords, strict=False):
+            weight = {"md": 0.12, "ad": 0.16, "pd": 0.1}[level]
+            if lord in karakas:
+                contributions += weight
+                support_ids.append(
+                    f"rectification.{candidate_id}.{event['eventId']}.{level}.karaka"
+                )
+            sign_index = planet_signs.get(lord)
+            if sign_index is not None:
+                occupied_house = (int(sign_index) - lagna_index) % 12 + 1
+                if occupied_house in relevant_houses:
+                    contributions += weight
+                    support_ids.append(
+                        f"rectification.{candidate_id}.{event['eventId']}.{level}.occupant"
+                    )
+            ruled_houses = {
+                house
+                for house in relevant_houses
+                if SIGN_LORDS[(lagna_index + house - 1) % 12] == lord
+            }
+            if ruled_houses:
+                contributions += weight
+                support_ids.append(f"rectification.{candidate_id}.{event['eventId']}.{level}.lord")
+
+        for varga in relevant_vargas:
+            factor_field = f"d{varga[1:]}Lagna"
+            varga_sign = signature.get(factor_field)
+            if varga_sign in SIGNS and SIGN_LORDS[SIGNS.index(varga_sign)] in period_lords:
+                contributions += 0.08
+                support_ids.append(
+                    f"rectification.{candidate_id}.{event['eventId']}.{varga.lower()}.lagna_lord"
+                )
+
+        transit = calc_transits(
+            lagna_index,
+            int(planet_signs.get("Moon", lagna_index)),
+            as_of=event_moment.replace(tzinfo=timezone.utc),
+        )
+        activated = relevant_houses & set(transit.get("double_transit_houses") or [])
+        if activated:
+            contributions += 0.22
+            support_ids.append(f"rectification.{candidate_id}.{event['eventId']}.double_transit")
+
+        score = round(min(contributions, 1.0), 3)
+        evidence_scores.append(
+            {
+                "eventId": event["eventId"],
+                "role": event.get("role", "calibration"),
+                "score": score,
+                "supportingFactIds": support_ids,
+                "contradictingFactIds": [],
+                "ruleIds": ["rectification.event-evidence.v1"],
+                "explanation": (
+                    f"{event.get('categoryLabel')}: Dasha lords {period_lords or ['unavailable']}; "
+                    f"relevant vargas {relevant_vargas or ['none']}; "
+                    f"double-transit houses {transit.get('double_transit_houses') or []}."
+                ),
+            }
+        )
+
+    calibration = [item["score"] for item in evidence_scores if item["role"] == "calibration"]
+    holdout = [item["score"] for item in evidence_scores if item["role"] == "holdout"]
+    return {
+        "evidenceScores": evidence_scores,
+        "aggregateScore": round(sum(calibration) / len(calibration), 3) if calibration else None,
+        "holdoutScore": round(sum(holdout) / len(holdout), 3) if holdout else None,
+        "scoringPolicy": "transparent_product_hypothesis_v1",
+    }
+
+
+def _event_midpoint(event: dict[str, Any]) -> datetime:
+    raw = str(event.get("date") or "")
+    if re.fullmatch(r"\d{4}-\d{2}", raw):
+        year, month = (int(value) for value in raw.split("-"))
+        return datetime(year, month, 15, 12)
+    if re.fullmatch(r"\d{4}", raw):
+        return datetime(int(raw), 7, 1, 12)
+    return datetime.fromisoformat(raw).replace(hour=12, minute=0, second=0, microsecond=0)
 
 
 def build_life_event_focus(

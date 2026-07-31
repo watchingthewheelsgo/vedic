@@ -25,7 +25,7 @@ def parashari_lahiri_profile() -> CalculationProfile:
         dasha_year_days=365.256364,
         coordinate_datum="WGS84",
         ephemeris_provider="Swiss Ephemeris",
-        rule_pack_version="vedicdust-rules-1.1.0",
+        rule_pack_version="vedicdust-rules-1.2.0",
         source_ids=[
             "astro.swisseph.programmer-manual",
             "time.iana.tzdb",

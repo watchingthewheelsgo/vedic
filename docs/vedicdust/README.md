@@ -3,8 +3,7 @@
 VedicDust is the product-owned Vedic astrology method and data layer. The
 production session runtime owns chart identity, revisions, deterministic
 audits, the calculation-to-LLM boundary, and deterministic report rendering.
-Legacy Markdown reports remain readable for historical sessions but are no
-longer generated or consumed by the VedicDust report pipeline.
+Only artifacts declared by the current contracts participate in the runtime.
 
 ## Pipeline
 
@@ -37,7 +36,7 @@ tasks.
 ## Runtime artifacts
 
 - `reading_session.json`: stable workflow identity and active chart revision.
-- `chart_record.json`: internal deterministic chart record.
+- `chart_record.json`: canonical deterministic chart record and calculation view.
 - `chart_audit.json`: deterministic permission gate for rectification,
   judgement, and report rendering.
 - `judgement_context.json`: backend-selected evidence bundles, active rules,
@@ -48,9 +47,9 @@ tasks.
 - `agent_context.json`: compact retrieval context for later consultation.
 - `consultation_report.md`: deterministic user-facing rendering of the approved
   Dossier and Claim Graph.
-- `structured_data.md`: compatibility projection for the reader/calculator UI;
-  never authoritative over the chart record.
+- `synastry_context.json`: deterministic D1 whole-sign overlays and directed
+  Parashari graha drishti for a two-chart consultation.
 
-Internal JSON artifacts are not returned in ordinary user-facing session
-responses. The runtime loads them explicitly for calculation, audit, and LLM
-context.
+Workflow-only JSON artifacts are hidden from ordinary report views. `chart_record.json`
+remains available to the calculation-stage UI; the runtime loads all contracts explicitly
+for audit and bounded LLM context.

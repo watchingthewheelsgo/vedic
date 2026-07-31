@@ -1,9 +1,8 @@
-# Vedic Skills Runtime
+# VedicDust Runtime
 
-This project runs repo-local astrology skill workflows inside a web runtime.
-Version 1 must preserve the original Vedic skill behavior as closely as
-possible. The repo-local `.claude/skills` directory is the runtime source of
-truth; do not depend on a sibling checkout for normal app behavior.
+This project runs a product-owned Jyotish evidence pipeline. The backend owns
+canonicalization, calculation, schema validation, workflow gates, and report rendering.
+Repo-local skills own only their declared interpretation or dialogue task.
 
 Skill categories:
 
@@ -12,17 +11,12 @@ Skill categories:
 
 Rules:
 
-- Use the original `vedic-reader`, `vedic-core`, `vedic-career`, `vedic-love`,
-  `vedic-rectifier`, `vedic-calculator`, and `vedic-synastry` skills.
+- Use the VedicDust contracts and repo-local skills for Vedic workflows.
 - Use `bazi-calculator` for backend-generated BaZi chart facts and prompt
   artifacts.
 - Use `bazi-classics-core` for BaZi reports based on the three classical
   sources and `bazi-calculator` artifacts.
-- Preserve original file names, phase order, markdown style, and chat-progress
-  behavior.
 - Treat `chart_record.json` as the deterministic calculation source of truth.
-  `structured_data.md` is a compatibility projection for existing report files.
-- Do not add app-specific claims, daily notes, checkout flows, cards, JSON
-  report sections, or extra frameworks.
-- The web app may wrap outputs for transport, but the user-facing artifact
-  content must remain the original skill-style markdown.
+- Generate and consume only artifacts declared by the current VedicDust contracts.
+- Claims must reference eligible fact IDs and registered rules, pass counter-evidence and
+  audience checks, and be released through the Consultation Dossier.

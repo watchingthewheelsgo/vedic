@@ -1,7 +1,7 @@
 """
 dasha_pyjhora.py — PyJHora Vimsottari Dasha 包装器
-使用 PyJHora 的精确天文算法计算大运/小运日期，偏差 ≤ 2 天（vs JHora PDF）。
-自建 engine.py 的 365.25 近似法偏差 6~9 天。
+使用固定版本 PyJHora 计算 Vimshottari 大运、小运和三级运日期。
+跨桌面软件误差必须由独立、可复现的 golden fixture 验证。
 
 返回格式与 engine.py 的 calc_vimsottari_dasha() 完全兼容。
 """
@@ -9,7 +9,9 @@ dasha_pyjhora.py — PyJHora Vimsottari Dasha 包装器
 import swisseph as swe
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+
+from .pyjhora_compat import ensure_pyjhora_swe_compat
 
 
 # Planet ID ↔ Name mapping (PyJHora convention: RAHU=7, KETU=8)
@@ -43,32 +45,22 @@ _DASHA_ORDER = ["Ketu", "Venus", "Sun", "Moon", "Mars", "Rahu", "Jupiter", "Satu
 
 
 def _setup_jhora():
-    """Apply the same monkey-patches as ashtakavarga_pyjhora.py"""
-    # Patch swe.calc_ut for pysweph 2.10+ compatibility
-    orig_calc = swe.calc_ut
-    if not getattr(orig_calc, "_dasha_patched", False):
-
-        def patched_calc(jd, planet, flags=0):
-            r = orig_calc(jd, planet, flags=flags)
-            return r[0], r[1] if len(r) > 1 else 0
-
-        patched_calc._dasha_patched = True
-        swe.calc_ut = patched_calc
-
-    # Patch swe.houses_ex
-    if hasattr(swe, "houses_ex"):
-        orig_he = swe.houses_ex
-        if not getattr(orig_he, "_dasha_patched", False):
-
-            def patched_he(*a, **kw):
-                r = orig_he(*a, **kw)
-                return (r[0], r[1]) if len(r) == 3 else r
-
-            patched_he._dasha_patched = True
-            swe.houses_ex = patched_he
+    """Install the process-wide PyJHora compatibility layer."""
+    ensure_pyjhora_swe_compat()
 
 
-def calculate_dasha_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
+def calculate_dasha_fixed(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    lat,
+    lon,
+    tz_offset,
+    *,
+    include_pratyantara=True,
+):
     """Calculate Vimsottari Dasha using PyJHora's precise algorithm.
 
     Args:
@@ -120,6 +112,18 @@ def calculate_dasha_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
     except Exception:
         ad_entries = []
 
+    if include_pratyantara:
+        try:
+            _, pd_entries = vimsottari.get_vimsottari_dhasa_bhukthi(
+                jd_local,
+                place,
+                dhasa_level_index=3,
+            )
+        except Exception:
+            pd_entries = []
+    else:
+        pd_entries = []
+
     # Build antardasha lookup: {md_planet_id: [(ad_planet_name, start_date_str, end_date_str), ...]}
     ad_lookup = {}
     for i, entry in enumerate(ad_entries):
@@ -132,8 +136,17 @@ def calculate_dasha_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
             ad_lookup[md_id] = []
         ad_lookup[md_id].append((ad_planet, ad_start))
 
+    pd_lookup = {}
+    for entry in pd_entries:
+        md_id, ad_id, pd_id = entry[0]
+        y, m, d, _ = entry[1]
+        pd_start = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+        pd_lookup.setdefault((md_id, ad_id), []).append(
+            (_PLANET_NAMES.get(pd_id, f"P{pd_id}"), pd_start)
+        )
+
     # ── 3. Build output ──
-    now = datetime.now()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     md_items = list(md_dict.items())
     dashas = []
 
@@ -174,12 +187,32 @@ def calculate_dasha_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
             ad_end_dt = datetime.strptime(ad_end_str, "%Y-%m-%d")
             ad_is_current = ad_start_dt <= now <= ad_end_dt
 
+            ad_id = next(
+                (planet_id for planet_id, name in _PLANET_NAMES.items() if name == ad_planet),
+                None,
+            )
+            pratyantardashas = []
+            pd_list = pd_lookup.get((pid, ad_id), []) if ad_id is not None else []
+            for k, (pd_planet, pd_start_str) in enumerate(pd_list):
+                pd_end_str = pd_list[k + 1][1] if k + 1 < len(pd_list) else ad_end_str
+                pd_start_dt = datetime.strptime(pd_start_str, "%Y-%m-%d")
+                pd_end_dt = datetime.strptime(pd_end_str, "%Y-%m-%d")
+                pratyantardashas.append(
+                    {
+                        "planet": pd_planet,
+                        "start": pd_start_str,
+                        "end": pd_end_str,
+                        "is_current": pd_start_dt <= now <= pd_end_dt,
+                    }
+                )
+
             antardashas.append(
                 {
                     "planet": ad_planet,
                     "start": ad_start_str,
                     "end": ad_end_str,
                     "is_current": ad_is_current,
+                    "pratyantardashas": pratyantardashas,
                 }
             )
 
@@ -195,3 +228,67 @@ def calculate_dasha_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
         )
 
     return dashas
+
+
+def calculate_dasha_lords_at(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    lat,
+    lon,
+    tz_offset,
+    event_moments,
+):
+    """Resolve MD/AD/PD lords for dated events without expanding full timelines."""
+
+    _setup_jhora()
+    from jhora import const
+    from jhora.panchanga import drik
+    from jhora.panchanga.drik import Place
+    from jhora.horoscope.dhasa.graha import vimsottari
+
+    drik.set_ayanamsa_mode("LAHIRI")
+    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
+    const._use_true_nodes_for_rahu_ketu = False
+    place = Place("birth_place", lat, lon, tz_offset)
+    birth_jd = swe.julday(year, month, day, hour + minute / 60.0)
+    mahadashas = vimsottari.vimsottari_mahadasa(birth_jd, place)
+    results = []
+    for moment in event_moments:
+        event_jd = swe.julday(
+            moment.year,
+            moment.month,
+            moment.day,
+            moment.hour + moment.minute / 60.0,
+        )
+        md_id = vimsottari._where_occurs(event_jd, mahadashas)
+        if md_id is None:
+            results.append({"mahadasha": None, "antardasha": None, "pratyantardasha": None})
+            continue
+        antardashas = vimsottari._vimsottari_bhukti(md_id, mahadashas[md_id])
+        ad_id = vimsottari._where_occurs(event_jd, antardashas)
+        if ad_id is None:
+            results.append(
+                {
+                    "mahadasha": _PLANET_NAMES.get(md_id),
+                    "antardasha": None,
+                    "pratyantardasha": None,
+                }
+            )
+            continue
+        pratyantardashas = vimsottari._vimsottari_antara(
+            md_id,
+            ad_id,
+            antardashas[ad_id],
+        )
+        pd_id = vimsottari._where_occurs(event_jd, pratyantardashas)
+        results.append(
+            {
+                "mahadasha": _PLANET_NAMES.get(md_id),
+                "antardasha": _PLANET_NAMES.get(ad_id),
+                "pratyantardasha": _PLANET_NAMES.get(pd_id),
+            }
+        )
+    return results

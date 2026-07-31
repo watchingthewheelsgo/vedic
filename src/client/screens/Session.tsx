@@ -43,7 +43,10 @@ import {
   type PipelineData,
   type PipelineNode
 } from "../lib/pipeline";
-import { chartRevealCoordinatesFromFacts, deriveChartRevealState } from "../lib/chartRevealMapping";
+import {
+  chartRevealCoordinatesFromRecord,
+  deriveChartRevealState
+} from "../lib/chartRevealMapping";
 import { getReportSections, titleForArtifact } from "../lib/report";
 import { cn } from "../lib/cn";
 import { useI18n } from "../i18n/provider";
@@ -56,8 +59,7 @@ import type {
 
 type NavState = { name?: string; birth?: BirthInput; concern?: string } | null;
 
-const BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json";
-const LEGACY_STRUCTURED_DATA_JSON = "structured_data.json";
+const CHART_RECORD_JSON = "chart_record.json";
 
 type BirthInfo = {
   date: string;
@@ -211,16 +213,9 @@ function localizedStageCopy(stageId: string, t: Translate): StageCopy {
 }
 
 const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
-  src: [
-    "structured_data.md",
-    BIRTH_CHART_FACTS_JSON,
-    LEGACY_STRUCTURED_DATA_JSON,
-    "birth_input_context.json",
-    "sensitivity_scan.json",
-    "run_metrics.json"
-  ],
+  src: [CHART_RECORD_JSON, "birth_input_context.json", "sensitivity_scan.json", "run_metrics.json"],
   chart: [
-    "structured_data.md",
+    CHART_RECORD_JSON,
     "birth_input_context.json",
     "sensitivity_scan.json",
     "chart_rectification_state.json"
@@ -233,7 +228,7 @@ const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
   ],
   judgement: ["reader_prevalidation.md", "prevalidation_result.json"],
   consultation: ["consultation_report.md"],
-  bazi_chart: ["bazi_structured_data.md", "bazi_report_context.md", "bazi_structured_data.json"],
+  bazi_chart: ["bazi_chart_foundation.md", "bazi_report_context.md", "bazi_chart_record.json"],
   bazi_report: [
     "bazi_life_report.md",
     "bazi_overview.md",
@@ -297,11 +292,6 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
   未提供: "Prefer not to say"
 };
 
-const EFFECTIVE_PRECISION_LABELS: Record<string, string> = {
-  "±分钟级": "± minute-level",
-  按出生时间精度降级解释: "Downgraded by birth-time certainty"
-};
-
 const VALIDATION_CHOICES: Array<{
   value: ValidationAnswer;
   labelKey: string;
@@ -339,7 +329,7 @@ const READING_INTERRUPTED_MESSAGE =
   "The reading was interrupted. Completed parts are saved, and resume will continue from the unfinished part.";
 
 const TECHNICAL_ERROR_PATTERN =
-  /(structured_data|reader_prevalidation|user_context|run_metrics|\.md|artifact|agent output|traceback|vedic-core|batch|node|pipeline|skill|expected artifact|AGENT_TIMEOUT_MS|JSON)/i;
+  /(reader_prevalidation|user_context|run_metrics|\.md|artifact|agent output|traceback|vedic-core|batch|node|pipeline|skill|expected artifact|AGENT_TIMEOUT_MS|JSON)/i;
 
 function userFacingError(caught: unknown, fallback: string) {
   return sanitizeUserMessage(caught instanceof Error ? caught.message : "", fallback);
@@ -898,12 +888,8 @@ function deriveReadingProductPhases({
   t: Translate;
 }): ReadingProductPhase[] {
   const hasSession = Boolean(session);
-  const hasVedicChart = Boolean(
-    findArtifact(session, "structured_data.md") ||
-    findArtifact(session, BIRTH_CHART_FACTS_JSON) ||
-    findArtifact(session, LEGACY_STRUCTURED_DATA_JSON)
-  );
-  const hasBaziChart = Boolean(findArtifact(session, "bazi_structured_data.md"));
+  const hasVedicChart = Boolean(findArtifact(session, CHART_RECORD_JSON));
+  const hasBaziChart = Boolean(findArtifact(session, "bazi_chart_foundation.md"));
   const hasChart = baziMode ? hasBaziChart : hasVedicChart;
   const revealStarted = Boolean(
     complete ||
@@ -1088,10 +1074,7 @@ function ReadingRevealPanel({
     () =>
       baziMode
         ? null
-        : chartRevealCoordinatesFromFacts(
-            parseJsonArtifact(session, BIRTH_CHART_FACTS_JSON) ??
-              parseJsonArtifact(session, LEGACY_STRUCTURED_DATA_JSON)
-          ),
+        : chartRevealCoordinatesFromRecord(parseJsonArtifact(session, CHART_RECORD_JSON)),
     [baziMode, session]
   );
   const baziReveal = useMemo(
@@ -1639,7 +1622,8 @@ function ChartFactsDetail({
 }) {
   const { t } = useI18n();
   const copy = localizedStageCopy("chart", t);
-  const structuredData = findArtifact(session, "structured_data.md");
+  const chartRecordArtifact = findArtifact(session, CHART_RECORD_JSON);
+  const chartRecord = useMemo(() => parseJsonArtifact(session, CHART_RECORD_JSON), [session]);
   const inputContext = findArtifact(session, "birth_input_context.json");
   const sensitivityScan = findArtifact(session, "sensitivity_scan.json");
   const rectificationArtifact = findArtifact(session, "chart_rectification_state.json");
@@ -1647,17 +1631,14 @@ function ChartFactsDetail({
     () => parseRectificationState(rectificationArtifact?.content ?? ""),
     [rectificationArtifact?.content]
   );
-  const sections = useMemo(
-    () => parseChartFactSections(structuredData?.content ?? ""),
-    [structuredData?.content]
-  );
+  const sections = useMemo(() => chartRecordSections(chartRecord), [chartRecord]);
 
   return (
     <>
       <StageStatusSummary
         status={status}
         copy={copy}
-        completed={structuredData ? 1 : 0}
+        completed={chartRecordArtifact ? 1 : 0}
         total={1}
         running={0}
         durationSeconds={0}
@@ -1666,7 +1647,7 @@ function ChartFactsDetail({
 
       <ChartConfirmationCard
         birthInfo={birthInfo}
-        hasChartFacts={Boolean(structuredData)}
+        hasChartFacts={Boolean(chartRecordArtifact)}
         rectificationState={rectificationState}
       />
 
@@ -1676,7 +1657,7 @@ function ChartFactsDetail({
         </summary>
         <div className="mt-3 flex flex-wrap gap-2">
           {[
-            structuredData?.path,
+            chartRecordArtifact?.path,
             inputContext?.path,
             sensitivityScan?.path,
             rectificationArtifact?.path
@@ -2715,7 +2696,7 @@ function getBaziPipelineData(
   running: boolean
 ): PipelineData | null {
   if (!session || !isBaziSession(session)) return null;
-  const hasChart = Boolean(findArtifact(session, "bazi_structured_data.md"));
+  const hasChart = Boolean(findArtifact(session, "bazi_chart_foundation.md"));
   const hasReport = Boolean(findArtifact(session, "bazi_life_report.md"));
   const chartStatus = hasChart ? "completed" : "pending";
   const reportStatus = hasReport
@@ -2731,9 +2712,9 @@ function getBaziPipelineData(
       label: "BaZi Chart Facts",
       wave: 0,
       status: chartStatus,
-      files: ["bazi_structured_data.md", "bazi_structured_data.json", "bazi_report_context.md"],
+      files: ["bazi_chart_foundation.md", "bazi_chart_record.json", "bazi_report_context.md"],
       dependencies: [],
-      finishedAt: findArtifact(session, "bazi_structured_data.md")?.updatedAt ?? null,
+      finishedAt: findArtifact(session, "bazi_chart_foundation.md")?.updatedAt ?? null,
       durationSeconds: null,
       error: null
     },
@@ -2824,38 +2805,102 @@ function parseResultPreviewSections(content: string): ResultPreviewSection[] {
   return (readable.length > 0 ? readable : sections).slice(0, 24);
 }
 
-function parseChartFactSections(content: string): ResultPreviewSection[] {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
-  if (!normalized) return [];
+function chartRecordSections(record: Record<string, unknown> | null): ResultPreviewSection[] {
+  if (!record) return [];
+  const profile = objectValue(record, "calculationProfile");
+  const astronomy = objectValue(record, "astronomy");
+  const ascendant = objectValue(astronomy, "ascendant");
+  const grahas = arrayValue(astronomy, "grahas");
+  const charts = arrayValue(record, "charts");
+  const timingPeriods = arrayValue(record, "timingPeriods");
+  const qualityChecks = arrayValue(record, "qualityChecks");
 
-  const lines = normalized.split("\n");
-  const sections: ResultPreviewSection[] = [];
-  let currentTitle = "";
-  let currentBody: string[] = [];
+  const foundation = [
+    zodiacSummary("Lagna", ascendant),
+    ...grahas
+      .map((item) => {
+        const graha = objectFromUnknown(item);
+        return zodiacSummary(String(graha?.graha ?? "Graha"), objectValue(graha, "position"));
+      })
+      .filter(Boolean)
+  ].filter(Boolean);
+  const vargas = charts
+    .map((item) => {
+      const chart = objectFromUnknown(item);
+      const lagna = objectValue(objectValue(chart, "lagna"), "position");
+      const label = String(chart?.vargaId ?? "Varga");
+      const confidence = String(chart?.confidence ?? "unknown");
+      return `${label}: ${String(lagna?.sign ?? "—")} Lagna · ${confidence}`;
+    })
+    .slice(0, 15);
+  const timing = timingPeriods.slice(0, 8).map((item) => {
+    const period = objectFromUnknown(item);
+    const interval = objectValue(period, "interval");
+    const lords = Array.isArray(period?.lords) ? period.lords.join(" / ") : "—";
+    return `${String(period?.level ?? "period")}: ${lords} · ${dateOnly(interval?.start)}–${dateOnly(interval?.end)}`;
+  });
+  const checks = qualityChecks.map((item) => {
+    const check = objectFromUnknown(item);
+    return `${String(check?.status ?? "unknown").toUpperCase()} · ${String(check?.message ?? check?.checkId ?? "Quality check")}`;
+  });
 
-  function flush() {
-    const body = cleanResultPreviewBody(currentBody.join("\n"));
-    if (!currentTitle && !body) return;
-    sections.push({
-      id: `chart-section-${sections.length + 1}`,
-      title: cleanMarkdownInline(currentTitle || "Overview"),
-      body: body || currentTitle
-    });
-  }
-
-  for (const line of lines) {
-    const heading = line.trim().match(/^##\s+(.+)$/);
-    if (heading) {
-      flush();
-      currentTitle = heading[1].trim();
-      currentBody = [];
-      continue;
+  return [
+    {
+      id: "chart-section-method",
+      title: "Calculation profile",
+      body: [
+        String(profile?.tradition ?? "Parashari"),
+        String(profile?.zodiac ?? "sidereal"),
+        `Ayanamsa: ${String(objectValue(profile, "ayanamsa")?.model ?? "lahiri")}`,
+        `House model: ${String(profile?.rashiHouseModel ?? "whole sign")}`
+      ].join(" · ")
+    },
+    {
+      id: "chart-section-foundation",
+      title: "D1 foundation",
+      body: foundation.join("\n")
+    },
+    {
+      id: "chart-section-vargas",
+      title: "Divisional chart set",
+      body: vargas.join("\n")
+    },
+    {
+      id: "chart-section-timing",
+      title: "Timing periods",
+      body: timing.join("\n") || "No released timing periods."
+    },
+    {
+      id: "chart-section-quality",
+      title: "Calculation quality",
+      body: checks.join("\n") || "No quality checks recorded."
     }
-    currentBody.push(line);
-  }
-  flush();
+  ];
+}
 
-  return sections.filter((section) => stripMarkdownForPreview(section.body).length > 8);
+function zodiacSummary(label: string, position: Record<string, unknown> | null): string {
+  if (!position) return "";
+  const degree = typeof position.degreeInSign === "number" ? position.degreeInSign.toFixed(2) : "—";
+  const nakshatra = objectValue(position, "nakshatra");
+  const nakshatraText = nakshatra?.name
+    ? ` · ${String(nakshatra.name)} p${String(nakshatra.pada ?? "—")}`
+    : "";
+  return `${label}: ${String(position.sign ?? "—")} ${degree}°${nakshatraText}`;
+}
+
+function objectFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function arrayValue(record: Record<string, unknown> | null, key: string): unknown[] {
+  const value = record?.[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function dateOnly(value: unknown): string {
+  return typeof value === "string" ? value.slice(0, 10) : "—";
 }
 
 function cleanResultPreviewBody(content: string) {
@@ -3055,7 +3100,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     };
   }
 
-  const bazi = session?.artifacts.find((a) => a.path === "bazi_structured_data.md")?.content ?? "";
+  const bazi = session?.artifacts.find((a) => a.path === "bazi_chart_foundation.md")?.content ?? "";
   if (bazi) {
     const grabBazi = (label: string) =>
       bazi.match(new RegExp(`- ${label}:\\s*(.+)`))?.[1]?.trim() ?? "—";
@@ -3079,20 +3124,32 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     };
   }
 
-  const sd = session?.artifacts.find((a) => a.path === "structured_data.md")?.content ?? "";
-  const grab = (label: string) => sd.match(new RegExp(`${label}:\\s*(.+)`))?.[1]?.trim() ?? "—";
+  const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
+  const subject = objectValue(chartRecord, "subject");
+  const birthAssertion = objectValue(chartRecord, "birthAssertion");
+  const canonicalMoment = objectValue(chartRecord, "canonicalMoment");
+  const birthEvidence = Array.isArray(birthAssertion?.evidence) ? birthAssertion.evidence : [];
+  const firstEvidence = objectFromUnknown(birthEvidence[0]);
+  const timeCertainty = String(birthAssertion?.timeCertainty ?? "unknown");
+  const normalizedPrecision =
+    {
+      exact_minute: "exact",
+      bounded_window: "approximate",
+      part_of_day: "part_of_day",
+      unknown: "unknown"
+    }[timeCertainty] ?? timeCertainty;
   const feedback = session?.artifacts.find((a) => a.path === "user_context.md")?.content ?? "";
   return {
-    date: grab("出生日期"),
-    time: grab("出生时间"),
-    place: grab("出生地点"),
+    date: String(birthAssertion?.localDate ?? "—"),
+    time: String(birthAssertion?.reportedLocalTime ?? "—"),
+    place: String(birthAssertion?.reportedPlace ?? "—"),
     latitude: coordinates.latitude,
     longitude: coordinates.longitude,
-    gender: displayCollected(displayMappedValue(grab("性别"), GENDER_LABELS)),
-    relationship: displayCollected(displayMappedValue(grab("感情状态"), RELATIONSHIP_LABELS)),
-    timePrecision: displayMappedValue(grab("时间精度"), PRECISION_LABELS),
-    timeSource: displayMappedValue(grab("时间来源"), TIME_SOURCE_LABELS),
-    effectivePrecision: displayMappedValue(grab("有效精度"), EFFECTIVE_PRECISION_LABELS),
+    gender: displayCollected(String(subject?.genderContext ?? "")),
+    relationship: displayCollected(String(subject?.relationshipStatus ?? "")),
+    timePrecision: displayMappedValue(normalizedPrecision, PRECISION_LABELS),
+    timeSource: displayMappedValue(String(firstEvidence?.sourceLabel ?? ""), TIME_SOURCE_LABELS),
+    effectivePrecision: String(canonicalMoment?.resolutionConfidence ?? "—"),
     concern: extractConcern(feedback)
   };
 }
@@ -3106,19 +3163,14 @@ function resolveBirthCoordinates(
   const fromInput = coordinatesFromObject(inputCoordinates);
   if (fromInput) return fromInput;
 
-  const birthChartFacts =
-    parseJsonArtifact(session, BIRTH_CHART_FACTS_JSON) ??
-    parseJsonArtifact(session, LEGACY_STRUCTURED_DATA_JSON);
-  const structuredCoordinates = objectValue(objectValue(birthChartFacts, "subject"), "coordinates");
-  const fromStructured = coordinatesFromObject(structuredCoordinates);
-  if (fromStructured) return fromStructured;
+  const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
+  const canonicalMoment = objectValue(chartRecord, "canonicalMoment");
+  const resolvedPlace = objectValue(canonicalMoment, "place");
+  const point = objectValue(resolvedPlace, "point");
+  const fromRecord = coordinatesFromObject(point);
+  if (fromRecord) return fromRecord;
 
-  const structuredMarkdown =
-    session?.artifacts.find((artifact) => artifact.path === "structured_data.md")?.content ?? "";
-  const markdownPlace =
-    structuredMarkdown.match(/出生地点:\s*(.+)/)?.[1]?.trim() ??
-    structuredMarkdown.match(/- Place:\s*(.+)/)?.[1]?.trim();
-  const fromText = coordinatesFromText(fallbackPlace ?? markdownPlace ?? "");
+  const fromText = coordinatesFromText(fallbackPlace ?? "");
   if (fromText) return fromText;
 
   return { latitude: "", longitude: "" };
@@ -3168,8 +3220,8 @@ function objectValue(value: unknown, key: string): Record<string, unknown> | nul
 function coordinatesFromObject(
   value: Record<string, unknown> | null
 ): { latitude: string; longitude: string } | null {
-  const lat = numberLike(value?.lat ?? value?.latitude);
-  const lon = numberLike(value?.lon ?? value?.lng ?? value?.longitude);
+  const lat = numberLike(value?.lat ?? value?.latitude ?? value?.latitudeDeg);
+  const lon = numberLike(value?.lon ?? value?.lng ?? value?.longitude ?? value?.longitudeDeg);
   if (lat == null || lon == null) return null;
   return { latitude: formatCoordinateDisplay(lat), longitude: formatCoordinateDisplay(lon) };
 }

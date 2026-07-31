@@ -175,6 +175,15 @@ class ChartRectificationService:
                 selected,
                 candidate_bound_count,
             )
+        holdout_result = self._holdout_result(selected, candidates)
+        if selected is not None and holdout_result == "failed":
+            status = "needs_more_feedback"
+            confidence = "none"
+            gate = {
+                "fullReportAllowed": False,
+                "reason": "The selected candidate did not lead the reserved life-event check.",
+                "nextStep": "ask_holdout_discriminator",
+            }
         round_history = self._round_history(next_state)
         round_history.append(
             {
@@ -206,6 +215,7 @@ class ChartRectificationService:
                 "status": status,
                 "selectedCandidateId": selected.get("candidateId") if selected else None,
                 "selectionConfidence": confidence,
+                "holdoutResult": holdout_result,
                 "candidateBoundAnchorCount": int(next_state.get("candidateBoundAnchorCount") or 0)
                 + candidate_bound_count,
                 "currentRoundCandidateBoundAnchorCount": candidate_bound_count,
@@ -220,19 +230,39 @@ class ChartRectificationService:
         next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
         return next_state
 
+    @staticmethod
+    def _holdout_result(
+        selected: dict[str, Any] | None,
+        candidates: list[dict[str, Any]],
+    ) -> str:
+        if selected is None or selected.get("holdoutScore") is None:
+            return "not_run"
+        comparable = [
+            float(candidate["holdoutScore"])
+            for candidate in candidates
+            if candidate.get("holdoutScore") is not None
+        ]
+        if not comparable:
+            return "not_run"
+        selected_score = float(selected["holdoutScore"])
+        return "passed" if selected_score >= max(comparable) - 0.05 else "failed"
+
     def rectified_birth_input(
         self,
         state: dict[str, Any],
         birth_input_context: dict[str, Any],
-        birth_chart_facts: dict[str, Any],
+        chart_record: dict[str, Any],
     ) -> BirthInput | None:
         candidate = self.selected_candidate(state)
         if not candidate or candidate.get("isBase"):
             return None
 
-        subject = birth_chart_facts.get("subject")
+        subject = chart_record.get("subject")
         if not isinstance(subject, dict):
             subject = {}
+        birth_assertion = chart_record.get("birthAssertion")
+        if not isinstance(birth_assertion, dict):
+            birth_assertion = {}
         time_context = birth_input_context.get("time")
         if not isinstance(time_context, dict):
             time_context = {}
@@ -240,21 +270,31 @@ class ChartRectificationService:
         if not isinstance(place_context, dict):
             place_context = {}
 
-        birth_date = str(subject.get("birthDate") or time_context.get("date") or "")
-        birth_time = str(subject.get("birthTime") or time_context.get("reported") or "")
+        birth_date = str(birth_assertion.get("localDate") or time_context.get("date") or "")
+        birth_time = str(
+            birth_assertion.get("reportedLocalTime") or time_context.get("reported") or ""
+        )
         birth_place = str(
             place_context.get("reported")
-            or subject.get("birthPlace")
+            or birth_assertion.get("reportedPlace")
             or place_context.get("resolvedLabel")
             or ""
         )
         place_rectification_allowed = self._place_rectification_allowed(place_context)
 
         axis_changes = []
+        representative = candidate.get("representativeDatetime")
+        if representative:
+            date_part, time_part = self._split_datetime(str(representative))
+            if date_part:
+                birth_date = date_part
+            if time_part:
+                birth_time = time_part
+            axis_changes.append("time")
         for member in candidate.get("members") or []:
             if not isinstance(member, dict):
                 continue
-            if member.get("axis") == "time" and member.get("datetime"):
+            if not representative and member.get("axis") == "time" and member.get("datetime"):
                 date_part, time_part = self._split_datetime(str(member["datetime"]))
                 if date_part:
                     birth_date = date_part
@@ -284,8 +324,8 @@ class ChartRectificationService:
             birthTime=birth_time,
             birthPlace=birth_place,
             birthTimePrecision=str(time_context.get("precision") or "approximate"),
-            gender=str(subject.get("gender") or "未提供"),
-            relationship=str(subject.get("relationship") or "未提供"),
+            gender=str(subject.get("genderContext") or "未提供"),
+            relationship=str(subject.get("relationshipStatus") or "未提供"),
             timeSource=self._rectified_time_source(time_context.get("source")),
             locale="zh",
         )
@@ -499,7 +539,11 @@ class ChartRectificationService:
         for candidate in candidates:
             item = copy.deepcopy(candidate)
             item.setdefault("candidateId", "")
-            item["score"] = 0.0
+            deterministic_score = item.get("aggregateScore")
+            item["deterministicScore"] = (
+                round(float(deterministic_score), 3) if deterministic_score is not None else None
+            )
+            item["score"] = item["deterministicScore"] or 0.0
             item["support"] = 0
             item["reject"] = 0
             result.append(item)
@@ -628,10 +672,10 @@ class ChartRectificationService:
         ids: list[str] = []
         pattern = re.compile(
             r"(?im)^>[ \t]*(?:Candidate(?:[ \t]+IDs?)?|候选盘|候選盤)"
-            r"[ \t]*[：:][ \t]*([A-Z](?:[ \t]*[,/，、][ \t]*[A-Z])*)[ \t]*$"
+            r"[ \t]*[：:][ \t]*([A-Z]+(?:[ \t]*[,/，、][ \t]*[A-Z]+)*)[ \t]*$"
         )
         for match in pattern.finditer(block):
-            for candidate_id in re.findall(r"\b[A-Z]\b", match.group(1)):
+            for candidate_id in re.findall(r"\b[A-Z]+\b", match.group(1)):
                 if candidate_id not in ids:
                     ids.append(candidate_id)
         return ids
@@ -1050,12 +1094,26 @@ class ChartRectificationService:
             search_bounds.get("time") if isinstance(search_bounds.get("time"), dict) else {}
         )
         original_start = self._parse_datetime(str(time_bounds.get("start") or ""))
-        original_end = self._parse_datetime(str(time_bounds.get("end") or ""))
+        has_exclusive_end = bool(time_bounds.get("endExclusive"))
+        original_end = self._parse_datetime(
+            str(time_bounds.get("endExclusive") or time_bounds.get("end") or "")
+        )
+        if original_end is not None and not has_exclusive_end:
+            original_end += timedelta(minutes=1)
         if original_start is None or original_end is None:
             return time_bounds or None
 
         candidate_times: list[datetime] = []
         for candidate in candidates:
+            interval = candidate.get("interval")
+            if isinstance(interval, dict):
+                interval_start = self._parse_datetime(str(interval.get("start") or ""))
+                interval_end = self._parse_datetime(str(interval.get("end") or ""))
+                if interval_start is not None:
+                    candidate_times.append(interval_start)
+                if interval_end is not None:
+                    candidate_times.append(interval_end)
+                continue
             for member in candidate.get("members") or []:
                 if not isinstance(member, dict) or member.get("axis") != "time":
                     continue
@@ -1079,9 +1137,10 @@ class ChartRectificationService:
         narrowed_end = min(original_end, max(candidate_times) + timedelta(minutes=padding))
         return {
             "start": narrowed_start.strftime("%Y-%m-%d %H:%M"),
-            "end": narrowed_end.strftime("%Y-%m-%d %H:%M"),
+            "end": (narrowed_end - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M"),
+            "endExclusive": narrowed_end.strftime("%Y-%m-%d %H:%M"),
             "radiusMinutes": int((narrowed_end - narrowed_start).total_seconds() / 120),
-            "basis": "candidate_member_datetimes",
+            "basis": "candidate_intervals",
             "paddingMinutes": padding,
             "targetCandidateIds": [
                 str(candidate.get("candidateId"))

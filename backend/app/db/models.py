@@ -150,7 +150,7 @@ class VedicArtifactRecord(Base):
     producer: Mapped[str | None] = mapped_column(String(120), nullable=True)
     checkpointed: Mapped[bool] = mapped_column(Boolean, default=False)
     artifact_sha256: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    structured_data_sha256: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    chart_record_sha256: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

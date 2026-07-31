@@ -340,9 +340,9 @@ class MetadataStore:
                     producer=self._optional_string(checkpoint, "producer"),
                     checkpointed=bool(checkpoint),
                     artifact_sha256=self._optional_string(checkpoint, "artifactSha256"),
-                    structured_data_sha256=self._optional_string(
+                    chart_record_sha256=self._optional_string(
                         checkpoint,
-                        "structuredDataSha256",
+                        "chartRecordSha256",
                     ),
                     created_at=self._mtime(path),
                     updated_at=self._mtime(path),
@@ -436,7 +436,12 @@ class MetadataStore:
         )
 
     def _session_files(self, session_dir: Path) -> list[Path]:
-        return sorted(path for path in session_dir.rglob("*") if path.is_file())
+        return sorted(
+            path
+            for path in session_dir.rglob("*")
+            if path.is_file()
+            and self.workspace.is_current_runtime_file(path.relative_to(session_dir).as_posix())
+        )
 
     def _checkpoint_metadata(self, session_dir: Path) -> dict[str, dict[str, Any]]:
         checkpoint_dir = session_dir / ".meta" / "artifacts"
@@ -453,11 +458,25 @@ class MetadataStore:
         return checkpoints
 
     def _subject_json(self, session_dir: Path) -> dict[str, Any] | None:
-        payload = self._read_json(session_dir / "birth_chart_facts.json")
-        if payload is None:
-            payload = self._read_json(session_dir / "structured_data.json")
-        subject = payload.get("subject") if isinstance(payload, dict) else None
-        return subject if isinstance(subject, dict) else None
+        payload = self._read_json(session_dir / "chart_record.json")
+        if not isinstance(payload, dict):
+            return None
+        subject = payload.get("subject")
+        birth_assertion = payload.get("birthAssertion")
+        canonical_moment = payload.get("canonicalMoment")
+        if not isinstance(subject, dict) or not isinstance(birth_assertion, dict):
+            return None
+        canonical = canonical_moment if isinstance(canonical_moment, dict) else {}
+        place = canonical.get("place") if isinstance(canonical, dict) else {}
+        return {
+            "birthDate": birth_assertion.get("localDate"),
+            "birthTime": birth_assertion.get("reportedLocalTime"),
+            "birthPlace": birth_assertion.get("reportedPlace"),
+            "gender": subject.get("genderContext"),
+            "relationship": subject.get("relationshipStatus"),
+            "timezone": canonical.get("timezoneId"),
+            "resolvedPlace": place.get("label") if isinstance(place, dict) else None,
+        }
 
     def _read_json(self, path: Path) -> dict[str, Any] | None:
         if not path.exists():
@@ -473,7 +492,7 @@ class MetadataStore:
         metric_status = self._string(metrics, "status")
         if metric_status in {"queued", "running", "completed", "failed"}:
             return metric_status
-        if "appendix.md" in names:
+        if "consultation_report.md" in names:
             return "completed"
         if metric_status == "calculator_complete":
             return "draft"
@@ -485,11 +504,11 @@ class MetadataStore:
         names = {path.name for path in files}
         if status == "failed":
             return "error"
-        if "appendix.md" in names:
+        if "consultation_report.md" in names:
             return "core_complete"
         if "user_context.md" in names or "reader_prevalidation.md" in names:
             return "reader_validation"
-        if "structured_data.md" in names:
+        if "chart_record.json" in names:
             return "reader_ready"
         return self._string(metrics, "stage") or "draft"
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -76,10 +77,6 @@ def _base_chart() -> dict[str, Any]:
             }
         },
         "dashas": [{"planet": "Moon", "is_current": True, "antardashas": []}],
-        "d9": {"Lagna": ("Libra", 0)},
-        "d10": {"Lagna": ("Capricorn", 0)},
-        "d4": {"Lagna": ("Cancer", 0)},
-        "d5": {"Lagna": ("Leo", 0)},
         "divisional_charts": divisional_charts,
     }
 
@@ -181,6 +178,58 @@ def test_candidate_groups_use_rectification_vargas_but_not_d60_noise() -> None:
     assert len(d7_groups) == 2
     assert d7_groups[1]["changedFromBase"] == ["d7Lagna"]
     assert len(d60_groups) == 1
+
+
+def test_time_points_become_contiguous_non_overlapping_candidate_intervals() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    base_signature = calculator._chart_signature(_base_chart())
+    changed_signature = {**base_signature, "d9Lagna": "Scorpio"}
+
+    variants = calculator._coalesce_time_points(
+        [
+            {"moment": datetime(1990, 1, 1, 8, 29), "signature": base_signature},
+            {"moment": datetime(1990, 1, 1, 8, 30), "signature": base_signature},
+            {"moment": datetime(1990, 1, 1, 8, 31), "signature": changed_signature},
+        ],
+        datetime(1990, 1, 1, 8, 30),
+        base_signature,
+    )
+
+    assert [variant["interval"] for variant in variants] == [
+        {"start": "1990-01-01 08:29", "end": "1990-01-01 08:31"},
+        {"start": "1990-01-01 08:31", "end": "1990-01-01 08:32"},
+    ]
+    assert variants[0]["representativeDatetime"] == "1990-01-01 08:30"
+    assert variants[0]["isBase"] is True
+    assert variants[1]["isBase"] is False
+
+
+def test_life_event_ledger_reserves_latest_event_as_holdout() -> None:
+    ledger = parse_life_event_ledger("2012年9月 入学\n2018年10月 结婚\n2023年6月 跳槽")
+
+    assert [event["role"] for event in ledger["events"]] == [
+        "calibration",
+        "calibration",
+        "holdout",
+    ]
+    assert ledger["events"][-1]["category"] == "career"
+
+
+def test_holdout_failure_blocks_selected_candidate() -> None:
+    service = ChartRectificationService()
+    candidates = [
+        {"candidateId": "A", "holdoutScore": 0.25},
+        {"candidateId": "B", "holdoutScore": 0.7},
+    ]
+
+    assert service._holdout_result(candidates[0], candidates) == "failed"
+    assert service._holdout_result(candidates[1], candidates) == "passed"
+
+
+def test_candidate_anchor_parser_supports_more_than_twenty_six_intervals() -> None:
+    service = ChartRectificationService()
+
+    assert service._candidate_ids_from_block("> Candidate IDs: Z, AA, AB") == ["Z", "AA", "AB"]
 
 
 def test_report_readiness_restricts_advanced_vargas_without_blocking_d1() -> None:
@@ -456,29 +505,34 @@ def test_prevalidation_decision_requires_medium_risk_threshold() -> None:
 
 def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
-    birth_chart_facts_json = json.dumps(
+    chart_record_json = json.dumps(
         {
             "subject": {
-                "birthDate": "1990-01-01",
-                "birthTime": "08:30",
-                "birthPlace": "Shanghai",
-                "timePrecision": "约略时间",
-                "timeSource": "family memory",
+                "subjectId": "subject-1",
             },
-            "sensitivityScan": {
-                "summary": {
-                    "riskLevel": "high",
-                    "changedFields": ["d9Lagna"],
-                    "divisionalConfidence": {"D9": {"confidence": "low"}},
-                },
-                "stability": {"llmRestrictedEvidence": ["d9Lagna", "D9"]},
-                "reportReadiness": {
-                    "mode": "rectification_required",
-                    "scope": "prevalidation_or_d1_only",
-                    "minimumHitRateForCore": 0.9,
-                    "coreAllowedWithoutRectification": False,
-                    "llmContract": {"mustNotUseAsPrimaryEvidence": ["d9Lagna", "D9"]},
-                },
+            "birthAssertion": {
+                "localDate": "1990-01-01",
+                "reportedLocalTime": "08:30",
+                "reportedPlace": "Shanghai",
+                "timeCertainty": "approximate",
+                "evidence": [{"sourceLabel": "family memory"}],
+            },
+        }
+    )
+    sensitivity_scan_json = json.dumps(
+        {
+            "summary": {
+                "riskLevel": "high",
+                "changedFields": ["d9Lagna"],
+                "divisionalConfidence": {"D9": {"confidence": "low"}},
+            },
+            "stability": {"llmRestrictedEvidence": ["d9Lagna", "D9"]},
+            "reportReadiness": {
+                "mode": "rectification_required",
+                "scope": "prevalidation_or_d1_only",
+                "minimumHitRateForCore": 0.9,
+                "coreAllowedWithoutRectification": False,
+                "llmContract": {"mustNotUseAsPrimaryEvidence": ["d9Lagna", "D9"]},
             },
         }
     )
@@ -494,7 +548,8 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
 > Derivation: test
         """,
         "1. 准\n2. 准\n",
-        birth_chart_facts_json,
+        chart_record_json,
+        sensitivity_scan_json,
     )
 
     score = cast(dict[str, Any], result["score"])
@@ -1147,10 +1202,10 @@ def test_core_batch_prompts_enforce_input_confidence_contract() -> None:
     assert "judgement_context.json" in judgement_prompt
     assert "restrictedFactIds" in judgement_prompt
     assert "restrictedTimingPeriodIds" in judgement_prompt
-    assert "Do not read or use p1_overview.md" in judgement_prompt
+    assert "Use only the listed typed contracts" in judgement_prompt
     assert "claim_graph.json" in judgement_prompt
     assert "consultation_dossier.json" in consultation_prompt
-    assert "Do not read or use any legacy p1-p5 Markdown report" in consultation_prompt
+    assert "Use only the listed typed contracts" in consultation_prompt
 
 
 def test_reader_prompt_uses_backend_rectification_plan() -> None:

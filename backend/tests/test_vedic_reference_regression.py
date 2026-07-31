@@ -13,7 +13,7 @@ import pytz
 import swisseph as swe
 
 from app.calculator.engine import PLANETS_SWE, SIGNS, calculate_full_chart
-from app.calculator.structured_schema import build_structured_schema
+from app.calculator.pyjhora_compat import ensure_pyjhora_swe_compat
 from app.vedicdust.chart_record_builder import ChartRecordBuildInput, build_chart_record
 from app.vedicdust.source_registry import load_rule_catalog
 
@@ -75,7 +75,7 @@ def test_vedic_engine_matches_swiss_ephemeris_core_positions(case: dict[str, Any
 
 
 @pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
-def test_vedic_engine_matches_pyjhora_reference_for_vargas_sav_and_dasha(
+def test_vedic_engine_adapter_matches_direct_pyjhora_for_all_vargas_sav_and_dasha(
     case: dict[str, Any],
 ) -> None:
     chart = _calculate_case(case)
@@ -84,10 +84,37 @@ def test_vedic_engine_matches_pyjhora_reference_for_vargas_sav_and_dasha(
     assert chart["sav"] == reference["sav"]
     assert sum(chart["sav"].values()) == 337
 
-    for chart_key in ["D4", "D5", "D9", "D10"]:
+    for chart_key in [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D7",
+        "D9",
+        "D10",
+        "D12",
+        "D16",
+        "D20",
+        "D24",
+        "D27",
+        "D30",
+        "D60",
+    ]:
         actual_chart = chart["divisional_charts"][chart_key]
         expected_chart = reference["divisional_charts"][chart_key]
-        for body in ["Lagna", "Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]:
+        for body in [
+            "Lagna",
+            "Sun",
+            "Moon",
+            "Mars",
+            "Mercury",
+            "Jupiter",
+            "Venus",
+            "Saturn",
+            "Rahu",
+            "Ketu",
+        ]:
             assert actual_chart[body]["sign_idx"] == expected_chart[body]["sign_idx"]
             assert actual_chart[body]["sign"] == expected_chart[body]["sign"]
             assert actual_chart[body]["degree"] == pytest.approx(
@@ -134,35 +161,6 @@ def test_vedic_engine_matches_pinned_product_reference_snapshot(case: dict[str, 
 
 
 @pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
-def test_birth_chart_facts_schema_uses_lahiri_and_exposes_calculation_context(
-    case: dict[str, Any],
-) -> None:
-    chart = _calculate_case(case)
-    payload = build_structured_schema(
-        chart,
-        transit_data=None,
-        meta={
-            "dob": f"{int(case['year']):04d}-{int(case['month']):02d}-{int(case['day']):02d}",
-            "time": f"{int(case['hour']):02d}:{int(case['minute']):02d}",
-            "place": case["id"],
-            "lat": float(case["lat"]),
-            "lon": float(case["lon"]),
-            "timezone": case["tz"],
-        },
-        user_info={},
-    )
-
-    ayanamsa = payload["calculation"]["ayanamsa"]
-    assert ayanamsa["mode"] == "LAHIRI"
-    assert ayanamsa["label"] == "Lahiri"
-    assert ayanamsa["crossCheck"]["primary"] == "Lahiri"
-    assert ayanamsa["crossCheck"]["alternate"] == "True Chitrapaksha"
-    assert "vargeeyaBala" in payload["strengths"]
-    assert "bhavaBala" in payload["strengths"]
-    assert "specialLagnas" in payload["strengths"]
-
-
-@pytest.mark.parametrize("case", _reference_cases(), ids=lambda case: case["id"])
 def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any]) -> None:
     chart = _calculate_case(case)
     birth_date = f"{int(case['year']):04d}-{int(case['month']):02d}-{int(case['day']):02d}"
@@ -184,6 +182,8 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
             birth_place=str(case["label"]),
             birth_time_precision="exact",
             time_source="reference fixture",
+            gender_context="not specified",
+            relationship_status="not specified",
             place_label=str(case["label"]),
             latitude=float(case["lat"]),
             longitude=float(case["lon"]),
@@ -235,13 +235,31 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
         30,
         60,
     }
-    assert all(check.status == "passed" for check in result.quality_checks)
+    assert not any(check.status == "failed" for check in result.quality_checks)
     assert any(
         check.check_id == "varga.d1-provider-sign-alignment" for check in result.quality_checks
     )
+    independent_reference = next(
+        check
+        for check in result.quality_checks
+        if check.check_id == "calculation.independent-golden-reference"
+    )
+    assert independent_reference.status == "warning"
     registered_rules = {rule.rule_id for rule in load_rule_catalog().rules}
     assert {fact.provenance.rule_id for fact in result.facts} <= registered_rules
     assert {period.provenance.rule_id for period in result.timing_periods} <= registered_rules
+    fact_types = {fact.fact_type for fact in result.facts}
+    assert "rashi.house.occupant" in fact_types
+    assert "relationship.same_sign" in fact_types
+    assert "ashtakavarga.bav.graha" in fact_types
+    assert "karaka.chara" in fact_types
+    assert "point.arudha" in fact_types
+    assert "strength.bhava_bala" in fact_types
+    assert "point.special_lagna" in fact_types
+    assert "timing.transit.position" in fact_types
+    assert "timing.transit.sade_sati" in fact_types
+    assert "timing.transit.double_transit" in fact_types
+    assert any(period.level == "pratyantardasha" for period in result.timing_periods)
     assert result.rectification is not None
     assert result.rectification.decision.status == "not_required"
 
@@ -251,6 +269,13 @@ def test_calculator_rejects_ambiguous_civil_time() -> None:
 
     with pytest.raises(ValueError, match="ambiguous"):
         to_jd(2021, 11, 7, 1, 30, "America/New_York")
+
+
+def test_calculator_rejects_nonexistent_civil_time() -> None:
+    from app.calculator.engine import to_jd
+
+    with pytest.raises(ValueError, match="does not exist"):
+        to_jd(2021, 3, 14, 2, 30, "America/New_York")
 
 
 def test_pyjhora_bundled_reference_baseline_is_available() -> None:
@@ -269,6 +294,41 @@ def test_pyjhora_bundled_reference_baseline_is_available() -> None:
     assert len(payload) >= 6800
     assert payload["1"][0] == "BVRaman Shadbala rasi_planet_positions"
     assert payload["28"][0] == "BVRaman Shadbala Total"
+
+
+def test_pyjhora_swisseph_compatibility_patch_is_idempotent() -> None:
+    from app.calculator.dasha_pyjhora import _setup_jhora
+    from app.calculator.extras_pyjhora import _setup
+    from app.calculator.pyjhora_compat import ensure_pyjhora_swe_compat
+
+    ensure_pyjhora_swe_compat()
+    patched_calc_ut = swe.calc_ut
+    patched_calc = swe.calc
+    patched_houses = swe.houses_ex
+
+    for _ in range(3):
+        _setup()
+        _setup_jhora()
+        ensure_pyjhora_swe_compat()
+
+    assert swe.calc_ut is patched_calc_ut
+    assert swe.calc is patched_calc
+    assert swe.houses_ex is patched_houses
+
+
+def test_transit_snapshot_uses_explicit_utc_instant() -> None:
+    from datetime import timedelta
+
+    from app.calculator.engine import calc_transits
+
+    instant = datetime(2026, 7, 31, 12, 30, tzinfo=timezone.utc)
+    same_instant = instant.astimezone(timezone(timedelta(hours=8)))
+
+    first = calc_transits(0, 1, as_of=instant)
+    second = calc_transits(0, 1, as_of=same_instant)
+
+    assert first == second
+    assert first["as_of_utc"] == "2026-07-31T12:30:00+00:00"
 
 
 def _calculate_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -348,7 +408,7 @@ def _pyjhora_reference(case: dict[str, Any]) -> dict[str, Any]:
     _, sav_raw, _ = ashtakavarga.get_ashtaka_varga(house_to_planets)
 
     divisional_charts: dict[str, dict[str, Any]] = {}
-    for factor in [4, 5, 9, 10]:
+    for factor in [1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]:
         positions = charts.divisional_chart(
             jd_local,
             place,
@@ -389,7 +449,7 @@ def _configure_pyjhora() -> None:
         sys.path.insert(0, str(pyjhora_path))
     swe.set_ephe_path(str(pyjhora_path / "jhora" / "data" / "ephe"))
 
-    _patch_swe_for_pyjhora()
+    ensure_pyjhora_swe_compat()
 
     from jhora import const
     from jhora.panchanga import drik
@@ -397,34 +457,6 @@ def _configure_pyjhora() -> None:
     drik.set_ayanamsa_mode("LAHIRI")
     const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
     const._use_true_nodes_for_rahu_ketu = False
-
-
-def _patch_swe_for_pyjhora() -> None:
-    for fn_name in ["calc_ut", "calc"]:
-        original = getattr(swe, fn_name)
-        if getattr(original, "_vedic_reference_patched", False):
-            continue
-
-        def make_patch(func: Any) -> Any:
-            def patched(jd: float, planet: int, flags: int = 0) -> Any:
-                result = func(jd, planet, flags=flags)
-                return (result[0], result[1]) if len(result) == 3 else result
-
-            patched._vedic_reference_patched = True
-            return patched
-
-        setattr(swe, fn_name, make_patch(original))
-
-    if hasattr(swe, "houses_ex"):
-        original_houses = swe.houses_ex
-        if not getattr(original_houses, "_vedic_reference_patched", False):
-
-            def patched_houses(*args: Any, **kwargs: Any) -> Any:
-                result = original_houses(*args, **kwargs)
-                return (result[0], result[1]) if len(result) == 3 else result
-
-            patched_houses._vedic_reference_patched = True
-            swe.houses_ex = patched_houses
 
 
 def _map_pyjhora_positions(positions: list[Any]) -> dict[str, dict[str, Any]]:

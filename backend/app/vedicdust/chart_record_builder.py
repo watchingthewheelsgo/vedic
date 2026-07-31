@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import calendar
 from dataclasses import dataclass
 from datetime import date, datetime
 from functools import lru_cache
@@ -12,12 +15,15 @@ from .models import (
     AstronomySnapshot,
     BirthAssertion,
     CanonicalBirthMoment,
+    CandidateEvidenceScore,
+    CandidateInterval,
     ChartPlacement,
     ConfidenceGrade,
     EvidenceClass,
     EvidenceItem,
     GrahaPosition,
     JyotishFact,
+    LifeEvent,
     PlaceResolution,
     QualityCheck,
     RectificationDecision,
@@ -80,6 +86,8 @@ class ChartRecordBuildInput:
     birth_place: str
     birth_time_precision: str
     time_source: str
+    gender_context: str
+    relationship_status: str
     place_label: str
     latitude: float
     longitude: float
@@ -174,6 +182,8 @@ def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
                 _age_on(date.fromisoformat(source.birth_date), source.created_at.date())
             ),
             reader_relationship="self",
+            gender_context=source.gender_context,
+            relationship_status=source.relationship_status,
         ),
         birth_assertion=BirthAssertion(
             local_date=source.birth_date,
@@ -314,12 +324,29 @@ def _facts(
         )
     )
     for name in GRAHAS:
+        planet = chart["planets"][name]
+        house = int(planet["house"])
         facts.append(
             _fact(
                 fact_id=f"fact.D1.{name}.position",
                 fact_type="rashi.graha.position",
                 subject_ref=f"D1.{name}",
-                value=_zodiac_position(chart["planets"][name]).model_dump(by_alias=True),
+                value=_zodiac_position(planet).model_dump(by_alias=True),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.VERIFIED,
+            )
+        )
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.H{house}.occupant.{name}",
+                fact_type="rashi.house.occupant",
+                subject_ref=f"D1.H{house}.occupant.{name}",
+                value={
+                    "graha": name,
+                    "house": house,
+                    "sign": str(planet["sign"]),
+                    "signIndex": int(planet["sign_idx"]),
+                },
                 method_profile_id=method_profile_id,
                 confidence=ConfidenceGrade.VERIFIED,
             )
@@ -385,6 +412,153 @@ def _facts(
                 confidence=ConfidenceGrade.CORROBORATED,
             )
         )
+    combustion = chart.get("combustion") or {}
+    sun_longitude = float(chart["planets"]["Sun"]["longitude"])
+    for name in ["Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]:
+        value = combustion.get(name) if isinstance(combustion, Mapping) else None
+        longitude = float(chart["planets"][name]["longitude"])
+        distance = abs(longitude - sun_longitude)
+        if distance > 180:
+            distance = 360 - distance
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{name}.combustion",
+                fact_type="strength.combustion",
+                subject_ref=f"D1.{name}",
+                value={
+                    "isCombust": isinstance(value, Mapping),
+                    "distanceDeg": round(float(value.get("distance", distance)), 4)
+                    if isinstance(value, Mapping)
+                    else round(distance, 4),
+                },
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+    for name, value in (chart.get("digbala") or {}).items():
+        if name not in GRAHAS:
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{name}.digbala",
+                fact_type="strength.digbala",
+                subject_ref=f"D1.{name}",
+                value={"hasDirectionalStrength": bool(value)},
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+    for name, value in (chart.get("vargottama") or {}).items():
+        if name not in GRAHAS:
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{name}.vargottama",
+                fact_type="varga.vargottama",
+                subject_ref=f"D1.{name}",
+                value={"isVargottamaD1D9": bool(value)},
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+    for row in (chart.get("karakas") or {}).get("7k") or []:
+        if not isinstance(row, (list, tuple)) or len(row) < 3 or str(row[1]) not in GRAHAS:
+            continue
+        role, name, degree = str(row[0]), str(row[1]), float(row[2])
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{name}.chara_karaka",
+                fact_type="karaka.chara",
+                subject_ref=f"D1.{name}",
+                value={"scheme": "7K", "role": role, "degreeInSign": round(degree, 6)},
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+    for point, value in (chart.get("special_points") or {}).items():
+        if point not in {"AL", "UL"} or not isinstance(value, Mapping):
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{point}.position",
+                fact_type="point.arudha",
+                subject_ref=f"D1.{point}",
+                value=dict(value),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+    moon_phase = chart.get("moon_phase")
+    if isinstance(moon_phase, Mapping):
+        facts.append(
+            _fact(
+                fact_id="fact.D1.Moon.phase",
+                fact_type="state.moon_phase",
+                subject_ref="D1.Moon",
+                value=dict(moon_phase),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.VERIFIED,
+            )
+        )
+    for house, value in (chart.get("bhava_bala") or {}).items():
+        if not isinstance(value, Mapping):
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.H{house}.bhava_bala",
+                fact_type="strength.bhava_bala",
+                subject_ref=f"D1.H{house}",
+                value=dict(value),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.CORROBORATED,
+            )
+        )
+    vargeeya_by_graha: dict[str, dict[str, float]] = {name: {} for name in GRAHAS}
+    for scheme, values in (chart.get("vargeeya_bala") or {}).items():
+        if not isinstance(values, Mapping):
+            continue
+        for name, value in values.items():
+            if name in vargeeya_by_graha and isinstance(value, (int, float)):
+                vargeeya_by_graha[name][str(scheme)] = float(value)
+    for name, values in vargeeya_by_graha.items():
+        if not values:
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{name}.vargeeya_bala",
+                fact_type="strength.vargeeya_bala",
+                subject_ref=f"D1.{name}",
+                value=values,
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.CORROBORATED,
+            )
+        )
+    for name, values in (chart.get("bav") or {}).items():
+        if name not in GRAHAS or not isinstance(values, Mapping):
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.{name}.bav",
+                fact_type="ashtakavarga.bav.graha",
+                subject_ref=f"D1.{name}",
+                value=dict(values),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.CORROBORATED,
+            )
+        )
+    for name, value in (chart.get("special_lagnas") or {}).items():
+        if not isinstance(value, Mapping):
+            continue
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.special_lagna.{name}",
+                fact_type="point.special_lagna",
+                subject_ref=f"D1.special_lagna.{name}",
+                value=dict(value),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.CORROBORATED,
+            )
+        )
     for house, value in (chart.get("sav_by_house") or {}).items():
         facts.append(
             _fact(
@@ -397,17 +571,89 @@ def _facts(
                 confidence=ConfidenceGrade.CORROBORATED,
             )
         )
-    for index, aspect in enumerate(chart.get("aspects") or []):
-        if not isinstance(aspect, Mapping) or aspect.get("kind") != "graha_drishti":
+    aspect_index = 0
+    for aspect in chart.get("aspects") or []:
+        if not isinstance(aspect, Mapping):
             continue
         source = str(aspect["source"])
         target = str(aspect["target"])
+        if aspect.get("kind") == "same_sign":
+            facts.append(
+                _fact(
+                    fact_id=f"fact.D1.same_sign.{source}.{target}",
+                    fact_type="relationship.same_sign",
+                    subject_ref=f"D1.{source}~{target}",
+                    value=dict(aspect),
+                    method_profile_id=method_profile_id,
+                    confidence=ConfidenceGrade.PROVISIONAL,
+                )
+            )
+            continue
+        if aspect.get("kind") != "graha_drishti":
+            continue
         facts.append(
             _fact(
-                fact_id=f"fact.D1.aspect.{index:03d}",
+                fact_id=f"fact.D1.aspect.{aspect_index:03d}",
                 fact_type="aspect.graha_drishti",
                 subject_ref=f"D1.{source}->{target}",
                 value=dict(aspect),
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+        aspect_index += 1
+    for aspect in chart.get("house_aspects") or []:
+        if not isinstance(aspect, Mapping):
+            continue
+        source = str(aspect["source"])
+        target = f"H{int(aspect['target_house'])}"
+        facts.append(
+            _fact(
+                fact_id=f"fact.D1.aspect.{aspect_index:03d}",
+                fact_type="aspect.graha_drishti",
+                subject_ref=f"D1.{source}->{target}",
+                value={**dict(aspect), "kind": "graha_drishti", "target": target},
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+        aspect_index += 1
+    transits = chart.get("transits")
+    if isinstance(transits, Mapping):
+        as_of_utc = transits.get("as_of_utc")
+        for name in ["Saturn", "Jupiter", "Rahu", "Ketu"]:
+            value = transits.get(name)
+            if not isinstance(value, Mapping):
+                continue
+            facts.append(
+                _fact(
+                    fact_id=f"fact.Transit.{name}.position",
+                    fact_type="timing.transit.position",
+                    subject_ref=f"Transit.{name}",
+                    value={**dict(value), "asOfUtc": as_of_utc},
+                    method_profile_id=method_profile_id,
+                    confidence=ConfidenceGrade.VERIFIED,
+                )
+            )
+        facts.append(
+            _fact(
+                fact_id="fact.Transit.Saturn.Moon.sade_sati",
+                fact_type="timing.transit.sade_sati",
+                subject_ref="Transit.Saturn.Moon",
+                value={"phase": transits.get("sade_sati"), "asOfUtc": as_of_utc},
+                method_profile_id=method_profile_id,
+                confidence=ConfidenceGrade.PROVISIONAL,
+            )
+        )
+        facts.append(
+            _fact(
+                fact_id="fact.Transit.Saturn.Jupiter.double_transit",
+                fact_type="timing.transit.double_transit",
+                subject_ref="Transit.Saturn~Jupiter",
+                value={
+                    "houses": list(transits.get("double_transit_houses") or []),
+                    "asOfUtc": as_of_utc,
+                },
                 method_profile_id=method_profile_id,
                 confidence=ConfidenceGrade.PROVISIONAL,
             )
@@ -480,6 +726,30 @@ def _timing_periods(
                     provenance=_timing_provenance(method_profile_id),
                 )
             )
+            for pd_index, pratyantardasha in enumerate(antardasha.get("pratyantardashas") or []):
+                if not isinstance(pratyantardasha, Mapping):
+                    continue
+                pd_start = _period_moment(str(pratyantardasha["start"]), timezone_id)
+                pd_end = _period_moment(str(pratyantardasha["end"]), timezone_id)
+                if pd_end <= pd_start:
+                    continue
+                result.append(
+                    TimingPeriod(
+                        period_id=(
+                            f"{md_id}.ad.{ad_index:02d}.{str(antardasha['planet']).lower()}"
+                            f".pd.{pd_index:02d}.{str(pratyantardasha['planet']).lower()}"
+                        ),
+                        system="Vimshottari",
+                        level="pratyantardasha",
+                        lords=[
+                            str(dasha["planet"]),
+                            str(antardasha["planet"]),
+                            str(pratyantardasha["planet"]),
+                        ],
+                        interval=TimeRange(start=pd_start, end=pd_end),
+                        provenance=_timing_provenance(method_profile_id),
+                    )
+                )
     return result
 
 
@@ -542,6 +812,16 @@ def _quality_checks(chart: Mapping[str, Any], charts: list[VargaChart]) -> list[
                 else "Swiss Ephemeris and PyJHora D1 signs disagree."
             ),
         ),
+        QualityCheck(
+            check_id="calculation.independent-golden-reference",
+            status="warning",
+            expected="Pinned outputs from an independent Jyotish desktop reference",
+            observed="Swiss Ephemeris core checks plus direct PyJHora adapter checks",
+            message=(
+                "Provider compatibility is covered, but cross-software golden fixtures "
+                "remain required before claiming independent desktop equivalence."
+            ),
+        ),
     ]
 
 
@@ -596,7 +876,123 @@ def _rectification(
                 "No decision-relevant instability requires rectification for the current scope."
             ],
         )
-    return RectificationRecord(reported_window=reported_window, decision=decision)
+    return RectificationRecord(
+        reported_window=reported_window,
+        life_events=_life_events(source),
+        candidates=_candidate_intervals(source),
+        decision=decision,
+    )
+
+
+def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterval]:
+    raw_candidates = source.sensitivity_scan.get("candidateGroups") or []
+    result: list[CandidateInterval] = []
+    for raw in raw_candidates:
+        if not isinstance(raw, Mapping):
+            continue
+        interval = raw.get("interval")
+        representative = raw.get("representativeDatetime")
+        candidate_id = raw.get("candidateId")
+        if not isinstance(interval, Mapping) or not representative or not candidate_id:
+            continue
+        start = _localize_naive(
+            datetime.strptime(str(interval.get("start")), "%Y-%m-%d %H:%M"),
+            source.timezone_id,
+        )
+        end = _localize_naive(
+            datetime.strptime(str(interval.get("end")), "%Y-%m-%d %H:%M"),
+            source.timezone_id,
+        )
+        representative_moment = _localize_naive(
+            datetime.strptime(str(representative), "%Y-%m-%d %H:%M"),
+            source.timezone_id,
+        )
+        signature = raw.get("signature") if isinstance(raw.get("signature"), Mapping) else {}
+        fingerprint = hashlib.sha256(
+            json.dumps(signature, ensure_ascii=True, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        result.append(
+            CandidateInterval(
+                candidate_id=str(candidate_id),
+                interval=TimeRange(start=start, end=end),
+                representative_moment=representative_moment,
+                fingerprint=fingerprint,
+                evidence_scores=[
+                    CandidateEvidenceScore(
+                        event_id=str(score.get("eventId")),
+                        score=float(score.get("score") or 0.0),
+                        supporting_fact_ids=[
+                            str(value) for value in score.get("supportingFactIds") or []
+                        ],
+                        contradicting_fact_ids=[
+                            str(value) for value in score.get("contradictingFactIds") or []
+                        ],
+                        rule_ids=[str(value) for value in score.get("ruleIds") or []],
+                        explanation=str(score.get("explanation") or "No explanation supplied."),
+                    )
+                    for score in raw.get("evidenceScores") or []
+                    if isinstance(score, Mapping) and score.get("eventId")
+                ],
+                aggregate_score=(
+                    float(raw["aggregateScore"]) if raw.get("aggregateScore") is not None else None
+                ),
+            )
+        )
+    return result
+
+
+def _life_events(source: ChartRecordBuildInput) -> list[LifeEvent]:
+    ledger = source.input_context.get("lifeEvents") or {}
+    raw_events = ledger.get("events") if isinstance(ledger, Mapping) else []
+    result: list[LifeEvent] = []
+    for raw in raw_events or []:
+        if not isinstance(raw, Mapping) or not raw.get("eventId") or not raw.get("date"):
+            continue
+        date_value = str(raw["date"])
+        precision = str(raw.get("datePrecision") or "year")
+        if precision == "month":
+            year, month = (int(value) for value in date_value.split("-"))
+            start_naive = datetime(year, month, 1)
+            end_naive = datetime(
+                year,
+                month,
+                calendar.monthrange(year, month)[1],
+                23,
+                59,
+                59,
+            )
+        else:
+            year = int(date_value[:4])
+            start_naive = datetime(year, 1, 1)
+            end_naive = datetime(year, 12, 31, 23, 59, 59)
+            precision = "year"
+        confidence = (
+            ConfidenceGrade.CORROBORATED
+            if str(raw.get("confidence")) == "high"
+            else ConfidenceGrade.PROVISIONAL
+        )
+        result.append(
+            LifeEvent(
+                event_id=str(raw["eventId"]),
+                category=str(raw.get("category") or "unknown"),
+                interval=TimeRange(
+                    start=_localize_naive(start_naive, source.timezone_id),
+                    end=_localize_naive(end_naive, source.timezone_id),
+                ),
+                date_precision=precision,
+                description=str(raw.get("description") or "Dated life event"),
+                role=str(raw.get("role") or "calibration"),
+                evidence=EvidenceItem(
+                    evidence_id=f"evidence.{raw['eventId']}",
+                    evidence_class=EvidenceClass.USER_TESTIMONY,
+                    source_label="user life-event intake",
+                    observed_value=str(raw.get("description") or date_value),
+                    confidence=confidence,
+                    notes="Used for rectification ranking only; not proof of causation.",
+                ),
+            )
+        )
+    return result
 
 
 def _zodiac_position(value: Mapping[str, Any]) -> ZodiacPosition:
@@ -636,7 +1032,7 @@ def _reported_window(input_context: Mapping[str, Any], timezone_id: str) -> Time
     time_context = input_context.get("time") or {}
     window = time_context.get("window") or {}
     start = window.get("start")
-    end = window.get("end")
+    end = window.get("endExclusive") or window.get("end")
     if not start or not end:
         return None
     return TimeRange(

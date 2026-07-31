@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from app.vedicdust.reporting import (
     render_consultation_report,
 )
 from app.vedicdust.source_registry import load_rule_catalog
+from app.vedicdust.synastry import build_synastry_context
 from app.vedicdust.validation import (
     validate_agent_context,
     validate_claim_graph,
@@ -47,7 +49,6 @@ from app.vedicdust.validation import (
     validate_judgement_context,
 )
 
-BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json"
 CHART_RECORD_JSON = "chart_record.json"
 READING_SESSION_JSON = "reading_session.json"
 CHART_AUDIT_JSON = "chart_audit.json"
@@ -57,10 +58,13 @@ CONSULTATION_DOSSIER_JSON = "consultation_dossier.json"
 CONSULTATION_REPORT_MANIFEST_JSON = "consultation_report_manifest.json"
 AGENT_CONTEXT_JSON = "agent_context.json"
 CONSULTATION_REPORT_MD = "consultation_report.md"
-LEGACY_VEDICDUST_CASE_JSON = "vedicdust_case.json"
-LEGACY_STRUCTURED_DATA_JSON = "structured_data.json"
-BIRTH_CHART_FACTS_B_JSON = "birth_chart_facts_B.json"
-LEGACY_STRUCTURED_DATA_B_JSON = "structured_data_B.json"
+CHART_RECORD_B_JSON = "chart_record_B.json"
+SYNASTRY_CONTEXT_JSON = "synastry_context.json"
+
+
+@dataclass(frozen=True)
+class _AgentWorkspaceSnapshot:
+    files: dict[str, bytes]
 
 
 class SkillRuntime:
@@ -92,12 +96,6 @@ class SkillRuntime:
         )
         calculation = self.calculator.calculate(input_data, identity=identity)
         finished = datetime.now(timezone.utc)
-        self.workspace.write_artifact(session_id, "structured_data.md", calculation.structured_data)
-        self.workspace.write_artifact(
-            session_id,
-            BIRTH_CHART_FACTS_JSON,
-            calculation.birth_chart_facts_json,
-        )
         self.workspace.write_artifact(
             session_id,
             "birth_input_context.json",
@@ -148,12 +146,6 @@ class SkillRuntime:
         )
         self.workspace.write_session_manifest(session_id, locale=input_data.locale)
         self.workspace.mark_artifact_checkpoint(
-            session_id, "structured_data.md", producer="calculator"
-        )
-        self.workspace.mark_artifact_checkpoint(
-            session_id, BIRTH_CHART_FACTS_JSON, producer="calculator"
-        )
-        self.workspace.mark_artifact_checkpoint(
             session_id, "birth_input_context.json", producer="calculator"
         )
         self.workspace.mark_artifact_checkpoint(
@@ -184,7 +176,7 @@ class SkillRuntime:
             stage="reader_ready",
             chat_message=chat_message,
             artifacts=self.workspace.read_artifacts(session_id),
-            active_artifact="structured_data.md",
+            active_artifact="birth_input_context.json",
         )
 
     async def create_bazi_session(
@@ -229,8 +221,8 @@ class SkillRuntime:
                             "id": "bazi_chart",
                             "label": "BaZi Chart Facts",
                             "files": [
-                                "bazi_structured_data.json",
-                                "bazi_structured_data.md",
+                                "bazi_chart_record.json",
+                                "bazi_chart_foundation.md",
                                 "bazi_report_context.md",
                             ],
                             "dependencies": [],
@@ -264,8 +256,8 @@ class SkillRuntime:
         )
         self.workspace.write_session_manifest(session_id, locale=input_data.locale)
         for artifact_path in [
-            "bazi_structured_data.json",
-            "bazi_structured_data.md",
+            "bazi_chart_record.json",
+            "bazi_chart_foundation.md",
             "bazi_report_context.md",
             "run_metrics.json",
         ]:
@@ -285,7 +277,7 @@ class SkillRuntime:
                 "BaZi chart facts are ready. Generate the classical report when you are ready."
             ),
             artifacts=self.workspace.read_artifacts(session_id),
-            active_artifact="bazi_structured_data.md",
+            active_artifact="bazi_chart_foundation.md",
         )
 
     def load_session(self, session_id: str) -> SkillSessionResponse:
@@ -296,21 +288,17 @@ class SkillRuntime:
             stage = "bazi_complete"
             active = "bazi_life_report.md"
             message = "Your BaZi classical report is ready."
-        elif "bazi_structured_data.md" in paths:
+        elif "bazi_chart_foundation.md" in paths:
             stage = "bazi_ready"
-            active = "bazi_structured_data.md"
+            active = "bazi_chart_foundation.md"
             message = "Your BaZi chart facts are ready."
         elif CONSULTATION_REPORT_MD in paths:
             stage = "core_complete"
             active = CONSULTATION_REPORT_MD
             message = "Your VedicDust consultation is ready."
-        elif "appendix.md" in paths and "run_metrics.json" in paths:
-            stage = "core_complete"
-            active = "run_metrics.json"
-            message = "Your full reading is ready."
-        elif "structured_data.md" in paths:
+        elif CHART_RECORD_JSON in paths:
             stage = "reader_ready"
-            active = "structured_data.md"
+            active = "birth_input_context.json"
             message = "Your chart data is ready."
         else:
             stage = "reader_ready"
@@ -328,34 +316,50 @@ class SkillRuntime:
         self, input_data: SynastryBirthInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
-        if not (session_dir / "structured_data.md").exists():
-            raise ValueError("A structured_data.md is required before synastry")
+        a_record_path = session_dir / CHART_RECORD_JSON
+        if not a_record_path.exists():
+            raise ValueError("A chart_record.json is required before synastry")
 
         folder = self._synastry_folder(input_data.label)
-        calculation = self.calculator.calculate(input_data.birth)
-        b_path = f"{folder}/structured_data_B.md"
-        self.workspace.write_artifact(input_data.session_id, b_path, calculation.structured_data)
+        b_identity = ChartRecordIdentity(
+            reading_session_id=input_data.session_id,
+            chart_record_id=make_id("chart"),
+            subject_id=make_id("subject"),
+        )
+        calculation = self.calculator.calculate(input_data.birth, identity=b_identity)
+        b_path = f"{folder}/{CHART_RECORD_B_JSON}"
         self.workspace.write_artifact(
             input_data.session_id,
-            f"{folder}/{BIRTH_CHART_FACTS_B_JSON}",
-            calculation.birth_chart_facts_json,
+            b_path,
+            calculation.chart_record_json,
         )
-
-        intake = self._synastry_intake(input_data)
-        self.workspace.write_artifact(input_data.session_id, f"{folder}/intake.md", intake)
-
-        synastry_dir = session_dir / folder
-        validate_output = self.tools.validate_synastry_data(
-            session_dir / "structured_data.md",
-            synastry_dir / "structured_data_B.md",
-        ).output
-        build_output = self.tools.build_synastry_data(
-            session_dir / "structured_data.md",
-            synastry_dir / "structured_data_B.md",
-            synastry_dir,
-            a_label="A",
+        a_record = ChartRecord.model_validate_json(a_record_path.read_text(encoding="utf-8"))
+        b_record = ChartRecord.model_validate_json(calculation.chart_record_json)
+        context = build_synastry_context(
+            a_record,
+            b_record,
             b_label=input_data.label or "B",
-        ).output
+            relationship_type=input_data.relationship_type,
+            current_stage=input_data.current_stage,
+            question=input_data.question,
+        )
+        context_path = f"{folder}/{SYNASTRY_CONTEXT_JSON}"
+        self.workspace.write_artifact(
+            input_data.session_id,
+            context_path,
+            context.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            input_data.session_id,
+            b_path,
+            producer="vedicdust-chart-calculation",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            input_data.session_id,
+            context_path,
+            producer="vedicdust-synastry-context",
+            dependency_paths=[CHART_RECORD_JSON, b_path],
+        )
         await self._sync_metadata(
             input_data.session_id,
             stage="synastry_ready",
@@ -367,14 +371,13 @@ class SkillRuntime:
             session_id=input_data.session_id,
             stage="synastry_ready",
             chat_message=(
-                "合盘前置数据已生成。\n\n"
+                "合盘证据上下文已生成。\n\n"
                 f"已生成: {b_path}\n"
-                f"已生成: {folder}/synastry_data.md\n\n"
-                "下一步按原 vedic-synastry 流程运行 Layer 0.5。\n\n"
-                f"{validate_output.strip()}\n{build_output.strip()}"
+                f"已生成: {context_path}\n\n"
+                "下一步将基于双盘的确定性证据生成关系判断。"
             ),
             artifacts=self.workspace.read_artifacts(input_data.session_id),
-            active_artifact=f"{folder}/synastry_data.md",
+            active_artifact=context_path,
         )
 
     async def run_skill(
@@ -589,6 +592,7 @@ class SkillRuntime:
         prompt = str(batch["prompt"])
         result = None
         for attempt in range(2):
+            workspace_snapshot = self._snapshot_agent_workspace(session_dir, expected)
             result = await self.agent_runtime.run_skill_task(
                 str(batch.get("task_name") or input_data.skill),
                 prompt,
@@ -596,9 +600,19 @@ class SkillRuntime:
                 skills=selected_skills,
                 max_turns=max(self._max_turns_for(skill) for skill in selected_skills),
             )
+            boundary_errors = self._restore_agent_workspace_boundary(
+                session_dir,
+                expected,
+                workspace_snapshot,
+            )
             self.workspace.assert_no_project_runtime_artifacts()
             missing = [path for path in expected if not (session_dir / path).exists()]
             try:
+                if boundary_errors:
+                    raise ValueError(
+                        "agent modified files outside its declared output contract: "
+                        + ", ".join(boundary_errors)
+                    )
                 if missing:
                     raise ValueError("missing expected artifact(s): " + ", ".join(missing))
                 self._validate_native_core_batch(input_data.session_id, batch_id)
@@ -652,6 +666,53 @@ class SkillRuntime:
             artifacts=artifacts,
             active_artifact=self._active_artifact_for_batch(batch, artifacts),
         )
+
+    @staticmethod
+    def _snapshot_agent_workspace(
+        session_dir: Path,
+        writable_paths: set[str],
+    ) -> _AgentWorkspaceSnapshot:
+        files: dict[str, bytes] = {}
+        for path in session_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(session_dir).as_posix()
+            if relative in writable_paths or relative.startswith(".meta/"):
+                continue
+            files[relative] = path.read_bytes()
+        return _AgentWorkspaceSnapshot(files=files)
+
+    @staticmethod
+    def _restore_agent_workspace_boundary(
+        session_dir: Path,
+        writable_paths: set[str],
+        snapshot: _AgentWorkspaceSnapshot,
+    ) -> list[str]:
+        errors: list[str] = []
+        current_paths = {
+            path.relative_to(session_dir).as_posix(): path
+            for path in session_dir.rglob("*")
+            if path.is_file()
+            and not path.relative_to(session_dir).as_posix().startswith(".meta/")
+            and path.relative_to(session_dir).as_posix() not in writable_paths
+        }
+
+        for relative, original in snapshot.files.items():
+            target = session_dir / relative
+            current = target.read_bytes() if target.exists() else None
+            if current == original:
+                continue
+            errors.append(f"modified:{relative}" if current is not None else f"deleted:{relative}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(original)
+
+        for relative, target in current_paths.items():
+            if relative in snapshot.files:
+                continue
+            errors.append(f"created:{relative}")
+            target.unlink(missing_ok=True)
+
+        return sorted(errors)
 
     async def record_reader_feedback(
         self,
@@ -806,7 +867,8 @@ class SkillRuntime:
         result = self._build_prevalidation_result(
             prevalidation,
             feedback,
-            self._birth_chart_facts_json(artifacts),
+            artifacts.get(CHART_RECORD_JSON, ""),
+            artifacts.get("sensitivity_scan.json", ""),
         )
         self.workspace.write_artifact(
             session_id,
@@ -847,7 +909,7 @@ class SkillRuntime:
             rectified_input = self.rectification.rectified_birth_input(
                 updated_state,
                 self._json_dict(artifacts.get("birth_input_context.json", "")),
-                self._json_dict(self._birth_chart_facts_json(artifacts)),
+                self._json_dict(artifacts.get(CHART_RECORD_JSON, "")),
             )
             if rectified_input is not None:
                 chart_revision = self._next_chart_revision(updated_state)
@@ -859,8 +921,6 @@ class SkillRuntime:
                 calculation = self.calculator.calculate(rectified_input, identity=identity)
                 self._write_chart_calculation(
                     session_id,
-                    calculation.structured_data,
-                    calculation.birth_chart_facts_json,
                     calculation.birth_input_context_json,
                     calculation.sensitivity_scan_json,
                     calculation.chart_record_json,
@@ -915,8 +975,6 @@ class SkillRuntime:
     def _write_chart_calculation(
         self,
         session_id: str,
-        structured_data: str,
-        birth_chart_facts_json: str,
         birth_input_context_json: str,
         sensitivity_scan_json: str,
         chart_record_json: str,
@@ -936,8 +994,6 @@ class SkillRuntime:
             ]:
                 (session_dir / stale_path).unlink(missing_ok=True)
         chart_artifacts = {
-            "structured_data.md": structured_data,
-            BIRTH_CHART_FACTS_JSON: birth_chart_facts_json,
             "birth_input_context.json": birth_input_context_json,
             "sensitivity_scan.json": sensitivity_scan_json,
             CHART_RECORD_JSON: chart_record_json,
@@ -972,13 +1028,9 @@ class SkillRuntime:
         artifacts: dict[str, str],
     ) -> None:
         for path in [
-            "structured_data.md",
-            BIRTH_CHART_FACTS_JSON,
-            LEGACY_STRUCTURED_DATA_JSON,
             "birth_input_context.json",
             "sensitivity_scan.json",
             CHART_RECORD_JSON,
-            LEGACY_VEDICDUST_CASE_JSON,
             JUDGEMENT_CONTEXT_JSON,
             CLAIM_GRAPH_JSON,
             CONSULTATION_DOSSIER_JSON,
@@ -1016,31 +1068,6 @@ class SkillRuntime:
                     rectification_status=self._chart_rectification_status(current),
                 )
             return
-        legacy = self.workspace.read_artifact_text(session_id, LEGACY_VEDICDUST_CASE_JSON)
-        if legacy is None:
-            return
-        payload = self._json_dict(legacy)
-        legacy_id = str(payload.pop("caseId", "") or make_id("chart"))
-        payload["schemaVersion"] = "vedicdust-chart-record/1.0.0"
-        payload["chartRecordId"] = legacy_id
-        payload["readingSessionId"] = session_id
-        payload["revision"] = 1
-        record = ChartRecord.model_validate(payload)
-        content = record.model_dump_json(by_alias=True, indent=2) + "\n"
-        self.workspace.write_artifact(session_id, CHART_RECORD_JSON, content)
-        self._write_chart_audit(session_id, content)
-        self._write_reading_session(
-            session_id,
-            identity=ChartRecordIdentity(
-                reading_session_id=session_id,
-                chart_record_id=record.chart_record_id,
-                subject_id=record.subject.subject_id,
-                revision=record.revision,
-            ),
-            locale=record.subject.locale,
-            stage="chart_ready",
-            rectification_status=self._chart_rectification_status(content),
-        )
 
     def _chart_record_identity(
         self,
@@ -1123,12 +1150,12 @@ class SkillRuntime:
         record = ChartRecord.model_validate_json(content)
         if record.rectification is None:
             return
-        compatibility_status = str(state.get("status") or "")
-        if compatibility_status == "not_required":
+        rectification_state_status = str(state.get("status") or "")
+        if rectification_state_status == "not_required":
             decision_status = "not_required"
-        elif compatibility_status in {"base_confirmed", "corrected_chart_ready"}:
+        elif rectification_state_status in {"base_confirmed", "corrected_chart_ready"}:
             decision_status = "bounded_interval"
-        elif compatibility_status == "needs_recalculation":
+        elif rectification_state_status == "needs_recalculation":
             decision_status = "comparing_candidates"
         else:
             decision_status = "collecting_evidence"
@@ -1138,6 +1165,13 @@ class SkillRuntime:
         record.rectification.decision.confidence = self._selection_confidence(
             state.get("selectionConfidence")
         )
+        holdout_result = str(state.get("holdoutResult") or "not_run")
+        if holdout_result == "passed":
+            record.rectification.decision.holdout_result = "passed"
+        elif holdout_result == "failed":
+            record.rectification.decision.holdout_result = "failed"
+        else:
+            record.rectification.decision.holdout_result = "not_run"
         raw_report_gate = state.get("reportGate")
         report_gate: dict[str, object] = (
             raw_report_gate if isinstance(raw_report_gate, dict) else {}
@@ -1145,16 +1179,33 @@ class SkillRuntime:
         record.rectification.decision.reasons = [
             str(
                 report_gate.get("reason")
-                or f"Rectification compatibility state: {compatibility_status or 'unknown'}."
+                or f"Rectification state: {rectification_state_status or 'unknown'}."
             )
         ]
         if decision_status == "bounded_interval":
             record.status = "rectified"
             record.rectification.decision.unresolved_questions = []
+            selected_candidate = next(
+                (
+                    candidate
+                    for candidate in record.rectification.candidates
+                    if candidate.candidate_id == str(selected)
+                ),
+                None,
+            )
+            record.rectification.decision.resulting_interval = (
+                selected_candidate.interval if selected_candidate is not None else None
+            )
+            if selected_candidate is None:
+                record.rectification.decision.reasons.append(
+                    "The selected candidate has no persisted time interval; the result remains provisional."
+                )
         elif decision_status == "not_required":
             record.status = "ready_for_judgement"
+            record.rectification.decision.resulting_interval = None
         else:
             record.status = "rectification_required"
+            record.rectification.decision.resulting_interval = None
         updated = record.model_dump_json(by_alias=True, indent=2) + "\n"
         self.workspace.write_artifact(session_id, CHART_RECORD_JSON, updated)
         self.workspace.mark_artifact_checkpoint(
@@ -1178,7 +1229,7 @@ class SkillRuntime:
             return ConfidenceGrade.PROVISIONAL
         return ConfidenceGrade.PROVISIONAL
 
-    def _sync_reading_session_stage(self, session_id: str, legacy_stage: str) -> None:
+    def _sync_reading_session_stage(self, session_id: str, runtime_stage: str) -> None:
         if self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON) is None:
             return
         identity = self._chart_record_identity(
@@ -1214,9 +1265,9 @@ class SkillRuntime:
             session_id,
             identity=identity,
             locale=self.workspace.read_session_locale(session_id),
-            stage=stage_map.get(legacy_stage, "chart_ready"),
+            stage=stage_map.get(runtime_stage, "chart_ready"),
             rectification_status=rectification_status,
-            report_status=report_status_map.get(legacy_stage),
+            report_status=report_status_map.get(runtime_stage),
         )
 
     def _active_chart_revision(self, session_id: str) -> int:
@@ -1246,21 +1297,16 @@ class SkillRuntime:
             return {}
         return payload if isinstance(payload, dict) else {}
 
-    @staticmethod
-    def _birth_chart_facts_json(artifacts: dict[str, str]) -> str:
-        return artifacts.get(BIRTH_CHART_FACTS_JSON) or artifacts.get(
-            LEGACY_STRUCTURED_DATA_JSON, ""
-        )
-
     def _build_prevalidation_result(
         self,
         prevalidation_markdown: str,
         feedback_markdown: str,
-        birth_chart_facts_json: str,
+        chart_record_json: str,
+        sensitivity_scan_json: str,
     ) -> dict[str, object]:
         anchors = self._parse_prevalidation_anchors(prevalidation_markdown)
         answers = self._parse_prevalidation_feedback(feedback_markdown)
-        subject = self._prevalidation_subject_context(birth_chart_facts_json)
+        subject = self._prevalidation_subject_context(chart_record_json, sensitivity_scan_json)
         scored_anchors: list[dict[str, object]] = []
         total_score = 0.0
         answered_count = 0
@@ -1538,15 +1584,25 @@ class SkillRuntime:
             return 0.0
         return None
 
-    def _prevalidation_subject_context(self, birth_chart_facts_json: str) -> dict[str, object]:
+    def _prevalidation_subject_context(
+        self,
+        chart_record_json: str,
+        sensitivity_scan_json: str,
+    ) -> dict[str, object]:
         try:
-            payload = json.loads(birth_chart_facts_json) if birth_chart_facts_json.strip() else {}
+            payload = json.loads(chart_record_json) if chart_record_json.strip() else {}
         except json.JSONDecodeError:
             payload = {}
         subject = payload.get("subject") if isinstance(payload, dict) else {}
         if not isinstance(subject, dict):
             subject = {}
-        sensitivity = payload.get("sensitivityScan") if isinstance(payload, dict) else {}
+        birth_assertion = payload.get("birthAssertion") if isinstance(payload, dict) else {}
+        if not isinstance(birth_assertion, dict):
+            birth_assertion = {}
+        try:
+            sensitivity = json.loads(sensitivity_scan_json) if sensitivity_scan_json.strip() else {}
+        except json.JSONDecodeError:
+            sensitivity = {}
         if not isinstance(sensitivity, dict):
             sensitivity = {}
         summary = sensitivity.get("summary") if isinstance(sensitivity, dict) else {}
@@ -1558,8 +1614,18 @@ class SkillRuntime:
         stability = sensitivity.get("stability")
         if not isinstance(stability, dict):
             stability = {}
-        time_precision = str(subject.get("timePrecision") or "")
-        time_source = str(subject.get("timeSource") or "")
+        time_certainty = str(birth_assertion.get("timeCertainty") or "")
+        time_precision = {
+            "exact_minute": "exact",
+            "bounded_window": "approximate",
+            "part_of_day": "part_of_day",
+            "unknown": "unknown",
+        }.get(time_certainty, time_certainty)
+        evidence = birth_assertion.get("evidence")
+        first_evidence = evidence[0] if isinstance(evidence, list) and evidence else {}
+        time_source = (
+            str(first_evidence.get("sourceLabel") or "") if isinstance(first_evidence, dict) else ""
+        )
         reliable_source = bool(
             re.search(r"出生证|医院|birth certificate|hospital", time_source, re.I)
         )
@@ -1568,13 +1634,13 @@ class SkillRuntime:
         )
         time_reliability = (
             "reliable_exact"
-            if time_precision == "精确到分钟" and reliable_source and not approximate_source
+            if time_precision == "exact" and reliable_source and not approximate_source
             else "uncertain"
         )
         return {
-            "birthDate": subject.get("birthDate"),
-            "birthTime": subject.get("birthTime"),
-            "birthPlace": subject.get("birthPlace"),
+            "birthDate": birth_assertion.get("localDate"),
+            "birthTime": birth_assertion.get("reportedLocalTime"),
+            "birthPlace": birth_assertion.get("reportedPlace"),
             "timePrecision": time_precision or None,
             "timeSource": time_source or None,
             "timeReliability": time_reliability,
@@ -1761,6 +1827,20 @@ class SkillRuntime:
                 raise ValueError(
                     f"{skill} returned unexpected artifact(s): {', '.join(unexpected)}"
                 )
+        if skill == "vedic-synastry":
+            unexpected = [
+                str(artifact.get("path"))
+                for artifact in artifacts
+                if isinstance(artifact, dict)
+                and not re.fullmatch(
+                    r"synastry_[^/]+_\d{8}/reports/relationship_consultation\.md",
+                    str(artifact.get("path")),
+                )
+            ]
+            if unexpected:
+                raise ValueError(
+                    f"{skill} returned unexpected artifact(s): {', '.join(unexpected)}"
+                )
         if skill != "vedic-reader":
             return
         prevalidation = ""
@@ -1787,6 +1867,12 @@ class SkillRuntime:
     def _allowed_output_artifacts(skill: str) -> set[str] | None:
         if skill == "vedic-reader":
             return {"reader_prevalidation.md"}
+        if skill == "vedic-career":
+            return {"career_report.md"}
+        if skill == "vedic-love":
+            return {"love_report.md"}
+        if skill == "vedic-rectifier":
+            return {"rectification_report.md"}
         return None
 
     def _prompt_for(self, input_data: SkillRunInput) -> str:
@@ -1794,7 +1880,7 @@ class SkillRuntime:
         if input_data.skill == "vedic-reader":
             return self._reader_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-core":
-            return self._core_prompt(input_data.user_message, locale)
+            raise ValueError("vedic-core must run through the native core job")
         if input_data.skill == "vedic-career":
             return self._career_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-love":
@@ -1843,438 +1929,8 @@ Rules:
 - Do not include any artifact outside the selected skill's expected file set.
 - The JSON wrapper is only for the backend; the user sees the markdown artifacts."""
 
-    def _legacy_core_batches(
-        self, user_message: str, locale: str = "en"
-    ) -> list[dict[str, object]]:
-        user_line = user_message or "开始分析"
-        language_instruction = self._language_instruction(locale)
-        planets = [
-            ("sun", "Sun", "太阳"),
-            ("moon", "Moon", "月亮"),
-            ("mars", "Mars", "火星"),
-            ("mercury", "Mercury", "水星"),
-            ("jupiter", "Jupiter", "木星"),
-            ("venus", "Venus", "金星"),
-            ("saturn", "Saturn", "土星"),
-            ("rahu", "Rahu", "罗睺"),
-            ("ketu", "Ketu", "计都"),
-        ]
-        p2_node_ids = [f"p2_{slug}" for slug, _, _ in planets]
-        d9_node_ids = [f"p3a_d9_{slug}" for slug, _, _ in planets]
-        divisional_node_ids = ["p3b_d10", "p3b_d4", "p3b_d5"]
-        p3_done = [*d9_node_ids, *divisional_node_ids]
-        house_node_ids = [f"p4_house_{number:02d}" for number in range(1, 13)]
-        life_node_ids = [f"p5_block_{number:02d}" for number in range(1, 11)]
-
-        batches: list[dict[str, object]] = [
-            self._core_batch(
-                "p1",
-                "P1 身份总览",
-                "p1_overview.md",
-                "Run vedic-core Step 0 and P1 only. Use structured_data.md. Do not use user_context.md in this batch.",
-                user_line,
-                language_instruction=language_instruction,
-            ),
-            self._core_batch(
-                "p2_yoga",
-                "P2 Yoga/NBRY 预扫描",
-                ".runtime/p2/yoga.md",
-                "Run only the original Step 1 Yoga pre-scan before planet audit. Read structured_data.md and resources/yogas.md. Check every listed Yoga/NBRY condition. Write the content that belongs at the top of p2a_planets.md: the opening framework note plus 已确认格局 / 待验证格局 / 落陷星NBRY状态. Do not audit Sun or Moon in this batch.",
-                user_line,
-                active="p1_overview.md",
-                progress_message="P2 Yoga/NBRY 预扫描已完成。",
-                language_instruction=language_instruction,
-            ),
-        ]
-
-        for slug, planet, chinese_name in planets:
-            others = ", ".join(item[1] for item in planets if item[0] != slug)
-            batches.append(
-                self._core_batch(
-                    f"p2_{slug}",
-                    f"P2 {planet} 行星审计",
-                    f".runtime/p2/{slug}.md",
-                    (
-                        f"Run only the original Step 1 P1-P12 planet audit for {planet} "
-                        f"({chinese_name}). Read structured_data.md, resources/p1_p12.md, "
-                        "and .runtime/p2/yoga.md for Yoga/NBRY labels. Preserve the "
-                        "P1-P12 framework, PAC联合判定, SAV读取铁规, 美贴标注, and confidence "
-                        f"rules. Write only the complete {planet} section. Do not audit or "
-                        f"summarize these other planets: {others}."
-                    ),
-                    user_line,
-                    dependencies=["p2_yoga"],
-                    active="p1_overview.md",
-                    progress_message=f"P2 {planet} 审计已完成。",
-                    language_instruction=language_instruction,
-                )
-            )
-
-        for slug, planet, chinese_name in planets:
-            batches.append(
-                self._core_batch(
-                    f"p3a_d9_{slug}",
-                    f"P3A D9 {planet} 审计",
-                    f".runtime/p3/d9_{slug}.md",
-                    (
-                        f"Run only the original Step 2.1 D9 audit for {planet} ({chinese_name}). "
-                        "Use structured_data.md and the completed p2a_planets.md, "
-                        "p2b_planets.md, p2c_planets.md, p2d_planets.md artifacts as prior "
-                        "blind-audit context. Preserve the D9三条铁律, 身份继承矩阵, "
-                        "D9 quality/兑现率 logic, and the current concise evidence style. "
-                        f"Write only the complete D9 section for {planet}; do not audit other planets."
-                    ),
-                    user_line,
-                    dependencies=p2_node_ids,
-                    active="p2a_planets.md",
-                    progress_message=f"P3A D9 {planet} 审计已完成。",
-                    language_instruction=language_instruction,
-                )
-            )
-
-        divisional_batches = [
-            (
-                "p3b_d10",
-                "P3B D10 事业概述",
-                ".runtime/p3/d10.md",
-                "Run only original Step 2.2 D10 career overview. Read structured_data.md and completed P2 artifacts. Cover D10 Lagna, strong D10 planets, D10 10th lord position, career direction clues, and confidence. Do not write D4/D5.",
-            ),
-            (
-                "p3b_d4",
-                "P3B D4 财产概述",
-                ".runtime/p3/d4.md",
-                "Run only original Step 2.3 D4 property/comfort overview. Read structured_data.md and completed P2 artifacts. Cover D4 Lagna, D4 4th lord/Venus, D1 4th vs D4 cross-check, and property/vehicle indications. Do not write D10/D5.",
-            ),
-            (
-                "p3b_d5",
-                "P3B D5 权力概述",
-                ".runtime/p3/d5.md",
-                "Run only original Step 2.4 D5 authority/creative power overview. Read structured_data.md and completed P2 artifacts. Cover D5 Sun/Jupiter, authority/influence, and creative potential. Do not write D10/D4.",
-            ),
-        ]
-        for node_id, label, file_name, instruction in divisional_batches:
-            batches.append(
-                self._core_batch(
-                    node_id,
-                    label,
-                    file_name,
-                    instruction,
-                    user_line,
-                    dependencies=p2_node_ids,
-                    active="p2a_planets.md",
-                    progress_message=f"{label} 已完成。",
-                    language_instruction=language_instruction,
-                )
-            )
-
-        for number in range(1, 13):
-            batches.append(
-                self._core_batch(
-                    f"p4_house_{number:02d}",
-                    f"P4 第{number}宫诊断",
-                    f".runtime/houses/house_{number:02d}.md",
-                    (
-                        f"Run only the original Step 3 house diagnosis for house {number}. "
-                        "Before writing, read structured_data.md, p2a_planets.md, p2b_planets.md, "
-                        "p2c_planets.md, p2d_planets.md, p3a_d9.md, and p3b_divisional.md. "
-                        "Preserve the four-dimensional house framework: manager/house lord, tenant "
-                        "planets, aspects, SAV hardware, divisional cross-checks, Dasha event "
-                        "association, evidence weighting, and markdown style. Write only this one "
-                        "house section. Do not diagnose other houses and do not run the Parivartana scan."
-                    ),
-                    user_line,
-                    dependencies=p3_done,
-                    active="p3a_d9.md",
-                    progress_message=f"P4 第{number}宫诊断已完成。",
-                    language_instruction=language_instruction,
-                )
-            )
-
-        batches.append(
-            self._core_batch(
-                "p4_parivartana",
-                "P4 Parivartana 互溶扫描",
-                ".runtime/houses/parivartana.md",
-                (
-                    "Run only the original Step 3 Parivartana scan required after all 12 house "
-                    "diagnoses. Read structured_data.md, p2a-p2d, p3a/p3b, and all "
-                    ".runtime/houses/house_01.md through .runtime/houses/house_12.md. Include "
-                    "the original exchange-check logic, confirmed/excluded exchange pairs, final "
-                    "house-diagnosis synthesis for houses 7-12, and the Step 3 completion marker. "
-                    "Do not repeat the full 12 house diagnoses."
-                ),
-                user_line,
-                dependencies=house_node_ids,
-                active="p4a_houses.md",
-                progress_message="P4 Parivartana 互溶扫描已完成。",
-                language_instruction=language_instruction,
-            )
-        )
-
-        batches.append(
-            self._core_batch(
-                "dasha_review",
-                "Step 4 Dasha速查与格局激活",
-                ".runtime/dasha_review.md",
-                (
-                    "Run only the original Step 4 prerequisite: Dasha回顾速查表 and Yoga x "
-                    "Dasha x D9 activation validation. Read structured_data.md, completed "
-                    "p2a-p2d artifacts, p3a_d9.md, and p3b_divisional.md. Produce a reusable "
-                    "markdown reference for later life blocks. Do not write any life synthesis blocks."
-                ),
-                user_line,
-                dependencies=p3_done,
-                active="p3a_d9.md",
-                progress_message="Dasha速查与格局激活验证已完成。",
-                language_instruction=language_instruction,
-            )
-        )
-
-        life_blocks = [
-            (
-                1,
-                "人格核心",
-                "Use p1_overview.md, p2 Sun/Moon findings, p3a Sun/Moon D9 settlement, Lagna, Moon, Sun, and AK. Write block 1 only.",
-            ),
-            (
-                2,
-                "财富潜力",
-                "Use house 2 and house 11 diagnoses, D4 data, p2 money-relevant planet audits, and Dasha review. Write block 2 only.",
-            ),
-            (
-                3,
-                "事业方向",
-                "Use house 10 diagnosis, D10 data, L10/AmK audits, Yoga activation, and Dasha review. Write block 3 only.",
-            ),
-            (
-                4,
-                "感情/婚姻",
-                "Use house 7 diagnosis, D9, Venus/Jupiter/DK/UL signals, and Dasha review. Write block 4 only.",
-            ),
-            (
-                5,
-                "健康提醒",
-                "Use house 1 and house 6 diagnoses, Mars/Saturn audits, Maraka context, and Dasha review. Write block 5 only.",
-            ),
-            (
-                6,
-                "教育/学习",
-                "Use house 4 and house 5 diagnoses, D5 data, Mercury/Jupiter/Moon signals, and Dasha review. Write block 6 only.",
-            ),
-            (
-                7,
-                "家庭/居住",
-                "Use house 4 and house 9 diagnoses, D4 data, parental/home indicators, and Dasha review. Write block 7 only.",
-            ),
-            (
-                8,
-                "社交/声誉",
-                "Use AL data from structured_data.md, house 11 diagnosis, relevant p2/p4 signals, and Dasha review. Write block 8 only.",
-            ),
-            (
-                9,
-                "长期成长",
-                "Use AK, house 9 and house 12 diagnoses, AK planet D9 settlement, and Dasha review. Write block 9 only.",
-            ),
-            (
-                10,
-                "赛道优势地图",
-                "Use all p2 Yoga findings, p3a D9 settlements, p4 house conclusions, and dasha_review.md. Translate Yoga into capability tracks, business/wealth paths, compounding conditions, and timing. Write block 10 only.",
-            ),
-        ]
-        for number, title, instruction in life_blocks:
-            batches.append(
-                self._core_batch(
-                    f"p5_block_{number:02d}",
-                    f"P5 板块{number} {title}",
-                    f".runtime/life/block_{number:02d}.md",
-                    (
-                        "Run only the original Step 4 life synthesis block requested below. "
-                        "Before writing, read p1_overview.md, p2a-p2d, p3a_d9.md, "
-                        "p3b_divisional.md, p4a_houses.md, p4b_houses.md, and "
-                        ".runtime/dasha_review.md. Follow the Step 4 context rule: you may use "
-                        "confirmed facts only as supporting evidence, never to reverse-infer the "
-                        "chart. Write for a human reader using what/why/limit/next-step structure; "
-                        "translate naked technical labels on first use; avoid florid persona, filler, "
-                        "and word-count padding. No data tables except where the original block "
-                        "explicitly allows it. "
-                        f"{instruction}"
-                    ),
-                    user_line,
-                    dependencies=["p4_parivartana", "dasha_review"],
-                    active="p4b_houses.md",
-                    progress_message=f"P5 板块{number} {title} 已完成。",
-                    language_instruction=language_instruction,
-                )
-            )
-
-        batches.append(
-            self._core_batch(
-                "appendix",
-                "Step 5 技术附录",
-                "appendix.md",
-                (
-                    "Run the original Step 5 technical appendix only. Read structured_data.md, "
-                    "birth_input_context.json, sensitivity_scan.json, "
-                    "chart_rectification_state.json, prevalidation_result.json "
-                    "if present, p2a-p2d, p3a/p3b, p4a/p4b, p5a/p5b, and "
-                    ".runtime/dasha_review.md. Include the P1-P12 parameter table, divisional "
-                    "data overview, input confidence / report readiness summary, validation "
-                    "report, Dasha timeline, and the Dasha回顾速查表 if available."
-                ),
-                user_line,
-                dependencies=life_node_ids,
-                active="p5a_life.md",
-                progress_message="Step 5 技术附录已完成。",
-                language_instruction=language_instruction,
-            )
-        )
-
-        batches.append(
-            self._core_batch(
-                "report_quality_audit",
-                "Step 6 最终报告质量审计",
-                "report_quality_audit.md",
-                (
-                    "Run the current vedic-core Step 6 final report quality audit only. "
-                    "Read birth_input_context.json, sensitivity_scan.json, "
-                    "chart_rectification_state.json, prevalidation_result.json "
-                    "if present, structured_data.md, p5a_life.md, p5b_life.md, and appendix.md. "
-                    "Do not rewrite the report body. Write a clear PASS / NEEDS_REVISION audit "
-                    "with blocking issues, evidence, and exact fixes. Fail the audit if "
-                    "prevalidation_result.decision.reportAllowed is false, "
-                    "sensitivity_scan.reportReadiness.mode is rectification_required but the report "
-                    "is written as a deterministic full report, any "
-                    "llmContract.mustNotUseAsPrimaryEvidence field is used as a primary conclusion "
-                    "anchor, time confidence is inconsistent, missed validation anchors are "
-                    "reinterpreted as hits, child/adult framing is wrong, Dasha ages are incoherent, "
-                    "or the main report contains raw technical-label paragraphs."
-                ),
-                user_line,
-                dependencies=["appendix"],
-                active="report_quality_audit.md",
-                progress_message="Step 6 最终报告质量审计已完成。",
-                language_instruction=language_instruction,
-            )
-        )
-
-        batches.append(
-            {
-                "id": "vedicdust_consultation",
-                "label": "VedicDust 专业咨询档案",
-                "files": [CLAIM_GRAPH_JSON, CONSULTATION_DOSSIER_JSON],
-                "dependencies": ["report_quality_audit"],
-                "active": CONSULTATION_REPORT_MD,
-                "progress_message": "VedicDust 专业咨询档案已完成。",
-                "task_name": "vedicdust-consultation",
-                "skills": ["vedicdust-judgement", "vedicdust-consultation"],
-                "prompt": f"""Build the VedicDust judgement and consultation contracts for this session.
-
-Read:
-- chart_record.json and chart_audit.json as authoritative deterministic inputs;
-- prevalidation_result.json and chart_rectification_state.json for confidence limits;
-- p1_overview.md, p2a_planets.md through p5b_life.md, appendix.md, and
-  report_quality_audit.md only as migration-era interpretive working notes.
-
-{language_instruction}
-
-Write exactly these two files and no others:
-1. {CLAIM_GRAPH_JSON}
-2. {CONSULTATION_DOSSIER_JSON}
-
-Both files must contain valid JSON with camelCase keys and no Markdown fences.
-
-Judgement requirements:
-- Rebuild every released conclusion as a Claim grounded in exact fact IDs from
-  chart_record.json. Legacy prose is never evidence.
-- Use only rule IDs already present in fact provenance plus these workflow gates:
-  sop.promise-before-varga, sop.promise-capacity-before-timing,
-  sop.d60-eligibility-gate.
-- Obey sensitivity_scan.reportReadiness.llmContract. Never promote a field from
-  mustNotUseAsPrimaryEvidence into a supportingFactId or executive Claim.
-- If reportReadiness.mode is rectification_required, do not approve the dossier
-  unless the backend prevalidation gate explicitly permits the requested scope.
-- Record counter-evidence and limitations before assigning certainty.
-- Use at most 12 high-value Claims. Prefer synthesis over one Claim per planet or house.
-- A timing Claim must include timeScope and exact timingPeriodIds from
-  chart_record.json. Do not invent timing fact IDs.
-- `status=withheld` requires `certainty=withheld`; withheld Claims cannot appear
-  in report sections.
-- Use user testimony only to describe relevance or an open question, never to
-  manufacture a chart promise.
-
-Each Claim must use this contract:
-claimId, topic, title, plainStatement, technicalStatement,
-realWorldExpressions, userRelevance, conditions, supportingFactIds,
-counterFactIds, timingFactIds, timingPeriodIds, ruleIds, certainty, scope,
-status, timeScope, practicalImplications, limitations.
-
-The Claim Graph must use:
-schemaVersion=vedicdust-claim-graph/1.0.0, chartRecordId, chartRevision,
-methodProfileId, generatedAt, claims, omittedTopics, qualityChecks.
-
-Consultation dossier requirements:
-- Use schemaVersion=vedicdust-consultation-dossier/1.0.0.
-- Copy chartRecordId, chartRevision, methodProfileId, and rulePackVersion exactly.
-- Organize the reading around user relevance, not technical calculation order.
-- Select 3 to 5 executive Claim IDs.
-- Use the fixed section kinds below, plus zero or more priority_domain sections:
-  scope, executive_synthesis, chart_foundation, core_architecture,
-  timing_outlook, decision_support, follow_up, technical_evidence.
-- executive_synthesis, chart_foundation, and decision_support must each contain
-  at least one Claim. Executive synthesis must contain the selected 3 to 5 Claims.
-- Every non-withheld Claim must belong to exactly one section or be listed in
-  omittedClaimIds with a reason. The technical_evidence section must leave
-  claimIds empty because the renderer appends the evidence table automatically.
-- Dynamic priority domains must reflect the intersection of the user's requested
-  topics and chart salience; do not output all twelve houses.
-- Timing windows use exact Claim IDs, fact IDs, and timing period IDs. Present
-  ranges and conditions, never guaranteed events.
-- Keep unresolved questions explicit for future consultation.
-- Set releaseStatus=approved only when report_quality_audit.md says PASS and the
-  deterministic chart audit permits judgement. Otherwise set blocked.
-
-Each section must use:
-sectionId, sectionKind, title, purpose, claimIds, timingWindowIds, visualRefs,
-priority, confidenceDisclosureRequired.
-
-Scope must use:
-requestedTopics, userQuestions, includedTopics, omittedTopics, reportDepth,
-residualUncertainties.
-
-Confidence must use:
-overall, inputConfidence, rectificationConfidence, judgementConfidence, rationale.
-overall and judgementConfidence use high, moderate, low, or blocked.
-inputConfidence and rectificationConfidence use verified, corroborated,
-provisional, disputed, or unavailable. Do not invent percentages.
-
-Each Timing Window must use:
-timingWindowId, title, horizon, interval, claimIds, activationFactIds,
-activationPeriodIds, opportunities, pressures, conditions, confidence,
-limitations. `interval` and every Claim `timeScope` use ISO-8601 `start` and `end`.
-`horizon` is historical, current, near_term, or strategic.
-
-The dossier must use:
-dossierId, chartRecordId, chartRevision, methodProfileId, claimGraphVersion,
-generatedAt, locale, audience, scope, confidence, executiveClaimIds, sections,
-timingWindows, omittedClaimIds, unresolvedQuestions, releaseStatus, qualityChecks.
-
-Do not write the final Markdown report. The backend validates these contracts and
-deterministically renders consultation_report.md and agent_context.json.
-
-User message:
-{user_line}""",
-            }
-        )
-
-        return batches
-
     def _core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
-        """Return the native VedicDust production DAG.
-
-        Legacy Markdown batches remain readable for historical sessions but are
-        not generated or consumed by this DAG.
-        """
+        """Return the VedicDust production DAG."""
 
         user_line = user_message or "开始分析"
         language_instruction = self._language_instruction(locale)
@@ -2298,8 +1954,7 @@ Read exactly these authoritative inputs:
 - prevalidation_result.json and chart_rectification_state.json: input confidence
   and unresolved rectification limits.
 
-Do not read or use p1_overview.md, p2*.md, p3*.md, p4*.md, p5*.md, appendix.md,
-report_quality_audit.md, structured_data.md, or any prior prose as evidence.
+Use only the listed typed contracts. Do not use any prior prose as evidence.
 
 {language_instruction}
 
@@ -2310,9 +1965,10 @@ vedicdust-claim-graph/1.0.0. Do not write Markdown or any other file.
 Hard contract:
 - Copy chartRecordId, chartRevision, and methodProfileId exactly.
 - Use only topic IDs, fact IDs, timingPeriodIds, and rule IDs exposed by
-  judgement_context.json.
-- Every Claim must use its topic's judgement rule. Workflow gates may be added
-  only when their required evidence is actually cited.
+  judgement_context.json. A rule is usable only when evaluationStatus is
+  eligible; matchedFactIds and the topic evidence lists are hard boundaries.
+- Every Claim must use its topic's eligible judgement rule. Workflow gates may
+  be added only when they are eligible and their required evidence is cited.
 - Use 5 to 10 synthesis Claims. Include chart foundation, the user's requested
   topics, and only the highest-priority remaining topics. Do not produce one
   Claim per planet, house, or varga.
@@ -2357,8 +2013,7 @@ Read:
 - claim_graph.json;
 - prevalidation_result.json and chart_rectification_state.json.
 
-Do not read or use any legacy p1-p5 Markdown report, appendix, quality-audit
-Markdown, or structured_data.md. Do not add a new astrological judgement.
+Use only the listed typed contracts. Do not add a new astrological judgement.
 
 {language_instruction}
 
@@ -2393,75 +2048,6 @@ User request:
             },
         ]
 
-    def _core_batch(
-        self,
-        batch_id: str,
-        batch_name: str,
-        file_name: str | list[str],
-        instruction: str,
-        user_message: str,
-        *,
-        dependencies: list[str] | None = None,
-        active: str | None = None,
-        progress_message: str | None = None,
-        language_instruction: str,
-    ) -> dict[str, object]:
-        files = [file_name] if isinstance(file_name, str) else file_name
-        return {
-            "id": batch_id,
-            "label": batch_name,
-            "files": files,
-            "dependencies": dependencies or [],
-            "active": active or files[0],
-            "progress_message": progress_message,
-            "prompt": self._core_batch_prompt(
-                batch_name,
-                files,
-                instruction,
-                user_message,
-                language_instruction,
-            ),
-        }
-
-    def _core_batch_prompt(
-        self,
-        batch_name: str,
-        files: list[str],
-        instruction: str,
-        user_message: str,
-        language_instruction: str,
-    ) -> str:
-        file_list = ", ".join(files)
-        return f"""Run vedic-core exactly as the original skill, but only for this backend batch: {batch_name}.
-
-Batch instruction:
-{instruction}
-
-Write exactly these batch file names in the current workspace and no others:
-{file_list}
-
-Rules:
-- Preserve the vedic-core phase order, source-of-truth boundaries, evidence weighting, and QA/report rules.
-- Follow the current report quality rules: user-facing life blocks prioritize plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
-- Do not inherit old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
-- {language_instruction}
-- Use chart_record.json as the deterministic calculation source of truth.
-- Use structured_data.md only as a compatibility projection for the requested Markdown files.
-- Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json when present; use them only as the input-confidence, active chart revision, and report-readiness gate.
-- Obey sensitivity_scan.reportReadiness.llmContract: never use mustNotUseAsPrimaryEvidence fields as primary conclusion anchors, and downgrade or omit unstable divisional/timing claims.
-- Obey chart_rectification_state.rectificationPlan.advancedVargaPolicy: D16/D20/D24/D27/D30 are corroboration-only until the time window is narrow; D60 is final-confirmation-only, never a first-pass report anchor.
-- If sensitivity_scan.reportReadiness.mode is rectification_required, write only candidate-discriminating or clearly low-confidence/D1-only content unless prevalidation_result.json explicitly allows the full report.
-- Do not summarize with app-specific sections, cards, claims, daily notes, or JSON.
-- Each requested file must be complete markdown, not a placeholder and not "see previous".
-- If the requested file is under .runtime/, treat it as an internal shard; do not write the public composed files such as p2a_planets.md, p3a_d9.md, p4a_houses.md, p4b_houses.md, p5a_life.md, or p5b_life.md.
-- Do not create, edit, or rename any file outside the exact requested batch file name(s).
-- All requested paths are relative to the current working directory, which is the only valid user session workspace.
-- Do not read from or write to ../ paths, absolute paths, the project root .runtime directory, or any other session directory.
-- Do not return JSON for this batch. Write the markdown file directly, then state the batch is complete and list the file generated.
-
-User message:
-{user_message}"""
-
     def _batch_files(self, batch: dict[str, object]) -> list[str]:
         return [str(path) for path in batch["files"]]
 
@@ -2482,100 +2068,6 @@ User message:
             for path in session_dir.rglob("*")
             if path.is_file()
         }
-
-    def _compose_core_outputs(self, session_id: str, session_dir: Path) -> None:
-        p2a_parts = [
-            session_dir / ".runtime" / "p2" / "yoga.md",
-            session_dir / ".runtime" / "p2" / "sun.md",
-            session_dir / ".runtime" / "p2" / "moon.md",
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p2a_planets.md", p2a_parts, "vedic-core:compose:p2a"
-        )
-
-        p2b_parts = [
-            session_dir / ".runtime" / "p2" / "mars.md",
-            session_dir / ".runtime" / "p2" / "mercury.md",
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p2b_planets.md", p2b_parts, "vedic-core:compose:p2b"
-        )
-
-        p2c_parts = [
-            session_dir / ".runtime" / "p2" / "jupiter.md",
-            session_dir / ".runtime" / "p2" / "venus.md",
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p2c_planets.md", p2c_parts, "vedic-core:compose:p2c"
-        )
-
-        p2d_parts = [
-            session_dir / ".runtime" / "p2" / "saturn.md",
-            session_dir / ".runtime" / "p2" / "rahu.md",
-            session_dir / ".runtime" / "p2" / "ketu.md",
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p2d_planets.md", p2d_parts, "vedic-core:compose:p2d"
-        )
-
-        p3a_parts = [
-            session_dir / ".runtime" / "p3" / f"d9_{planet}.md"
-            for planet in [
-                "sun",
-                "moon",
-                "mars",
-                "mercury",
-                "jupiter",
-                "venus",
-                "saturn",
-                "rahu",
-                "ketu",
-            ]
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p3a_d9.md", p3a_parts, "vedic-core:compose:p3a"
-        )
-
-        p3b_parts = [
-            session_dir / ".runtime" / "p3" / "d10.md",
-            session_dir / ".runtime" / "p3" / "d4.md",
-            session_dir / ".runtime" / "p3" / "d5.md",
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p3b_divisional.md", p3b_parts, "vedic-core:compose:p3b"
-        )
-
-        p4a_parts = [
-            session_dir / ".runtime" / "houses" / f"house_{number:02d}.md" for number in range(1, 7)
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p4a_houses.md", p4a_parts, "vedic-core:compose:p4a"
-        )
-
-        p4b_parts = [
-            *[
-                session_dir / ".runtime" / "houses" / f"house_{number:02d}.md"
-                for number in range(7, 13)
-            ],
-            session_dir / ".runtime" / "houses" / "parivartana.md",
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p4b_houses.md", p4b_parts, "vedic-core:compose:p4b"
-        )
-
-        p5a_parts = [
-            session_dir / ".runtime" / "life" / f"block_{number:02d}.md" for number in range(1, 6)
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p5a_life.md", p5a_parts, "vedic-core:compose:p5a"
-        )
-
-        p5b_parts = [
-            session_dir / ".runtime" / "life" / f"block_{number:02d}.md" for number in range(6, 11)
-        ]
-        self._compose_parts(
-            session_id, session_dir / "p5b_life.md", p5b_parts, "vedic-core:compose:p5b"
-        )
 
     def _validate_native_core_batch(self, session_id: str, batch_id: str) -> None:
         if batch_id != "vedicdust_judgement":
@@ -2711,42 +2203,6 @@ User message:
                 ],
             )
 
-    def _compose_parts(
-        self,
-        session_id: str,
-        target: Path,
-        parts: list[Path],
-        producer: str,
-    ) -> None:
-        session_dir = self.workspace.require_session_dir(session_id)
-        if not all(path.exists() for path in parts):
-            return
-        relative_parts = [path.relative_to(session_dir).as_posix() for path in parts]
-        if not all(
-            self.workspace.artifact_checkpoint_valid(
-                session_id,
-                relative_path,
-                producer=self._producer_for_core_file(relative_path),
-            )
-            for relative_path in relative_parts
-        ):
-            return
-        target.write_text(
-            "\n\n".join(path.read_text(encoding="utf-8").strip() for path in parts) + "\n",
-            encoding="utf-8",
-        )
-        self.workspace.mark_artifact_checkpoint(
-            session_id,
-            target.relative_to(session_dir).as_posix(),
-            producer=producer,
-        )
-
-    def _producer_for_core_file(self, relative_path: str) -> str:
-        for batch in self.core_batches(""):
-            if relative_path in self.core_batch_files(batch):
-                return self._batch_producer(batch)
-        return ""
-
     def _active_artifact_for_batch(self, batch: dict[str, object], artifacts: list[object]) -> str:
         paths = {str(getattr(artifact, "path")) for artifact in artifacts}
         active = str(batch.get("active") or self._batch_files(batch)[0])
@@ -2755,15 +2211,8 @@ User message:
         for fallback in [
             CONSULTATION_REPORT_MD,
             "reader_prevalidation.md",
-            "p5a_life.md",
-            "p5b_life.md",
-            "report_quality_audit.md",
-            "p4b_houses.md",
-            "p4a_houses.md",
-            "p3a_d9.md",
-            "p2a_planets.md",
-            "p1_overview.md",
-            "structured_data.md",
+            "birth_input_context.json",
+            CHART_RECORD_JSON,
         ]:
             if fallback in paths:
                 return fallback
@@ -2780,15 +2229,8 @@ User message:
         for artifact in artifacts:
             path = str(getattr(artifact, "path"))
             content = str(getattr(artifact, "content"))
-            if (
-                path in {BIRTH_CHART_FACTS_JSON, LEGACY_STRUCTURED_DATA_JSON}
-                or path == LEGACY_VEDICDUST_CASE_JSON
-                or path.endswith(f"/{BIRTH_CHART_FACTS_B_JSON}")
-                or path.endswith(f"/{LEGACY_STRUCTURED_DATA_B_JSON}")
-            ):
-                continue
             if skill == "vedic-synastry":
-                if path == "structured_data.md" or path.startswith("synastry_"):
+                if path == CHART_RECORD_JSON or path.startswith("synastry_"):
                     selected[path] = content
                 continue
             if skill in {"bazi-calculator", "bazi-classics-core"}:
@@ -2803,14 +2245,12 @@ User message:
         return f"""Run vedic-reader in Calc mode.
 
 Workspace contains chart_record.json generated by the VedicDust calculation engine.
-structured_data.md is a compatibility projection for the existing reader output format.
 
 Follow the original vedic-reader workflow exactly, but because this is a web adapter:
 - {self._language_instruction(locale)}
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
 - Treat chart_record.json as the authoritative deterministic record.
-- Use structured_data.md only as a compatibility view when the existing output format needs it.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
 - If sensitivity_scan.reportReadiness.mode is rectification_required, make each anchor support one explicit candidate ID from chart_rectification_state.json and focus on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
 - Use chart_rectification_state.rectificationPlan as the backend-owned next-round plan: targetCandidateIds, discriminatingFields, focusAxes, timeWindow, placeWindow, lifeEventFocus, eventCollectionRequired, and requiredAnchorCount are hard constraints.
@@ -2829,58 +2269,35 @@ Follow the original vedic-reader workflow exactly, but because this is a web ada
 User message:
 {user_message or self._reader_default_user_message(locale)}"""
 
-    def _core_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run vedic-core exactly as the original skill.
-
-Workspace contains chart_record.json, structured_data.md, birth_input_context.json, sensitivity_scan.json,
-chart_rectification_state.json, and may contain user_context.md / reader_prevalidation.md.
-
-Rules:
-- {self._language_instruction(locale)}
-- Follow vedic-core Step 0 through Step 5.
-- Treat chart_record.json as the authoritative deterministic record. structured_data.md is
-  only a compatibility projection and must not override the record.
-- Preserve blind-audit rules: Step 1-3 must not use user_context.md.
-- Use prevalidation_result.json and chart_rectification_state.json, when present, as the structured source for validation score, active chart revision, time confidence, and report gating. Do not reinterpret missed anchors as hits.
-- Obey sensitivity_scan.reportReadiness.llmContract: do not use restricted evidence as a primary conclusion anchor, and downgrade or omit unstable divisional/timing claims.
-- Follow the current report quality rules: main report sections use plain conclusions, concise evidence, limitations, and actionable guidance; technical detail belongs in appendix.
-- Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
-- Write the original expected markdown files: p1_overview.md, p2a_planets.md, p2b_planets.md, p2c_planets.md, p2d_planets.md, p3a_d9.md, p3b_divisional.md, p4a_houses.md, p4b_houses.md, p5a_life.md, p5b_life.md, appendix.md.
-- Chat response should only report completion and available next actions, matching the skill style.
-- Do not compress the report into app-specific sections, claims, daily notes, or JSON.
-
-User message:
-{user_message or "开始分析"}"""
-
     def _career_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run vedic-career exactly as the original skill.
+        return f"""Run the VedicDust career consultation skill.
 
-Workspace contains chart_record.json, structured_data.md, and may contain the core report files.
+Workspace contains chart_record.json, claim_graph.json, consultation_dossier.json,
+agent_context.json, and consultation_report.md.
 
 Rules:
 - {self._language_instruction(locale)}
-- Use chart_record.json as the authoritative deterministic record and the core report files
-  as prior interpretation. structured_data.md is compatibility-only.
-- Follow all four career phases.
-- Follow the current report quality rules: plain career conclusions, concise evidence, limitations/risks, and actionable guidance. Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
-- Write the original expected markdown outputs, including career_phase4a.md, career_phase4b.md, and career_phase4c.md when Phase 4 is reached.
+- Use agent_context.json as the released consultation context and chart_record.json only to
+  verify cited fact IDs. Do not introduce a chart judgement absent from claim_graph.json.
+- Write career_report.md with conclusions, evidence, counter-evidence, timing limits,
+  decision support, and follow-up questions.
 - Chat response should only report progress/completion and file paths.
-- Do not output app cards, claims, daily notes, or JSON.
 
 User message:
 {user_message or "分析事业"}"""
 
     def _love_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run vedic-love exactly as the original skill.
+        return f"""Run the VedicDust relationship consultation skill.
 
-Workspace contains chart_record.json, structured_data.md, and may contain the core report files.
+Workspace contains chart_record.json, claim_graph.json, consultation_dossier.json,
+agent_context.json, and consultation_report.md.
 
 Rules:
 - {self._language_instruction(locale)}
-- Use chart_record.json as the authoritative deterministic record and allowed report files.
-  structured_data.md is compatibility-only.
-- Follow the original love timing workflow and output file rules.
-- Follow the current report quality rules: plain relationship conclusions, concise evidence, limitations/risks, and actionable guidance. Do not use old persona language, florid metaphors, raw technical-label paragraphs, or fixed word-count padding.
+- Use agent_context.json as the released consultation context and chart_record.json only to
+  verify cited fact IDs. Do not introduce a chart judgement absent from claim_graph.json.
+- Write love_report.md with conclusions, evidence, counter-evidence, timing limits,
+  decision support, and follow-up questions.
 - Chat response should only report progress/completion and file paths.
 - Do not output app cards, claims, daily notes, or JSON.
 
@@ -2890,7 +2307,8 @@ User message:
     def _rectifier_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run vedic-rectifier exactly as the original skill.
 
-Workspace contains chart_record.json, structured_data.md, and user_context.md if feedback/events exist.
+Workspace contains chart_record.json, chart_rectification_state.json,
+rectification_question_set.json, prevalidation_result.json, and user_context.md when feedback exists.
 
 Rules:
 - {self._language_instruction(locale)}
@@ -2905,25 +2323,22 @@ User message:
 {user_message or "校准时间"}"""
 
     def _synastry_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run vedic-synastry exactly as the original skill.
+        return f"""Run the VedicDust relationship consultation skill.
 
-Workspace contains A's structured_data.md and a synastry_<B>_<YYYYMMDD> folder with:
-- intake.md
-- structured_data_B.md
-- synastry_data.md
+Workspace contains chart_record.json for subject A and a synastry_<B>_<YYYYMMDD> folder with:
+- chart_record_B.json
+- synastry_context.json
 
 Rules:
 - {self._language_instruction(locale)}
 - Do not read user_context.md.
-- Use synastry_data.md as the cross-chart calculation source of truth.
-- If reports/00_signal_triage.md does not exist, run Layer 0.5 only, write reports/00_signal_triage.md, then stop and ask the original intake question:
-  ① 就到这
-  ② 深入分析，但不用贴标签（通用深析）
-  ③ 告诉我现实关系类型，我做对应专属解读
-- If reports/00_signal_triage.md exists and the user requests deeper analysis, continue with the original selected layer/framework rules.
-- Preserve original nested paths under the existing synastry folder.
-- Artifact JSON paths must include the synastry_<B>_<YYYYMMDD>/ prefix, for example synastry_B_20260630/reports/00_signal_triage.md.
-- Chat response should only report progress/completion and next intake choice.
+- Treat synastry_context.json as the authoritative deterministic cross-chart evidence.
+- Use chart_record.json and chart_record_B.json only to verify cited placements and timing limits.
+- Do not introduce Western degree aspects, composite charts, or Ashtakoota scores because the active method profile does not calculate them.
+- Separate observable cross-chart evidence, interpretation, counter-evidence, timing limits, and practical guidance.
+- Write one report under the existing folder at reports/relationship_consultation.md.
+- Artifact JSON paths must include the synastry_<B>_<YYYYMMDD>/ prefix.
+- Chat response should only report progress/completion and the report path.
 - Do not output app cards, claims, daily notes, or JSON.
 
 User message:
@@ -2942,7 +2357,7 @@ Rules:
 - Call mcp__vedic_backend_tools__bazi_calculate_chart once with emit_artifact_content=true and out_dir="".
 - Do not hand-calculate pillars, solar terms, ten gods, hidden stems, relations, luck cycles, or ages.
 - Parse the tool result JSON and copy the returned artifacts verbatim into output artifacts:
-  bazi_structured_data.json, bazi_structured_data.md, bazi_report_context.md.
+  bazi_chart_record.json, bazi_chart_foundation.md, bazi_report_context.md.
 - Chat response should say the BaZi chart data is ready, mention any warning count or key boundary warning, and recommend bazi-classics-core for the classical report.
 - Do not create bazi_life_report.md or any classics interpretation in this skill.
 
@@ -2953,7 +2368,7 @@ User message:
         return f"""Run bazi-classics-core exactly as the repo-local skill.
 
 Workspace must contain:
-- bazi_structured_data.md or bazi_structured_data.json
+- bazi_chart_foundation.md or bazi_chart_record.json
 - bazi_report_context.md
 
 Rules:
@@ -3022,18 +2437,16 @@ User message:
         if skill == "vedic-synastry" and artifacts:
             for artifact in artifacts:
                 path = getattr(artifact, "path", "")
-                if path.endswith("/reports/00_signal_triage.md"):
-                    return path
-                if path.endswith("/reports/04_guidance.md"):
+                if path.endswith("/reports/relationship_consultation.md"):
                     return path
         return {
             "vedic-reader": "reader_prevalidation.md",
             "vedic-core": "reader_prevalidation.md",
-            "vedic-career": "career_phase4a.md",
+            "vedic-career": "career_report.md",
             "vedic-love": "love_report.md",
             "vedic-rectifier": "rectification_report.md",
-            "vedic-synastry": "reports/00_signal_triage.md",
-            "bazi-calculator": "bazi_structured_data.md",
+            "vedic-synastry": "reports/relationship_consultation.md",
+            "bazi-calculator": "bazi_chart_foundation.md",
             "bazi-classics-core": "bazi_life_report.md",
         }[skill]
 
@@ -3041,17 +2454,6 @@ User message:
         slug = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "_", label.strip() or "B").strip("_")
         slug = slug[:40] or "B"
         return f"synastry_{slug}_{datetime.now(timezone.utc).strftime('%Y%m%d')}"
-
-    def _synastry_intake(self, input_data: SynastryBirthInput) -> str:
-        lines = [
-            "# intake.md",
-            "",
-            f"- B label: {input_data.label or 'B'}",
-            f"- relationship type: {input_data.relationship_type or '未指定'}",
-            f"- current stage: {input_data.current_stage or '未指定'}",
-            f"- question: {input_data.question or '未指定'}",
-        ]
-        return "\n".join(lines).strip() + "\n"
 
     def _parse_artifact_response(self, raw_text: str) -> dict[str, object]:
         try:

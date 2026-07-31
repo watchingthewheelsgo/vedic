@@ -581,12 +581,27 @@
             "rashi.lagna.position",
             "rashi.graha.position",
             "rashi.house.lord",
+            "rashi.house.occupant",
+            "relationship.same_sign",
             "varga.lagna.position",
             "varga.graha.position",
+            "varga.vargottama",
             "strength.dignity",
             "strength.shadbala",
+            "strength.combustion",
+            "strength.digbala",
+            "strength.bhava_bala",
+            "strength.vargeeya_bala",
             "ashtakavarga.sav.house",
-            "aspect.graha_drishti"
+            "ashtakavarga.bav.graha",
+            "karaka.chara",
+            "point.arudha",
+            "point.special_lagna",
+            "state.moon_phase",
+            "aspect.graha_drishti",
+            "timing.transit.position",
+            "timing.transit.sade_sati",
+            "timing.transit.double_transit"
           ],
           "title": "Facttype",
           "type": "string"
@@ -1024,6 +1039,30 @@
           "enum": ["self", "parent", "partner", "family", "professional"],
           "title": "Readerrelationship",
           "type": "string"
+        },
+        "genderContext": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gendercontext"
+        },
+        "relationshipStatus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationshipstatus"
         },
         "consultationTopics": {
           "items": {

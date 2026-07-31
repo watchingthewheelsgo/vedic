@@ -1,6 +1,6 @@
 {
   "schemaVersion": "vedicdust-rule-catalog/1.0.0",
-  "catalogVersion": "1.1.0",
+  "catalogVersion": "1.2.0",
   "rules": [
     {
       "ruleId": "derive.astronomy.sidereal-position",
@@ -143,6 +143,86 @@
       ]
     },
     {
+      "ruleId": "derive.relationship.same-sign-conjunction",
+      "ruleVersion": "1.0.0",
+      "title": "Derive same-sign graha conjunction contacts",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_same_sign_conjunction_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": ["contract.rashi.same-sign-contact"],
+      "limitations": [
+        "The baseline records same-sign contact and degree separation without importing Western orb doctrine."
+      ]
+    },
+    {
+      "ruleId": "derive.capacity.baseline",
+      "ruleVersion": "1.0.0",
+      "title": "Derive baseline capacity states and product-owned points",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_combustion_digbala_karaka_arudha_and_vargottama_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "These deterministic values remain corroborating evidence until edition-pinned interpretation rules are validated."
+      ]
+    },
+    {
+      "ruleId": "derive.capacity.pyjhora-extras",
+      "ruleVersion": "1.0.0",
+      "title": "Derive supplemental capacity measures through PyJHora",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_bhava_bala_special_lagna_and_vargeeya_bala_facts",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Supplemental measures require independent golden-reference fixtures before promotion to validated."
+      ]
+    },
+    {
+      "ruleId": "derive.timing.transit-swisseph",
+      "ruleVersion": "1.0.0",
+      "title": "Derive reproducible sidereal transit snapshots",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "topic": "timing",
+      "requiredEvidenceLayers": ["timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_transit_positions_sade_sati_and_double_transit",
+      "evidenceClass": "astronomical_authority",
+      "sourceIds": ["astro.swisseph.programmer-manual"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Transit interpretation remains separate from the verified astronomical snapshot."
+      ]
+    },
+    {
       "ruleId": "derive.timing.vimshottari-pyjhora",
       "ruleVersion": "1.0.0",
       "title": "Derive Vimshottari periods through PyJHora",
@@ -170,8 +250,12 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "evidence_order",
       "requiredEvidenceLayers": ["natal_promise", "varga_confirmation"],
-      "allOf": [],
-      "anyOf": [],
+      "allOf": [
+        { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" }
+      ],
+      "anyOf": [
+        { "factType": "varga.lagna.position", "subjectSelector": "D*.Lagna", "operator": "exists" }
+      ],
       "noneOf": [],
       "outputCode": "require_d1_promise_before_varga_confirmation",
       "evidenceClass": "product_hypothesis",
@@ -188,7 +272,15 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "timing",
       "requiredEvidenceLayers": ["natal_promise", "capacity", "timing"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" },
+        {
+          "factType": "timing.transit.position",
+          "subjectSelector": "Transit.*",
+          "operator": "exists"
+        }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "withhold_timing_without_promise_and_capacity",
@@ -206,7 +298,9 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "rectification",
       "requiredEvidenceLayers": ["natal_promise", "varga_confirmation"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "varga.lagna.position", "subjectSelector": "D60.Lagna", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "withhold_d60_when_interval_is_unstable",
@@ -224,7 +318,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "foundation",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_chart_foundation",
@@ -242,7 +339,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "identity",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H1", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_identity_and_agency",
@@ -260,7 +360,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "career",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H10", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H10", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_career_d1_capacity_d10",
@@ -280,7 +383,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "finance",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H2", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H2", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_finance_d1_capacity_d2_d4",
@@ -300,7 +406,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "relationship",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H7", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H7", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_relationship_d1_capacity_d9",
@@ -320,7 +429,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "home",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H4", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H4", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_home_d1_capacity_d4",
@@ -340,7 +452,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "learning",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H5", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H5", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_learning_d1_capacity_d5_d24",
@@ -358,7 +473,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "children",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H5", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H5", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_children_d1_capacity_d7",
@@ -376,7 +494,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "health",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H6", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H6", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_vitality_d1_capacity_d30",
@@ -396,7 +517,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "dharma",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H9", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H9", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_dharma_d1_capacity_d9_d20",
@@ -414,7 +538,10 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "family",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H4", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H4", "operator": "exists" }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_family_d1_capacity_d12",
@@ -434,7 +561,15 @@
       "methodProfileIds": ["parashari-lahiri-1.0.0"],
       "topic": "timing",
       "requiredEvidenceLayers": ["natal_promise", "capacity", "timing"],
-      "allOf": [],
+      "allOf": [
+        { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" },
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" },
+        {
+          "factType": "timing.transit.position",
+          "subjectSelector": "Transit.*",
+          "operator": "exists"
+        }
+      ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_bounded_vimshottari_window",

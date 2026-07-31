@@ -13,6 +13,7 @@ from .models import (
     QualityCheck,
     RuleCatalog,
 )
+from .rule_engine import evaluate_method_rule
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,11 @@ def build_judgement_context(
         if rule.status not in {"draft", "retired"}
         and record.calculation_profile.profile_id in rule.method_profile_ids
     }
+    rule_evaluations = {
+        rule.rule_id: evaluate_method_rule(rule, record)
+        for rule in active_rules.values()
+        if rule.rule_kind in {"judgement", "workflow_gate"}
+    }
     rule_contexts = [
         JudgementRuleContext(
             rule_id=rule.rule_id,
@@ -183,6 +189,9 @@ def build_judgement_context(
             topic=rule.topic,
             required_evidence_layers=rule.required_evidence_layers,
             status=rule.status,
+            evaluation_status=rule_evaluations[rule.rule_id]["evaluationStatus"],
+            matched_fact_ids=rule_evaluations[rule.rule_id]["matchedFactIds"],
+            failed_predicates=rule_evaluations[rule.rule_id]["failedPredicates"],
             limitations=rule.limitations,
         )
         for rule in active_rules.values()
@@ -200,6 +209,7 @@ def build_judgement_context(
         )
         for definition in TOPICS
         if definition.rule_id in active_rules
+        and rule_evaluations[definition.rule_id]["evaluationStatus"] == "eligible"
     ]
     topics.sort(key=lambda item: (-item.priority_score, item.topic_id))
 
@@ -228,7 +238,10 @@ def build_judgement_context(
         rule_pack_version=f"vedicdust-rules-{catalog.catalog_version}",
         rules=rule_contexts,
         global_gate_rule_ids=[
-            rule_id for rule_id in GLOBAL_GATE_RULE_IDS if rule_id in active_rules
+            rule_id
+            for rule_id in GLOBAL_GATE_RULE_IDS
+            if rule_id in active_rules
+            and rule_evaluations[rule_id]["evaluationStatus"] == "eligible"
         ],
         topics=topics,
         restricted_fact_ids=sorted(restricted & facts_by_id.keys()),
@@ -247,9 +260,21 @@ def _build_topic(
 ) -> JudgementTopicContext:
     house_refs = {f"D1.H{house}" for house in definition.houses}
     graha_refs = {f"D1.{graha}" for graha in definition.karakas}
+    relevant_graha_refs = set(graha_refs)
+    for fact in facts_by_id.values():
+        if fact.fact_type == "rashi.house.occupant" and any(
+            fact.subject_ref.startswith(f"{house_ref}.occupant.") for house_ref in house_refs
+        ):
+            relevant_graha_refs.add(f"D1.{fact.subject_ref.rsplit('.', 1)[-1]}")
+        elif fact.fact_type == "rashi.house.lord" and fact.subject_ref in house_refs:
+            value = fact.value if isinstance(fact.value, dict) else {}
+            lord = value.get("lord")
+            if lord:
+                relevant_graha_refs.add(f"D1.{lord}")
     natal: list[str] = []
     capacity: list[str] = []
     varga: list[str] = []
+    timing: list[str] = []
 
     for fact_id, raw_fact in facts_by_id.items():
         fact = raw_fact
@@ -259,17 +284,23 @@ def _build_topic(
         subject_ref = fact.subject_ref
         if layer == "natal_promise" and (
             subject_ref in house_refs
-            or subject_ref in graha_refs
+            or subject_ref in relevant_graha_refs
+            or any(subject_ref.startswith(f"{house}.occupant.") for house in house_refs)
             or any(subject_ref.endswith(f"->{house}") for house in house_refs)
+            or _relationship_mentions_any(subject_ref, relevant_graha_refs)
             or (definition.topic_id == "foundation" and subject_ref == "D1.Lagna")
         ):
             natal.append(fact_id)
-        elif layer == "capacity" and (subject_ref in house_refs or subject_ref in graha_refs):
+        elif layer == "capacity" and (
+            subject_ref in house_refs or subject_ref in relevant_graha_refs
+        ):
             capacity.append(fact_id)
         elif layer == "varga_confirmation" and any(
             subject_ref.startswith(f"{varga_id}.") for varga_id in definition.vargas
         ):
             varga.append(fact_id)
+        elif layer == "timing":
+            timing.append(fact_id)
 
     available_vargas = sorted(
         varga_id
@@ -284,7 +315,7 @@ def _build_topic(
             ("natal_promise", natal),
             ("capacity", capacity),
             ("varga_confirmation", varga),
-            ("timing", period_ids),
+            ("timing", [*timing, *period_ids]),
         )
         if values
     ]
@@ -331,11 +362,22 @@ def _build_topic(
         natal_fact_ids=sorted(natal),
         capacity_fact_ids=sorted(capacity),
         varga_fact_ids=sorted(varga),
+        timing_fact_ids=sorted(timing),
         timing_period_ids=period_ids,
         eligible_vargas=primary_vargas,
         evidence_layers=evidence_layers,
         limitations=limitations,
     )
+
+
+def _relationship_mentions_any(subject_ref: str, graha_refs: set[str]) -> bool:
+    if "->" in subject_ref:
+        source, target = subject_ref.split("->", 1)
+        return source in graha_refs or f"D1.{target}" in graha_refs
+    if "~" in subject_ref:
+        left, right = subject_ref.split("~", 1)
+        return left in graha_refs or f"D1.{right}" in graha_refs
+    return False
 
 
 def _normalize_requested_topics(values: list[str]) -> set[str]:

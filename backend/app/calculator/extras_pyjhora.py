@@ -3,6 +3,8 @@ extras_pyjhora.py - PyJHora 额外功能封装
 包含: Bhava Bala, Special Lagnas, Vimsopaka/Vargeeya Bala
 """
 
+from .pyjhora_compat import ensure_pyjhora_swe_compat
+
 
 def _setup():
     """Common setup for PyJHora"""
@@ -28,29 +30,7 @@ def _setup():
         sys.path.insert(0, pyjhora_path)
     swe.set_ephe_path(os.path.join(pyjhora_path, "jhora", "data", "ephe"))
 
-    for fn_name in ["calc_ut", "calc"]:
-        orig = getattr(swe, fn_name)
-        if not hasattr(orig, "_patched"):
-
-            def make_patch(o):
-                def p(jd, planet, flags=0):
-                    r = o(jd, planet, flags=flags)
-                    return (r[0], r[1]) if len(r) == 3 else r
-
-                p._patched = True
-                return p
-
-            setattr(swe, fn_name, make_patch(orig))
-    if hasattr(swe, "houses_ex"):
-        orig_he = swe.houses_ex
-        if not hasattr(orig_he, "_patched"):
-
-            def patch_he(*a, **kw):
-                r = orig_he(*a, **kw)
-                return (r[0], r[1]) if len(r) == 3 else r
-
-            patch_he._patched = True
-            swe.houses_ex = patch_he
+    ensure_pyjhora_swe_compat()
 
     from jhora import const
     from jhora.panchanga import drik

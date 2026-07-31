@@ -32,9 +32,11 @@ def test_workspace_rejects_project_root_runtime_artifacts(tmp_path: Path) -> Non
 def test_report_export_defaults_to_session_exports_directory(tmp_path: Path) -> None:
     workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
     session_id = workspace.create_session()
-    workspace.write_artifact(session_id, "structured_data.md", "# structured\n")
+    workspace.write_artifact(session_id, "chart_record.json", '{"chartRecordId":"chart-1"}\n')
     workspace.write_session_manifest(session_id)
-    workspace.write_artifact(session_id, "p1_overview.md", "# Overview\n\nBody")
+    workspace.write_artifact(
+        session_id, "consultation_report.md", "# Consultation\n\nApproved report"
+    )
 
     exporter = ReportExporter(workspace)
 
@@ -51,29 +53,28 @@ def test_report_export_defaults_to_session_exports_directory(tmp_path: Path) -> 
     assert result.pdf_path.exists()
 
 
-def test_chart_record_is_internal_but_available_to_the_runtime(tmp_path: Path) -> None:
+def test_chart_record_is_the_public_calculation_contract(tmp_path: Path) -> None:
     workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
     session_id = workspace.create_session()
-    workspace.write_artifact(session_id, "structured_data.md", "# legacy view\n")
     workspace.write_artifact(
         session_id,
         "chart_record.json",
         '{"schemaVersion":"vedicdust-chart-record/1.0.0","chartRecordId":"chart-1"}\n',
     )
+    workspace.write_artifact(session_id, "obsolete_artifact.md", "# ignored\n")
 
     public_artifacts = workspace.read_artifacts(session_id)
     runtime_artifacts = workspace.read_artifacts(session_id, include_internal=True)
 
-    assert [artifact.path for artifact in public_artifacts] == ["structured_data.md"]
+    assert [artifact.path for artifact in public_artifacts] == ["chart_record.json"]
     assert runtime_artifacts[0].path == "chart_record.json"
     assert runtime_artifacts[0].kind == "json"
-    assert runtime_artifacts[1].path == "structured_data.md"
 
 
 def test_checkpoint_invalidates_when_native_dependency_changes(tmp_path: Path) -> None:
     workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
     session_id = workspace.create_session()
-    workspace.write_artifact(session_id, "structured_data.md", "# chart\n")
+    workspace.write_artifact(session_id, "chart_record.json", '{"chartRevision":1}\n')
     workspace.write_artifact(session_id, "judgement_context.json", '{"revision":1}\n')
     workspace.write_artifact(session_id, "claim_graph.json", '{"claims":[]}\n')
     workspace.mark_artifact_checkpoint(

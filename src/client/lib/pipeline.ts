@@ -1,7 +1,6 @@
 import type { CoreJobResponse, SkillSessionResponse } from "../../shared/domain";
 
-const BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json";
-const LEGACY_STRUCTURED_DATA_JSON = "structured_data.json";
+const CHART_RECORD_JSON = "chart_record.json";
 
 export type RunMetrics = {
   status?: string;
@@ -155,12 +154,8 @@ export function getPipelineData(
 
 function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineNode | null {
   const artifacts = session?.artifacts ?? [];
-  const structuredData = artifacts.find((artifact) => artifact.path === "structured_data.md");
-  if (!structuredData) return null;
-  const birthChartFacts = artifacts.find(
-    (artifact) =>
-      artifact.path === BIRTH_CHART_FACTS_JSON || artifact.path === LEGACY_STRUCTURED_DATA_JSON
-  );
+  const chartRecord = artifacts.find((artifact) => artifact.path === CHART_RECORD_JSON);
+  if (!chartRecord) return null;
   const inputContext = artifacts.find((artifact) => artifact.path === "birth_input_context.json");
   const sensitivity = artifacts.find((artifact) => artifact.path === "sensitivity_scan.json");
   const rectification = artifacts.find(
@@ -172,8 +167,7 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
     wave: 1,
     status: "completed",
     files: [
-      "structured_data.md",
-      birthChartFacts?.path ?? BIRTH_CHART_FACTS_JSON,
+      CHART_RECORD_JSON,
       "birth_input_context.json",
       "sensitivity_scan.json",
       "chart_rectification_state.json"
@@ -184,8 +178,7 @@ function calculatorPipelineNode(session: SkillSessionResponse | null): PipelineN
       sensitivity?.updatedAt ??
       rectification?.updatedAt ??
       inputContext?.updatedAt ??
-      birthChartFacts?.updatedAt ??
-      structuredData.updatedAt,
+      chartRecord.updatedAt,
     durationSeconds: null,
     error: null
   };
@@ -196,8 +189,8 @@ function readerPipelineNode(
   readerRunning: boolean
 ): PipelineNode | null {
   const artifacts = session?.artifacts ?? [];
-  const hasStructuredData = artifacts.some((artifact) => artifact.path === "structured_data.md");
-  if (!hasStructuredData) return null;
+  const hasChartRecord = artifacts.some((artifact) => artifact.path === CHART_RECORD_JSON);
+  if (!hasChartRecord) return null;
   const prevalidation = artifacts.find((artifact) => artifact.path === "reader_prevalidation.md");
   const validationResult = artifacts.find(
     (artifact) => artifact.path === "prevalidation_result.json"

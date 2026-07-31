@@ -41,7 +41,7 @@ const PLANET_GLYPH: Record<PlanetKey, string> = {
 };
 
 // Fixed demo layout — 9 grahas placed around the wheel. Real angles come
-// from the actual chart once this is wired to structured_data facts.
+// from the actual chart once this is wired to Chart Record facts.
 const DEMO_PLANET_ANGLES: Record<PlanetKey, number> = {
   Sun: 15,
   Moon: 55,
@@ -177,7 +177,7 @@ export function ChartRevealProgress({
 }: {
   /** Real usage: pass deriveChartRevealState(pipelineData) here. */
   state?: ChartRevealState;
-  /** Real chart coordinates from birth_chart_facts.json. */
+  /** Real chart coordinates from chart_record.json. */
   coordinates?: ChartRevealCoordinates | null;
   /** Preview usage: cycle through DEMO_STATES instead of using `state`. */
   demo?: boolean;

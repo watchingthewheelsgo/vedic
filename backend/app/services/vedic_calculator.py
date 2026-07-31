@@ -18,7 +18,10 @@ from app.schemas import (
     PlanetFact,
     StrengthFact,
 )
-from app.services.life_event_rectification import parse_life_event_ledger
+from app.services.life_event_rectification import (
+    parse_life_event_ledger,
+    score_candidate_events,
+)
 from app.services.place_service import PlaceService, ResolvedPlace
 from app.settings import Settings
 from app.utils.ids import make_id
@@ -62,7 +65,7 @@ DIVISIONAL_POLICIES: dict[int, dict[str, str]] = {
     },
     7: {
         "name": "Saptamsha",
-        "role": "children, fertility, lineage, legacy",
+        "role": "children, fertility, lineage, family continuity",
         "usageTier": "rectification_domain",
     },
     9: {
@@ -171,8 +174,6 @@ class VedicCalculator:
         place = self.place_service.resolve(intake.birth_place)
         payload = self._calculator_payload(intake, birth_date, birth_time, place)
         (
-            structured_data,
-            birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
             chart_record_json,
@@ -190,8 +191,6 @@ class VedicCalculator:
             geo_source=place.source,
             input_precision=intake.birth_time_precision,
             validation_status=PRECISION_STATUS[intake.birth_time_precision],
-            structured_data=structured_data,
-            birth_chart_facts_json=birth_chart_facts_json,
             birth_input_context_json=birth_input_context_json,
             sensitivity_scan_json=sensitivity_scan_json,
             chart_record_json=chart_record_json,
@@ -204,13 +203,15 @@ class VedicCalculator:
         intake: BirthInput,
         place: ResolvedPlace,
         identity: ChartRecordIdentity,
-    ) -> tuple[str, str, str, str, str, ChartFacts]:
+    ) -> tuple[str, str, str, ChartFacts]:
         with redirect_stdout(sys.stderr):
-            from app.calculator.engine import SIGNS, calculate_full_chart
-            from app.calculator.formatter import format_structured_data
-            from app.calculator.structured_schema import build_structured_schema
-            from app.calculator.transit import calc_transit
+            from app.calculator.engine import (
+                SIGNS,
+                calculate_full_chart,
+                calculate_rectification_signature,
+            )
 
+            calculated_at = datetime.now(timezone.utc)
             chart = calculate_full_chart(
                 year=int(payload["year"]),
                 month=int(payload["month"]),
@@ -220,6 +221,7 @@ class VedicCalculator:
                 lat=float(payload["lat"]),
                 lon=float(payload["lon"]),
                 tz_str=str(payload["timezone"]),
+                transit_as_of=calculated_at,
             )
             input_context = self._birth_input_context(payload, intake, place)
             sensitivity_scan = self._sensitivity_scan(
@@ -228,45 +230,8 @@ class VedicCalculator:
                 payload,
                 intake,
                 place,
-            )
-            transit = calc_transit(
-                chart["lagna"]["sign_idx"],
-                chart["planets"]["Moon"]["sign_idx"],
-                str(payload["timezone"]),
-            )
-            meta = {
-                "dob": payload["dob"],
-                "time": payload["time"],
-                "place": payload["place"],
-                "lat": payload["lat"],
-                "lon": payload["lon"],
-                "timezone": payload["timezone"],
-                "time_precision": payload["time_precision"],
-                "time_source": payload.get("time_source", "user-input"),
-                "effective_precision": payload.get("effective_precision", "birth-time-tiered"),
-            }
-            user_info = {
-                "gender": payload.get("gender", "[not-collected]"),
-                "relationship": payload.get("relationship", "[not-collected]"),
-            }
-            structured_data = format_structured_data(
-                chart,
-                transit,
-                meta,
-                user_info,
-                input_context=input_context,
-                sensitivity_scan=sensitivity_scan,
-            )
-            structured_payload = build_structured_schema(
-                chart,
-                transit,
-                meta,
-                user_info,
-                input_context=input_context,
-                sensitivity_scan=sensitivity_scan,
-            )
-            birth_chart_facts_json = (
-                json.dumps(structured_payload, ensure_ascii=False, indent=2) + "\n"
+                calculate_signature=calculate_rectification_signature,
+                life_event_ledger=input_context["lifeEvents"],
             )
             birth_input_context_json = (
                 json.dumps(input_context, ensure_ascii=False, indent=2) + "\n"
@@ -280,13 +245,15 @@ class VedicCalculator:
                     reading_session_id=identity.reading_session_id,
                     revision=identity.revision,
                     subject_id=identity.subject_id,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=calculated_at,
                     locale=intake.locale,
                     birth_date=str(payload["dob"]),
                     birth_time=str(payload["time"]),
                     birth_place=intake.birth_place,
                     birth_time_precision=intake.birth_time_precision,
                     time_source=intake.time_source,
+                    gender_context=intake.gender,
+                    relationship_status=intake.relationship,
                     place_label=place.label,
                     latitude=float(place.lat),
                     longitude=float(place.lon),
@@ -309,8 +276,6 @@ class VedicCalculator:
             facts = self._chart_facts(chart, sav_total)
 
         return (
-            structured_data,
-            birth_chart_facts_json,
             birth_input_context_json,
             sensitivity_scan_json,
             chart_record_json,
@@ -372,6 +337,9 @@ class VedicCalculator:
         payload: dict[str, Any],
         intake: BirthInput,
         place: ResolvedPlace,
+        *,
+        calculate_signature: Any | None = None,
+        life_event_ledger: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         base_signature = self._chart_signature(base_chart)
         time_variants = self._time_scan_variants(
@@ -380,6 +348,7 @@ class VedicCalculator:
             base_signature,
             payload,
             intake.birth_time_precision,
+            calculate_signature=calculate_signature,
         )
         place_variants = self._place_scan_variants(
             calculate_full_chart,
@@ -401,6 +370,11 @@ class VedicCalculator:
             base_signature,
             time_variants,
             place_variants if place_rectification_allowed else [],
+        )
+        self._score_candidate_groups(
+            candidate_groups,
+            life_event_ledger or {},
+            payload,
         )
         stability = self._stability_map(
             set(summary["changedFields"]),
@@ -432,34 +406,95 @@ class VedicCalculator:
         time_variants: list[dict[str, Any]],
         place_variants: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        grouped: dict[str, dict[str, Any]] = {}
-        for axis, variants in [("time", time_variants), ("place", place_variants)]:
-            for variant in variants:
-                signature = variant.get("signature")
-                if not isinstance(signature, dict):
+        if time_variants and any(
+            not isinstance(variant.get("interval"), dict) for variant in time_variants
+        ):
+            legacy_points: list[dict[str, Any]] = []
+            base_dt: datetime | None = None
+            for variant in time_variants:
+                raw_moment = variant.get("datetime")
+                if not raw_moment:
                     continue
-                fingerprint = self._signature_fingerprint(signature)
-                item = grouped.setdefault(
-                    fingerprint,
-                    {
-                        "candidateId": "",
-                        "signature": signature,
-                        "members": [],
-                        "changedFromBase": self._signature_changes(base_signature, signature),
-                        "isBase": fingerprint == self._signature_fingerprint(base_signature),
-                    },
+                try:
+                    moment = datetime.strptime(str(raw_moment), "%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+                point: dict[str, Any] = {"moment": moment}
+                if isinstance(variant.get("signature"), dict):
+                    point["signature"] = variant["signature"]
+                    if self._signature_fingerprint(
+                        variant["signature"]
+                    ) == self._signature_fingerprint(base_signature) and (
+                        variant.get("label") == "base" or base_dt is None
+                    ):
+                        base_dt = moment
+                elif variant.get("error"):
+                    point["error"] = variant["error"]
+                legacy_points.append(point)
+            if legacy_points:
+                time_variants = self._coalesce_time_points(
+                    legacy_points,
+                    base_dt or legacy_points[0]["moment"],
+                    base_signature,
                 )
-                item["members"].append(
-                    {
-                        "axis": axis,
-                        "label": variant.get("label"),
-                        "datetime": variant.get("datetime"),
-                        "coordinates": variant.get("coordinates"),
-                        "radiusKm": variant.get("radiusKm"),
-                    }
-                )
+        grouped: list[dict[str, Any]] = []
+        for variant in time_variants:
+            signature = variant.get("signature")
+            interval = variant.get("interval")
+            if not isinstance(signature, dict) or not isinstance(interval, dict):
+                continue
+            grouped.append(
+                {
+                    "candidateId": "",
+                    "signature": signature,
+                    "interval": interval,
+                    "representativeDatetime": variant.get("representativeDatetime"),
+                    "members": [
+                        {
+                            "axis": "time",
+                            "label": variant.get("label"),
+                            "datetime": variant.get("representativeDatetime"),
+                            "interval": interval,
+                        }
+                    ],
+                    "changedFromBase": self._signature_changes(base_signature, signature),
+                    "isBase": bool(variant.get("isBase")),
+                }
+            )
+
+        for variant in place_variants:
+            signature = variant.get("signature")
+            if not isinstance(signature, dict):
+                continue
+            fingerprint = self._signature_fingerprint(signature)
+            target = next(
+                (
+                    item
+                    for item in grouped
+                    if item.get("isBase")
+                    and self._signature_fingerprint(item.get("signature", {})) == fingerprint
+                ),
+                None,
+            )
+            if target is None:
+                target = {
+                    "candidateId": "",
+                    "signature": signature,
+                    "members": [],
+                    "changedFromBase": self._signature_changes(base_signature, signature),
+                    "isBase": fingerprint == self._signature_fingerprint(base_signature),
+                }
+                grouped.append(target)
+            target["members"].append(
+                {
+                    "axis": "place",
+                    "label": variant.get("label"),
+                    "coordinates": variant.get("coordinates"),
+                    "radiusKm": variant.get("radiusKm"),
+                }
+            )
         sorted_items = sorted(
-            grouped.values(),
+            grouped,
             key=lambda item: (
                 0 if item.get("isBase") else 1,
                 len(item.get("changedFromBase", [])),
@@ -467,8 +502,64 @@ class VedicCalculator:
             ),
         )
         for index, item in enumerate(sorted_items):
-            item["candidateId"] = chr(ord("A") + index)
+            item["candidateId"] = self._candidate_label(index)
         return sorted_items
+
+    @staticmethod
+    def _score_candidate_groups(
+        candidates: list[dict[str, Any]],
+        life_event_ledger: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        if not life_event_ledger.get("events"):
+            return
+        base_moment = datetime(
+            int(payload["year"]),
+            int(payload["month"]),
+            int(payload["day"]),
+            int(payload["hour"]),
+            int(payload["minute"]),
+        )
+        for candidate in candidates:
+            raw_representative = candidate.get("representativeDatetime")
+            try:
+                representative = (
+                    datetime.strptime(str(raw_representative), "%Y-%m-%d %H:%M")
+                    if raw_representative
+                    else base_moment
+                )
+                result = score_candidate_events(
+                    candidate_id=str(candidate.get("candidateId") or "candidate"),
+                    signature=(
+                        candidate.get("signature")
+                        if isinstance(candidate.get("signature"), dict)
+                        else {}
+                    ),
+                    representative_moment=representative,
+                    latitude=float(payload["lat"]),
+                    longitude=float(payload["lon"]),
+                    timezone_id=str(payload["timezone"]),
+                    ledger=life_event_ledger,
+                )
+                candidate.update(result)
+            except Exception as exc:
+                candidate.update(
+                    {
+                        "evidenceScores": [],
+                        "aggregateScore": None,
+                        "holdoutScore": None,
+                        "scoringError": str(exc),
+                    }
+                )
+
+    @staticmethod
+    def _candidate_label(index: int) -> str:
+        label = ""
+        value = index + 1
+        while value:
+            value, remainder = divmod(value - 1, 26)
+            label = chr(ord("A") + remainder) + label
+        return label
 
     @staticmethod
     def _signature_fingerprint(signature: dict[str, Any]) -> str:
@@ -627,10 +718,10 @@ class VedicCalculator:
             "blockingFactors": blockers,
             "llmContract": {
                 "mustRead": [
+                    "chart_record.json",
                     "birth_input_context.json",
                     "sensitivity_scan.json",
                     "prevalidation_result.json",
-                    "structured_data.md",
                 ],
                 "mustNotUseAsPrimaryEvidence": stability.get("llmRestrictedEvidence", []),
                 "mayUseAsPrimaryEvidence": stability.get("llmStableEvidence", []),
@@ -661,15 +752,19 @@ class VedicCalculator:
             return {
                 "start": start.strftime("%Y-%m-%d %H:%M"),
                 "end": end.strftime("%Y-%m-%d %H:%M"),
+                "endExclusive": (end + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M"),
                 "radiusMinutes": 720,
-                "scanMode": "full_day_samples",
+                "scanMode": "continuous_minute_grid",
+                "resolutionMinutes": 1,
             }
         radius = {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
         return {
             "start": (base - timedelta(minutes=radius)).strftime("%Y-%m-%d %H:%M"),
             "end": (base + timedelta(minutes=radius)).strftime("%Y-%m-%d %H:%M"),
+            "endExclusive": (base + timedelta(minutes=radius + 1)).strftime("%Y-%m-%d %H:%M"),
             "radiusMinutes": radius,
-            "scanMode": "offset_samples",
+            "scanMode": "continuous_minute_grid",
+            "resolutionMinutes": 1,
         }
 
     def _time_scan_variants(
@@ -679,6 +774,8 @@ class VedicCalculator:
         base_signature: dict[str, Any],
         payload: dict[str, Any],
         precision: str,
+        *,
+        calculate_signature: Any | None = None,
     ) -> list[dict[str, Any]]:
         base_dt = datetime(
             int(payload["year"]),
@@ -688,30 +785,21 @@ class VedicCalculator:
             int(payload["minute"]),
         )
         if precision == "unknown":
-            samples = [
-                ("00:00", base_dt.replace(hour=0, minute=0)),
-                ("06:00", base_dt.replace(hour=6, minute=0)),
-                ("12:00", base_dt.replace(hour=12, minute=0)),
-                ("18:00", base_dt.replace(hour=18, minute=0)),
-                ("23:59", base_dt.replace(hour=23, minute=59)),
-            ]
+            start = base_dt.replace(hour=0, minute=0)
+            end = base_dt.replace(hour=23, minute=59)
         else:
-            offsets = {
-                "exact": [-2, 0, 2],
-                "approximate": [-15, -5, 0, 5, 15],
-                "part_of_day": [-120, -60, 0, 60, 120],
-            }.get(precision, [-15, 0, 15])
-            samples = [
-                (f"{offset:+d}m" if offset else "base", base_dt + timedelta(minutes=offset))
-                for offset in offsets
-            ]
-        variants = []
-        for label, sample in samples:
+            radius = {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
+            start = base_dt - timedelta(minutes=radius)
+            end = base_dt + timedelta(minutes=radius)
+
+        points: list[dict[str, Any]] = []
+        sample = start
+        while sample <= end:
             try:
-                chart = (
-                    base_chart
-                    if sample == base_dt
-                    else calculate_full_chart(
+                if sample == base_dt:
+                    signature = base_signature
+                elif calculate_signature is not None:
+                    signature = calculate_signature(
                         sample.year,
                         sample.month,
                         sample.day,
@@ -721,24 +809,106 @@ class VedicCalculator:
                         float(payload["lon"]),
                         str(payload["timezone"]),
                     )
-                )
-                signature = self._chart_signature(chart)
-                variants.append(
+                    signature["currentDasha"] = base_signature.get("currentDasha")
+                else:
+                    chart = calculate_full_chart(
+                        sample.year,
+                        sample.month,
+                        sample.day,
+                        sample.hour,
+                        sample.minute,
+                        float(payload["lat"]),
+                        float(payload["lon"]),
+                        str(payload["timezone"]),
+                    )
+                    signature = self._chart_signature(chart)
+                points.append(
                     {
-                        "label": label,
-                        "datetime": sample.strftime("%Y-%m-%d %H:%M"),
-                        "changed": self._signature_changes(base_signature, signature),
+                        "moment": sample,
                         "signature": signature,
                     }
                 )
             except Exception as exc:
-                variants.append(
+                points.append(
                     {
-                        "label": label,
-                        "datetime": sample.strftime("%Y-%m-%d %H:%M"),
+                        "moment": sample,
                         "error": str(exc),
                     }
                 )
+            sample += timedelta(minutes=1)
+        return self._coalesce_time_points(points, base_dt, base_signature)
+
+    def _coalesce_time_points(
+        self,
+        points: list[dict[str, Any]],
+        base_dt: datetime,
+        base_signature: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        variants: list[dict[str, Any]] = []
+        run: list[dict[str, Any]] = []
+
+        def flush() -> None:
+            if not run:
+                return
+            first = run[0]
+            last = run[-1]
+            signature = first.get("signature")
+            start = first["moment"]
+            end = last["moment"] + timedelta(minutes=1)
+            representative = start + (end - start) / 2
+            representative = representative.replace(second=0, microsecond=0)
+            if not isinstance(signature, dict):
+                variants.append(
+                    {
+                        "label": start.strftime("%H:%M"),
+                        "interval": {
+                            "start": start.strftime("%Y-%m-%d %H:%M"),
+                            "end": end.strftime("%Y-%m-%d %H:%M"),
+                        },
+                        "representativeDatetime": representative.strftime("%Y-%m-%d %H:%M"),
+                        "error": str(first.get("error") or "signature calculation failed"),
+                    }
+                )
+                return
+            variants.append(
+                {
+                    "label": (
+                        f"{start.strftime('%H:%M')}-{(end - timedelta(minutes=1)).strftime('%H:%M')}"
+                    ),
+                    "interval": {
+                        "start": start.strftime("%Y-%m-%d %H:%M"),
+                        "end": end.strftime("%Y-%m-%d %H:%M"),
+                    },
+                    "representativeDatetime": representative.strftime("%Y-%m-%d %H:%M"),
+                    "isBase": start <= base_dt < end,
+                    "changed": self._signature_changes(base_signature, signature),
+                    "signature": signature,
+                }
+            )
+
+        for point in points:
+            if not run:
+                run.append(point)
+                continue
+            previous = run[-1]
+            previous_signature = previous.get("signature")
+            current_signature = point.get("signature")
+            same = (
+                isinstance(previous_signature, dict)
+                and isinstance(current_signature, dict)
+                and self._signature_fingerprint(previous_signature)
+                == self._signature_fingerprint(current_signature)
+            ) or (
+                not isinstance(previous_signature, dict)
+                and not isinstance(current_signature, dict)
+                and previous.get("error") == point.get("error")
+            )
+            if same:
+                run.append(point)
+                continue
+            flush()
+            run = [point]
+        flush()
         return variants
 
     def _place_scan_variants(
@@ -826,6 +996,11 @@ class VedicCalculator:
             "moonNakshatra": moon_nakshatra.get("name"),
             "moonPada": moon_nakshatra.get("pada"),
             "currentDasha": self._current_dasha_label(chart),
+            "planetSignIndices": {
+                name: int(position.get("sign_idx", 0))
+                for name, position in (chart.get("planets") or {}).items()
+                if isinstance(position, dict) and position.get("sign_idx") is not None
+            },
         }
         for factor in DIVISIONAL_FACTORS:
             if factor == 1:
@@ -847,15 +1022,6 @@ class VedicCalculator:
                 return str(sign) if sign else None
             if isinstance(lagna, tuple) and lagna:
                 return str(lagna[0]) if lagna[0] else None
-
-        legacy = chart.get(f"d{factor}", {})
-        if isinstance(legacy, dict):
-            lagna = legacy.get("Lagna")
-            if isinstance(lagna, tuple) and lagna:
-                return str(lagna[0]) if lagna[0] else None
-            if isinstance(lagna, dict):
-                sign = lagna.get("sign")
-                return str(sign) if sign else None
         return None
 
     @staticmethod

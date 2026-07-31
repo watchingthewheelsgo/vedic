@@ -3,19 +3,6 @@ import { messages, reportTitleKeys, type LocaleCode } from "../i18n/messages";
 
 export const reportOrder = [
   "consultation_report.md",
-  "p1_overview.md",
-  "p2a_planets.md",
-  "p2b_planets.md",
-  "p2c_planets.md",
-  "p2d_planets.md",
-  "p3a_d9.md",
-  "p3b_divisional.md",
-  "p4a_houses.md",
-  "p4b_houses.md",
-  "p5a_life.md",
-  "p5b_life.md",
-  "appendix.md",
-  "report_quality_audit.md",
   "career_phase4a.md",
   "love_report.md",
   "rectification_report.md",
@@ -29,19 +16,6 @@ export const reportOrder = [
 
 export const reportTitles: Record<string, string> = {
   "consultation_report.md": "VedicDust Consultation",
-  "p1_overview.md": "Core Pattern",
-  "p2a_planets.md": "Planetary Signals - Part 1",
-  "p2b_planets.md": "Planetary Signals - Part 2",
-  "p2c_planets.md": "Planetary Signals - Part 3",
-  "p2d_planets.md": "Planetary Signals - Part 4",
-  "p3a_d9.md": "Deeper Promise (D9)",
-  "p3b_divisional.md": "Supporting Life Context",
-  "p4a_houses.md": "Life Areas - Part 1",
-  "p4b_houses.md": "Life Areas - Part 2",
-  "p5a_life.md": "Life Guidance - Part 1",
-  "p5b_life.md": "Life Guidance - Part 2",
-  "appendix.md": "Reference Notes",
-  "report_quality_audit.md": "Report Quality Audit",
   "career_phase4a.md": "Career Guidance",
   "love_report.md": "Relationship Guidance",
   "rectification_report.md": "Birth Time Review",
@@ -57,26 +31,21 @@ export function isReportArtifact(artifact: SkillArtifact) {
   const path = artifact.path;
   if (!path.endsWith(".md")) return false;
   if (
-    path === "structured_data.md" ||
-    path === "bazi_structured_data.md" ||
+    path === "bazi_chart_foundation.md" ||
     path === "bazi_report_context.md" ||
     path === "reader_prevalidation.md" ||
     path === "prevalidation_result.json" ||
     path === "user_context.md" ||
     path === "intake.md" ||
-    path.endsWith("structured_data_B.md") ||
-    path.endsWith("synastry_data.md")
+    path.endsWith("synastry_context.json")
   ) {
     return false;
   }
   return (
     path === "consultation_report.md" ||
-    path.startsWith("p") ||
-    path === "appendix.md" ||
-    path === "report_quality_audit.md" ||
     path.startsWith("career_") ||
     path.startsWith("love_") ||
-    (path.startsWith("bazi_") && path !== "bazi_structured_data.md") ||
+    (path.startsWith("bazi_") && path !== "bazi_chart_foundation.md") ||
     path === "rectification_report.md" ||
     path.includes("/reports/")
   );

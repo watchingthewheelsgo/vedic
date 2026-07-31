@@ -167,18 +167,24 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
         session_id = "resume-session"
         workspace = FakeWorkspace(tmp_path)
         runtime_dir = workspace.require_session_dir(session_id)
-        workspace.write_artifact(session_id, "p1_overview.md", "# p1\n")
-        workspace.mark_artifact_checkpoint(session_id, "p1_overview.md", producer="vedic-core:p1")
-        workspace.write_artifact(session_id, ".runtime/p2/rahu.md", "# partial rahu\n")
+        workspace.write_artifact(session_id, "claim_graph.json", '{"claims":[]}\n')
+        workspace.mark_artifact_checkpoint(
+            session_id, "claim_graph.json", producer="vedic-core:vedicdust_judgement"
+        )
+        workspace.write_artifact(session_id, "consultation_dossier.json", '{"sections":[]}\n')
         (runtime_dir / "run_metrics.json").write_text(
             json.dumps(
                 {
                     "nodes": [
-                        {"id": "p1", "status": "completed", "files": ["p1_overview.md"]},
                         {
-                            "id": "p2_rahu",
+                            "id": "vedicdust_judgement",
+                            "status": "completed",
+                            "files": ["claim_graph.json"],
+                        },
+                        {
+                            "id": "vedicdust_consultation",
                             "status": "failed",
-                            "files": [".runtime/p2/rahu.md"],
+                            "files": ["consultation_dossier.json"],
                             "error": "API Error: Connection closed mid-response.",
                         },
                     ]
@@ -190,8 +196,12 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
         skill_runtime = FakeSkillRuntime(
             workspace,
             [
-                batch("p1", "p1_overview.md"),
-                batch("p2_rahu", ".runtime/p2/rahu.md", ["p1"]),
+                batch("vedicdust_judgement", "claim_graph.json"),
+                batch(
+                    "vedicdust_consultation",
+                    "consultation_dossier.json",
+                    ["vedicdust_judgement"],
+                ),
             ],
         )
         runtime = CoreJobRuntime(skill_runtime)  # type: ignore[arg-type]
@@ -201,11 +211,13 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
         finished = await wait_for_job(runtime, started.job_id)
 
         assert finished.status == "completed"
-        assert skill_runtime.calls == [("p2_rahu", True)]
+        assert skill_runtime.calls == [("vedicdust_consultation", True)]
         nodes = {node.id: node for node in finished.nodes}
-        assert nodes["p1"].status == "skipped"
-        assert nodes["p2_rahu"].status == "completed"
-        assert (runtime_dir / ".runtime/p2/rahu.md").read_text(encoding="utf-8") == "# p2_rahu\n"
+        assert nodes["vedicdust_judgement"].status == "skipped"
+        assert nodes["vedicdust_consultation"].status == "completed"
+        assert (runtime_dir / "consultation_dossier.json").read_text(
+            encoding="utf-8"
+        ) == "# vedicdust_consultation\n"
 
     asyncio.run(run())
 
@@ -215,19 +227,25 @@ def test_resume_reruns_completed_file_without_session_checkpoint(tmp_path: Path)
         session_id = "untrusted-session"
         workspace = FakeWorkspace(tmp_path)
         runtime_dir = workspace.require_session_dir(session_id)
-        workspace.write_artifact(session_id, "p1_overview.md", "# stale p1\n")
+        workspace.write_artifact(session_id, "claim_graph.json", '{"claims":[]}\n')
         (runtime_dir / "run_metrics.json").write_text(
             json.dumps(
                 {
                     "nodes": [
-                        {"id": "p1", "status": "completed", "files": ["p1_overview.md"]},
+                        {
+                            "id": "vedicdust_judgement",
+                            "status": "completed",
+                            "files": ["claim_graph.json"],
+                        },
                     ]
                 }
             ),
             encoding="utf-8",
         )
 
-        skill_runtime = FakeSkillRuntime(workspace, [batch("p1", "p1_overview.md")])
+        skill_runtime = FakeSkillRuntime(
+            workspace, [batch("vedicdust_judgement", "claim_graph.json")]
+        )
         runtime = CoreJobRuntime(skill_runtime)  # type: ignore[arg-type]
         started = await runtime.start(
             SkillRunInput(sessionId=session_id, skill="vedic-core", userMessage="")
@@ -235,10 +253,12 @@ def test_resume_reruns_completed_file_without_session_checkpoint(tmp_path: Path)
         finished = await wait_for_job(runtime, started.job_id)
 
         assert finished.status == "completed"
-        assert skill_runtime.calls == [("p1", True)]
+        assert skill_runtime.calls == [("vedicdust_judgement", True)]
         nodes = {node.id: node for node in finished.nodes}
-        assert nodes["p1"].status == "completed"
-        assert (runtime_dir / "p1_overview.md").read_text(encoding="utf-8") == "# p1\n"
+        assert nodes["vedicdust_judgement"].status == "completed"
+        assert (runtime_dir / "claim_graph.json").read_text(
+            encoding="utf-8"
+        ) == "# vedicdust_judgement\n"
 
     asyncio.run(run())
 

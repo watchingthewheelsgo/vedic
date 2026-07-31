@@ -1,0 +1,332 @@
+{
+  "$defs": {
+    "QualityCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "checkId": {
+          "title": "Checkid",
+          "type": "string"
+        },
+        "status": {
+          "enum": ["passed", "warning", "failed", "not_run"],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "observed": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": ["checkId", "status", "message"],
+      "title": "QualityCheck",
+      "type": "object"
+    },
+    "SynastryContact": {
+      "additionalProperties": false,
+      "properties": {
+        "contactId": {
+          "title": "Contactid",
+          "type": "string"
+        },
+        "sourceRole": {
+          "enum": ["A", "B"],
+          "title": "Sourcerole",
+          "type": "string"
+        },
+        "sourceObjectId": {
+          "title": "Sourceobjectid",
+          "type": "string"
+        },
+        "targetRole": {
+          "enum": ["A", "B"],
+          "title": "Targetrole",
+          "type": "string"
+        },
+        "targetObjectId": {
+          "title": "Targetobjectid",
+          "type": "string"
+        },
+        "contactType": {
+          "enum": [
+            "conjunction",
+            "seventh_drishti",
+            "mars_fourth_drishti",
+            "mars_eighth_drishti",
+            "jupiter_fifth_drishti",
+            "jupiter_ninth_drishti",
+            "saturn_third_drishti",
+            "saturn_tenth_drishti"
+          ],
+          "title": "Contacttype",
+          "type": "string"
+        },
+        "sourceSignIndex": {
+          "maximum": 11,
+          "minimum": 0,
+          "title": "Sourcesignindex",
+          "type": "integer"
+        },
+        "targetSignIndex": {
+          "maximum": 11,
+          "minimum": 0,
+          "title": "Targetsignindex",
+          "type": "integer"
+        },
+        "derivationModel": {
+          "const": "parashari-graha-drishti-1.0.0",
+          "default": "parashari-graha-drishti-1.0.0",
+          "title": "Derivationmodel",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contactId",
+        "sourceRole",
+        "sourceObjectId",
+        "targetRole",
+        "targetObjectId",
+        "contactType",
+        "sourceSignIndex",
+        "targetSignIndex"
+      ],
+      "title": "SynastryContact",
+      "type": "object"
+    },
+    "SynastryOverlay": {
+      "additionalProperties": false,
+      "properties": {
+        "overlayId": {
+          "title": "Overlayid",
+          "type": "string"
+        },
+        "sourceRole": {
+          "enum": ["A", "B"],
+          "title": "Sourcerole",
+          "type": "string"
+        },
+        "sourceObjectId": {
+          "title": "Sourceobjectid",
+          "type": "string"
+        },
+        "targetRole": {
+          "enum": ["A", "B"],
+          "title": "Targetrole",
+          "type": "string"
+        },
+        "targetHouse": {
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Targethouse",
+          "type": "integer"
+        },
+        "sourceSignIndex": {
+          "maximum": 11,
+          "minimum": 0,
+          "title": "Sourcesignindex",
+          "type": "integer"
+        },
+        "targetLagnaSignIndex": {
+          "maximum": 11,
+          "minimum": 0,
+          "title": "Targetlagnasignindex",
+          "type": "integer"
+        },
+        "derivationModel": {
+          "const": "whole-sign-overlay",
+          "default": "whole-sign-overlay",
+          "title": "Derivationmodel",
+          "type": "string"
+        }
+      },
+      "required": [
+        "overlayId",
+        "sourceRole",
+        "sourceObjectId",
+        "targetRole",
+        "targetHouse",
+        "sourceSignIndex",
+        "targetLagnaSignIndex"
+      ],
+      "title": "SynastryOverlay",
+      "type": "object"
+    },
+    "SynastryScope": {
+      "additionalProperties": false,
+      "properties": {
+        "relationshipType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationshiptype"
+        },
+        "currentStage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentstage"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Question"
+        }
+      },
+      "title": "SynastryScope",
+      "type": "object"
+    },
+    "SynastrySubject": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": ["A", "B"],
+          "title": "Role",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "chartRecordId": {
+          "title": "Chartrecordid",
+          "type": "string"
+        },
+        "chartRevision": {
+          "minimum": 1,
+          "title": "Chartrevision",
+          "type": "integer"
+        },
+        "subjectId": {
+          "title": "Subjectid",
+          "type": "string"
+        }
+      },
+      "required": ["role", "label", "chartRecordId", "chartRevision", "subjectId"],
+      "title": "SynastrySubject",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-synastry-context/1.0.0",
+      "default": "vedicdust-synastry-context/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "synastryContextId": {
+      "title": "Synastrycontextid",
+      "type": "string"
+    },
+    "readingSessionId": {
+      "title": "Readingsessionid",
+      "type": "string"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "methodProfileId": {
+      "title": "Methodprofileid",
+      "type": "string"
+    },
+    "subjects": {
+      "items": {
+        "$ref": "#/$defs/SynastrySubject"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "title": "Subjects",
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/$defs/SynastryScope"
+    },
+    "overlays": {
+      "items": {
+        "$ref": "#/$defs/SynastryOverlay"
+      },
+      "title": "Overlays",
+      "type": "array"
+    },
+    "contacts": {
+      "items": {
+        "$ref": "#/$defs/SynastryContact"
+      },
+      "title": "Contacts",
+      "type": "array"
+    },
+    "qualityChecks": {
+      "items": {
+        "$ref": "#/$defs/QualityCheck"
+      },
+      "title": "Qualitychecks",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "status": {
+      "enum": ["ready_for_judgement", "blocked"],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "synastryContextId",
+    "readingSessionId",
+    "generatedAt",
+    "methodProfileId",
+    "subjects",
+    "scope",
+    "overlays",
+    "contacts",
+    "qualityChecks",
+    "status"
+  ],
+  "title": "SynastryContext",
+  "type": "object"
+}

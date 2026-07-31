@@ -1,12 +1,11 @@
-"""
-ashtakavarga_pyjhora.py - PyJHora Ashtakavarga 封装
-SAV/BAV 100% 匹配 JHora 桌面版
-"""
+"""PyJHora Ashtakavarga adapter for the pinned VedicDust method profile."""
+
+from .pyjhora_compat import ensure_pyjhora_swe_compat
 
 
 def calculate_ashtakavarga_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
     """
-    使用 PyJHora 计算 SAV/BAV，100% 匹配 JHora 桌面版。
+    使用固定版本 PyJHora 计算 SAV/BAV；桌面 JHora 一致性由独立基准测试决定。
 
     Returns:
         dict: {
@@ -38,30 +37,7 @@ def calculate_ashtakavarga_fixed(year, month, day, hour, minute, lat, lon, tz_of
         sys.path.insert(0, pyjhora_path)
     swe.set_ephe_path(os.path.join(pyjhora_path, "jhora", "data", "ephe"))
 
-    # Monkey-patch
-    for fn_name in ["calc_ut", "calc"]:
-        orig = getattr(swe, fn_name)
-        if not hasattr(orig, "_patched"):
-
-            def make_patch(o):
-                def p(jd, planet, flags=0):
-                    r = o(jd, planet, flags=flags)
-                    return (r[0], r[1]) if len(r) == 3 else r
-
-                p._patched = True
-                return p
-
-            setattr(swe, fn_name, make_patch(orig))
-    if hasattr(swe, "houses_ex"):
-        orig_he = swe.houses_ex
-        if not hasattr(orig_he, "_patched"):
-
-            def patch_he(*a, **kw):
-                r = orig_he(*a, **kw)
-                return (r[0], r[1]) if len(r) == 3 else r
-
-            patch_he._patched = True
-            swe.houses_ex = patch_he
+    ensure_pyjhora_swe_compat()
 
     from jhora import const
     from jhora.panchanga import drik

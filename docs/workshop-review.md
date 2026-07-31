@@ -81,7 +81,7 @@ Recommended backend cache layers:
 1. Calculation cache
    - Key: normalized birth input plus calculator version, ayanamsa, ephemeris
      version, and place/timezone resolver version.
-   - Value: deterministic `structured_data` calculation output.
+   - Value: deterministic Chart Record calculation output.
    - Safe to reuse across sessions if privacy policy allows server-side storage
      of birth data; otherwise scope by account.
 

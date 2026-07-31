@@ -13,6 +13,8 @@ shadbala_pyjhora.py v4 - 逐项修正版
   - Tribhaga/Abda/Masa/Vaara/Ayana/Yuddha: 全部匹配
 """
 
+from .pyjhora_compat import ensure_pyjhora_swe_compat
+
 
 def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
     import sys
@@ -38,29 +40,7 @@ def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset
         sys.path.insert(0, pyjhora_path)
     swe.set_ephe_path(os.path.join(pyjhora_path, "jhora", "data", "ephe"))
 
-    for fn_name in ["calc_ut", "calc"]:
-        orig = getattr(swe, fn_name)
-        if not hasattr(orig, "_patched"):
-
-            def make_patch(o):
-                def p(jd, planet, flags=0):
-                    r = o(jd, planet, flags=flags)
-                    return (r[0], r[1]) if len(r) == 3 else r
-
-                p._patched = True
-                return p
-
-            setattr(swe, fn_name, make_patch(orig))
-    if hasattr(swe, "houses_ex"):
-        orig_he = swe.houses_ex
-        if not hasattr(orig_he, "_patched"):
-
-            def patch_he(*a, **kw):
-                r = orig_he(*a, **kw)
-                return (r[0], r[1]) if len(r) == 3 else r
-
-            patch_he._patched = True
-            swe.houses_ex = patch_he
+    ensure_pyjhora_swe_compat()
 
     from jhora import const, utils
     from jhora.panchanga import drik

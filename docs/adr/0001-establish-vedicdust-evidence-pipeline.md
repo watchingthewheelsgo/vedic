@@ -5,11 +5,10 @@
 
 ## Context
 
-The legacy workflow combines astronomical calculation, Jyotish derivation,
-interpretive policy, rectification heuristics, and report prose across a copied
-calculator shape and large prompt files. A caller cannot determine which
-setting or source produced a conclusion, and a model can silently bridge gaps
-between calculated data and narrative.
+Astronomical calculation, Jyotish derivation, interpretive policy,
+rectification heuristics, and report prose require explicit ownership. A caller
+must be able to determine which setting or source produced a conclusion, and a
+model must not silently bridge gaps between calculated data and narrative.
 
 There is no single universal Jyotish calculation or consultation SOP. Product
 choices such as ayanamsa, node model, divisional-chart method, Dasha year
@@ -38,7 +37,7 @@ silently.
 
 ## Consequences
 
-- The legacy workflow and VedicDust run in parallel until VedicDust has independent golden fixtures.
+- VedicDust is the sole Vedic production workflow.
 - Every calculated artifact carries a schema version and Calculation Profile.
 - Every derived judgement carries source references and counter-evidence.
 - Rectification returns an interval and calibrated confidence, not false

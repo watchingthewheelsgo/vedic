@@ -19,7 +19,7 @@ description: "八字经典报告生成 skill。使用《穷通宝鉴》《子平
 
 ## Boundary
 
-- 禁止手排年柱、月柱、日柱、时柱、大运。排盘必须来自 `bazi_structured_data.md` 或 `bazi_structured_data.json`。
+- 禁止手排年柱、月柱、日柱、时柱、大运。排盘必须来自 `bazi_chart_foundation.md` 或 `bazi_chart_record.json`。
 - 禁止把“调候用神”“格局用神”“扶抑喜忌”“通关之神”静默合并成一个“喜用神”。
 - 禁止用“缺什么补什么”替代经典判断。
 - 禁止把用户经历当作推导依据。用户经历只能在校准阶段验证，不可反推盘面。
@@ -29,7 +29,7 @@ description: "八字经典报告生成 skill。使用《穷通宝鉴》《子平
 
 生成报告前检查工作区是否有：
 
-1. `bazi_structured_data.md` 或 `bazi_structured_data.json`
+1. `bazi_chart_foundation.md` 或 `bazi_chart_record.json`
 2. `bazi_report_context.md`
 
 `bazi_report_context.md` 必须包含：

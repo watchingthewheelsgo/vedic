@@ -14,19 +14,6 @@ from app.services.skill_workspace import SkillWorkspace
 
 PUBLIC_REPORT_ORDER = [
     "consultation_report.md",
-    "p1_overview.md",
-    "p2a_planets.md",
-    "p2b_planets.md",
-    "p2c_planets.md",
-    "p2d_planets.md",
-    "p3a_d9.md",
-    "p3b_divisional.md",
-    "p4a_houses.md",
-    "p4b_houses.md",
-    "p5a_life.md",
-    "p5b_life.md",
-    "appendix.md",
-    "report_quality_audit.md",
 ]
 
 LOCALE_TAGS = {"zh": "zh-CN", "en": "en-US", "ja": "ja-JP"}
@@ -45,19 +32,6 @@ REPORT_COPY = {
         "wave": "Wave",
         "sections": {
             "consultation_report.md": "VedicDust Consultation",
-            "p1_overview.md": "Core Pattern",
-            "p2a_planets.md": "Planetary Signals - Part 1",
-            "p2b_planets.md": "Planetary Signals - Part 2",
-            "p2c_planets.md": "Planetary Signals - Part 3",
-            "p2d_planets.md": "Planetary Signals - Part 4",
-            "p3a_d9.md": "Deeper Promise (D9)",
-            "p3b_divisional.md": "Supporting Life Context",
-            "p4a_houses.md": "Life Areas - Part 1",
-            "p4b_houses.md": "Life Areas - Part 2",
-            "p5a_life.md": "Life Guidance - Part 1",
-            "p5b_life.md": "Life Guidance - Part 2",
-            "appendix.md": "Reference Notes",
-            "report_quality_audit.md": "Report Quality Audit",
         },
     },
     "zh": {
@@ -73,19 +47,6 @@ REPORT_COPY = {
         "wave": "批次",
         "sections": {
             "consultation_report.md": "VedicDust 专业咨询档案",
-            "p1_overview.md": "核心模式",
-            "p2a_planets.md": "行星信号一",
-            "p2b_planets.md": "行星信号二",
-            "p2c_planets.md": "行星信号三",
-            "p2d_planets.md": "行星信号四",
-            "p3a_d9.md": "深层潜力（D9）",
-            "p3b_divisional.md": "人生支持语境",
-            "p4a_houses.md": "人生领域一",
-            "p4b_houses.md": "人生领域二",
-            "p5a_life.md": "人生指引一",
-            "p5b_life.md": "人生指引二",
-            "appendix.md": "参考附录",
-            "report_quality_audit.md": "报告质量审计",
         },
     },
     "ja": {
@@ -101,19 +62,6 @@ REPORT_COPY = {
         "wave": "Wave",
         "sections": {
             "consultation_report.md": "VedicDust コンサルテーション記録",
-            "p1_overview.md": "核となるパターン",
-            "p2a_planets.md": "惑星シグナル 1",
-            "p2b_planets.md": "惑星シグナル 2",
-            "p2c_planets.md": "惑星シグナル 3",
-            "p2d_planets.md": "惑星シグナル 4",
-            "p3a_d9.md": "深い可能性（D9）",
-            "p3b_divisional.md": "人生文脈の補助",
-            "p4a_houses.md": "人生領域 1",
-            "p4b_houses.md": "人生領域 2",
-            "p5a_life.md": "人生ガイダンス 1",
-            "p5b_life.md": "人生ガイダンス 2",
-            "appendix.md": "参考ノート",
-            "report_quality_audit.md": "レポート品質監査",
         },
     },
 }
@@ -217,12 +165,7 @@ class ReportExporter:
     ) -> list[ReportSection]:
         by_path = {artifact.path: artifact for artifact in artifacts}
         sections: list[ReportSection] = []
-        report_order = (
-            ["consultation_report.md"]
-            if "consultation_report.md" in by_path
-            else PUBLIC_REPORT_ORDER
-        )
-        for index, path in enumerate(report_order):
+        for index, path in enumerate(PUBLIC_REPORT_ORDER):
             artifact = by_path.get(path)
             if artifact is None or not artifact.content.strip():
                 continue

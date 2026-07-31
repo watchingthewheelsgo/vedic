@@ -54,13 +54,13 @@ def test_write_bazi_artifacts(tmp_path: Path) -> None:
     written = write_artifacts(payload, tmp_path)
 
     assert set(written) == {
-        "bazi_structured_data.json",
-        "bazi_structured_data.md",
+        "bazi_chart_record.json",
+        "bazi_chart_foundation.md",
         "bazi_report_context.md",
     }
-    structured = json.loads((tmp_path / "bazi_structured_data.json").read_text())
-    assert structured["schemaVersion"] == "bazi-chart-facts/v1"
-    assert "## Four Pillars" in (tmp_path / "bazi_structured_data.md").read_text()
+    chart_record = json.loads((tmp_path / "bazi_chart_record.json").read_text())
+    assert chart_record["schemaVersion"] == "bazi-chart-facts/v1"
+    assert "## Four Pillars" in (tmp_path / "bazi_chart_foundation.md").read_text()
     assert "Major Luck True Ages" in (tmp_path / "bazi_report_context.md").read_text()
 
 
@@ -78,8 +78,8 @@ def test_backend_runner_calculates_bazi_chart_artifacts(tmp_path: Path) -> None:
 
     payload = json.loads(result.output)
     assert payload["ok"] is True
-    assert (tmp_path / "bazi_structured_data.json").exists()
-    assert (tmp_path / "bazi_structured_data.md").exists()
+    assert (tmp_path / "bazi_chart_record.json").exists()
+    assert (tmp_path / "bazi_chart_foundation.md").exists()
     assert (tmp_path / "bazi_report_context.md").exists()
 
 
@@ -115,14 +115,14 @@ def test_skill_runtime_creates_bazi_session(tmp_path: Path) -> None:
             )
         )
         assert session.stage == "bazi_ready"
-        assert session.active_artifact == "bazi_structured_data.md"
+        assert session.active_artifact == "bazi_chart_foundation.md"
         paths = {artifact.path for artifact in session.artifacts}
-        assert "bazi_structured_data.md" in paths
-        assert "bazi_structured_data.json" in paths
+        assert "bazi_chart_foundation.md" in paths
+        assert "bazi_chart_record.json" in paths
         assert "bazi_report_context.md" in paths
 
         loaded = runtime.load_session(session.session_id)
         assert loaded.stage == "bazi_ready"
-        assert loaded.active_artifact == "bazi_structured_data.md"
+        assert loaded.active_artifact == "bazi_chart_foundation.md"
 
     asyncio.run(run())

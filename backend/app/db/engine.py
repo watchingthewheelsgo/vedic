@@ -35,7 +35,7 @@ async def init_db(settings: Settings) -> None:
     AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_ensure_owner_user_columns)
+        await conn.run_sync(_ensure_runtime_columns)
 
 
 async def close_db() -> None:
@@ -75,7 +75,7 @@ def normalize_database_url(value: str) -> URL:
     return url
 
 
-def _ensure_owner_user_columns(sync_conn) -> None:
+def _ensure_runtime_columns(sync_conn) -> None:
     inspector = inspect(sync_conn)
     table_names = set(inspector.get_table_names())
     for table in [
@@ -90,6 +90,10 @@ def _ensure_owner_user_columns(sync_conn) -> None:
         columns = {column["name"] for column in inspector.get_columns(table)}
         if "owner_user_id" not in columns:
             sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN owner_user_id VARCHAR(160)"))
+        if table == "vedic_artifacts" and "chart_record_sha256" not in columns:
+            sync_conn.execute(
+                text("ALTER TABLE vedic_artifacts ADD COLUMN chart_record_sha256 VARCHAR(80)")
+            )
 
 
 def database_diagnostic_context(settings: Settings | None = None) -> dict[str, object]:

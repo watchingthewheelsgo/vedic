@@ -132,6 +132,8 @@ class SubjectContext(ContractModel):
     current_age: int | None = Field(default=None, ge=0, le=130)
     life_stage: Literal["child", "teen", "young_adult", "adult", "elder"] | None = None
     reader_relationship: Literal["self", "parent", "partner", "family", "professional"] = "self"
+    gender_context: str | None = None
+    relationship_status: str | None = None
     consultation_topics: list[str] = Field(default_factory=list)
 
 
@@ -438,6 +440,81 @@ class ChartRecord(ContractModel):
         return self
 
 
+class SynastrySubject(ContractModel):
+    role: Literal["A", "B"]
+    label: str
+    chart_record_id: str
+    chart_revision: int = Field(ge=1)
+    subject_id: str
+
+
+class SynastryScope(ContractModel):
+    relationship_type: str | None = None
+    current_stage: str | None = None
+    question: str | None = None
+
+
+class SynastryOverlay(ContractModel):
+    overlay_id: str
+    source_role: Literal["A", "B"]
+    source_object_id: str
+    target_role: Literal["A", "B"]
+    target_house: int = Field(ge=1, le=12)
+    source_sign_index: int = Field(ge=0, le=11)
+    target_lagna_sign_index: int = Field(ge=0, le=11)
+    derivation_model: Literal["whole-sign-overlay"] = "whole-sign-overlay"
+
+
+class SynastryContact(ContractModel):
+    contact_id: str
+    source_role: Literal["A", "B"]
+    source_object_id: str
+    target_role: Literal["A", "B"]
+    target_object_id: str
+    contact_type: Literal[
+        "conjunction",
+        "seventh_drishti",
+        "mars_fourth_drishti",
+        "mars_eighth_drishti",
+        "jupiter_fifth_drishti",
+        "jupiter_ninth_drishti",
+        "saturn_third_drishti",
+        "saturn_tenth_drishti",
+    ]
+    source_sign_index: int = Field(ge=0, le=11)
+    target_sign_index: int = Field(ge=0, le=11)
+    derivation_model: Literal["parashari-graha-drishti-1.0.0"] = "parashari-graha-drishti-1.0.0"
+
+
+class SynastryContext(ContractModel):
+    schema_version: Literal["vedicdust-synastry-context/1.0.0"] = "vedicdust-synastry-context/1.0.0"
+    synastry_context_id: str
+    reading_session_id: str
+    generated_at: datetime
+    method_profile_id: str
+    subjects: list[SynastrySubject] = Field(min_length=2, max_length=2)
+    scope: SynastryScope
+    overlays: list[SynastryOverlay]
+    contacts: list[SynastryContact]
+    quality_checks: list[QualityCheck]
+    limitations: list[str] = Field(default_factory=list)
+    status: Literal["ready_for_judgement", "blocked"]
+
+    @model_validator(mode="after")
+    def validate_context(self) -> SynastryContext:
+        roles = [subject.role for subject in self.subjects]
+        if sorted(roles) != ["A", "B"]:
+            raise ValueError("synastry context requires one A subject and one B subject")
+        if len({overlay.overlay_id for overlay in self.overlays}) != len(self.overlays):
+            raise ValueError("synastry context contains duplicate overlay ids")
+        if len({contact.contact_id for contact in self.contacts}) != len(self.contacts):
+            raise ValueError("synastry context contains duplicate contact ids")
+        has_failure = any(check.status == "failed" for check in self.quality_checks)
+        if has_failure != (self.status == "blocked"):
+            raise ValueError("synastry status must agree with failed quality checks")
+        return self
+
+
 class ReadingSession(ContractModel):
     schema_version: Literal["vedicdust-reading-session/1.0.0"] = "vedicdust-reading-session/1.0.0"
     reading_session_id: str
@@ -614,6 +691,9 @@ class JudgementRuleContext(ContractModel):
         Literal["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"]
     ] = Field(default_factory=list)
     status: Literal["draft", "provisional", "validated"]
+    evaluation_status: Literal["eligible", "ineligible"]
+    matched_fact_ids: list[str] = Field(default_factory=list)
+    failed_predicates: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 
 
@@ -627,6 +707,7 @@ class JudgementTopicContext(ContractModel):
     natal_fact_ids: list[str] = Field(default_factory=list)
     capacity_fact_ids: list[str] = Field(default_factory=list)
     varga_fact_ids: list[str] = Field(default_factory=list)
+    timing_fact_ids: list[str] = Field(default_factory=list)
     timing_period_ids: list[str] = Field(default_factory=list)
     eligible_vargas: list[str] = Field(default_factory=list)
     evidence_layers: list[Literal["natal_promise", "capacity", "varga_confirmation", "timing"]] = (

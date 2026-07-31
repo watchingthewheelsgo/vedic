@@ -1,6 +1,6 @@
 # Input Contract
 
-Use this when validating `bazi_structured_data.md/json`.
+Use this when validating `bazi_chart_foundation.md` and `bazi_chart_record.json`.
 
 The calculator owns these facts. The report skill reads them; it does not recalculate them.
 

@@ -1,15 +1,17 @@
 """
 divisional_pyjhora.py - PyJHora 分盘计算封装
 支持所有标准分盘 (D1-D60)
-使用 charts.divisional_chart(chart_method=1) — JHora Traditional Parasara
+使用 charts.divisional_chart(chart_method=1)；这是 provider 适配声明，不是独立桌面软件验证。
 """
+
+from .pyjhora_compat import ensure_pyjhora_swe_compat
 
 
 def calculate_divisional_charts(
     year, month, day, hour, minute, lat, lon, tz_offset, chart_factors=None
 ):
     """
-    使用 PyJHora 计算分盘，与 JHora 桌面版一致。
+    使用固定版本 PyJHora 和明确的 chart_method=1 计算分盘。
 
     Returns:
         dict: {'D9': {planet: {'sign':..., 'sign_idx':..., 'degree':...}, ...}, ...}
@@ -36,29 +38,7 @@ def calculate_divisional_charts(
         sys.path.insert(0, pyjhora_path)
     swe.set_ephe_path(os.path.join(pyjhora_path, "jhora", "data", "ephe"))
 
-    for fn_name in ["calc_ut", "calc"]:
-        orig = getattr(swe, fn_name)
-        if not hasattr(orig, "_patched"):
-
-            def make_patch(o):
-                def p(jd, planet, flags=0):
-                    r = o(jd, planet, flags=flags)
-                    return (r[0], r[1]) if len(r) == 3 else r
-
-                p._patched = True
-                return p
-
-            setattr(swe, fn_name, make_patch(orig))
-    if hasattr(swe, "houses_ex"):
-        orig_he = swe.houses_ex
-        if not hasattr(orig_he, "_patched"):
-
-            def patch_he(*a, **kw):
-                r = orig_he(*a, **kw)
-                return (r[0], r[1]) if len(r) == 3 else r
-
-            patch_he._patched = True
-            swe.houses_ex = patch_he
+    ensure_pyjhora_swe_compat()
 
     from jhora import const
     from jhora.panchanga import drik

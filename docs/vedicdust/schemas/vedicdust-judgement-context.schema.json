@@ -28,6 +28,25 @@
           "title": "Status",
           "type": "string"
         },
+        "evaluationStatus": {
+          "enum": ["eligible", "ineligible"],
+          "title": "Evaluationstatus",
+          "type": "string"
+        },
+        "matchedFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Matchedfactids",
+          "type": "array"
+        },
+        "failedPredicates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failedpredicates",
+          "type": "array"
+        },
         "limitations": {
           "items": {
             "type": "string"
@@ -36,7 +55,7 @@
           "type": "array"
         }
       },
-      "required": ["ruleId", "title", "topic", "status"],
+      "required": ["ruleId", "title", "topic", "status", "evaluationStatus"],
       "title": "JudgementRuleContext",
       "type": "object"
     },
@@ -93,6 +112,13 @@
             "type": "string"
           },
           "title": "Vargafactids",
+          "type": "array"
+        },
+        "timingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingfactids",
           "type": "array"
         },
         "timingPeriodIds": {

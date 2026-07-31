@@ -102,7 +102,7 @@ limitations. Prefer a small number of decision-relevant synthesis Claims over a
 planet-by-planet or house-by-house catalogue. User testimony may validate
 expression but cannot retroactively manufacture a natal promise.
 
-Domain judgement rules in rule pack `vedicdust-rules-1.1.0` are explicit
+Domain judgement rules in rule pack `vedicdust-rules-1.2.0` are explicit
 product hypotheses until edition-pinned textual research and professional
 fixtures promote them. Their provisional status is a disclosure, not permission
 to substitute unsupported prose.
@@ -119,8 +119,8 @@ Assign every released Claim to exactly one reader section or record why it was
 omitted. Write for the subject's life stage and reader relationship. Lead with
 plain meaning, disclose certainty and limits, then provide technical evidence.
 The backend renders the final report deterministically from the approved
-Dossier and Claim Graph. Legacy p1-p5 Markdown is not a production input. Do
-not introduce fatalistic, medical, legal, or financial certainty.
+Dossier and Claim Graph. Do not introduce fatalistic, medical, legal, or
+financial certainty.
 
 ### 9. Consultation continuity
 

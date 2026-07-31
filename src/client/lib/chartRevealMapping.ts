@@ -51,19 +51,21 @@ export interface ChartRevealCoordinates {
   planetLongitudes: Partial<Record<PlanetKey, number>>;
 }
 
-export function chartRevealCoordinatesFromFacts(
-  facts: Record<string, unknown> | null
+export function chartRevealCoordinatesFromRecord(
+  record: Record<string, unknown> | null
 ): ChartRevealCoordinates | null {
-  const rashi = objectRecord(facts?.rashi);
-  const lagna = objectRecord(rashi?.lagna);
-  const planets = objectRecord(rashi?.planets);
-  const lagnaLongitude = finiteNumber(lagna?.longitude);
-  if (lagnaLongitude == null || !planets) return null;
+  const astronomy = objectRecord(record?.astronomy);
+  const ascendant = objectRecord(astronomy?.ascendant);
+  const grahas = Array.isArray(astronomy?.grahas) ? astronomy.grahas : [];
+  const lagnaLongitude = finiteNumber(ascendant?.longitudeDeg);
+  if (lagnaLongitude == null) return null;
 
   const planetLongitudes: Partial<Record<PlanetKey, number>> = {};
-  for (const planet of Object.keys(PLANET_SLUG).map((slug) => PLANET_SLUG[slug])) {
-    const longitude = finiteNumber(objectRecord(planets[planet])?.longitude);
-    if (longitude != null) planetLongitudes[planet] = longitude;
+  for (const item of grahas) {
+    const graha = objectRecord(item);
+    const planet = typeof graha?.graha === "string" ? PLANET_SLUG[graha.graha.toLowerCase()] : null;
+    const longitude = finiteNumber(objectRecord(graha?.position)?.longitudeDeg);
+    if (planet && longitude != null) planetLongitudes[planet] = longitude;
   }
   return { lagnaLongitude, planetLongitudes };
 }

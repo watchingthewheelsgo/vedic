@@ -16,6 +16,7 @@ from app.vedicdust.models import (
     RectificationAnswerBatch,
     RectificationQuestionSet,
     RuleCatalog,
+    SynastryContext,
 )
 
 
@@ -33,6 +34,7 @@ SCHEMAS = {
     "vedicdust-agent-context.schema.json": AgentContext,
     "vedicdust-report-manifest.schema.json": ConsultationReportManifest,
     "vedicdust-rule-catalog.schema.json": RuleCatalog,
+    "vedicdust-synastry-context.schema.json": SynastryContext,
 }
 
 

@@ -24,6 +24,10 @@ run: it resolves the applicable rules, requested topics, exact fact IDs,
 eligible vargas, timing periods, and restricted evidence. A rule or ID absent
 from that context does not exist for this run.
 
+Rules with `evaluationStatus: ineligible` are audit output, not an invitation
+to interpret. Use only eligible rules, their `matchedFactIds`, and the fact IDs
+inside the matching topic bundle.
+
 ## Judgement order
 
 1. Establish D1 natal promise.
@@ -39,7 +43,8 @@ from that context does not exist for this run.
 
 For each requested or high-priority topic in `judgement_context.json`:
 
-1. Resolve applicable Method Rules; do not invent a rule.
+1. Resolve Method Rules whose backend evaluation is `eligible`; do not invent
+   or rehabilitate an ineligible rule.
 2. Record supporting, contradicting, and timing fact IDs.
 3. Require natal promise plus capacity for a strong structural Claim.
 4. Require natal promise, capacity, and an exact `timingPeriodId` for a forecast
@@ -54,8 +59,8 @@ For each requested or high-priority topic in `judgement_context.json`:
    Copy `rulePackVersion` from `judgement_context.json`.
 
 Use only canonical topic IDs exposed by the context. Produce 5 to 10 synthesis
-Claims, including chart foundation. Never use a legacy report paragraph as
-evidence or as a shortcut to a Claim.
+Claims, including chart foundation. Use only evidence declared by the current
+Judgement Context.
 
 Complete only when every Claim is traceable and every omitted requested topic
 has a reason.
