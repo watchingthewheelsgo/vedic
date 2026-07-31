@@ -25,48 +25,27 @@ export const WORKSHOP_STAGES: StageDef[] = [
     id: "chart",
     label: "Chart Facts",
     sub: "calculator",
+    seed: true,
     match: (id) => id === "chart_facts"
   },
   {
     id: "reader",
-    label: "First Check",
-    sub: "your replies",
+    label: "Birth Time Check",
+    sub: "lived evidence",
+    seed: true,
     match: (id) => id === "reader_prevalidation"
   },
-  { id: "p1", label: "Core Pattern", sub: "temperament", match: (id) => id === "p1" },
-  { id: "yoga", label: "Major Patterns", sub: "chart themes", match: (id) => id === "p2_yoga" },
   {
-    id: "p2",
-    label: "Planet Signals",
-    sub: "9 signals",
-    match: (id) => id.startsWith("p2_") && id !== "p2_yoga"
-  },
-  { id: "d9", label: "Deeper Promise", sub: "D9 lens", match: (id) => id.startsWith("p3a_d9_") },
-  {
-    id: "div",
-    label: "Life Context",
-    sub: "career and home",
-    match: (id) => id.startsWith("p3b_")
-  },
-  { id: "house", label: "Life Areas", sub: "12 houses", match: (id) => id.startsWith("p4_house_") },
-  {
-    id: "dasha",
-    label: "Timing Guidance",
-    sub: "life periods",
-    match: (id) => id === "dasha_review"
-  },
-  { id: "pari", label: "Cross-checks", sub: "theme links", match: (id) => id === "p4_parivartana" },
-  {
-    id: "life",
-    label: "Life Synthesis",
-    sub: "10 domains",
-    match: (id) => id.startsWith("p5_block_")
+    id: "judgement",
+    label: "Evidence Synthesis",
+    sub: "facts into claims",
+    match: (id) => id === "vedicdust_judgement"
   },
   {
-    id: "appx",
-    label: "Final Reading",
-    sub: "wrap-up",
-    match: (id) => id === "appendix" || id === "report_quality_audit"
+    id: "consultation",
+    label: "Professional Reading",
+    sub: "personal dossier",
+    match: (id) => id === "vedicdust_consultation"
   }
 ];
 

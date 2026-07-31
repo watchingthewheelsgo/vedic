@@ -17,23 +17,36 @@ from app.vedicdust.models import (
     Claim,
     ClaimGraph,
     ConfidenceGrade,
+    ConsultationConfidence,
+    ConsultationDossier,
+    ConsultationScope,
     EvidenceClass,
     EvidenceItem,
     GrahaPosition,
     JyotishFact,
+    JudgementContext,
+    ReportSection,
     RuleProvenance,
     SubjectContext,
     TimeRange,
     ZodiacPosition,
 )
 from app.vedicdust.profiles import parashari_lahiri_profile
+from app.vedicdust.judgement import build_judgement_context
+from app.vedicdust.reporting import build_agent_context, render_consultation_report
 from app.vedicdust.source_registry import (
     load_rule_catalog,
     load_source_registry,
     validate_profile_source_ids,
     validate_rule_catalog_sources,
 )
-from app.vedicdust.validation import validate_chart_record_provenance, validate_claim_graph
+from app.vedicdust.validation import (
+    validate_agent_context,
+    validate_chart_record_provenance,
+    validate_claim_graph,
+    validate_consultation_dossier,
+    validate_judgement_context,
+)
 
 
 UTC = timezone.utc
@@ -73,12 +86,26 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
     catalog = load_rule_catalog()
     validate_rule_catalog_sources(catalog)
 
-    assert catalog.catalog_version == "1.0.0"
+    assert catalog.catalog_version == "1.1.0"
     rule_ids = {rule.rule_id for rule in catalog.rules}
     assert {
         "sop.promise-before-varga",
         "sop.promise-capacity-before-timing",
         "sop.d60-eligibility-gate",
+    } <= rule_ids
+    assert {
+        "judge.foundation.integrated",
+        "judge.identity.integrated",
+        "judge.career.d1-d10",
+        "judge.finance.d1-d2-d4",
+        "judge.relationship.d1-d9",
+        "judge.home.d1-d4",
+        "judge.learning.d1-d5-d24",
+        "judge.children.d1-d7",
+        "judge.health.d1-d30",
+        "judge.dharma.d1-d9-d20",
+        "judge.family.d1-d12",
+        "judge.timing.vimshottari-activation",
     } <= rule_ids
     assert {
         "derive.astronomy.sidereal-position",
@@ -214,6 +241,21 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
             confidence=ConfidenceGrade.VERIFIED,
         ),
     )
+    capacity_fact = JyotishFact(
+        fact_id="fact.D1.H1.sav",
+        fact_type="ashtakavarga.sav.house",
+        subject_ref="D1.H1",
+        value=30,
+        unit="bindu",
+        provenance=RuleProvenance(
+            rule_id="derive.ashtakavarga.pyjhora",
+            rule_version="1.0.0",
+            method_profile_id=profile.profile_id,
+            evidence_class="software_reference",
+            source_ids=["software.pyjhora.compatibility"],
+            confidence=ConfidenceGrade.CORROBORATED,
+        ),
+    )
     record = ChartRecord(
         chart_record_id="chart-claim",
         reading_session_id="session-claim",
@@ -232,29 +274,119 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
             evidence=[testimony],
         ),
         calculation_profile=profile,
-        facts=[fact],
+        facts=[fact, capacity_fact],
         status="intake",
     )
     graph = ClaimGraph(
         chart_record_id=record.chart_record_id,
         method_profile_id=profile.profile_id,
+        rule_pack_version="vedicdust-rules-1.1.0",
         generated_at=datetime.now(UTC),
         claims=[
             Claim(
-                claim_id="claim-1",
-                topic="relationship",
-                plain_statement="The chart contains a provisional relationship promise.",
+                claim_id=f"claim-{index}",
+                topic="foundation",
+                plain_statement=(
+                    "The chart contains a provisional relationship promise."
+                    if index == 1
+                    else f"Relationship synthesis {index} remains provisional."
+                ),
                 technical_statement="D1 promise is present; confirmation is still required.",
-                supporting_fact_ids=[fact.fact_id],
-                rule_ids=["sop.promise-before-varga"],
+                supporting_fact_ids=[fact.fact_id, capacity_fact.fact_id],
+                rule_ids=["judge.foundation.integrated"],
                 certainty="low",
                 scope="natal_promise",
             )
+            for index in range(1, 6)
         ],
     )
 
-    validate_claim_graph(record, graph, load_rule_catalog())
-    validate_chart_record_provenance(record, load_rule_catalog())
+    catalog = load_rule_catalog()
+    judgement_context = build_judgement_context(
+        record,
+        catalog,
+        now=datetime(2026, 7, 31, tzinfo=UTC),
+    )
+    validate_judgement_context(record, judgement_context, catalog)
+    foundation_context = next(
+        topic for topic in judgement_context.topics if topic.topic_id == "foundation"
+    )
+    assert fact.fact_id in foundation_context.natal_fact_ids
+    assert capacity_fact.fact_id in foundation_context.capacity_fact_ids
+    assert foundation_context.rule_ids == ["judge.foundation.integrated"]
+
+    validate_claim_graph(record, graph, catalog, judgement_context)
+    validate_chart_record_provenance(record, catalog)
+
+    sections = [
+        ReportSection(
+            section_id=kind,
+            section_kind=kind,
+            title=kind.replace("_", " ").title(),
+            purpose=f"Render {kind}",
+            claim_ids=(
+                ["claim-1", "claim-2", "claim-3"]
+                if kind == "executive_synthesis"
+                else ["claim-4"]
+                if kind == "chart_foundation"
+                else ["claim-5"]
+                if kind == "decision_support"
+                else []
+            ),
+            priority=index,
+        )
+        for index, kind in enumerate(
+            [
+                "scope",
+                "executive_synthesis",
+                "chart_foundation",
+                "timing_outlook",
+                "decision_support",
+                "follow_up",
+                "technical_evidence",
+            ]
+        )
+    ]
+    dossier = ConsultationDossier(
+        dossier_id="dossier-1",
+        chart_record_id=record.chart_record_id,
+        chart_revision=record.revision,
+        method_profile_id=profile.profile_id,
+        claim_graph_version=graph.schema_version,
+        generated_at=datetime.now(UTC),
+        locale="en",
+        audience="self",
+        scope=ConsultationScope(
+            requested_topics=["foundation"],
+            included_topics=["foundation"],
+        ),
+        confidence=ConsultationConfidence(
+            overall="low",
+            input_confidence=ConfidenceGrade.PROVISIONAL,
+            rectification_confidence=ConfidenceGrade.PROVISIONAL,
+            judgement_confidence="low",
+            rationale=["The birth time remains approximate."],
+        ),
+        executive_claim_ids=["claim-1", "claim-2", "claim-3"],
+        sections=sections,
+        unresolved_questions=["What additional evidence would strengthen this claim?"],
+        release_status="approved",
+    )
+    validate_consultation_dossier(record, graph, dossier)
+    context = build_agent_context(record, graph, dossier)
+    validate_agent_context(record, graph, dossier, context)
+    report = render_consultation_report(record, graph, dossier)
+    assert "# VedicDust Consultation" in report
+    assert "The chart contains a provisional relationship promise." in report
+    assert context.topic_index == {
+        "foundation": [
+            "claim-1",
+            "claim-2",
+            "claim-3",
+            "claim-4",
+            "claim-5",
+        ]
+    }
 
     invalid = graph.model_copy(deep=True)
     invalid.claims[0].supporting_fact_ids = ["fact.missing"]
@@ -269,7 +401,9 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
 
 def test_generated_json_schemas_are_current() -> None:
     from app.vedicdust.models import (
+        AgentContext,
         ConsultationReportManifest,
+        ConsultationDossier,
         ReadingSession,
         RectificationAnswerBatch,
         RectificationQuestionSet,
@@ -283,6 +417,9 @@ def test_generated_json_schemas_are_current() -> None:
         "vedicdust-question-set.schema.json": RectificationQuestionSet,
         "vedicdust-answer-batch.schema.json": RectificationAnswerBatch,
         "vedicdust-claim-graph.schema.json": ClaimGraph,
+        "vedicdust-judgement-context.schema.json": JudgementContext,
+        "vedicdust-consultation-dossier.schema.json": ConsultationDossier,
+        "vedicdust-agent-context.schema.json": AgentContext,
         "vedicdust-report-manifest.schema.json": ConsultationReportManifest,
         "vedicdust-rule-catalog.schema.json": RuleCatalog,
     }

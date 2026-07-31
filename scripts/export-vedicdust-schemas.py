@@ -5,10 +5,13 @@ import subprocess
 from pathlib import Path
 
 from app.vedicdust.models import (
+    AgentContext,
     ChartAudit,
     ChartRecord,
     ClaimGraph,
+    ConsultationDossier,
     ConsultationReportManifest,
+    JudgementContext,
     ReadingSession,
     RectificationAnswerBatch,
     RectificationQuestionSet,
@@ -25,6 +28,9 @@ SCHEMAS = {
     "vedicdust-question-set.schema.json": RectificationQuestionSet,
     "vedicdust-answer-batch.schema.json": RectificationAnswerBatch,
     "vedicdust-claim-graph.schema.json": ClaimGraph,
+    "vedicdust-judgement-context.schema.json": JudgementContext,
+    "vedicdust-consultation-dossier.schema.json": ConsultationDossier,
+    "vedicdust-agent-context.schema.json": AgentContext,
     "vedicdust-report-manifest.schema.json": ConsultationReportManifest,
     "vedicdust-rule-catalog.schema.json": RuleCatalog,
 }

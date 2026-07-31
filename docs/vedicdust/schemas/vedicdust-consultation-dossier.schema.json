@@ -1,0 +1,417 @@
+{
+  "$defs": {
+    "ConfidenceGrade": {
+      "enum": ["verified", "corroborated", "provisional", "disputed", "unavailable"],
+      "title": "ConfidenceGrade",
+      "type": "string"
+    },
+    "ConsultationConfidence": {
+      "additionalProperties": false,
+      "properties": {
+        "overall": {
+          "enum": ["high", "moderate", "low", "blocked"],
+          "title": "Overall",
+          "type": "string"
+        },
+        "inputConfidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "rectificationConfidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "judgementConfidence": {
+          "enum": ["high", "moderate", "low", "blocked"],
+          "title": "Judgementconfidence",
+          "type": "string"
+        },
+        "rationale": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Rationale",
+          "type": "array"
+        }
+      },
+      "required": [
+        "overall",
+        "inputConfidence",
+        "rectificationConfidence",
+        "judgementConfidence",
+        "rationale"
+      ],
+      "title": "ConsultationConfidence",
+      "type": "object"
+    },
+    "ConsultationScope": {
+      "additionalProperties": false,
+      "properties": {
+        "requestedTopics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requestedtopics",
+          "type": "array"
+        },
+        "userQuestions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Userquestions",
+          "type": "array"
+        },
+        "includedTopics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Includedtopics",
+          "type": "array"
+        },
+        "omittedTopics": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Omittedtopics",
+          "type": "object"
+        },
+        "reportDepth": {
+          "default": "standard",
+          "enum": ["standard", "professional"],
+          "title": "Reportdepth",
+          "type": "string"
+        },
+        "residualUncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Residualuncertainties",
+          "type": "array"
+        }
+      },
+      "title": "ConsultationScope",
+      "type": "object"
+    },
+    "QualityCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "checkId": {
+          "title": "Checkid",
+          "type": "string"
+        },
+        "status": {
+          "enum": ["passed", "warning", "failed", "not_run"],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "observed": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": ["checkId", "status", "message"],
+      "title": "QualityCheck",
+      "type": "object"
+    },
+    "ReportSection": {
+      "additionalProperties": false,
+      "properties": {
+        "sectionId": {
+          "title": "Sectionid",
+          "type": "string"
+        },
+        "sectionKind": {
+          "enum": [
+            "scope",
+            "executive_synthesis",
+            "chart_foundation",
+            "core_architecture",
+            "priority_domain",
+            "timing_outlook",
+            "decision_support",
+            "follow_up",
+            "technical_evidence"
+          ],
+          "title": "Sectionkind",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "claimIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claimids",
+          "type": "array"
+        },
+        "timingWindowIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingwindowids",
+          "type": "array"
+        },
+        "visualRefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Visualrefs",
+          "type": "array"
+        },
+        "priority": {
+          "default": 100,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "confidenceDisclosureRequired": {
+          "default": false,
+          "title": "Confidencedisclosurerequired",
+          "type": "boolean"
+        }
+      },
+      "required": ["sectionId", "sectionKind", "title", "purpose"],
+      "title": "ReportSection",
+      "type": "object"
+    },
+    "TimeRange": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["start", "end"],
+      "title": "TimeRange",
+      "type": "object"
+    },
+    "TimingWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "timingWindowId": {
+          "title": "Timingwindowid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "horizon": {
+          "enum": ["historical", "current", "near_term", "strategic"],
+          "title": "Horizon",
+          "type": "string"
+        },
+        "interval": {
+          "$ref": "#/$defs/TimeRange"
+        },
+        "claimIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Claimids",
+          "type": "array"
+        },
+        "activationFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Activationfactids",
+          "type": "array"
+        },
+        "activationPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Activationperiodids",
+          "type": "array"
+        },
+        "opportunities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Opportunities",
+          "type": "array"
+        },
+        "pressures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Pressures",
+          "type": "array"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "confidence": {
+          "enum": ["high", "moderate", "low"],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": ["timingWindowId", "title", "horizon", "interval", "claimIds", "confidence"],
+      "title": "TimingWindow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-consultation-dossier/1.0.0",
+      "default": "vedicdust-consultation-dossier/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "dossierId": {
+      "title": "Dossierid",
+      "type": "string"
+    },
+    "chartRecordId": {
+      "title": "Chartrecordid",
+      "type": "string"
+    },
+    "chartRevision": {
+      "minimum": 1,
+      "title": "Chartrevision",
+      "type": "integer"
+    },
+    "methodProfileId": {
+      "title": "Methodprofileid",
+      "type": "string"
+    },
+    "claimGraphVersion": {
+      "const": "vedicdust-claim-graph/1.0.0",
+      "title": "Claimgraphversion",
+      "type": "string"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "locale": {
+      "enum": ["zh", "en", "ja"],
+      "title": "Locale",
+      "type": "string"
+    },
+    "audience": {
+      "enum": ["self", "parent", "partner", "family", "professional"],
+      "title": "Audience",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/ConsultationScope"
+    },
+    "confidence": {
+      "$ref": "#/$defs/ConsultationConfidence"
+    },
+    "executiveClaimIds": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 5,
+      "title": "Executiveclaimids",
+      "type": "array"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/ReportSection"
+      },
+      "minItems": 1,
+      "title": "Sections",
+      "type": "array"
+    },
+    "timingWindows": {
+      "items": {
+        "$ref": "#/$defs/TimingWindow"
+      },
+      "title": "Timingwindows",
+      "type": "array"
+    },
+    "omittedClaimIds": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Omittedclaimids",
+      "type": "object"
+    },
+    "unresolvedQuestions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolvedquestions",
+      "type": "array"
+    },
+    "releaseStatus": {
+      "enum": ["draft", "approved", "blocked"],
+      "title": "Releasestatus",
+      "type": "string"
+    },
+    "qualityChecks": {
+      "items": {
+        "$ref": "#/$defs/QualityCheck"
+      },
+      "title": "Qualitychecks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "dossierId",
+    "chartRecordId",
+    "chartRevision",
+    "methodProfileId",
+    "claimGraphVersion",
+    "generatedAt",
+    "locale",
+    "audience",
+    "scope",
+    "confidence",
+    "sections",
+    "releaseStatus"
+  ],
+  "title": "ConsultationDossier",
+  "type": "object"
+}

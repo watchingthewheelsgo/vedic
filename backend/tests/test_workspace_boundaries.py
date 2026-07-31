@@ -70,6 +70,36 @@ def test_chart_record_is_internal_but_available_to_the_runtime(tmp_path: Path) -
     assert runtime_artifacts[1].path == "structured_data.md"
 
 
+def test_checkpoint_invalidates_when_native_dependency_changes(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(session_id, "structured_data.md", "# chart\n")
+    workspace.write_artifact(session_id, "judgement_context.json", '{"revision":1}\n')
+    workspace.write_artifact(session_id, "claim_graph.json", '{"claims":[]}\n')
+    workspace.mark_artifact_checkpoint(
+        session_id,
+        "claim_graph.json",
+        producer="vedic-core:vedicdust_judgement",
+        dependency_paths=["judgement_context.json"],
+    )
+
+    assert workspace.artifact_checkpoint_valid(
+        session_id,
+        "claim_graph.json",
+        producer="vedic-core:vedicdust_judgement",
+        dependency_paths=["judgement_context.json"],
+    )
+
+    workspace.write_artifact(session_id, "judgement_context.json", '{"revision":2}\n')
+
+    assert not workspace.artifact_checkpoint_valid(
+        session_id,
+        "claim_graph.json",
+        producer="vedic-core:vedicdust_judgement",
+        dependency_paths=["judgement_context.json"],
+    )
+
+
 def test_reading_session_keeps_chart_identity_across_revisions(tmp_path: Path) -> None:
     workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
     session_id = workspace.create_session()

@@ -19,8 +19,11 @@ class SkillWorkspace:
         "vedicdust_case.json",
         "chart_audit.json",
         "case_audit.json",
+        "judgement_context.json",
         "claim_graph.json",
+        "consultation_dossier.json",
         "consultation_report_manifest.json",
+        "agent_context.json",
         "rectification_question_set.json",
         "rectification_answer_batch.json",
     }
@@ -117,6 +120,7 @@ class SkillWorkspace:
         relative_path: str,
         *,
         producer: str,
+        dependency_paths: list[str] | None = None,
     ) -> None:
         session_dir = self.require_session_dir(session_id)
         target = self._safe_artifact_path(session_dir, relative_path)
@@ -130,6 +134,7 @@ class SkillWorkspace:
             "producer": producer,
             "structuredDataSha256": self.structured_data_sha256(session_id),
             "artifactSha256": self._file_sha256(target),
+            "dependencySha256": self._dependency_hashes(session_dir, dependency_paths or []),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
         metadata_path.write_text(
@@ -142,6 +147,7 @@ class SkillWorkspace:
         relative_path: str,
         *,
         producer: str | None = None,
+        dependency_paths: list[str] | None = None,
     ) -> bool:
         session_dir = self.require_session_dir(session_id)
         target = self._safe_artifact_path(session_dir, relative_path)
@@ -165,6 +171,9 @@ class SkillWorkspace:
         if payload.get("structuredDataSha256") != self.structured_data_sha256(session_id):
             return False
         if payload.get("artifactSha256") != self._file_sha256(target):
+            return False
+        expected_dependencies = self._dependency_hashes(session_dir, dependency_paths or [])
+        if payload.get("dependencySha256", {}) != expected_dependencies:
             return False
         return True
 
@@ -208,6 +217,16 @@ class SkillWorkspace:
                 digest.update(chunk)
         return digest.hexdigest()
 
+    def _dependency_hashes(self, session_dir: Path, dependency_paths: list[str]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for relative_path in dependency_paths:
+            target = self._safe_artifact_path(session_dir, relative_path)
+            if not target.exists() or not target.is_file():
+                result[relative_path] = ""
+            else:
+                result[relative_path] = self._file_sha256(target)
+        return result
+
     def _artifact_from_path(self, session_dir: Path, path: Path) -> SkillArtifact:
         relative = path.resolve().relative_to(session_dir.resolve()).as_posix()
         kind = "json" if path.suffix == ".json" else "text" if path.suffix == ".txt" else "markdown"
@@ -230,6 +249,7 @@ class SkillWorkspace:
             "birth_input_context.json",
             "sensitivity_scan.json",
             "chart_rectification_state.json",
+            "judgement_context.json",
             "user_context.md",
             "reader_prevalidation.md",
             "prevalidation_result.json",
@@ -244,6 +264,7 @@ class SkillWorkspace:
             "p4b_houses.md",
             "p5a_life.md",
             "p5b_life.md",
+            "consultation_report.md",
             "appendix.md",
             "report_quality_audit.md",
             "run_metrics.json",

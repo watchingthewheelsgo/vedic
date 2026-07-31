@@ -11,6 +11,18 @@
           "title": "Topic",
           "type": "string"
         },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
         "plainStatement": {
           "title": "Plainstatement",
           "type": "string"
@@ -18,6 +30,32 @@
         "technicalStatement": {
           "title": "Technicalstatement",
           "type": "string"
+        },
+        "realWorldExpressions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Realworldexpressions",
+          "type": "array"
+        },
+        "userRelevance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Userrelevance"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
         },
         "supportingFactIds": {
           "items": {
@@ -41,6 +79,13 @@
           "title": "Timingfactids",
           "type": "array"
         },
+        "timingPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingperiodids",
+          "type": "array"
+        },
         "ruleIds": {
           "items": {
             "type": "string"
@@ -58,6 +103,30 @@
           "enum": ["natal_promise", "capacity", "timing", "rectification", "context"],
           "title": "Scope",
           "type": "string"
+        },
+        "status": {
+          "default": "supported",
+          "enum": ["supported", "tentative", "withheld"],
+          "title": "Status",
+          "type": "string"
+        },
+        "timeScope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "practicalImplications": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Practicalimplications",
+          "type": "array"
         },
         "limitations": {
           "items": {
@@ -120,6 +189,24 @@
       "required": ["checkId", "status", "message"],
       "title": "QualityCheck",
       "type": "object"
+    },
+    "TimeRange": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["start", "end"],
+      "title": "TimeRange",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -134,8 +221,18 @@
       "title": "Chartrecordid",
       "type": "string"
     },
+    "chartRevision": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Chartrevision",
+      "type": "integer"
+    },
     "methodProfileId": {
       "title": "Methodprofileid",
+      "type": "string"
+    },
+    "rulePackVersion": {
+      "title": "Rulepackversion",
       "type": "string"
     },
     "generatedAt": {
@@ -147,6 +244,8 @@
       "items": {
         "$ref": "#/$defs/Claim"
       },
+      "maxItems": 12,
+      "minItems": 1,
       "title": "Claims",
       "type": "array"
     },
@@ -165,7 +264,7 @@
       "type": "array"
     }
   },
-  "required": ["chartRecordId", "methodProfileId", "generatedAt", "claims"],
+  "required": ["chartRecordId", "methodProfileId", "rulePackVersion", "generatedAt", "claims"],
   "title": "ClaimGraph",
   "type": "object"
 }

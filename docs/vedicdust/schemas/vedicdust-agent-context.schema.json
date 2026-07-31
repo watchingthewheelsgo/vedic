@@ -1,0 +1,360 @@
+{
+  "$defs": {
+    "AgentClaimContext": {
+      "additionalProperties": false,
+      "properties": {
+        "claimId": {
+          "title": "Claimid",
+          "type": "string"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        },
+        "statement": {
+          "title": "Statement",
+          "type": "string"
+        },
+        "userRelevance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Userrelevance"
+        },
+        "certainty": {
+          "enum": ["high", "moderate", "low"],
+          "title": "Certainty",
+          "type": "string"
+        },
+        "supportingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supportingfactids",
+          "type": "array"
+        },
+        "counterFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterfactids",
+          "type": "array"
+        },
+        "ruleIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ruleids",
+          "type": "array"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "practicalImplications": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Practicalimplications",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "timeScope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timingWindowIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingwindowids",
+          "type": "array"
+        }
+      },
+      "required": ["claimId", "topic", "statement", "certainty"],
+      "title": "AgentClaimContext",
+      "type": "object"
+    },
+    "AgentFactContext": {
+      "additionalProperties": false,
+      "properties": {
+        "factId": {
+          "title": "Factid",
+          "type": "string"
+        },
+        "factType": {
+          "enum": [
+            "rashi.lagna.position",
+            "rashi.graha.position",
+            "rashi.house.lord",
+            "varga.lagna.position",
+            "varga.graha.position",
+            "strength.dignity",
+            "strength.shadbala",
+            "ashtakavarga.sav.house",
+            "aspect.graha_drishti"
+          ],
+          "title": "Facttype",
+          "type": "string"
+        },
+        "subjectRef": {
+          "title": "Subjectref",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "confidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        }
+      },
+      "required": ["factId", "factType", "subjectRef", "value", "confidence"],
+      "title": "AgentFactContext",
+      "type": "object"
+    },
+    "ConfidenceGrade": {
+      "enum": ["verified", "corroborated", "provisional", "disputed", "unavailable"],
+      "title": "ConfidenceGrade",
+      "type": "string"
+    },
+    "TimeRange": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["start", "end"],
+      "title": "TimeRange",
+      "type": "object"
+    },
+    "TimingWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "timingWindowId": {
+          "title": "Timingwindowid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "horizon": {
+          "enum": ["historical", "current", "near_term", "strategic"],
+          "title": "Horizon",
+          "type": "string"
+        },
+        "interval": {
+          "$ref": "#/$defs/TimeRange"
+        },
+        "claimIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Claimids",
+          "type": "array"
+        },
+        "activationFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Activationfactids",
+          "type": "array"
+        },
+        "activationPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Activationperiodids",
+          "type": "array"
+        },
+        "opportunities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Opportunities",
+          "type": "array"
+        },
+        "pressures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Pressures",
+          "type": "array"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "confidence": {
+          "enum": ["high", "moderate", "low"],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": ["timingWindowId", "title", "horizon", "interval", "claimIds", "confidence"],
+      "title": "TimingWindow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-agent-context/1.0.0",
+      "default": "vedicdust-agent-context/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "dossierId": {
+      "title": "Dossierid",
+      "type": "string"
+    },
+    "chartRecordId": {
+      "title": "Chartrecordid",
+      "type": "string"
+    },
+    "chartRevision": {
+      "minimum": 1,
+      "title": "Chartrevision",
+      "type": "integer"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "locale": {
+      "enum": ["zh", "en", "ja"],
+      "title": "Locale",
+      "type": "string"
+    },
+    "stableFactIds": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Stablefactids",
+      "type": "array"
+    },
+    "stableFacts": {
+      "items": {
+        "$ref": "#/$defs/AgentFactContext"
+      },
+      "title": "Stablefacts",
+      "type": "array"
+    },
+    "approvedClaims": {
+      "items": {
+        "$ref": "#/$defs/AgentClaimContext"
+      },
+      "title": "Approvedclaims",
+      "type": "array"
+    },
+    "withheldClaimIds": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Withheldclaimids",
+      "type": "array"
+    },
+    "timingWindows": {
+      "items": {
+        "$ref": "#/$defs/TimingWindow"
+      },
+      "title": "Timingwindows",
+      "type": "array"
+    },
+    "userConfirmedEventIds": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Userconfirmedeventids",
+      "type": "array"
+    },
+    "rejectedHypotheses": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Rejectedhypotheses",
+      "type": "array"
+    },
+    "openQuestions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Openquestions",
+      "type": "array"
+    },
+    "uncertainties": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Uncertainties",
+      "type": "array"
+    },
+    "topicIndex": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Topicindex",
+      "type": "object"
+    }
+  },
+  "required": ["dossierId", "chartRecordId", "chartRevision", "generatedAt", "locale"],
+  "title": "AgentContext",
+  "type": "object"
+}

@@ -160,67 +160,19 @@ const STAGE_COPY: Record<string, StageCopy> = {
     userAction: "Answer one check at a time. The full reading starts after your replies are saved.",
     expected: "Usually a few minutes while the system prepares your first checks."
   },
-  p1: {
-    purpose: "Establishes the first portrait of temperament and life orientation.",
-    userResult: "The reading starts with your core pattern and the tone of the chart.",
-    userAction: "No action required. Wait for this stage to finish.",
-    expected: "Starts after your first-check replies are saved."
-  },
-  yoga: {
-    purpose: "Looks for major chart patterns that can color the rest of the reading.",
-    userResult: "Strong patterns are carried forward; weak patterns are not overstated.",
-    userAction: "No action required.",
-    expected: "Runs automatically while other reading sections are prepared."
-  },
-  p2: {
-    purpose: "Reads the nine planetary signals behind most of the guidance.",
-    userResult: "Strengths, constraints, and recurring pressures are prepared for synthesis.",
-    userAction: "No action required.",
-    expected: "Several independent signals can be prepared at the same time."
-  },
-  d9: {
-    purpose: "Uses Navamsha (D9) as a deeper lens on promise and fulfillment.",
-    userResult: "The reading can separate visible potential from what tends to mature over time.",
-    userAction: "No action required.",
-    expected: "Prepared after the main planetary signals are available."
-  },
-  div: {
-    purpose: "Adds supporting context for career, home, authority, and creative direction.",
-    userResult: "These supporting lenses add nuance without overwhelming the main reading.",
-    userAction: "No action required.",
-    expected: "Prepared after the main planetary signals are available."
-  },
-  house: {
-    purpose: "Reviews the major life areas the final reading will synthesize.",
+  judgement: {
+    purpose: "Turns qualified chart facts into a small set of traceable conclusions.",
     userResult:
-      "Money, work, relationships, health, learning, family, reputation, and inner growth are covered.",
-    userAction: "No action required.",
-    expected: "Prepared after the deeper and supporting lenses are available."
+      "Each conclusion is checked against natal promise, capacity, eligible supporting charts, timing, and counter-evidence.",
+    userAction: "No action required. The system is evaluating the evidence relevant to you.",
+    expected: "Usually one focused analysis step after the birth-time check."
   },
-  dasha: {
-    purpose: "Frames current and upcoming life periods for timing guidance.",
-    userResult: "The reading can connect present themes to the season you are in.",
-    userAction: "No action required.",
-    expected: "Prepared once the deeper and supporting lenses are available."
-  },
-  pari: {
-    purpose: "Cross-checks strong links between life areas so the reading stays balanced.",
-    userResult: "Confirmed links are included; weaker links are kept in proportion.",
-    userAction: "No action required.",
-    expected: "Prepared after the life-area review."
-  },
-  life: {
-    purpose: "Turns the chart evidence into readable life-domain guidance.",
+  consultation: {
+    purpose: "Organizes the approved conclusions into a readable professional consultation.",
     userResult:
-      "Identity, wealth, career, relationship, health, education, family, reputation, growth, and strengths are synthesized.",
-    userAction: "No action required.",
-    expected: "Several life themes can be prepared at the same time."
-  },
-  appx: {
-    purpose: "Finishes the reading and keeps reference notes available at the end.",
-    userResult: "The Report tab becomes available with export-ready sections.",
+      "You receive an executive synthesis, priority life themes, bounded timing guidance, practical implications, and a technical evidence appendix.",
     userAction: "Open the Report tab when this completes.",
-    expected: "Final wrap-up."
+    expected: "The final rendering follows immediately after evidence synthesis."
   },
   bazi_chart: {
     purpose:
@@ -238,7 +190,7 @@ const STAGE_COPY: Record<string, StageCopy> = {
 };
 
 function localizedStageCopy(stageId: string, t: Translate): StageCopy {
-  const fallback = STAGE_COPY[stageId] ?? STAGE_COPY.appx;
+  const fallback = STAGE_COPY[stageId] ?? STAGE_COPY.consultation;
   const fieldKeys: Record<keyof StageCopy, string> = {
     purpose: "purpose",
     userResult: "result",
@@ -279,16 +231,8 @@ const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
     "chart_rectification_state.json",
     "user_context.md"
   ],
-  p1: ["p1_overview.md"],
-  yoga: [".runtime/p2/yoga.md", "p2a_planets.md"],
-  p2: ["p2a_planets.md", "p2b_planets.md", "p2c_planets.md", "p2d_planets.md"],
-  d9: ["p3a_d9.md"],
-  div: ["p3b_divisional.md"],
-  house: ["p4a_houses.md", "p4b_houses.md"],
-  dasha: [".runtime/dasha_review.md"],
-  pari: [".runtime/houses/parivartana.md", "p4b_houses.md"],
-  life: ["p5a_life.md", "p5b_life.md"],
-  appx: ["appendix.md", "report_quality_audit.md"],
+  judgement: ["reader_prevalidation.md", "prevalidation_result.json"],
+  consultation: ["consultation_report.md"],
   bazi_chart: ["bazi_structured_data.md", "bazi_report_context.md", "bazi_structured_data.json"],
   bazi_report: [
     "bazi_life_report.md",

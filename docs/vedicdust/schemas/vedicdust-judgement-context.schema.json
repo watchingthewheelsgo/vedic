@@ -1,0 +1,267 @@
+{
+  "$defs": {
+    "JudgementRuleContext": {
+      "additionalProperties": false,
+      "properties": {
+        "ruleId": {
+          "title": "Ruleid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        },
+        "requiredEvidenceLayers": {
+          "items": {
+            "enum": ["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"],
+            "type": "string"
+          },
+          "title": "Requiredevidencelayers",
+          "type": "array"
+        },
+        "status": {
+          "enum": ["draft", "provisional", "validated"],
+          "title": "Status",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": ["ruleId", "title", "topic", "status"],
+      "title": "JudgementRuleContext",
+      "type": "object"
+    },
+    "JudgementTopicContext": {
+      "additionalProperties": false,
+      "properties": {
+        "topicId": {
+          "title": "Topicid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "requested": {
+          "default": false,
+          "title": "Requested",
+          "type": "boolean"
+        },
+        "priorityScore": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Priorityscore",
+          "type": "integer"
+        },
+        "ruleIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Ruleids",
+          "type": "array"
+        },
+        "natalFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Natalfactids",
+          "type": "array"
+        },
+        "capacityFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Capacityfactids",
+          "type": "array"
+        },
+        "vargaFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Vargafactids",
+          "type": "array"
+        },
+        "timingPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingperiodids",
+          "type": "array"
+        },
+        "eligibleVargas": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Eligiblevargas",
+          "type": "array"
+        },
+        "evidenceLayers": {
+          "items": {
+            "enum": ["natal_promise", "capacity", "varga_confirmation", "timing"],
+            "type": "string"
+          },
+          "title": "Evidencelayers",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": ["topicId", "title", "purpose", "priorityScore", "ruleIds"],
+      "title": "JudgementTopicContext",
+      "type": "object"
+    },
+    "QualityCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "checkId": {
+          "title": "Checkid",
+          "type": "string"
+        },
+        "status": {
+          "enum": ["passed", "warning", "failed", "not_run"],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "observed": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": ["checkId", "status", "message"],
+      "title": "QualityCheck",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-judgement-context/1.0.0",
+      "default": "vedicdust-judgement-context/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "chartRecordId": {
+      "title": "Chartrecordid",
+      "type": "string"
+    },
+    "chartRevision": {
+      "minimum": 1,
+      "title": "Chartrevision",
+      "type": "integer"
+    },
+    "methodProfileId": {
+      "title": "Methodprofileid",
+      "type": "string"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "requestedTopics": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requestedtopics",
+      "type": "array"
+    },
+    "rulePackVersion": {
+      "title": "Rulepackversion",
+      "type": "string"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/JudgementRuleContext"
+      },
+      "minItems": 1,
+      "title": "Rules",
+      "type": "array"
+    },
+    "globalGateRuleIds": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Globalgateruleids",
+      "type": "array"
+    },
+    "topics": {
+      "items": {
+        "$ref": "#/$defs/JudgementTopicContext"
+      },
+      "minItems": 1,
+      "title": "Topics",
+      "type": "array"
+    },
+    "restrictedFactIds": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Restrictedfactids",
+      "type": "array"
+    },
+    "restrictedTimingPeriodIds": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Restrictedtimingperiodids",
+      "type": "array"
+    },
+    "qualityChecks": {
+      "items": {
+        "$ref": "#/$defs/QualityCheck"
+      },
+      "title": "Qualitychecks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "chartRecordId",
+    "chartRevision",
+    "methodProfileId",
+    "generatedAt",
+    "rulePackVersion",
+    "rules",
+    "topics"
+  ],
+  "title": "JudgementContext",
+  "type": "object"
+}

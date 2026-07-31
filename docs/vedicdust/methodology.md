@@ -88,17 +88,49 @@ stable enough for D60 to remain meaningful.
 
 ### 7. Claim synthesis
 
-Build Claims from rule evaluations. Each Claim must contain supporting facts,
-counter-facts, certainty, scope, and source references. User testimony may
-validate expression but cannot retroactively manufacture a natal promise.
+The backend first builds a Judgement Context for the active Chart Record
+revision. It selects exact evidence IDs for chart foundation and the supported
+domains of identity, career, finance, relationship, home, learning, children,
+health, meaning, and family. Requested topics receive priority; remaining
+topics are ranked by deterministic chart salience. Restricted facts and timing
+periods are removed before model access.
+
+Build Claims from the Judgement Context and rule evaluations. Each Claim must contain supporting facts,
+counter-facts, certainty, scope, source references, likely real-world
+expressions, conditions, user relevance, practical implications, and explicit
+limitations. Prefer a small number of decision-relevant synthesis Claims over a
+planet-by-planet or house-by-house catalogue. User testimony may validate
+expression but cannot retroactively manufacture a natal promise.
+
+Domain judgement rules in rule pack `vedicdust-rules-1.1.0` are explicit
+product hypotheses until edition-pinned textual research and professional
+fixtures promote them. Their provisional status is a disclosure, not permission
+to substitute unsupported prose.
 
 ### 8. Report rendering
 
-Write for the subject's life stage and reader relationship. Lead with plain
-meaning, disclose certainty and limits, then provide technical evidence. Do not
-introduce fatalistic, medical, legal, or financial certainty.
+Build a Consultation Dossier before prose. The fixed reader path is scope,
+executive synthesis, chart foundation, current priority domains, timing,
+decision support, follow-up questions, and technical evidence. Priority domains
+are selected from the intersection of user concern and chart salience; they are
+not a mandatory tour of all houses.
 
-### 9. Quality gate
+Assign every released Claim to exactly one reader section or record why it was
+omitted. Write for the subject's life stage and reader relationship. Lead with
+plain meaning, disclose certainty and limits, then provide technical evidence.
+The backend renders the final report deterministically from the approved
+Dossier and Claim Graph. Legacy p1-p5 Markdown is not a production input. Do
+not introduce fatalistic, medical, legal, or financial certainty.
+
+### 9. Consultation continuity
+
+Build an Agent Context from the approved Dossier. Later questions retrieve
+approved Claims, stable facts, Timing Windows, user-confirmed events,
+uncertainties, rejected hypotheses, and open questions by topic. A later Agent
+may append a new versioned Claim only through the judgement gate; it cannot
+rewrite the Chart Record or silently reinterpret a withheld Claim.
+
+### 10. Quality gate
 
 A report is releasable only when calculation checks pass, required
 rectification is resolved or explicitly bounded, every strong Claim is

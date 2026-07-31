@@ -13,8 +13,9 @@ and PyJHora for D2-D60, Shadbala, Ashtakavarga, and Vimshottari. It records the
 provider and adapter versions, rejects ambiguous or nonexistent civil times,
 and blocks chart records that fail deterministic quality gates. Rectification
 recalculation preserves `chartRecordId` and increments `revision`. The existing
-question UI and Markdown report files remain compatibility adapters; LLM
-prompts and skills treat `chart_record.json` as the deterministic source.
+question UI remains a compatibility adapter. Historical Markdown report files
+remain readable, but the production report DAG no longer generates or consumes
+them.
 
 ## Phase 1: provider-backed spacetime and astronomy
 
@@ -59,18 +60,20 @@ known-time cases. Do not ship second-level claims.
 
 ## Phase 4: judgement and report runtime
 
-**Status: Chart Record and Chart Audit are wired into production orchestration.
-The approved Rule Catalog still needs enough validated judgement rules before
-the legacy Markdown report renderer can be removed.**
+**Status: native production DAG implemented.**
 
-Execute the Rule Catalog to produce a Claim Graph, invoke the four VedicDust skills by
-explicit workflow step, validate every cross-artifact reference, and render the
-report from the approved graph. The report runtime must not read legacy Markdown as
-an authoritative data source.
+The backend now builds `judgement_context.json`, invokes
+`vedicdust-judgement` for `claim_graph.json`, invokes
+`vedicdust-consultation` for `consultation_dossier.json`, validates every
+cross-artifact reference, and deterministically renders the report and Agent
+Context. Legacy Markdown is absent from both prompts and dependencies.
 
-## Phase 5: production cutover
+## Phase 5: production validation
 
-Cut over only after:
+**Runtime graph status: cut over. Professional validation status: in progress.**
+
+The native graph is the only generated core-report path. The following
+acceptance work still controls whether provisional rules can be promoted:
 
 - calculation fixtures cover normal, boundary, DST, high-latitude, and
   historical cases;
@@ -82,6 +85,5 @@ Cut over only after:
 - the product can reproduce any released Claim from archived artifacts and
   exact versions.
 
-After cutover, archive legacy compatibility artifacts and remove them from the
-production dependency graph. Do not rename legacy artifacts and present them as
-VedicDust artifacts.
+Legacy artifacts remain read-only compatibility for historical sessions. Do
+not rename them or present them as VedicDust contracts.

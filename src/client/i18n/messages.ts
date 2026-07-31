@@ -17,6 +17,7 @@ export const localeTags: Record<LocaleCode, string> = {
 };
 
 export const reportTitleKeys: Record<string, string> = {
+  "consultation_report.md": "report.title.consultation",
   "p1_overview.md": "report.title.p1",
   "p2a_planets.md": "report.title.p2a",
   "p2b_planets.md": "report.title.p2b",
@@ -629,6 +630,21 @@ export const messages: Record<LocaleCode, Dict> = {
       "Answer one check at a time. The full reading starts after your replies are saved.",
     "stage.copy.reader.expected":
       "Usually a few minutes while the system prepares your first checks.",
+    "stage.copy.judgement.purpose":
+      "Turns qualified chart facts into a small set of traceable conclusions.",
+    "stage.copy.judgement.result":
+      "Each conclusion is checked against natal promise, capacity, eligible supporting charts, timing, and counter-evidence.",
+    "stage.copy.judgement.action":
+      "No action required. The system is evaluating the evidence relevant to you.",
+    "stage.copy.judgement.expected":
+      "Usually one focused analysis step after the birth-time check.",
+    "stage.copy.consultation.purpose":
+      "Organizes approved conclusions into a readable professional consultation.",
+    "stage.copy.consultation.result":
+      "You receive an executive synthesis, priority themes, bounded timing guidance, practical implications, and technical evidence.",
+    "stage.copy.consultation.action": "Open the Report tab when this completes.",
+    "stage.copy.consultation.expected":
+      "The final rendering follows immediately after evidence synthesis.",
     "stage.copy.default.action": "No action required.",
     "stage.copy.default.expected": "Runs automatically as the reading is prepared.",
     "stage.copy.p1.purpose": "Establishes the first portrait of temperament and life orientation.",
@@ -697,6 +713,7 @@ export const messages: Record<LocaleCode, Dict> = {
       "Completed sections have been saved. Resume will continue from the unfinished part.",
     "stage.failed.fallback":
       "This part did not finish. Resume will keep completed sections and retry the unfinished work.",
+    "report.title.consultation": "VedicDust Consultation",
     "report.title.p1": "Core Pattern",
     "report.title.p2a": "Planetary Signals - Part 1",
     "report.title.p2b": "Planetary Signals - Part 2",
@@ -1266,6 +1283,16 @@ const zhOverrides: Dict = {
   "stage.copy.reader.result": "你会看到 3-5 个简短校验，并标记为准确、部分准确或不准确。",
   "stage.copy.reader.action": "逐条回答校验。回复保存后，完整读盘会开始。",
   "stage.copy.reader.expected": "系统准备首次校验通常需要几分钟。",
+  "stage.copy.judgement.purpose": "把通过资格审查的盘面事实合成为少量可追溯判断。",
+  "stage.copy.judgement.result":
+    "每条判断都会核对本命承诺、能力强弱、可用分盘、时间周期与相反证据。",
+  "stage.copy.judgement.action": "无需操作，系统正在评估与你相关的证据。",
+  "stage.copy.judgement.expected": "通常在生时校验后完成一次聚焦分析。",
+  "stage.copy.consultation.purpose": "把通过审核的判断组织成清晰的专业咨询档案。",
+  "stage.copy.consultation.result":
+    "你会获得核心结论、重点领域、有限定条件的时间指引、现实启示与专业证据。",
+  "stage.copy.consultation.action": "完成后打开报告页。",
+  "stage.copy.consultation.expected": "证据判断完成后会立即进行最终渲染。",
   "stage.copy.default.action": "无需操作。",
   "stage.copy.default.expected": "读盘准备过程中会自动运行。",
   "stage.copy.p1.purpose": "建立关于气质和人生取向的第一层画像。",
@@ -1316,6 +1343,7 @@ const zhOverrides: Dict = {
   "stage.result.showLess": "收起",
   "stage.result.showFull": "查看全文",
   "stage.result.more": "完整结果中还有 {count} 个章节。",
+  "report.title.consultation": "VedicDust 专业咨询档案",
   "report.title.p1": "核心模式",
   "report.title.p2a": "行星信号一",
   "report.title.p2b": "行星信号二",
@@ -1859,6 +1887,17 @@ const jaOverrides: Dict = {
   "stage.copy.reader.action":
     "チェックを一つずつ回答してください。回答が保存されると完全版が始まります。",
   "stage.copy.reader.expected": "最初のチェック準備には通常数分かかります。",
+  "stage.copy.judgement.purpose": "審査済みのチャート事実を、追跡可能な少数の判断にまとめます。",
+  "stage.copy.judgement.result":
+    "各判断は出生図の約束、力量、利用可能な分割図、時期、反証に照らして確認されます。",
+  "stage.copy.judgement.action": "操作は不要です。関連する証拠を評価しています。",
+  "stage.copy.judgement.expected": "出生時刻の確認後、通常は一つの集中分析で完了します。",
+  "stage.copy.consultation.purpose":
+    "承認済みの判断を、読みやすい専門コンサルテーションに編成します。",
+  "stage.copy.consultation.result":
+    "要約、優先テーマ、条件付き時期ガイダンス、実践的示唆、専門的根拠を受け取れます。",
+  "stage.copy.consultation.action": "完了後にレポートタブを開いてください。",
+  "stage.copy.consultation.expected": "証拠の統合後、すぐに最終レンダリングされます。",
   "stage.copy.default.action": "操作は不要です。",
   "stage.copy.default.expected": "リーディング準備中に自動で実行されます。",
   "stage.copy.p1.purpose": "気質と人生の向き合い方について最初の輪郭を作ります。",
@@ -1913,6 +1952,7 @@ const jaOverrides: Dict = {
   "stage.result.showLess": "閉じる",
   "stage.result.showFull": "全文を見る",
   "stage.result.more": "完全な結果にはさらに {count} セクションがあります。",
+  "report.title.consultation": "VedicDust コンサルテーション記録",
   "report.title.p1": "核となるパターン",
   "report.title.p2a": "惑星シグナル 1",
   "report.title.p2b": "惑星シグナル 2",

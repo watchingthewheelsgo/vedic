@@ -7,6 +7,21 @@
           "title": "Sectionid",
           "type": "string"
         },
+        "sectionKind": {
+          "enum": [
+            "scope",
+            "executive_synthesis",
+            "chart_foundation",
+            "core_architecture",
+            "priority_domain",
+            "timing_outlook",
+            "decision_support",
+            "follow_up",
+            "technical_evidence"
+          ],
+          "title": "Sectionkind",
+          "type": "string"
+        },
         "title": {
           "title": "Title",
           "type": "string"
@@ -22,13 +37,33 @@
           "title": "Claimids",
           "type": "array"
         },
+        "timingWindowIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingwindowids",
+          "type": "array"
+        },
+        "visualRefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Visualrefs",
+          "type": "array"
+        },
+        "priority": {
+          "default": 100,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
         "confidenceDisclosureRequired": {
           "default": false,
           "title": "Confidencedisclosurerequired",
           "type": "boolean"
         }
       },
-      "required": ["sectionId", "title", "purpose"],
+      "required": ["sectionId", "sectionKind", "title", "purpose"],
       "title": "ReportSection",
       "type": "object"
     }
@@ -41,14 +76,45 @@
       "title": "Schemaversion",
       "type": "string"
     },
+    "dossierId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dossierid"
+    },
     "chartRecordId": {
       "title": "Chartrecordid",
       "type": "string"
+    },
+    "chartRevision": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Chartrevision",
+      "type": "integer"
     },
     "claimGraphVersion": {
       "const": "vedicdust-claim-graph/1.0.0",
       "title": "Claimgraphversion",
       "type": "string"
+    },
+    "generatedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Generatedat"
     },
     "locale": {
       "enum": ["zh", "en", "ja"],

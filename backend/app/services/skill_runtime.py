@@ -21,20 +21,42 @@ from app.tools.registry import BackendToolRunner
 from app.utils.ids import make_id
 from app.vedicdust.models import (
     ChartRecord,
+    ClaimGraph,
     ConfidenceGrade,
+    ConsultationDossier,
     DiscriminatorOption,
+    JudgementContext,
     ReadingSession,
     RectificationAnswer,
     RectificationAnswerBatch,
     RectificationQuestion,
     RectificationQuestionSet,
 )
+from app.vedicdust.judgement import build_judgement_context
 from app.vedicdust.orchestrator import audit_chart_record
+from app.vedicdust.reporting import (
+    build_agent_context,
+    build_report_manifest,
+    render_consultation_report,
+)
+from app.vedicdust.source_registry import load_rule_catalog
+from app.vedicdust.validation import (
+    validate_agent_context,
+    validate_claim_graph,
+    validate_consultation_dossier,
+    validate_judgement_context,
+)
 
 BIRTH_CHART_FACTS_JSON = "birth_chart_facts.json"
 CHART_RECORD_JSON = "chart_record.json"
 READING_SESSION_JSON = "reading_session.json"
 CHART_AUDIT_JSON = "chart_audit.json"
+JUDGEMENT_CONTEXT_JSON = "judgement_context.json"
+CLAIM_GRAPH_JSON = "claim_graph.json"
+CONSULTATION_DOSSIER_JSON = "consultation_dossier.json"
+CONSULTATION_REPORT_MANIFEST_JSON = "consultation_report_manifest.json"
+AGENT_CONTEXT_JSON = "agent_context.json"
+CONSULTATION_REPORT_MD = "consultation_report.md"
 LEGACY_VEDICDUST_CASE_JSON = "vedicdust_case.json"
 LEGACY_STRUCTURED_DATA_JSON = "structured_data.json"
 BIRTH_CHART_FACTS_B_JSON = "birth_chart_facts_B.json"
@@ -278,6 +300,10 @@ class SkillRuntime:
             stage = "bazi_ready"
             active = "bazi_structured_data.md"
             message = "Your BaZi chart facts are ready."
+        elif CONSULTATION_REPORT_MD in paths:
+            stage = "core_complete"
+            active = CONSULTATION_REPORT_MD
+            message = "Your VedicDust consultation is ready."
         elif "appendix.md" in paths and "run_metrics.json" in paths:
             stage = "core_complete"
             active = "run_metrics.json"
@@ -419,7 +445,7 @@ class SkillRuntime:
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
-        self.assert_core_readiness(input_data.session_id)
+        self.assert_core_readiness(input_data.session_id, input_data.user_message)
         locale = self._run_locale(input_data)
         batches = self.core_batches(input_data.user_message, locale)
         existing_paths = self._session_paths(session_dir)
@@ -443,7 +469,7 @@ class SkillRuntime:
             input_data, batch, batches=batches, owner_user_id=owner_user_id
         )
 
-    def assert_core_readiness(self, session_id: str) -> None:
+    def assert_core_readiness(self, session_id: str, user_message: str = "") -> None:
         session_dir = self.workspace.require_session_dir(session_id)
         read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
         if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
@@ -478,6 +504,8 @@ class SkillRuntime:
             raise ValueError(
                 "当前输入只允许验前事/低置信D1-only说明，不允许生成完整 vedic-core 报告。"
             )
+        if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
+            self._prepare_judgement_context(session_id, user_message)
 
     def core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
         return self._core_batches(user_message, locale)
@@ -496,8 +524,14 @@ class SkillRuntime:
         if not expected.issubset(self._session_paths(session_dir)):
             return False
         producer = self._batch_producer(batch)
+        dependency_paths = self._core_batch_dependency_paths(str(batch.get("id") or ""))
         return all(
-            self.workspace.artifact_checkpoint_valid(session_id, path, producer=producer)
+            self.workspace.artifact_checkpoint_valid(
+                session_id,
+                path,
+                producer=producer,
+                **({"dependency_paths": dependency_paths} if dependency_paths else {}),
+            )
             for path in expected
         )
 
@@ -532,7 +566,7 @@ class SkillRuntime:
         batches = batches or self.core_batches(input_data.user_message, locale)
         expected = set(self.core_batch_files(batch))
         if not force and self.core_batch_resume_valid(input_data.session_id, batch):
-            self._compose_core_outputs(input_data.session_id, session_dir)
+            self._finalize_consultation_artifacts(input_data.session_id)
             await self._sync_metadata(
                 input_data.session_id,
                 stage="core_in_progress",
@@ -549,30 +583,53 @@ class SkillRuntime:
             )
 
         self.workspace.assert_no_project_runtime_artifacts()
-        result = await self.agent_runtime.run_skill_task(
-            input_data.skill,
-            str(batch["prompt"]),
-            cwd=session_dir,
-            skills=[input_data.skill],
-            max_turns=self._max_turns_for(input_data.skill),
-        )
-        self.workspace.assert_no_project_runtime_artifacts()
-        missing = [path for path in expected if not (session_dir / path).exists()]
-        if missing:
-            raise ValueError(
-                "vedic-core did not create expected artifact(s): "
-                + ", ".join(missing)
-                + f"\nAgent output:\n{result.raw_text[:2000]}"
+        selected_skills = [str(skill) for skill in batch.get("skills", [input_data.skill])]
+        batch_id = str(batch.get("id") or "")
+        is_consultation_batch = batch_id == "vedicdust_consultation"
+        prompt = str(batch["prompt"])
+        result = None
+        for attempt in range(2):
+            result = await self.agent_runtime.run_skill_task(
+                str(batch.get("task_name") or input_data.skill),
+                prompt,
+                cwd=session_dir,
+                skills=selected_skills,
+                max_turns=max(self._max_turns_for(skill) for skill in selected_skills),
             )
+            self.workspace.assert_no_project_runtime_artifacts()
+            missing = [path for path in expected if not (session_dir / path).exists()]
+            try:
+                if missing:
+                    raise ValueError("missing expected artifact(s): " + ", ".join(missing))
+                self._validate_native_core_batch(input_data.session_id, batch_id)
+                if is_consultation_batch:
+                    self._finalize_consultation_artifacts(input_data.session_id)
+                break
+            except ValueError as exc:
+                if attempt == 1:
+                    raise ValueError(
+                        f"VedicDust {batch_id} failed its deterministic contract after retry: {exc}"
+                    ) from exc
+                prompt = (
+                    f"{batch['prompt']}\n\n"
+                    "The previous output failed the deterministic contract. Overwrite the exact "
+                    "requested file and fix every issue below. Do not explain the retry or create "
+                    f"another file:\n- {exc}"
+                )
+        if result is None:
+            raise ValueError(f"VedicDust {batch_id} did not return an Agent result")
         producer = self._batch_producer(batch)
+        dependency_paths = self._core_batch_dependency_paths(batch_id)
         for path in expected:
             self.workspace.mark_artifact_checkpoint(
                 input_data.session_id,
                 path,
                 producer=producer,
+                **({"dependency_paths": dependency_paths} if dependency_paths else {}),
             )
 
-        self._compose_core_outputs(input_data.session_id, session_dir)
+        if not is_consultation_batch:
+            self._finalize_consultation_artifacts(input_data.session_id)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         core_complete = all(
             self.core_batch_resume_valid(input_data.session_id, item) for item in batches
@@ -867,6 +924,17 @@ class SkillRuntime:
         producer: str,
         identity: ChartRecordIdentity | None = None,
     ) -> None:
+        if identity is not None and identity.revision > 1:
+            session_dir = self.workspace.require_session_dir(session_id)
+            for stale_path in [
+                JUDGEMENT_CONTEXT_JSON,
+                CLAIM_GRAPH_JSON,
+                CONSULTATION_DOSSIER_JSON,
+                CONSULTATION_REPORT_MANIFEST_JSON,
+                AGENT_CONTEXT_JSON,
+                CONSULTATION_REPORT_MD,
+            ]:
+                (session_dir / stale_path).unlink(missing_ok=True)
         chart_artifacts = {
             "structured_data.md": structured_data,
             BIRTH_CHART_FACTS_JSON: birth_chart_facts_json,
@@ -911,6 +979,12 @@ class SkillRuntime:
             "sensitivity_scan.json",
             CHART_RECORD_JSON,
             LEGACY_VEDICDUST_CASE_JSON,
+            JUDGEMENT_CONTEXT_JSON,
+            CLAIM_GRAPH_JSON,
+            CONSULTATION_DOSSIER_JSON,
+            CONSULTATION_REPORT_MANIFEST_JSON,
+            AGENT_CONTEXT_JSON,
+            CONSULTATION_REPORT_MD,
         ]:
             content = artifacts.get(path)
             if content is None:
@@ -1769,7 +1843,9 @@ Rules:
 - Do not include any artifact outside the selected skill's expected file set.
 - The JSON wrapper is only for the backend; the user sees the markdown artifacts."""
 
-    def _core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
+    def _legacy_core_batches(
+        self, user_message: str, locale: str = "en"
+    ) -> list[dict[str, object]]:
         user_line = user_message or "开始分析"
         language_instruction = self._language_instruction(locale)
         planets = [
@@ -2082,7 +2158,240 @@ Rules:
             )
         )
 
+        batches.append(
+            {
+                "id": "vedicdust_consultation",
+                "label": "VedicDust 专业咨询档案",
+                "files": [CLAIM_GRAPH_JSON, CONSULTATION_DOSSIER_JSON],
+                "dependencies": ["report_quality_audit"],
+                "active": CONSULTATION_REPORT_MD,
+                "progress_message": "VedicDust 专业咨询档案已完成。",
+                "task_name": "vedicdust-consultation",
+                "skills": ["vedicdust-judgement", "vedicdust-consultation"],
+                "prompt": f"""Build the VedicDust judgement and consultation contracts for this session.
+
+Read:
+- chart_record.json and chart_audit.json as authoritative deterministic inputs;
+- prevalidation_result.json and chart_rectification_state.json for confidence limits;
+- p1_overview.md, p2a_planets.md through p5b_life.md, appendix.md, and
+  report_quality_audit.md only as migration-era interpretive working notes.
+
+{language_instruction}
+
+Write exactly these two files and no others:
+1. {CLAIM_GRAPH_JSON}
+2. {CONSULTATION_DOSSIER_JSON}
+
+Both files must contain valid JSON with camelCase keys and no Markdown fences.
+
+Judgement requirements:
+- Rebuild every released conclusion as a Claim grounded in exact fact IDs from
+  chart_record.json. Legacy prose is never evidence.
+- Use only rule IDs already present in fact provenance plus these workflow gates:
+  sop.promise-before-varga, sop.promise-capacity-before-timing,
+  sop.d60-eligibility-gate.
+- Obey sensitivity_scan.reportReadiness.llmContract. Never promote a field from
+  mustNotUseAsPrimaryEvidence into a supportingFactId or executive Claim.
+- If reportReadiness.mode is rectification_required, do not approve the dossier
+  unless the backend prevalidation gate explicitly permits the requested scope.
+- Record counter-evidence and limitations before assigning certainty.
+- Use at most 12 high-value Claims. Prefer synthesis over one Claim per planet or house.
+- A timing Claim must include timeScope and exact timingPeriodIds from
+  chart_record.json. Do not invent timing fact IDs.
+- `status=withheld` requires `certainty=withheld`; withheld Claims cannot appear
+  in report sections.
+- Use user testimony only to describe relevance or an open question, never to
+  manufacture a chart promise.
+
+Each Claim must use this contract:
+claimId, topic, title, plainStatement, technicalStatement,
+realWorldExpressions, userRelevance, conditions, supportingFactIds,
+counterFactIds, timingFactIds, timingPeriodIds, ruleIds, certainty, scope,
+status, timeScope, practicalImplications, limitations.
+
+The Claim Graph must use:
+schemaVersion=vedicdust-claim-graph/1.0.0, chartRecordId, chartRevision,
+methodProfileId, generatedAt, claims, omittedTopics, qualityChecks.
+
+Consultation dossier requirements:
+- Use schemaVersion=vedicdust-consultation-dossier/1.0.0.
+- Copy chartRecordId, chartRevision, methodProfileId, and rulePackVersion exactly.
+- Organize the reading around user relevance, not technical calculation order.
+- Select 3 to 5 executive Claim IDs.
+- Use the fixed section kinds below, plus zero or more priority_domain sections:
+  scope, executive_synthesis, chart_foundation, core_architecture,
+  timing_outlook, decision_support, follow_up, technical_evidence.
+- executive_synthesis, chart_foundation, and decision_support must each contain
+  at least one Claim. Executive synthesis must contain the selected 3 to 5 Claims.
+- Every non-withheld Claim must belong to exactly one section or be listed in
+  omittedClaimIds with a reason. The technical_evidence section must leave
+  claimIds empty because the renderer appends the evidence table automatically.
+- Dynamic priority domains must reflect the intersection of the user's requested
+  topics and chart salience; do not output all twelve houses.
+- Timing windows use exact Claim IDs, fact IDs, and timing period IDs. Present
+  ranges and conditions, never guaranteed events.
+- Keep unresolved questions explicit for future consultation.
+- Set releaseStatus=approved only when report_quality_audit.md says PASS and the
+  deterministic chart audit permits judgement. Otherwise set blocked.
+
+Each section must use:
+sectionId, sectionKind, title, purpose, claimIds, timingWindowIds, visualRefs,
+priority, confidenceDisclosureRequired.
+
+Scope must use:
+requestedTopics, userQuestions, includedTopics, omittedTopics, reportDepth,
+residualUncertainties.
+
+Confidence must use:
+overall, inputConfidence, rectificationConfidence, judgementConfidence, rationale.
+overall and judgementConfidence use high, moderate, low, or blocked.
+inputConfidence and rectificationConfidence use verified, corroborated,
+provisional, disputed, or unavailable. Do not invent percentages.
+
+Each Timing Window must use:
+timingWindowId, title, horizon, interval, claimIds, activationFactIds,
+activationPeriodIds, opportunities, pressures, conditions, confidence,
+limitations. `interval` and every Claim `timeScope` use ISO-8601 `start` and `end`.
+`horizon` is historical, current, near_term, or strategic.
+
+The dossier must use:
+dossierId, chartRecordId, chartRevision, methodProfileId, claimGraphVersion,
+generatedAt, locale, audience, scope, confidence, executiveClaimIds, sections,
+timingWindows, omittedClaimIds, unresolvedQuestions, releaseStatus, qualityChecks.
+
+Do not write the final Markdown report. The backend validates these contracts and
+deterministically renders consultation_report.md and agent_context.json.
+
+User message:
+{user_line}""",
+            }
+        )
+
         return batches
+
+    def _core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
+        """Return the native VedicDust production DAG.
+
+        Legacy Markdown batches remain readable for historical sessions but are
+        not generated or consumed by this DAG.
+        """
+
+        user_line = user_message or "开始分析"
+        language_instruction = self._language_instruction(locale)
+        return [
+            {
+                "id": "vedicdust_judgement",
+                "label": "VedicDust 证据判断",
+                "files": [CLAIM_GRAPH_JSON],
+                "dependencies": [],
+                "active": "reader_prevalidation.md",
+                "progress_message": "盘面证据判断已完成。",
+                "task_name": "vedicdust-judgement",
+                "skills": ["vedicdust-judgement"],
+                "prompt": f"""Build the native VedicDust Claim Graph for this reading.
+
+Read exactly these authoritative inputs:
+- chart_record.json: deterministic Jyotish facts and timing periods;
+- chart_audit.json: calculation and release permissions;
+- judgement_context.json: backend-selected topic evidence, allowed rules, eligible
+  vargas, restricted facts, and restricted timing periods;
+- prevalidation_result.json and chart_rectification_state.json: input confidence
+  and unresolved rectification limits.
+
+Do not read or use p1_overview.md, p2*.md, p3*.md, p4*.md, p5*.md, appendix.md,
+report_quality_audit.md, structured_data.md, or any prior prose as evidence.
+
+{language_instruction}
+
+Write exactly one file: {CLAIM_GRAPH_JSON}
+The file must be valid camelCase JSON conforming to
+vedicdust-claim-graph/1.0.0. Do not write Markdown or any other file.
+
+Hard contract:
+- Copy chartRecordId, chartRevision, and methodProfileId exactly.
+- Use only topic IDs, fact IDs, timingPeriodIds, and rule IDs exposed by
+  judgement_context.json.
+- Every Claim must use its topic's judgement rule. Workflow gates may be added
+  only when their required evidence is actually cited.
+- Use 5 to 10 synthesis Claims. Include chart foundation, the user's requested
+  topics, and only the highest-priority remaining topics. Do not produce one
+  Claim per planet, house, or varga.
+- Each released Claim requires D1 natal promise and capacity evidence. Eligible
+  varga evidence may confirm; it may never create the promise.
+- A timing Claim requires a domain judgement rule,
+  judge.timing.vimshottari-activation, sop.promise-capacity-before-timing, an
+  exact timeScope, and exact timingPeriodIds.
+- Never use restrictedFactIds as supportingFactIds. Never use
+  restrictedTimingPeriodIds. Ineligible D60 cannot support a Claim.
+- Record counter-evidence, conditions, and limitations before certainty.
+- Use high only for convergent evidence with no material unresolved input risk;
+  otherwise use moderate, low/tentative, or withheld.
+- User testimony may explain relevance but cannot become a chart promise.
+- Health Claims describe wellbeing patterns only; no diagnosis. Finance Claims
+  describe conditions only; no promised return. No fatalistic event certainty.
+- For omitted requested topics, add an explicit omittedTopics reason.
+
+Each Claim must contain:
+claimId, topic, title, plainStatement, technicalStatement,
+realWorldExpressions, userRelevance, conditions, supportingFactIds,
+counterFactIds, timingFactIds, timingPeriodIds, ruleIds, certainty, scope,
+status, timeScope, practicalImplications, limitations.
+
+User request:
+{user_line}""",
+            },
+            {
+                "id": "vedicdust_consultation",
+                "label": "VedicDust 专业咨询档案",
+                "files": [CONSULTATION_DOSSIER_JSON],
+                "dependencies": ["vedicdust_judgement"],
+                "active": CONSULTATION_REPORT_MD,
+                "progress_message": "VedicDust 专业咨询档案已完成。",
+                "task_name": "vedicdust-consultation",
+                "skills": ["vedicdust-consultation"],
+                "prompt": f"""Build the native VedicDust Consultation Dossier.
+
+Read:
+- chart_record.json and chart_audit.json;
+- judgement_context.json;
+- claim_graph.json;
+- prevalidation_result.json and chart_rectification_state.json.
+
+Do not read or use any legacy p1-p5 Markdown report, appendix, quality-audit
+Markdown, or structured_data.md. Do not add a new astrological judgement.
+
+{language_instruction}
+
+Write exactly one file: {CONSULTATION_DOSSIER_JSON}
+The file must be valid camelCase JSON conforming to
+vedicdust-consultation-dossier/1.0.0. Do not write the final report or any
+other file; the backend renders consultation_report.md deterministically.
+
+Hard contract:
+- Copy chartRecordId, chartRevision, methodProfileId, and claimGraphVersion.
+- Select 3 to 5 executive Claims.
+- Use exactly one each of scope, executive_synthesis, chart_foundation,
+  timing_outlook, decision_support, follow_up, and technical_evidence; add
+  core_architecture when useful and at most five priority_domain sections.
+- Assign every released Claim to exactly one section, or record its omission in
+  omittedClaimIds. Executive Claims belong to executive_synthesis.
+- chart_foundation and decision_support each require their own assigned Claim.
+  technical_evidence must keep claimIds empty.
+- A Timing Window may use only a timing Claim and its exact fact and period IDs.
+  State opportunities, pressures, conditions, and limits; never a guaranteed event.
+- Organize priority domains by requested topic and judgementContext priority,
+  not by the calculator's technical order.
+- Confidence must reflect Birth Assertion, rectification result, Claim
+  certainty, and residual uncertainty. Do not invent percentages.
+- Preserve child/adult life-stage and reader-relationship framing from the Chart Record.
+- releaseStatus may be approved only when chart_audit permits judgement, all
+  released Claims are accounted for, and dossier qualityChecks pass. Otherwise
+  block and explain unresolvedQuestions.
+
+User request:
+{user_line}""",
+            },
+        ]
 
     def _core_batch(
         self,
@@ -2158,6 +2467,14 @@ User message:
 
     def _batch_producer(self, batch: dict[str, object]) -> str:
         return f"vedic-core:{batch.get('id') or 'unknown'}"
+
+    @staticmethod
+    def _core_batch_dependency_paths(batch_id: str) -> list[str]:
+        if batch_id == "vedicdust_judgement":
+            return [JUDGEMENT_CONTEXT_JSON]
+        if batch_id == "vedicdust_consultation":
+            return [JUDGEMENT_CONTEXT_JSON, CLAIM_GRAPH_JSON]
+        return []
 
     def _session_paths(self, session_dir: Path) -> set[str]:
         return {
@@ -2260,6 +2577,140 @@ User message:
             session_id, session_dir / "p5b_life.md", p5b_parts, "vedic-core:compose:p5b"
         )
 
+    def _validate_native_core_batch(self, session_id: str, batch_id: str) -> None:
+        if batch_id != "vedicdust_judgement":
+            return
+        chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        context_json = self.workspace.read_artifact_text(session_id, JUDGEMENT_CONTEXT_JSON)
+        graph_json = self.workspace.read_artifact_text(session_id, CLAIM_GRAPH_JSON)
+        if not chart_record_json or not context_json or not graph_json:
+            raise ValueError("VedicDust judgement batch is missing a required contract")
+        record = ChartRecord.model_validate_json(chart_record_json)
+        context = JudgementContext.model_validate_json(context_json)
+        graph = ClaimGraph.model_validate_json(graph_json)
+        catalog = load_rule_catalog()
+        validate_judgement_context(record, context, catalog)
+        validate_claim_graph(record, graph, catalog, context)
+
+    def _prepare_judgement_context(self, session_id: str, user_message: str = "") -> None:
+        chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if not chart_record_json:
+            raise ValueError("Session is missing chart_record.json")
+        record = ChartRecord.model_validate_json(chart_record_json)
+        sensitivity = self._json_dict(
+            self.workspace.read_artifact_text(session_id, "sensitivity_scan.json") or ""
+        )
+        restricted_fact_ids, restrict_timing = self._restricted_judgement_evidence(
+            record, sensitivity
+        )
+        catalog = load_rule_catalog()
+        context = build_judgement_context(
+            record,
+            catalog,
+            restricted_fact_ids=restricted_fact_ids,
+            restrict_timing=restrict_timing,
+            requested_topics=[user_message] if user_message.strip() else [],
+            now=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
+        )
+        validate_judgement_context(record, context, catalog)
+        self.workspace.write_artifact(
+            session_id,
+            JUDGEMENT_CONTEXT_JSON,
+            context.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            JUDGEMENT_CONTEXT_JSON,
+            producer="vedicdust-judgement-context",
+        )
+
+    @staticmethod
+    def _restricted_judgement_evidence(
+        record: ChartRecord,
+        sensitivity: dict[str, object],
+    ) -> tuple[set[str], bool]:
+        readiness = sensitivity.get("reportReadiness")
+        readiness_data = readiness if isinstance(readiness, dict) else {}
+        contract = readiness_data.get("llmContract")
+        contract_data = contract if isinstance(contract, dict) else {}
+        values = contract_data.get("mustNotUseAsPrimaryEvidence")
+        restrictions = [str(value) for value in values] if isinstance(values, list) else []
+        restricted: set[str] = set()
+        restrict_timing = False
+
+        for value in restrictions:
+            normalized = value.strip()
+            lagna_match = re.fullmatch(r"[dD](\d+)Lagna", normalized)
+            varga_match = re.fullmatch(r"[dD](\d+)", normalized)
+            if lagna_match:
+                restricted.add(f"fact.D{lagna_match.group(1)}.Lagna.position")
+            elif varga_match:
+                prefix = f"fact.D{varga_match.group(1)}."
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_id.startswith(prefix)
+                )
+            elif normalized in {"lagna", "ascendant", "lagnaSign"}:
+                restricted.add("fact.D1.Lagna.position")
+            elif normalized in {"moonSign", "moonNakshatra", "moonPada"}:
+                restricted.add("fact.D1.Moon.position")
+            elif normalized in {"currentDasha", "dasha", "vimshottari"}:
+                restrict_timing = True
+        return restricted, restrict_timing
+
+    def _finalize_consultation_artifacts(self, session_id: str) -> None:
+        chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        judgement_context_json = self.workspace.read_artifact_text(
+            session_id, JUDGEMENT_CONTEXT_JSON
+        )
+        claim_graph_json = self.workspace.read_artifact_text(session_id, CLAIM_GRAPH_JSON)
+        dossier_json = self.workspace.read_artifact_text(session_id, CONSULTATION_DOSSIER_JSON)
+        if (
+            not chart_record_json
+            or not judgement_context_json
+            or not claim_graph_json
+            or not dossier_json
+        ):
+            return
+
+        record = ChartRecord.model_validate_json(chart_record_json)
+        context = JudgementContext.model_validate_json(judgement_context_json)
+        graph = ClaimGraph.model_validate_json(claim_graph_json)
+        dossier = ConsultationDossier.model_validate_json(dossier_json)
+        catalog = load_rule_catalog()
+        validate_judgement_context(record, context, catalog)
+        validate_claim_graph(record, graph, catalog, context)
+        validate_consultation_dossier(record, graph, dossier)
+        if dossier.release_status != "approved":
+            raise ValueError(
+                "VedicDust consultation dossier did not pass its release gate: "
+                f"{dossier.release_status}"
+            )
+
+        manifest = build_report_manifest(dossier)
+        agent_context = build_agent_context(record, graph, dossier)
+        validate_agent_context(record, graph, dossier, agent_context)
+        report = render_consultation_report(record, graph, dossier)
+
+        generated = {
+            CONSULTATION_REPORT_MANIFEST_JSON: (
+                manifest.model_dump_json(by_alias=True, indent=2) + "\n"
+            ),
+            AGENT_CONTEXT_JSON: (agent_context.model_dump_json(by_alias=True, indent=2) + "\n"),
+            CONSULTATION_REPORT_MD: report,
+        }
+        for path, content in generated.items():
+            self.workspace.write_artifact(session_id, path, content)
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                path,
+                producer="vedicdust-consultation-renderer",
+                dependency_paths=[
+                    JUDGEMENT_CONTEXT_JSON,
+                    CLAIM_GRAPH_JSON,
+                    CONSULTATION_DOSSIER_JSON,
+                ],
+            )
+
     def _compose_parts(
         self,
         session_id: str,
@@ -2302,6 +2753,8 @@ User message:
         if active in paths:
             return active
         for fallback in [
+            CONSULTATION_REPORT_MD,
+            "reader_prevalidation.md",
             "p5a_life.md",
             "p5b_life.md",
             "report_quality_audit.md",
@@ -2310,7 +2763,6 @@ User message:
             "p3a_d9.md",
             "p2a_planets.md",
             "p1_overview.md",
-            "reader_prevalidation.md",
             "structured_data.md",
         ]:
             if fallback in paths:
@@ -2543,6 +2995,8 @@ User message:
             "vedic-love": 8,
             "vedic-rectifier": 6,
             "vedic-synastry": 8,
+            "vedicdust-judgement": 12,
+            "vedicdust-consultation": 12,
             "bazi-calculator": 6,
             "bazi-classics-core": 12,
         }[skill]
@@ -2560,6 +3014,11 @@ User message:
         }[skill]
 
     def _preferred_artifact(self, skill: str, artifacts: list[object] | None = None) -> str:
+        if skill == "vedic-core" and artifacts:
+            if any(
+                getattr(artifact, "path", "") == CONSULTATION_REPORT_MD for artifact in artifacts
+            ):
+                return CONSULTATION_REPORT_MD
         if skill == "vedic-synastry" and artifacts:
             for artifact in artifacts:
                 path = getattr(artifact, "path", "")
@@ -2569,7 +3028,7 @@ User message:
                     return path
         return {
             "vedic-reader": "reader_prevalidation.md",
-            "vedic-core": "p1_overview.md",
+            "vedic-core": "reader_prevalidation.md",
             "vedic-career": "career_phase4a.md",
             "vedic-love": "love_report.md",
             "vedic-rectifier": "rectification_report.md",

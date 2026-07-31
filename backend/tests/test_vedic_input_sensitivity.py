@@ -1137,16 +1137,20 @@ def test_core_batch_prompts_enforce_input_confidence_contract() -> None:
 
     batches = runtime._core_batches("开始分析", "zh")
     prompts = [str(batch["prompt"]) for batch in batches]
-    audit_prompt = next(
-        str(batch["prompt"]) for batch in batches if batch["id"] == "report_quality_audit"
-    )
 
-    assert prompts
-    assert all("sensitivity_scan.reportReadiness.llmContract" in prompt for prompt in prompts)
-    assert all("mustNotUseAsPrimaryEvidence" in prompt for prompt in prompts)
-    assert all("rectification_required" in prompt for prompt in prompts)
-    assert "prevalidation_result.decision.reportAllowed is false" in audit_prompt
-    assert "primary conclusion anchor" in audit_prompt
+    assert [batch["id"] for batch in batches] == [
+        "vedicdust_judgement",
+        "vedicdust_consultation",
+    ]
+    judgement_prompt = prompts[0]
+    consultation_prompt = prompts[1]
+    assert "judgement_context.json" in judgement_prompt
+    assert "restrictedFactIds" in judgement_prompt
+    assert "restrictedTimingPeriodIds" in judgement_prompt
+    assert "Do not read or use p1_overview.md" in judgement_prompt
+    assert "claim_graph.json" in judgement_prompt
+    assert "consultation_dossier.json" in consultation_prompt
+    assert "Do not read or use any legacy p1-p5 Markdown report" in consultation_prompt
 
 
 def test_reader_prompt_uses_backend_rectification_plan() -> None:

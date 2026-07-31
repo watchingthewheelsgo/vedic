@@ -548,41 +548,327 @@ class ChartAudit(ContractModel):
 class Claim(ContractModel):
     claim_id: str
     topic: str
+    title: str | None = None
     plain_statement: str
     technical_statement: str
+    real_world_expressions: list[str] = Field(default_factory=list)
+    user_relevance: str | None = None
+    conditions: list[str] = Field(default_factory=list)
     supporting_fact_ids: list[str] = Field(min_length=1)
     counter_fact_ids: list[str] = Field(default_factory=list)
     timing_fact_ids: list[str] = Field(default_factory=list)
+    timing_period_ids: list[str] = Field(default_factory=list)
     rule_ids: list[str] = Field(min_length=1)
     certainty: Literal["high", "moderate", "low", "withheld"]
     scope: Literal["natal_promise", "capacity", "timing", "rectification", "context"]
+    status: Literal["supported", "tentative", "withheld"] = "supported"
+    time_scope: TimeRange | None = None
+    practical_implications: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_claim_state(self) -> Claim:
+        if (self.certainty == "withheld") != (self.status == "withheld"):
+            raise ValueError("withheld claim status and certainty must agree")
+        if self.scope == "timing":
+            if self.time_scope is None:
+                raise ValueError("timing claim requires a time scope")
+            if not self.timing_fact_ids and not self.timing_period_ids:
+                raise ValueError("timing claim requires timing evidence")
+        for label, values in (
+            ("supporting facts", self.supporting_fact_ids),
+            ("counter facts", self.counter_fact_ids),
+            ("timing facts", self.timing_fact_ids),
+            ("timing periods", self.timing_period_ids),
+            ("rules", self.rule_ids),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"claim contains duplicate {label}")
+        return self
 
 
 class ClaimGraph(ContractModel):
     schema_version: Literal["vedicdust-claim-graph/1.0.0"] = "vedicdust-claim-graph/1.0.0"
     chart_record_id: str
+    chart_revision: int = Field(default=1, ge=1)
     method_profile_id: str
+    rule_pack_version: str
     generated_at: datetime
-    claims: list[Claim]
+    claims: list[Claim] = Field(min_length=1, max_length=12)
     omitted_topics: dict[str, str] = Field(default_factory=dict)
     quality_checks: list[QualityCheck] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_claim_ids(self) -> ClaimGraph:
+        claim_ids = [claim.claim_id for claim in self.claims]
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("claim graph contains duplicate claim ids")
+        return self
+
+
+class JudgementRuleContext(ContractModel):
+    rule_id: str
+    title: str
+    topic: str
+    required_evidence_layers: list[
+        Literal["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"]
+    ] = Field(default_factory=list)
+    status: Literal["draft", "provisional", "validated"]
+    limitations: list[str] = Field(default_factory=list)
+
+
+class JudgementTopicContext(ContractModel):
+    topic_id: str
+    title: str
+    purpose: str
+    requested: bool = False
+    priority_score: int = Field(ge=0, le=100)
+    rule_ids: list[str] = Field(min_length=1)
+    natal_fact_ids: list[str] = Field(default_factory=list)
+    capacity_fact_ids: list[str] = Field(default_factory=list)
+    varga_fact_ids: list[str] = Field(default_factory=list)
+    timing_period_ids: list[str] = Field(default_factory=list)
+    eligible_vargas: list[str] = Field(default_factory=list)
+    evidence_layers: list[Literal["natal_promise", "capacity", "varga_confirmation", "timing"]] = (
+        Field(default_factory=list)
+    )
+    limitations: list[str] = Field(default_factory=list)
+
+
+class JudgementContext(ContractModel):
+    schema_version: Literal["vedicdust-judgement-context/1.0.0"] = (
+        "vedicdust-judgement-context/1.0.0"
+    )
+    chart_record_id: str
+    chart_revision: int = Field(ge=1)
+    method_profile_id: str
+    generated_at: datetime
+    requested_topics: list[str] = Field(default_factory=list)
+    rule_pack_version: str
+    rules: list[JudgementRuleContext] = Field(min_length=1)
+    global_gate_rule_ids: list[str] = Field(default_factory=list)
+    topics: list[JudgementTopicContext] = Field(min_length=1)
+    restricted_fact_ids: list[str] = Field(default_factory=list)
+    restricted_timing_period_ids: list[str] = Field(default_factory=list)
+    quality_checks: list[QualityCheck] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_references(self) -> JudgementContext:
+        rule_ids = {rule.rule_id for rule in self.rules}
+        unknown = sorted(
+            {
+                rule_id
+                for topic in self.topics
+                for rule_id in topic.rule_ids
+                if rule_id not in rule_ids
+            }
+            | {rule_id for rule_id in self.global_gate_rule_ids if rule_id not in rule_ids}
+        )
+        if unknown:
+            raise ValueError("judgement context references unknown rules: " + ", ".join(unknown))
+        return self
+
+
+class TimingWindow(ContractModel):
+    timing_window_id: str
+    title: str
+    horizon: Literal["historical", "current", "near_term", "strategic"]
+    interval: TimeRange
+    claim_ids: list[str] = Field(min_length=1)
+    activation_fact_ids: list[str] = Field(default_factory=list)
+    activation_period_ids: list[str] = Field(default_factory=list)
+    opportunities: list[str] = Field(default_factory=list)
+    pressures: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    confidence: Literal["high", "moderate", "low"]
+    limitations: list[str] = Field(default_factory=list)
+
+
+class ConsultationScope(ContractModel):
+    requested_topics: list[str] = Field(default_factory=list)
+    user_questions: list[str] = Field(default_factory=list)
+    included_topics: list[str] = Field(default_factory=list)
+    omitted_topics: dict[str, str] = Field(default_factory=dict)
+    report_depth: Literal["standard", "professional"] = "standard"
+    residual_uncertainties: list[str] = Field(default_factory=list)
+
+
+class ConsultationConfidence(ContractModel):
+    overall: Literal["high", "moderate", "low", "blocked"]
+    input_confidence: ConfidenceGrade
+    rectification_confidence: ConfidenceGrade
+    judgement_confidence: Literal["high", "moderate", "low", "blocked"]
+    rationale: list[str] = Field(min_length=1)
 
 
 class ReportSection(ContractModel):
     section_id: str
+    section_kind: Literal[
+        "scope",
+        "executive_synthesis",
+        "chart_foundation",
+        "core_architecture",
+        "priority_domain",
+        "timing_outlook",
+        "decision_support",
+        "follow_up",
+        "technical_evidence",
+    ]
     title: str
     purpose: str
     claim_ids: list[str] = Field(default_factory=list)
+    timing_window_ids: list[str] = Field(default_factory=list)
+    visual_refs: list[str] = Field(default_factory=list)
+    priority: int = Field(default=100, ge=0)
     confidence_disclosure_required: bool = False
 
 
 class ConsultationReportManifest(ContractModel):
     schema_version: Literal["vedicdust-report-manifest/1.0.0"] = "vedicdust-report-manifest/1.0.0"
+    dossier_id: str | None = None
     chart_record_id: str
+    chart_revision: int = Field(default=1, ge=1)
     claim_graph_version: Literal["vedicdust-claim-graph/1.0.0"]
+    generated_at: datetime | None = None
     locale: Literal["zh", "en", "ja"]
     audience: Literal["self", "parent", "partner", "family", "professional"]
     sections: list[ReportSection]
     omitted_claim_ids: dict[str, str] = Field(default_factory=dict)
     release_status: Literal["draft", "approved", "blocked"]
+
+
+class ConsultationDossier(ContractModel):
+    schema_version: Literal["vedicdust-consultation-dossier/1.0.0"] = (
+        "vedicdust-consultation-dossier/1.0.0"
+    )
+    dossier_id: str
+    chart_record_id: str
+    chart_revision: int = Field(ge=1)
+    method_profile_id: str
+    claim_graph_version: Literal["vedicdust-claim-graph/1.0.0"]
+    generated_at: datetime
+    locale: Literal["zh", "en", "ja"]
+    audience: Literal["self", "parent", "partner", "family", "professional"]
+    scope: ConsultationScope
+    confidence: ConsultationConfidence
+    executive_claim_ids: list[str] = Field(default_factory=list, max_length=5)
+    sections: list[ReportSection] = Field(min_length=1)
+    timing_windows: list[TimingWindow] = Field(default_factory=list)
+    omitted_claim_ids: dict[str, str] = Field(default_factory=dict)
+    unresolved_questions: list[str] = Field(default_factory=list)
+    release_status: Literal["draft", "approved", "blocked"]
+    quality_checks: list[QualityCheck] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_dossier_shape(self) -> ConsultationDossier:
+        section_ids = [section.section_id for section in self.sections]
+        if len(section_ids) != len(set(section_ids)):
+            raise ValueError("consultation dossier contains duplicate section ids")
+        fixed_kinds = [
+            section.section_kind
+            for section in self.sections
+            if section.section_kind != "priority_domain"
+        ]
+        duplicate_kinds = sorted({kind for kind in fixed_kinds if fixed_kinds.count(kind) > 1})
+        if duplicate_kinds:
+            raise ValueError(
+                "consultation dossier contains duplicate fixed section kinds: "
+                + ", ".join(duplicate_kinds)
+            )
+        timing_ids = [window.timing_window_id for window in self.timing_windows]
+        if len(timing_ids) != len(set(timing_ids)):
+            raise ValueError("consultation dossier contains duplicate timing window ids")
+        if len(self.executive_claim_ids) != len(set(self.executive_claim_ids)):
+            raise ValueError("consultation dossier contains duplicate executive claim ids")
+        if self.release_status == "approved":
+            required = {
+                "scope",
+                "executive_synthesis",
+                "chart_foundation",
+                "timing_outlook",
+                "decision_support",
+                "follow_up",
+                "technical_evidence",
+            }
+            present = {section.section_kind for section in self.sections}
+            missing = sorted(required - present)
+            if missing:
+                raise ValueError(
+                    "approved consultation dossier is missing section kinds: " + ", ".join(missing)
+                )
+            if not 3 <= len(self.executive_claim_ids) <= 5:
+                raise ValueError(
+                    "approved consultation dossier requires three to five executive claims"
+                )
+            sections_by_kind = {section.section_kind: section for section in self.sections}
+            for section_kind in (
+                "executive_synthesis",
+                "chart_foundation",
+                "decision_support",
+            ):
+                if not sections_by_kind[section_kind].claim_ids:
+                    raise ValueError(
+                        f"approved consultation dossier requires claims in {section_kind}"
+                    )
+        return self
+
+
+class AgentClaimContext(ContractModel):
+    claim_id: str
+    topic: str
+    statement: str
+    user_relevance: str | None = None
+    certainty: Literal["high", "moderate", "low"]
+    supporting_fact_ids: list[str] = Field(default_factory=list)
+    counter_fact_ids: list[str] = Field(default_factory=list)
+    rule_ids: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    practical_implications: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    time_scope: TimeRange | None = None
+    timing_window_ids: list[str] = Field(default_factory=list)
+
+
+class AgentFactContext(ContractModel):
+    fact_id: str
+    fact_type: FactType
+    subject_ref: str
+    value: Any
+    unit: str | None = None
+    confidence: ConfidenceGrade
+
+
+class AgentContext(ContractModel):
+    schema_version: Literal["vedicdust-agent-context/1.0.0"] = "vedicdust-agent-context/1.0.0"
+    dossier_id: str
+    chart_record_id: str
+    chart_revision: int = Field(ge=1)
+    generated_at: datetime
+    locale: Literal["zh", "en", "ja"]
+    stable_fact_ids: list[str] = Field(default_factory=list)
+    stable_facts: list[AgentFactContext] = Field(default_factory=list)
+    approved_claims: list[AgentClaimContext] = Field(default_factory=list)
+    withheld_claim_ids: list[str] = Field(default_factory=list)
+    timing_windows: list[TimingWindow] = Field(default_factory=list)
+    user_confirmed_event_ids: list[str] = Field(default_factory=list)
+    rejected_hypotheses: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    uncertainties: list[str] = Field(default_factory=list)
+    topic_index: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_topic_index(self) -> AgentContext:
+        known_claim_ids = {claim.claim_id for claim in self.approved_claims}
+        unknown = sorted(
+            {
+                claim_id
+                for claim_ids in self.topic_index.values()
+                for claim_id in claim_ids
+                if claim_id not in known_claim_ids
+            }
+        )
+        if unknown:
+            raise ValueError(
+                "agent context topic index references unknown claims: " + ", ".join(unknown)
+            )
+        return self

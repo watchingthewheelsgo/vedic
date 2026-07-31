@@ -78,9 +78,10 @@ class ClaudeRuntime:
                 "You are running a repo-local astrology skill workflow inside a web "
                 "session workspace. Treat the current working directory as the user's skill "
                 "workspace. Follow the selected skill's file names, phase order, interaction "
-                "rules, and markdown output format. Do not invent app-specific JSON, checkout flows, "
-                "daily notes, or extra summaries. Use only files in this workspace "
-                "and the selected skill instructions."
+                "rules, and exact artifact contract. Markdown workflows must write Markdown; "
+                "VedicDust contract workflows must write only their requested typed JSON. "
+                "Do not invent checkout flows, daily notes, or extra summaries. Use only files "
+                "in this workspace and the selected skill instructions."
             ),
         )
         return await self._run_query(task_name, prompt, options)

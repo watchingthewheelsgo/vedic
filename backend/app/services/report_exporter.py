@@ -13,6 +13,7 @@ from app.services.skill_workspace import SkillWorkspace
 
 
 PUBLIC_REPORT_ORDER = [
+    "consultation_report.md",
     "p1_overview.md",
     "p2a_planets.md",
     "p2b_planets.md",
@@ -43,6 +44,7 @@ REPORT_COPY = {
         "recorded": "recorded",
         "wave": "Wave",
         "sections": {
+            "consultation_report.md": "VedicDust Consultation",
             "p1_overview.md": "Core Pattern",
             "p2a_planets.md": "Planetary Signals - Part 1",
             "p2b_planets.md": "Planetary Signals - Part 2",
@@ -70,6 +72,7 @@ REPORT_COPY = {
         "recorded": "已记录",
         "wave": "批次",
         "sections": {
+            "consultation_report.md": "VedicDust 专业咨询档案",
             "p1_overview.md": "核心模式",
             "p2a_planets.md": "行星信号一",
             "p2b_planets.md": "行星信号二",
@@ -97,6 +100,7 @@ REPORT_COPY = {
         "recorded": "記録済み",
         "wave": "Wave",
         "sections": {
+            "consultation_report.md": "VedicDust コンサルテーション記録",
             "p1_overview.md": "核となるパターン",
             "p2a_planets.md": "惑星シグナル 1",
             "p2b_planets.md": "惑星シグナル 2",
@@ -213,7 +217,12 @@ class ReportExporter:
     ) -> list[ReportSection]:
         by_path = {artifact.path: artifact for artifact in artifacts}
         sections: list[ReportSection] = []
-        for index, path in enumerate(PUBLIC_REPORT_ORDER):
+        report_order = (
+            ["consultation_report.md"]
+            if "consultation_report.md" in by_path
+            else PUBLIC_REPORT_ORDER
+        )
+        for index, path in enumerate(report_order):
             artifact = by_path.get(path)
             if artifact is None or not artifact.content.strip():
                 continue

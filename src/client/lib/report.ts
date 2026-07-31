@@ -2,6 +2,7 @@ import type { SkillArtifact, SkillSessionResponse } from "../../shared/domain";
 import { messages, reportTitleKeys, type LocaleCode } from "../i18n/messages";
 
 export const reportOrder = [
+  "consultation_report.md",
   "p1_overview.md",
   "p2a_planets.md",
   "p2b_planets.md",
@@ -27,6 +28,7 @@ export const reportOrder = [
 ];
 
 export const reportTitles: Record<string, string> = {
+  "consultation_report.md": "VedicDust Consultation",
   "p1_overview.md": "Core Pattern",
   "p2a_planets.md": "Planetary Signals - Part 1",
   "p2b_planets.md": "Planetary Signals - Part 2",
@@ -68,6 +70,7 @@ export function isReportArtifact(artifact: SkillArtifact) {
     return false;
   }
   return (
+    path === "consultation_report.md" ||
     path.startsWith("p") ||
     path === "appendix.md" ||
     path === "report_quality_audit.md" ||
@@ -98,7 +101,18 @@ export function titleForArtifact(artifact: SkillArtifact, locale: LocaleCode = "
 
 export function getReportSections(session: SkillSessionResponse | null) {
   const artifacts = session?.artifacts ?? [];
-  return artifacts
+  const sections = artifacts
     .filter(isReportArtifact)
     .sort((a, b) => reportRank(a.path) - reportRank(b.path) || a.path.localeCompare(b.path));
+  if (!sections.some((section) => section.path === "consultation_report.md")) {
+    return sections;
+  }
+  return sections.filter(
+    (section) =>
+      section.path === "consultation_report.md" ||
+      section.path.startsWith("career_") ||
+      section.path.startsWith("love_") ||
+      section.path === "rectification_report.md" ||
+      section.path.includes("/reports/")
+  );
 }
