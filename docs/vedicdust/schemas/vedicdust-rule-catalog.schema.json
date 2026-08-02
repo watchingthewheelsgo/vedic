@@ -97,7 +97,7 @@
         },
         "judgementUse": {
           "default": "context_only",
-          "enum": ["context_only", "directional"],
+          "enum": ["context_only", "traditional_tendency", "directional"],
           "title": "Judgementuse",
           "type": "string"
         },

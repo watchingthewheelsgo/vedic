@@ -1,6 +1,6 @@
 {
   "schemaVersion": "vedicdust-rule-catalog/1.0.0",
-  "catalogVersion": "1.35.0",
+  "catalogVersion": "1.36.0",
   "rules": [
     {
       "ruleId": "derive.astronomy.sidereal-position",
@@ -875,8 +875,8 @@
     },
     {
       "ruleId": "judge.capacity.dignity-condition",
-      "ruleVersion": "1.0.0",
-      "title": "Describe D1 house-lord dignity without automatic direction",
+      "ruleVersion": "1.1.0",
+      "title": "Interpret D1 house-lord dignity as a bounded traditional tendency",
       "ruleKind": "judgement",
       "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
@@ -888,19 +888,22 @@
       "noneOf": [],
       "outputCode": "describe_house_lord_dignity_condition",
       "evidenceClass": "lineage_commentary",
-      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "lineage.pvr-integrated-approach-2000-2010"
+      ],
       "status": "provisional",
-      "judgementUse": "context_only",
+      "judgementUse": "traditional_tendency",
       "validationFixtureIds": ["contract.judgement.capacity-rule-separation"],
       "limitations": [
-        "The cited source supports sign dignity and Panchadha Maitri as structural condition; this rule preserves that condition without converting it into a domain verdict.",
-        "Supportive or challenging synthesis requires a separately reviewed directional rule and cannot be inferred from the label alone."
+        "The cited lineage sources support sign dignity as one condition of a planet's capacity; dignity alone never determines a domain outcome.",
+        "A tendency is released only when another distinct source-grounded capacity method agrees, and the resulting conclusion is capped at low certainty pending independent professional review."
       ]
     },
     {
       "ruleId": "judge.capacity.shadbala-band",
-      "ruleVersion": "1.0.0",
-      "title": "Describe Shadbala percentage bands without automatic direction",
+      "ruleVersion": "1.1.0",
+      "title": "Interpret Shadbala capacity bands as a bounded traditional tendency",
       "ruleKind": "judgement",
       "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
@@ -911,13 +914,17 @@
       "anyOf": [],
       "noneOf": [],
       "outputCode": "describe_shadbala_structural_band",
-      "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "judgementUse": "context_only",
+      "judgementUse": "traditional_tendency",
       "validationFixtureIds": ["contract.judgement.capacity-rule-separation"],
       "limitations": [
-        "The 120 percent and 90 percent bands are versioned product thresholds and remain descriptive until independently validated."
+        "The cited lineage source supports Shadbala as capacity to lead and deliver results; the conservative 120 percent and 90 percent release bands remain a versioned VedicDust policy.",
+        "A tendency is released only when another distinct source-grounded capacity method agrees, and the resulting conclusion is capped at low certainty because the PyJHora compatibility derivation has not passed independent desktop comparison."
       ]
     },
     {

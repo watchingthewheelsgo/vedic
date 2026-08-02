@@ -1435,9 +1435,17 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
         if finding.polarity == "context"
         for fact_id in finding.fact_ids
     }
-    assert foundation_context_fact_ids <= set(foundation_conclusion.context_fact_ids)
+    foundation_conclusion_fact_ids = set(
+        foundation_conclusion.supporting_fact_ids
+        + foundation_conclusion.context_fact_ids
+        + foundation_conclusion.counter_fact_ids
+    )
+    assert foundation_context_fact_ids <= foundation_conclusion_fact_ids
     assert set(foundation_conclusion.context_fact_ids).isdisjoint(
         foundation_conclusion.supporting_fact_ids
+    )
+    assert set(foundation_conclusion.context_fact_ids).isdisjoint(
+        foundation_conclusion.counter_fact_ids
     )
     assert "D1 reference points are Lagna in" in foundation_conclusion.plain_statement
     assert all(
@@ -1828,7 +1836,18 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
 
     def career_conclusion_with_capacity(
         *, sav: float, dignity: str, shadbala_percentage: float, combust: bool
-    ) -> tuple[str, set[str], set[str], set[str], list[str], str]:
+    ) -> tuple[
+        str,
+        str,
+        str,
+        set[str],
+        set[str],
+        set[str],
+        list[str],
+        str,
+        list[str],
+        dict[str, str],
+    ]:
         scenario = result.model_copy(deep=True)
         scenario.subject.locale = "zh"
         scenario_facts = {fact.fact_id: fact for fact in scenario.facts}
@@ -1848,20 +1867,34 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
         conclusion = unit.conclusions[0]
         return (
             conclusion.conclusion_code,
+            conclusion.direction,
+            conclusion.certainty_cap,
             set(conclusion.supporting_fact_ids),
             set(conclusion.context_fact_ids),
             set(conclusion.counter_fact_ids),
             conclusion.counter_statements,
             conclusion.plain_statement,
+            conclusion.limitations,
+            {
+                finding.finding_code: finding.polarity
+                for finding in unit.findings
+                if finding.finding_code.endswith(
+                    (".lord_dignity", ".lord_shadbala", ".lord_combustion", ".sav")
+                )
+            },
         )
 
     (
         supportive_code,
+        supportive_direction,
+        supportive_cap,
         supportive_facts,
         supportive_context,
         supportive_counters,
         supportive_counter_text,
         supportive_plain,
+        supportive_limitations,
+        supportive_polarities,
     ) = career_conclusion_with_capacity(
         sav=36,
         dignity="exalted",
@@ -1870,11 +1903,15 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     )
     (
         challenging_code,
+        challenging_direction,
+        challenging_cap,
         challenging_facts,
         challenging_context,
         challenging_counters,
         challenging_counter_text,
         challenging_plain,
+        challenging_limitations,
+        challenging_polarities,
     ) = career_conclusion_with_capacity(
         sav=20,
         dignity="debilitated",
@@ -1883,11 +1920,15 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     )
     (
         mixed_code,
+        mixed_direction,
+        mixed_cap,
         mixed_facts,
         mixed_context,
         mixed_counters,
         mixed_counter_text,
         mixed_plain,
+        mixed_limitations,
+        mixed_polarities,
     ) = career_conclusion_with_capacity(
         sav=36,
         dignity="debilitated",
@@ -1895,15 +1936,25 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
         combust=False,
     )
 
-    assert supportive_code == "career.descriptive_structure"
-    assert challenging_code == "career.descriptive_structure"
+    assert supportive_code == "career.supportive_structure"
+    assert supportive_direction == "supportive"
+    assert supportive_cap == "low"
+    assert challenging_code == "career.challenging_structure"
+    assert challenging_direction == "challenging"
+    assert challenging_cap == "low"
     assert mixed_code == "career.descriptive_structure"
-    assert not supportive_facts
-    assert not challenging_facts
+    assert mixed_direction == "descriptive"
+    assert mixed_cap == "moderate"
     assert not mixed_facts
-    assert "fact.D1.H10.lord" in supportive_context
+    assert "fact.D1.H10.lord" in supportive_facts
+    assert "fact.D1.H10.lord" in challenging_facts
     assert "fact.D1.H10.sav" in supportive_context
     assert "fact.D1.H10.sav" in challenging_context
+    tenth_lord = facts_by_id["fact.D1.H10.lord"].value["lord"]
+    assert f"fact.D1.{tenth_lord}.dignity" in supportive_facts
+    assert f"fact.D1.{tenth_lord}.shadbala" in supportive_facts
+    assert f"fact.D1.{tenth_lord}.dignity" in challenging_facts
+    assert f"fact.D1.{tenth_lord}.shadbala" in challenging_facts
     assert supportive_context.isdisjoint(supportive_counters)
     assert challenging_context.isdisjoint(challenging_counters)
     assert "fact.D1.H10.sav" in mixed_context
@@ -1915,17 +1966,25 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     assert "第10宫" in supportive_plain
     assert "第10宫" in challenging_plain
     assert "方向证据不足" in mixed_plain
+    assert "支持因素占优" in supportive_plain
+    assert "压力因素占优" in challenging_plain
     assert "另有可核查结构" in supportive_plain
     assert "擢升状态" in supportive_plain
     assert "Sarvashtakavarga为36点" in supportive_plain
     assert "落陷状态" in challenging_plain
     assert "Sarvashtakavarga为20点" in challenging_plain
     assert "不代表事件必然发生" in supportive_plain
-    assert all(
-        finding.polarity == "context"
-        for finding in career_unit.findings
-        if finding.finding_code.endswith((".lord_dignity", ".lord_shadbala", ".lord_combustion"))
-    )
+    assert any("not passed independent professional" in item for item in supportive_limitations)
+    assert any("not passed independent professional" in item for item in challenging_limitations)
+    assert not any("not passed independent professional" in item for item in mixed_limitations)
+    assert supportive_polarities["career.anchor.h10.lord_dignity"] == "supportive"
+    assert supportive_polarities["career.anchor.h10.lord_shadbala"] == "supportive"
+    assert challenging_polarities["career.anchor.h10.lord_dignity"] == "challenging"
+    assert challenging_polarities["career.anchor.h10.lord_shadbala"] == "challenging"
+    assert mixed_polarities["career.anchor.h10.lord_dignity"] == "context"
+    assert mixed_polarities["career.anchor.h10.lord_shadbala"] == "context"
+    assert supportive_polarities["career.anchor.h10.sav"] == "context"
+    assert challenging_polarities["career.anchor.h10.sav"] == "context"
     assert all(
         finding.polarity == "context"
         for finding in career_unit.findings

@@ -248,8 +248,8 @@ a selected chart is released. When the evidence does not separate candidates, th
 system requests genuinely new dated evidence or returns `underdetermined`; it does
 not ask the model to map an answer back to a preferred chart.
 
-Directional interpretation remains disabled until a professional-review fixture is
-auditable rather than merely labelled. Such a fixture must retain the reviewed case
+Professionally validated `directional` interpretation remains disabled until a
+professional-review fixture is auditable rather than merely labelled. Such a fixture must retain the reviewed case
 IDs, protocol, reviewer and timestamp, plus the original review artifact whose
 SHA-256 is verified when the rule catalog loads. The review artifact must identify
 the reviewer's relevant credentials, attest subject-identity and system-authorship
@@ -258,7 +258,11 @@ Claim Graph, and Consultation Dossier for every case by retained path and SHA-25
 Each case records expected versus observed publish/withhold disposition, dimension-level
 assessment, reservations, disagreement, and rationale. A rejected dimension, rejected
 case, disposition mismatch, missing artifact, or hash mismatch invalidates the fixture.
-Engineering tests alone cannot certify a directional judgement method.
+Engineering tests alone cannot certify a professionally directional judgement method.
+VedicDust may separately expose a `traditional_tendency` when a pinned classical or
+lineage source and executable contract exist. That permission is not professional
+validation: it requires two distinct methods to agree, caps the released conclusion at
+low certainty, and must disclose that no independent professional review has occurred.
 
 Candidate comparison is all-or-nothing. If deterministic event scoring fails
 for any candidate interval, rectification enters `calculation_failed`; successful
@@ -334,18 +338,18 @@ plus natural-Karaka condition and dispositor path retain separate interpretation
 preserves method provenance and prevents several observations from masquerading
 as one independently validated method. All eight are currently provisional and
 `context_only`. Separate
-capacity-judgement rules record the VedicDust
-structural-bands 1.2.0 policy for SAV, dignity, Shadbala, and combustion. Those
-rules are currently provisional and `context_only`, so even an extreme numerical
-band is described rather than labelled favorable or unfavorable. Future
-directional use requires both a validated derivation rule and a separately
-validated judgement rule. A supportive or challenging domain direction also
-requires convergence from at least two distinct validated interpretation methods
-that agree on the same direction. One supportive method and one challenging method
-are disagreement, not convergence, and both remain descriptive. Every rule in the
-Agent-facing Judgement Context carries its explicit `context_only` or `directional`
-permission; the backend independently revalidates that permission before releasing
-Findings and Conclusions.
+capacity-judgement rules record the VedicDust structural-bands 1.2.0 policy for SAV,
+dignity, Shadbala, and combustion. Dignity and Shadbala are source-pinned
+`traditional_tendency` rules. They may contribute supportive or challenging evidence
+only when both methods agree, and any resulting conclusion is capped at low certainty.
+SAV and combustion remain provisional `context_only` product rules, so even an extreme
+numerical band is described rather than labelled favorable or unfavorable. A strict
+`directional` rule additionally requires a validated derivation, validated judgement
+contract, and professional-review fixture. One supportive method and one challenging
+method are disagreement, not convergence, and the conclusion remains descriptive.
+Every rule in the Agent-facing Judgement Context carries its explicit `context_only`,
+`traditional_tendency`, or `directional` permission; the backend independently
+revalidates that permission before releasing Findings and Conclusions.
 Natural Karakas use the topic's declared significators and their available D1
 condition evidence under an edition-pinned method contract. Anchor-house occupants
 and declared Parashari graha drishti to an anchor house or its lord also have distinct
@@ -392,8 +396,10 @@ behavior; same-provider regressions detect adapter drift; independent-external
 fixtures establish cross-implementation agreement; professional-review fixtures
 record expert judgement review under the machine-validated blind-review contract.
 The contract can preserve accepted-with-reservations and withheld cases without
-turning disagreement into approval. Only the last category can help authorize a
-directional interpretation rule, and it cannot replace the pinned textual source.
+turning disagreement into approval. Only the last category can help authorize a strict
+`directional` interpretation rule, and it cannot replace the pinned textual source.
+Source grounding plus executable contracts may authorize only the lower-assurance
+`traditional_tendency` permission described above.
 Rectification maturity labels are not self-authenticating: a professionally
 validated Rectification Record must retain registered professional-review fixture
 IDs, and provenance validation rejects unknown or non-professional fixtures.
@@ -401,8 +407,9 @@ IDs, and provenance validation rejects unknown or non-professional fixtures.
 Runtime evidence confidence cannot outrun derivation maturity. A provisional
 calculation rule may emit only provisional, disputed, or unavailable evidence;
 it cannot label a fact corroborated or verified. Judgement permission remains a
-separate axis, so a corroborated dignity calculation is still context-only until
-a professionally reviewed directional interpretation rule exists.
+separate axis. A corroborated dignity calculation may support only the registered
+low-certainty traditional tendency until a professionally reviewed directional
+interpretation rule exists; it does not become professional validation by itself.
 
 Structural association facts are kept method-specific. Same-sign contact,
 Parashari graha drishti, kendra-trikona lord association, and exact house-lord

@@ -713,7 +713,7 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
     catalog = load_rule_catalog()
     validate_rule_catalog_sources(catalog)
 
-    assert catalog.catalog_version == "1.35.0"
+    assert catalog.catalog_version == "1.36.0"
     rule_ids = {rule.rule_id for rule in catalog.rules}
     assert {
         "sop.promise-before-varga",
@@ -782,8 +782,6 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
         and rules_by_id[rule_id].judgement_use == "context_only"
         for rule_id in {
             "judge.capacity.sav-structural-band",
-            "judge.capacity.dignity-condition",
-            "judge.capacity.shadbala-band",
             "judge.capacity.combustion-condition",
             "judge.structure.lagna-sun-moon-reference-points",
             "judge.structure.house-lord-placement",
@@ -795,12 +793,24 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
             "judge.structure.dispositor-path",
         }
     )
+    assert all(
+        rules_by_id[rule_id].status == "provisional"
+        and rules_by_id[rule_id].judgement_use == "traditional_tendency"
+        for rule_id in {
+            "judge.capacity.dignity-condition",
+            "judge.capacity.shadbala-band",
+        }
+    )
     assert rules_by_id["judge.capacity.dignity-condition"].evidence_class == (
         EvidenceClass.LINEAGE_COMMENTARY
     )
-    assert rules_by_id["judge.capacity.dignity-condition"].source_ids == [
-        "lineage.pvr-lessons-volume-1-2005"
-    ]
+    assert set(rules_by_id["judge.capacity.dignity-condition"].source_ids) == {
+        "lineage.pvr-lessons-volume-1-2005",
+        "lineage.pvr-integrated-approach-2000-2010",
+    }
+    assert rules_by_id["judge.capacity.shadbala-band"].evidence_class == (
+        EvidenceClass.LINEAGE_COMMENTARY
+    )
     expected_rectification_sources = {
         "lineage.pvr-integrated-approach-2000-2010",
         "product.vedicdust-consultation-standard-1",
@@ -905,6 +915,17 @@ def test_rule_source_gate_rejects_pending_mismatched_and_unreviewed_directional_
     ]
     with pytest.raises(ValueError, match="requires a professional review fixture"):
         validate_rule_catalog_sources(unreviewed_direction)
+
+    ungrounded_tendency = catalog.model_copy(deep=True)
+    ungrounded_tendency_rule = next(
+        rule
+        for rule in ungrounded_tendency.rules
+        if rule.rule_id == "judge.capacity.dignity-condition"
+    )
+    ungrounded_tendency_rule.source_ids = ["product.vedicdust-consultation-standard-1"]
+    ungrounded_tendency_rule.evidence_class = EvidenceClass.PRODUCT_HYPOTHESIS
+    with pytest.raises(ValueError, match="requires a pinned classical or lineage source"):
+        validate_rule_catalog_sources(ungrounded_tendency)
 
 
 def test_rectification_event_vargas_follow_the_declared_domain_policy() -> None:

@@ -404,7 +404,7 @@
           "type": "string"
         },
         "judgementUse": {
-          "enum": ["context_only", "directional"],
+          "enum": ["context_only", "traditional_tendency", "directional"],
           "title": "Judgementuse",
           "type": "string"
         },

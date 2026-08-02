@@ -59,7 +59,8 @@ English technical terms in the appendix. Define a technical term on first use.
    scope, confidence, locale, audience, timing-window semantics, section
    presentation, omission reasons, and unresolved questions are backend-owned.
    Preserve each Claim's `evidenceConfidence`; never rewrite or promote
-   `certainty`.
+   `certainty`. Render a low-certainty traditional tendency as a tendency, never as
+   a validated prediction or professional consensus.
 
 Complete only when the dossier conforms to
 `vedicdust-consultation-dossier/1.0.0` and every released Claim is accounted for.

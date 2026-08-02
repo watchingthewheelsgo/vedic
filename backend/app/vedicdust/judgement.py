@@ -377,13 +377,15 @@ def _build_judgement_unit(
         )
         limitations.append(
             "Calculation rules establish facts; separate VedicDust structural-bands 1.2.0 "
-            "interpretation rules determine whether those facts may carry direction. Current "
-            "SAV, dignity, Shadbala, and combustion interpretations remain descriptive."
+            "interpretation rules determine whether those facts may carry direction. Dignity "
+            "and Shadbala may contribute only a source-grounded traditional tendency; SAV and "
+            "combustion remain descriptive."
         )
         limitations.append(
             "A supportive or challenging domain direction requires convergence from at least "
-            "two validated directional interpretation methods agreeing on that direction; "
-            "one method or opposing single methods remain descriptive."
+            "two separately registered methods agreeing on that direction. Any conclusion that "
+            "depends on an unreviewed traditional tendency is capped at low certainty; one method "
+            "or opposing methods remain descriptive."
         )
 
     findings, conclusions = compile_topic_judgement(
@@ -408,10 +410,22 @@ def _build_judgement_unit(
             and rule.status == "validated"
             and rule.judgement_use == "directional"
         },
+        traditional_tendency_rule_ids={
+            rule.rule_id
+            for rule in active_rules.values()
+            if rule.rule_kind == "judgement"
+            and rule.status in {"provisional", "validated"}
+            and rule.judgement_use == "traditional_tendency"
+        },
         validated_derivation_rule_ids={
             rule.rule_id
             for rule in active_rules.values()
             if rule.rule_kind == "derivation" and rule.status == "validated"
+        },
+        direction_eligible_derivation_rule_ids={
+            rule.rule_id
+            for rule in active_rules.values()
+            if rule.rule_kind == "derivation" and rule.status in {"provisional", "validated"}
         },
         timing_rule_id=(timing_rule.rule_id if timing_is_eligible and timing_rule else None),
         timing_gate_rule_id=(timing_gate.rule_id if timing_is_eligible and timing_gate else None),

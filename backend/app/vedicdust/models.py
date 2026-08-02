@@ -380,7 +380,7 @@ class MethodRule(ContractModel):
     evidence_class: EvidenceClass
     source_ids: list[str] = Field(min_length=1)
     status: Literal["draft", "provisional", "validated", "retired"]
-    judgement_use: Literal["context_only", "directional"] = "context_only"
+    judgement_use: Literal["context_only", "traditional_tendency", "directional"] = "context_only"
     validation_fixture_ids: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 
@@ -1168,7 +1168,7 @@ class JudgementRuleContext(ContractModel):
         Literal["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"]
     ] = Field(default_factory=list)
     status: Literal["draft", "provisional", "validated"]
-    judgement_use: Literal["context_only", "directional"]
+    judgement_use: Literal["context_only", "traditional_tendency", "directional"]
     evaluation_status: Literal["eligible", "ineligible"]
     matched_fact_ids: list[str] = Field(default_factory=list)
     failed_predicates: list[str] = Field(default_factory=list)

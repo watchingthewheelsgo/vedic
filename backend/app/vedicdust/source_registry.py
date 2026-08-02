@@ -132,10 +132,27 @@ def validate_rule_catalog_sources(catalog: RuleCatalog) -> None:
                 errors.append(
                     f"active judgement rule {rule.rule_id} requires an executable contract fixture"
                 )
-        if rule.judgement_use != "directional":
+        if rule.judgement_use == "context_only":
             continue
         if rule.rule_kind != "judgement":
-            errors.append(f"directional rule {rule.rule_id} must be a judgement rule")
+            errors.append(f"{rule.judgement_use} rule {rule.rule_id} must be a judgement rule")
+        has_pinned_authority = any(
+            source.citation_status == "pinned"
+            and source.evidence_class
+            in {EvidenceClass.CLASSICAL_TEXT, EvidenceClass.LINEAGE_COMMENTARY}
+            for source in sources
+        )
+        if not has_pinned_authority:
+            errors.append(
+                f"{rule.judgement_use} rule {rule.rule_id} requires a pinned classical or "
+                "lineage source"
+            )
+        if rule.judgement_use == "traditional_tendency":
+            if rule.status not in {"provisional", "validated"}:
+                errors.append(
+                    f"traditional tendency rule {rule.rule_id} must be provisional or validated"
+                )
+            continue
         if rule.status != "validated":
             errors.append(f"directional rule {rule.rule_id} must be validated")
         if not rule.validation_fixture_ids:
@@ -145,15 +162,5 @@ def validate_rule_catalog_sources(catalog: RuleCatalog) -> None:
             for fixture_id in rule.validation_fixture_ids
         ):
             errors.append(f"directional rule {rule.rule_id} requires a professional review fixture")
-        has_pinned_authority = any(
-            source.citation_status == "pinned"
-            and source.evidence_class
-            in {EvidenceClass.CLASSICAL_TEXT, EvidenceClass.LINEAGE_COMMENTARY}
-            for source in sources
-        )
-        if not has_pinned_authority:
-            errors.append(
-                f"directional rule {rule.rule_id} requires a pinned classical or lineage source"
-            )
     if errors:
         raise ValueError("; ".join(errors))

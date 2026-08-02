@@ -190,7 +190,9 @@ def compile_topic_judgement(
     limitations: list[str],
     interpretation_rule_ids: dict[str, str],
     directional_judgement_rule_ids: set[str],
+    traditional_tendency_rule_ids: set[str],
     validated_derivation_rule_ids: set[str],
+    direction_eligible_derivation_rule_ids: set[str],
     timing_rule_id: str | None = None,
     timing_gate_rule_id: str | None = None,
     timing_periods: list[TimingPeriod] | None = None,
@@ -392,12 +394,14 @@ def compile_topic_judgement(
                 if sav <= POLICY.sav_challenging_max
                 else "context"
             )
-            polarity = _validated_directional_polarity(
+            polarity = _permitted_directional_polarity(
                 candidate_polarity,
                 [sav_fact],
                 interpretation_rule_id=sav_rule_id,
                 directional_judgement_rule_ids=directional_judgement_rule_ids,
+                traditional_tendency_rule_ids=traditional_tendency_rule_ids,
                 validated_derivation_rule_ids=validated_derivation_rule_ids,
+                direction_eligible_derivation_rule_ids=direction_eligible_derivation_rule_ids,
             )
             findings.append(
                 _finding(
@@ -446,12 +450,14 @@ def compile_topic_judgement(
                 if dignity in _CHALLENGING_DIGNITIES
                 else "context"
             )
-            polarity = _validated_directional_polarity(
+            polarity = _permitted_directional_polarity(
                 candidate_polarity,
                 [dignity_fact],
                 interpretation_rule_id=dignity_rule_id,
                 directional_judgement_rule_ids=directional_judgement_rule_ids,
+                traditional_tendency_rule_ids=traditional_tendency_rule_ids,
                 validated_derivation_rule_ids=validated_derivation_rule_ids,
+                direction_eligible_derivation_rule_ids=direction_eligible_derivation_rule_ids,
             )
             findings.append(
                 _finding(
@@ -492,12 +498,14 @@ def compile_topic_judgement(
                     if strength_pct < POLICY.shadbala_challenging_below
                     else "context"
                 )
-                polarity = _validated_directional_polarity(
+                polarity = _permitted_directional_polarity(
                     candidate_polarity,
                     [shadbala_fact],
                     interpretation_rule_id=shadbala_rule_id,
                     directional_judgement_rule_ids=directional_judgement_rule_ids,
+                    traditional_tendency_rule_ids=traditional_tendency_rule_ids,
                     validated_derivation_rule_ids=validated_derivation_rule_ids,
+                    direction_eligible_derivation_rule_ids=(direction_eligible_derivation_rule_ids),
                 )
                 findings.append(
                     _finding(
@@ -539,12 +547,14 @@ def compile_topic_judgement(
                 )
             )
             combustion_polarity: Polarity = "challenging" if is_combust else "context"
-            combustion_polarity = _validated_directional_polarity(
+            combustion_polarity = _permitted_directional_polarity(
                 combustion_polarity,
                 [combustion_fact],
                 interpretation_rule_id=combustion_rule_id,
                 directional_judgement_rule_ids=directional_judgement_rule_ids,
+                traditional_tendency_rule_ids=traditional_tendency_rule_ids,
                 validated_derivation_rule_ids=validated_derivation_rule_ids,
+                direction_eligible_derivation_rule_ids=direction_eligible_derivation_rule_ids,
             )
             findings.append(
                 _finding(
@@ -658,7 +668,9 @@ def compile_topic_judgement(
 
     findings = _require_directional_method_convergence(
         findings,
-        directional_judgement_rule_ids=directional_judgement_rule_ids,
+        directional_judgement_rule_ids=(
+            directional_judgement_rule_ids | traditional_tendency_rule_ids
+        ),
     )
 
     if not findings:
@@ -696,6 +708,7 @@ def compile_topic_judgement(
         primary_rule_id=primary_rule_id,
         certainty_cap=certainty_cap,
         limitations=limitations,
+        traditional_tendency_rule_ids=traditional_tendency_rule_ids,
     )
     conclusions = [conclusion]
     if timing_rule_id and timing_gate_rule_id and timing_periods and reference_time:
@@ -1004,6 +1017,7 @@ def _conclusion(
     primary_rule_id: str,
     certainty_cap: Literal["high", "moderate", "low"],
     limitations: list[str],
+    traditional_tendency_rule_ids: set[str],
 ) -> JudgementConclusion:
     support_score = sum(finding.weight for finding in findings if finding.polarity == "supportive")
     challenge_score = sum(
@@ -1019,8 +1033,6 @@ def _conclusion(
         direction = "descriptive"
 
     context_findings = [finding for finding in findings if finding.polarity == "context"]
-    context_fact_ids = _unique_fact_ids(context_findings)
-    context_fact_set = set(context_fact_ids)
     if direction == "supportive":
         primary = [finding for finding in findings if finding.polarity == "supportive"]
         counter = [finding for finding in findings if finding.polarity == "challenging"]
@@ -1033,13 +1045,35 @@ def _conclusion(
     else:
         primary = context_findings
         counter = []
-    counter_fact_ids = _unique_fact_ids(counter)
-    counter_fact_set = set(counter_fact_ids)
-    supporting_fact_ids = [
-        fact_id
-        for fact_id in _unique_fact_ids(primary)
-        if fact_id not in counter_fact_set and fact_id not in context_fact_set
-    ]
+    if direction == "descriptive":
+        supporting_fact_ids = []
+        counter_fact_ids = []
+        context_fact_ids = _unique_fact_ids(context_findings)
+    else:
+        primary_fact_ids = _unique_fact_ids(primary)
+        raw_counter_fact_ids = _unique_fact_ids(counter)
+        shared_directional_fact_ids = set(primary_fact_ids) & set(raw_counter_fact_ids)
+        supporting_fact_ids = [
+            fact_id for fact_id in primary_fact_ids if fact_id not in shared_directional_fact_ids
+        ]
+        counter_fact_ids = [
+            fact_id
+            for fact_id in raw_counter_fact_ids
+            if fact_id not in shared_directional_fact_ids
+        ]
+        directional_fact_ids = set(supporting_fact_ids) | set(counter_fact_ids)
+        context_fact_ids = list(
+            dict.fromkeys(
+                [
+                    *(
+                        fact_id
+                        for fact_id in _unique_fact_ids(context_findings)
+                        if fact_id not in directional_fact_ids
+                    ),
+                    *sorted(shared_directional_fact_ids),
+                ]
+            )
+        )
 
     localized_title = _localized_topic_title(locale, topic_title)
     plain, expressions, implications = _localized_synthesis(
@@ -1049,6 +1083,20 @@ def _conclusion(
         findings=findings,
     )
     counter_statements = _localized_counter_statements(counter, locale)
+    uses_traditional_tendency = any(
+        finding.polarity != "context" and finding.rule_id in traditional_tendency_rule_ids
+        for finding in findings
+    )
+    effective_certainty_cap: Literal["high", "moderate", "low"] = (
+        "low" if uses_traditional_tendency else certainty_cap
+    )
+    effective_limitations = list(limitations)
+    if uses_traditional_tendency:
+        effective_limitations.append(
+            "The direction is a source-grounded traditional tendency released only after "
+            "two distinct methods converged. It has not passed independent professional "
+            "review and cannot be treated as an event prediction."
+        )
     return JudgementConclusion(
         conclusion_id=f"conclusion.{topic_id}.integrated",
         conclusion_code=f"{topic_id}.{direction}_structure",
@@ -1067,8 +1115,8 @@ def _conclusion(
         real_world_expressions=expressions,
         conditions=[_localized_structural_condition(locale)],
         practical_implications=implications,
-        limitations=list(dict.fromkeys(limitations)),
-        certainty_cap=certainty_cap,
+        limitations=list(dict.fromkeys(effective_limitations)),
+        certainty_cap=effective_certainty_cap,
     )
 
 
@@ -1260,7 +1308,7 @@ def _timing_conclusion(
     supporting_fact_ids = [
         fact_id
         for fact_id in structural_conclusion.supporting_fact_ids
-        if fact_id not in counter_fact_set
+        if fact_id not in counter_fact_set and fact_id not in linked_fact_set
     ]
     context_fact_ids = list(
         dict.fromkeys([*structural_conclusion.context_fact_ids, *linked_fact_ids])
@@ -1870,20 +1918,26 @@ def _evidence_confidence_multiplier(facts: list[JyotishFact]) -> float:
     return min(multipliers[effective_fact_confidence(fact)] for fact in facts)
 
 
-def _validated_directional_polarity(
+def _permitted_directional_polarity(
     polarity: Polarity,
     facts: list[JyotishFact],
     *,
     interpretation_rule_id: str,
     directional_judgement_rule_ids: set[str],
+    traditional_tendency_rule_ids: set[str],
     validated_derivation_rule_ids: set[str],
+    direction_eligible_derivation_rule_ids: set[str],
 ) -> Polarity:
-    """Require independently eligible derivation and interpretation rules for direction."""
+    """Apply the derivation gate appropriate to a rule's declared authority."""
 
     if polarity == "context":
         return polarity
-    if interpretation_rule_id not in directional_judgement_rule_ids:
+    if interpretation_rule_id in directional_judgement_rule_ids:
+        eligible_derivations = validated_derivation_rule_ids
+    elif interpretation_rule_id in traditional_tendency_rule_ids:
+        eligible_derivations = direction_eligible_derivation_rule_ids
+    else:
         return "context"
-    if any(fact.provenance.rule_id not in validated_derivation_rule_ids for fact in facts):
+    if any(fact.provenance.rule_id not in eligible_derivations for fact in facts):
         return "context"
     return polarity

@@ -577,6 +577,14 @@ def validate_judgement_context(
         and rule.status == "validated"
         and rule.judgement_use == "directional"
     }
+    traditional_tendency_rule_ids = {
+        rule.rule_id
+        for rule in catalog_rules.values()
+        if rule.rule_kind == "judgement"
+        and rule.status in {"provisional", "validated"}
+        and rule.judgement_use == "traditional_tendency"
+    }
+    direction_permitted_rule_ids = directional_judgement_rule_ids | traditional_tendency_rule_ids
     for rule in context.rules:
         source = catalog_rules.get(rule.rule_id)
         if source is None:
@@ -661,7 +669,7 @@ def validate_judgement_context(
         for finding in unit.findings:
             if (
                 finding.polarity != "context"
-                and finding.rule_id not in directional_judgement_rule_ids
+                and finding.rule_id not in direction_permitted_rule_ids
             ):
                 errors.append(
                     f"judgement unit {unit.unit_id} releases direction from "
@@ -685,13 +693,24 @@ def validate_judgement_context(
                 {
                     finding.rule_id
                     for finding in directional_findings
-                    if finding.rule_id not in directional_judgement_rule_ids
+                    if finding.rule_id not in direction_permitted_rule_ids
                 }
             )
             if invalid_directional_rules:
                 errors.append(
                     f"judgement conclusion {conclusion.conclusion_id} uses non-directional rules: "
                     + ", ".join(invalid_directional_rules)
+                )
+            if (
+                any(
+                    finding.rule_id in traditional_tendency_rule_ids
+                    for finding in directional_findings
+                )
+                and conclusion.certainty_cap != "low"
+            ):
+                errors.append(
+                    f"judgement conclusion {conclusion.conclusion_id} must cap a traditional "
+                    "tendency at low certainty"
                 )
     expected_context = build_judgement_context(
         record,
