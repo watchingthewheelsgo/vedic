@@ -18,7 +18,7 @@ import {
   UserRound
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { AccountCenter } from "../components/AccountCenter";
 import { BirthInputLayout } from "../components/BirthInputLayout";
 import { BirthInputAstroVisual } from "../components/BirthInputAstroVisual";
@@ -55,6 +55,17 @@ type SelectOption<T extends string = string> = {
 
 type FieldKey = "birthDate" | "birthTime" | "timeSource" | "place" | "submit";
 type FormErrors = Partial<Record<FieldKey, string>>;
+type AmbiguousTimeChoice = {
+  utcOffsetSeconds: number;
+  localDatetime: string;
+  utcDatetime: string;
+};
+type AmbiguousTimeDetail = {
+  code: "ambiguous_birth_time";
+  timezoneId: string;
+  localDatetime: string;
+  choices: AmbiguousTimeChoice[];
+};
 
 const RELATIONSHIP_OPTIONS: SelectOption[] = [
   { value: "单身", labelKey: "intake.relationship.single" },
@@ -73,9 +84,11 @@ export function Intake() {
   const [name, setName] = useState("");
   const [gender, setGender] = useState("");
   const [relationship, setRelationship] = useState("");
-  const [lifeEvents, setLifeEvents] = useState("");
+  const [readingFocus, setReadingFocus] = useState("");
   const [timePrecision, setTimePrecision] = useState<BirthTimePrecision>("exact");
   const [timeSource, setTimeSource] = useState("");
+  const [utcOffsetSeconds, setUtcOffsetSeconds] = useState<number | null>(null);
+  const [ambiguousTime, setAmbiguousTime] = useState<AmbiguousTimeDetail | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [busy, setBusy] = useState(false);
   const [visualLocation, setVisualLocation] = useState<BirthPlaceVisualState | null>(null);
@@ -92,27 +105,29 @@ export function Intake() {
         timePrecision,
         gender,
         relationship,
-        lifeEvents,
+        readingFocus,
         timeSource,
+        utcOffsetSeconds,
         locale
       }),
     [
       birthDate,
       birthTime,
       gender,
-      lifeEvents,
+      readingFocus,
       locale,
       place,
       relationship,
       timePrecision,
-      timeSource
+      timeSource,
+      utcOffsetSeconds
     ]
   );
   const birthTimeReady = timePrecision === "unknown" || Boolean(birthTime);
   const timeSourceReady = timePrecision === "unknown" || Boolean(timeSource);
   const birthMomentReady = Boolean(birthDate) && birthTimeReady && timeSourceReady;
   const locationReady = Boolean(place) && locationConfirmed;
-  const optionalProfileTouched = Boolean(name || gender || relationship || lifeEvents.trim());
+  const optionalProfileTouched = Boolean(name || gender || relationship || readingFocus.trim());
   const currentStep = !birthMomentReady ? 1 : !locationReady ? 2 : 3;
   const birthMomentSummary = birthDate
     ? `${formatDate(birthDate, { year: "numeric", month: "short", day: "numeric" })} · ${
@@ -164,6 +179,13 @@ export function Intake() {
         state: { name, birth }
       });
     } catch (caught) {
+      const detail = caught instanceof ApiError ? caught.detail : null;
+      if (isAmbiguousTimeDetail(detail)) {
+        setAmbiguousTime(detail);
+        setErrors({});
+        setBusy(false);
+        return;
+      }
       setErrors({
         submit: caught instanceof Error ? caught.message : t("intake.error.start")
       });
@@ -227,10 +249,14 @@ export function Intake() {
             errors={errors}
             onBirthDateChange={(date) => {
               setBirthDate(date);
+              setUtcOffsetSeconds(null);
+              setAmbiguousTime(null);
               clearError(setErrors, "birthDate");
             }}
             onBirthTimeChange={(date) => {
               setBirthTime(date);
+              setUtcOffsetSeconds(null);
+              setAmbiguousTime(null);
               clearError(setErrors, "birthTime");
             }}
           />
@@ -239,6 +265,8 @@ export function Intake() {
             value={timePrecision}
             onChange={(next) => {
               setTimePrecision(next);
+              setUtcOffsetSeconds(null);
+              setAmbiguousTime(null);
               setBirthTime((current) => normalizeTimeForPrecision(current, next));
               if (next === "unknown") {
                 setTimeSource("");
@@ -282,6 +310,8 @@ export function Intake() {
               onVisualStateChange={handleVisualLocationChange}
               onChange={(value) => {
                 setPlace(value);
+                setUtcOffsetSeconds(null);
+                setAmbiguousTime(null);
                 setLocationConfirmed(false);
                 if (value) clearError(setErrors, "place");
               }}
@@ -345,8 +375,8 @@ export function Intake() {
                   className="mb-0"
                 >
                   <Textarea
-                    value={lifeEvents}
-                    onChange={(event) => setLifeEvents(event.target.value)}
+                    value={readingFocus}
+                    onChange={(event) => setReadingFocus(event.target.value)}
                     placeholder={t("intake.lifeEvents.placeholder")}
                     rows={4}
                   />
@@ -359,6 +389,43 @@ export function Intake() {
         {errors.submit && (
           <div className="rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red">
             {errors.submit}
+          </div>
+        )}
+
+        {ambiguousTime && (
+          <div className="rounded-[12px] border border-gold/28 bg-gold/10 p-4">
+            <div className="flex items-start gap-3">
+              <Clock3 className="mt-0.5 size-4 shrink-0 text-gold-light" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-heading">
+                  {t("intake.ambiguousTime.title")}
+                </p>
+                <p className="mt-1 text-[13px] leading-relaxed text-body">
+                  {t("intake.ambiguousTime.body")}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {ambiguousTime.choices.map((choice, index) => (
+                <button
+                  key={`${choice.utcDatetime}-${choice.utcOffsetSeconds}`}
+                  type="button"
+                  className="rounded-[10px] border border-gold/22 bg-black/15 px-3 py-3 text-left transition-colors hover:border-gold/50 hover:bg-gold/10"
+                  onClick={() => {
+                    setUtcOffsetSeconds(choice.utcOffsetSeconds);
+                    setAmbiguousTime(null);
+                    setErrors({});
+                  }}
+                >
+                  <span className="block text-[13px] font-semibold text-heading">
+                    {t(index === 0 ? "intake.ambiguousTime.first" : "intake.ambiguousTime.second")}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted">
+                    {formatUtcOffset(choice.utcOffsetSeconds)}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -517,8 +584,9 @@ function buildBirthInput({
   timePrecision,
   gender,
   relationship,
-  lifeEvents,
+  readingFocus,
   timeSource,
+  utcOffsetSeconds,
   locale
 }: {
   birthDate: Date | null;
@@ -527,8 +595,9 @@ function buildBirthInput({
   timePrecision: BirthTimePrecision;
   gender: string;
   relationship: string;
-  lifeEvents: string;
+  readingFocus: string;
   timeSource: string;
+  utcOffsetSeconds: number | null;
   locale: AppLocale;
 }): BirthInput | null {
   if (!birthDate) return null;
@@ -543,8 +612,36 @@ function buildBirthInput({
     birthTimePrecision: timePrecision,
     gender: gender || "未提供",
     relationship: relationship || "未提供",
-    lifeEvents: lifeEvents.trim(),
+    readingFocus: readingFocus.trim(),
+    lifeEvents: "",
+    readerRelationship: "self",
     timeSource: timePrecision === "unknown" ? "时间未知" : timeSource,
+    ...(utcOffsetSeconds !== null ? { utcOffsetSeconds } : {}),
     locale
   };
+}
+
+function isAmbiguousTimeDetail(value: unknown): value is AmbiguousTimeDetail {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<AmbiguousTimeDetail>;
+  return (
+    candidate.code === "ambiguous_birth_time" &&
+    typeof candidate.timezoneId === "string" &&
+    Array.isArray(candidate.choices) &&
+    candidate.choices.length === 2 &&
+    candidate.choices.every(
+      (choice) =>
+        choice &&
+        typeof choice.utcOffsetSeconds === "number" &&
+        typeof choice.utcDatetime === "string"
+    )
+  );
+}
+
+function formatUtcOffset(seconds: number): string {
+  const sign = seconds >= 0 ? "+" : "-";
+  const totalMinutes = Math.floor(Math.abs(seconds) / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `UTC${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }

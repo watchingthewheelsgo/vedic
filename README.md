@@ -117,6 +117,17 @@ Effect:
 - Starts Vite on `http://127.0.0.1:5173`.
 - Creates a local SQLite database automatically on first backend startup.
 
+Calculator-only maintenance uses explicit commands:
+
+```bash
+npm run backend:calculator-sync   # install/repair exact pinned distributions
+npm run backend:calculator-check  # verify versions, data files, and fixed SAV result
+```
+
+`uv.lock` owns the web/API environment; `backend/astrology-runtime.lock` owns the
+calculation providers and their declared runtime distributions. Startup fails on
+version drift rather than calculating with an unrecorded provider version.
+
 If you only need UI-level work and do not have third-party keys yet, set
 `VEDIC_AI_MODE=mock` and `VEDIC_AUTH_MODE=disabled` in `.env` before running the
 backend config check.
@@ -380,14 +391,18 @@ Effect:
 Full report-generation smoke test:
 
 ```bash
+VEDIC_WORKFLOW_AUTH_TOKEN='<clerk-session-token>' \
+VEDIC_WORKFLOW_FEEDBACK='1. 准\\n2. 部分准' \
 npm run workflow:test
 ```
 
-Current limitation: this script talks directly to the backend API and does not
-currently acquire a Clerk session token. For a real authenticated full-report
-smoke test, either run through the browser UI while signed in, or temporarily set
-`VEDIC_AUTH_MODE=disabled` in local `.env` and restart the backend. Do not use
-disabled auth for production or payment validation.
+The token must belong to an admin account or an account with paid access when the
+paywall is enabled. The script follows the production sequence: chart calculation,
+deterministic rectification when required, one scan-stable Reader quality check,
+core-job polling, and public VedicDust artifact verification. A fixture that requires
+rectification must supply `VEDIC_WORKFLOW_EVENTS_JSON` with 3-5 dated event objects;
+the script never invents biography or lets Reader feedback select a candidate. Never
+disable production auth to make this test pass.
 
 ### Commit Hooks
 
@@ -660,7 +675,8 @@ search-result text and still requires city-distance verification before use.
 - `birth_input_context.json` records the original birth-time/place facts,
   resolved coordinates, timezone, coordinate source, place accuracy, radius, and
   rectification guardrails.
-- `sensitivity_scan.json` records small-sample time/place perturbation checks.
+- `sensitivity_scan.json` records exhaustive minute-grid time checks and the
+  declared bounded place-candidate checks.
   Reader/core workflows use it to decide whether prevalidation should validate a
   single chart or first shrink uncertain time/place candidates. It also exposes
   `candidateGroups`, `stability`, `reportReadiness`, and an `llmContract` so
@@ -669,8 +685,9 @@ search-result text and still requires city-distance verification before use.
 - Aspect facts use Vedic whole-sign contact + Graha Drishti. Western
   degree-angle aspects are not part of the calculation fact source.
 - `vedic-core` runs the native judgement and consultation DAG. Backend-issued
-  Judgement Units constrain every model-written claim to permitted facts, rules,
-  output codes, scope, certainty, and limitations. Intermediate JSON contracts
+  Judgement Units compile immutable Conclusions and publish the Claim Graph. The
+  model may organize approved Claims into a dossier but cannot rewrite their facts,
+  rules, output codes, scope, certainty, or limitations. Intermediate JSON contracts
   are validated before the deterministic renderer creates `consultation_report.md`.
 - Vedic runtime artifacts must be declared by the current VedicDust contracts.
 - The JSON wrapper used between backend and Claude Agent SDK is transport only;

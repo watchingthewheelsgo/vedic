@@ -58,7 +58,7 @@ class CoreJobState:
 
 
 class CoreJobRuntime:
-    """In-memory DAG runner for full vedic-core report generation."""
+    """DAG runner with durable terminal and restart-interrupted job visibility."""
 
     MAX_CONCURRENCY = 10
     USER_RUNNING_MESSAGE = (
@@ -69,8 +69,24 @@ class CoreJobRuntime:
     def __init__(self, skill_runtime: SkillRuntime) -> None:
         self.skill_runtime = skill_runtime
         self._jobs: dict[str, CoreJobState] = {}
+        self._persisted_jobs: dict[str, CoreJobResponse] = {}
+        self._persisted_owners: dict[str, str | None] = {}
         self._active_by_session: dict[str, str] = {}
         self._registry_lock = asyncio.Lock()
+
+    async def restore_persisted_jobs(self) -> None:
+        metadata_store = getattr(self.skill_runtime, "metadata_store", None)
+        if metadata_store is None:
+            return
+        snapshots = await metadata_store.restore_core_jobs()
+        async with self._registry_lock:
+            self._persisted_jobs = {
+                snapshot.response.job_id: self._hydrate_persisted_session(snapshot.response)
+                for snapshot in snapshots
+            }
+            self._persisted_owners = {
+                snapshot.response.job_id: snapshot.owner_user_id for snapshot in snapshots
+            }
 
     async def start(
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
@@ -91,6 +107,8 @@ class CoreJobRuntime:
 
             job = self._create_job(input_data, owner_user_id=owner_user_id)
             self._jobs[job.job_id] = job
+            self._persisted_jobs.pop(job.job_id, None)
+            self._persisted_owners.pop(job.job_id, None)
             self._active_by_session[job.session_id] = job.job_id
             await self._persist_job_metadata(job)
             job.task = asyncio.create_task(self._run_job(job))
@@ -98,23 +116,42 @@ class CoreJobRuntime:
 
     async def get(self, job_id: str, *, owner_user_id: str | None = None) -> CoreJobResponse:
         job = self._jobs.get(job_id)
-        if job is None:
+        if job is not None:
+            if owner_user_id and job.owner_user_id != owner_user_id:
+                raise LookupError(f"Core job not found: {job_id}")
+            return self._to_response(job)
+
+        persisted = self._persisted_jobs.get(job_id)
+        if persisted is None:
             raise LookupError(f"Core job not found: {job_id}")
-        if owner_user_id and job.owner_user_id != owner_user_id:
+        if owner_user_id and self._persisted_owners.get(job_id) != owner_user_id:
             raise LookupError(f"Core job not found: {job_id}")
-        return self._to_response(job)
+        return persisted.model_copy(deep=True)
 
     def list_jobs(self, *, owner_user_id: str | None = None) -> list[CoreJobResponse]:
-        jobs = sorted(
-            (
-                job
-                for job in self._jobs.values()
-                if owner_user_id is None or job.owner_user_id == owner_user_id
-            ),
-            key=lambda job: job.started_at or "",
+        responses = {
+            job_id: response.model_copy(deep=True)
+            for job_id, response in self._persisted_jobs.items()
+            if owner_user_id is None or self._persisted_owners.get(job_id) == owner_user_id
+        }
+        for job in self._jobs.values():
+            if owner_user_id is None or job.owner_user_id == owner_user_id:
+                responses[job.job_id] = self._to_response(job)
+        return sorted(
+            responses.values(),
+            key=lambda response: response.started_at or "",
             reverse=True,
         )
-        return [self._to_response(job) for job in jobs]
+
+    def _hydrate_persisted_session(self, response: CoreJobResponse) -> CoreJobResponse:
+        try:
+            session = self.skill_runtime.load_session(response.session_id)
+        except (FileNotFoundError, LookupError, ValueError):
+            return response
+        session.chat_message = response.message
+        if response.status == "failed":
+            session.stage = "error"
+        return response.model_copy(update={"session": session})
 
     def _create_job(
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
@@ -227,13 +264,15 @@ class CoreJobRuntime:
             job.finished_at = _now()
             job.finished_perf = time.perf_counter()
             await self._write_metrics(job)
-            if job.session is None:
-                job.session = self.skill_runtime.core_progress_response(
-                    job.session_id,
-                    job.message,
-                    stage="error",
-                )
+            job.session = self.skill_runtime.core_progress_response(
+                job.session_id,
+                job.message,
+                stage="error",
+            )
         finally:
+            response = self._to_response(job)
+            self._persisted_jobs[job.job_id] = response.model_copy(deep=True)
+            self._persisted_owners[job.job_id] = job.owner_user_id
             async with self._registry_lock:
                 if self._active_by_session.get(job.session_id) == job.job_id:
                     self._active_by_session.pop(job.session_id, None)
@@ -354,6 +393,7 @@ class CoreJobRuntime:
                         node.started_perf, node.finished_perf
                     ),
                     "error": node.error,
+                    "agentRun": self._agent_run_summary(job.session_id, node.id),
                 }
                 for node in job.nodes
             ],
@@ -364,6 +404,13 @@ class CoreJobRuntime:
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         )
         await self._persist_job_metadata(job)
+
+    def _agent_run_summary(self, session_id: str, node_id: str) -> dict[str, object] | None:
+        reader = getattr(self.skill_runtime, "agent_run_summary", None)
+        if not callable(reader):
+            return None
+        result = reader(session_id, scope="core", key=node_id)
+        return result if isinstance(result, dict) else None
 
     async def _persist_job_metadata(self, job: CoreJobState) -> None:
         metadata_store = getattr(self.skill_runtime, "metadata_store", None)
@@ -380,7 +427,13 @@ class CoreJobRuntime:
         await metadata_store.sync_session_from_files(
             job.session_id,
             owner_user_id=job.owner_user_id,
-            stage="core_complete" if job.status == "completed" else "core_in_progress",
+            stage=(
+                "core_complete"
+                if job.status == "completed"
+                else "error"
+                if job.status == "failed"
+                else "core_in_progress"
+            ),
             status=job.status,
             active_job_id=job.job_id,
             active_node=", ".join(running[:3]) if running else failed.label if failed else None,

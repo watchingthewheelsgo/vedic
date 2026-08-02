@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import sys
+from copy import deepcopy
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
+import pytz
+
+from app.calculator.civil_time import AmbiguousCivilTimeError, resolve_civil_time
 from app.schemas import (
     BirthInput,
     CalculationSnapshot,
@@ -20,6 +26,7 @@ from app.schemas import (
 )
 from app.calculator.provenance import calculation_runtime_provenance
 from app.services.life_event_rectification import (
+    candidate_event_period_fingerprint,
     parse_life_event_ledger,
     score_candidate_events,
 )
@@ -27,6 +34,15 @@ from app.services.place_service import PlaceService, ResolvedPlace
 from app.settings import Settings
 from app.utils.ids import make_id
 from app.vedicdust.chart_record_builder import ChartRecordBuildInput, build_chart_record
+from app.vedicdust.independent_reference import find_independent_reference
+from app.vedicdust.models import TimeRange
+from app.vedicdust.profiles import PARASHARI_LAHIRI_PROFILE_ID
+from app.vedicdust.varga_policy import (
+    SUPPORTED_VARGA_FACTORS,
+    VARGA_DOMAIN_POLICY_ID,
+    VARGA_DOMAIN_SOURCE_IDS,
+    varga_domain_policy,
+)
 
 
 PRECISION_STATUS: dict[str, str] = {
@@ -36,90 +52,16 @@ PRECISION_STATUS: dict[str, str] = {
     "unknown": "limited",
 }
 
-DIVISIONAL_FACTORS = [1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60]
+DIVISIONAL_FACTORS = list(SUPPORTED_VARGA_FACTORS)
 
-DIVISIONAL_POLICIES: dict[int, dict[str, str]] = {
-    1: {
-        "name": "Rashi",
-        "role": "body, identity, house lords, and the foundation for all readings",
-        "usageTier": "primary_foundation",
-    },
-    2: {
-        "name": "Hora",
-        "role": "wealth flow, liquidity, food, family resources",
-        "usageTier": "supporting_domain",
-    },
-    3: {
-        "name": "Drekkana",
-        "role": "siblings, initiative, courage, effort pattern",
-        "usageTier": "supporting_domain",
-    },
-    4: {
-        "name": "Chaturthamsha",
-        "role": "home, property, residence, vehicles, core comforts",
-        "usageTier": "supporting_domain",
-    },
-    5: {
-        "name": "Panchamsha",
-        "role": "creative authority, counsel, recognition, purva punya",
-        "usageTier": "supporting_domain",
-    },
-    7: {
-        "name": "Saptamsha",
-        "role": "children, fertility, lineage, family continuity",
-        "usageTier": "rectification_domain",
-    },
-    9: {
-        "name": "Navamsha",
-        "role": "marriage, dharma, maturity, promise confirmation",
-        "usageTier": "rectification_domain",
-    },
-    10: {
-        "name": "Dashamsha",
-        "role": "career, public role, work environment, authority",
-        "usageTier": "rectification_domain",
-    },
-    12: {
-        "name": "Dwadashamsha",
-        "role": "parents, ancestry, inherited family patterns",
-        "usageTier": "rectification_domain",
-    },
-    16: {
-        "name": "Shodashamsha",
-        "role": "vehicles, luxuries, comforts, lived ease",
-        "usageTier": "advanced_validation",
-    },
-    20: {
-        "name": "Vimshamsha",
-        "role": "spiritual practice, devotion, initiation",
-        "usageTier": "advanced_validation",
-    },
-    24: {
-        "name": "Chaturvimshamsha",
-        "role": "education, learning, formal knowledge",
-        "usageTier": "advanced_validation",
-    },
-    27: {
-        "name": "Bhamsa",
-        "role": "strengths, vulnerabilities, resilience",
-        "usageTier": "advanced_validation",
-    },
-    30: {
-        "name": "Trimshamsha",
-        "role": "adversity, misfortune, hidden stress, faults",
-        "usageTier": "advanced_validation",
-    },
-    60: {
-        "name": "Shashtiamsha",
-        "role": "fine karmic residue and final birth-time confirmation",
-        "usageTier": "final_confirmation_only",
-    },
-}
-
-DIVISIONAL_FINGERPRINT_FACTORS = [2, 3, 4, 5, 7, 9, 10, 12]
-CALCULATION_VERSION = "vedic-calculator-pyjhora-0.5"
+# D2-D30 can distinguish rectification candidates. D60 is deliberately excluded:
+# its minute-level volatility is evidence for uncertainty, not an initial split key.
+DIVISIONAL_FINGERPRINT_FACTORS = [2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30]
+CALCULATION_VERSION = f"vedicdust-{PARASHARI_LAHIRI_PROFILE_ID}"
+SUB_MINUTE_BOUNDARY_TARGET_SECONDS = 5
 HIGH_RISK_CHANGED_FIELDS = {
     "lagnaSign",
+    "d1Structure",
     "moonNakshatra",
     "currentDasha",
     "d7Lagna",
@@ -151,6 +93,7 @@ class BirthDate:
 class BirthTime:
     hour: int
     minute: int
+    second: int
     normalized: str
 
 
@@ -174,6 +117,7 @@ class VedicCalculator:
         intake: BirthInput,
         *,
         identity: ChartRecordIdentity | None = None,
+        timing_window_override: TimeRange | None = None,
     ) -> CalculationSnapshot:
         identity = identity or ChartRecordIdentity(
             reading_session_id=make_id("reading"),
@@ -184,6 +128,10 @@ class VedicCalculator:
         birth_time = self._parse_birth_time(intake.birth_time, intake.birth_time_precision)
         place = self.place_service.resolve(intake.birth_place)
         payload = self._calculator_payload(intake, birth_date, birth_time, place)
+        if timing_window_override is not None:
+            payload["timing_window_override"] = timing_window_override.model_dump(
+                mode="json",
+            )
         runtime_provenance = calculation_runtime_provenance()
         (
             birth_input_context_json,
@@ -234,10 +182,12 @@ class VedicCalculator:
                 day=int(payload["day"]),
                 hour=int(payload["hour"]),
                 minute=int(payload["minute"]),
+                second=int(payload.get("second") or 0),
                 lat=float(payload["lat"]),
                 lon=float(payload["lon"]),
                 tz_str=str(payload["timezone"]),
                 transit_as_of=calculated_at,
+                utc_offset_seconds=payload.get("utc_offset_seconds"),
             )
             input_context = self._birth_input_context(payload, intake, place)
             sensitivity_scan = self._sensitivity_scan(
@@ -248,7 +198,30 @@ class VedicCalculator:
                 place,
                 calculate_signature=calculate_rectification_signature,
                 life_event_ledger=input_context["lifeEvents"],
+                reference_moment=calculated_at,
             )
+            sensitivity_scan["timingBoundarySampling"] = self._timing_boundary_sampling(
+                payload,
+                intake.birth_time_precision,
+                intake.time_source,
+                chart,
+                calculated_at,
+            )
+            timing_sampling = sensitivity_scan["timingBoundarySampling"]
+            if timing_sampling["status"] != "complete":
+                sensitivity_scan["summary"].setdefault("timingBoundaryErrors", []).extend(
+                    timing_sampling.get("errors") or ["timing boundary sampling incomplete"]
+                )
+                readiness = sensitivity_scan["reportReadiness"]
+                readiness.setdefault("blockingFactors", []).append(
+                    "timing_boundary_sampling_incomplete"
+                )
+                readiness["timingEvidenceAllowed"] = False
+                readiness["llmContract"].setdefault("mustNotUseAsPrimaryEvidence", []).append(
+                    "Vimshottari boundary dates"
+                )
+            else:
+                sensitivity_scan["reportReadiness"]["timingEvidenceAllowed"] = True
             birth_input_context_json = (
                 json.dumps(input_context, ensure_ascii=False, indent=2) + "\n"
             )
@@ -270,10 +243,19 @@ class VedicCalculator:
                     time_source=intake.time_source,
                     gender_context=intake.gender,
                     relationship_status=intake.relationship,
+                    reader_relationship=intake.reader_relationship,
+                    consultation_topics=(
+                        (intake.reading_focus.strip(),) if intake.reading_focus.strip() else ()
+                    ),
                     place_label=place.label,
                     latitude=float(place.lat),
                     longitude=float(place.lon),
                     timezone_id=place.timezone,
+                    utc_offset_seconds=(
+                        int(payload["utc_offset_seconds"])
+                        if payload.get("utc_offset_seconds") is not None
+                        else None
+                    ),
                     place_source=place.source,
                     place_accuracy=place.accuracy,
                     place_confidence=place.confidence,
@@ -286,6 +268,19 @@ class VedicCalculator:
                     chart=chart,
                     input_context=input_context,
                     sensitivity_scan=sensitivity_scan,
+                    independent_reference=find_independent_reference(
+                        self._independent_reference_registry_path(),
+                        local_date=str(payload["dob"]),
+                        local_time=str(payload["time"]),
+                        latitude=float(place.lat),
+                        longitude=float(place.lon),
+                        timezone_id=place.timezone,
+                        utc_offset_seconds=(
+                            int(payload["utc_offset_seconds"])
+                            if payload.get("utc_offset_seconds") is not None
+                            else None
+                        ),
+                    ),
                 )
             )
             chart_record_json = chart_record.model_dump_json(by_alias=True, indent=2) + "\n"
@@ -300,6 +295,105 @@ class VedicCalculator:
             chart_record_json,
             facts,
         )
+
+    def _timing_boundary_sampling(
+        self,
+        payload: dict[str, Any],
+        precision: str,
+        time_source: str,
+        base_chart: dict[str, Any],
+        calculation_as_of: datetime,
+    ) -> dict[str, Any]:
+        """Recalculate Vimshottari at the declared birth-window endpoints.
+
+        This is an uncertainty envelope, not a claim that endpoint sampling proves
+        monotonicity between the samples. The coverage label is deliberately explicit.
+        """
+
+        from app.calculator.dasha_pyjhora import calculate_dasha_fixed
+
+        window = self._time_window(payload, precision, time_source)
+        base_moment = self._resolved_payload_moment(payload)
+        candidates = [
+            ("window-start", str(window["startUtc"])),
+            ("reported", base_moment.astimezone(pytz.utc).isoformat()),
+            ("window-end", str(window["endUtc"])),
+        ]
+        moments: dict[str, dict[str, Any]] = {}
+        for role, raw_moment in candidates:
+            instant = datetime.fromisoformat(raw_moment)
+            if instant.tzinfo is None or instant.utcoffset() is None:
+                raise ValueError("timing boundary sample moment must include a UTC offset")
+            key = instant.astimezone(pytz.utc).isoformat()
+            moments.setdefault(key, {"instant": instant, "roles": []})["roles"].append(role)
+
+        timezone_id = str(payload["timezone"])
+        timezone_value = pytz.timezone(timezone_id)
+        base_utc = base_moment.astimezone(pytz.utc)
+        samples: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        for index, item in enumerate(moments.values()):
+            instant = item["instant"].astimezone(pytz.utc)
+            local_moment = instant.astimezone(timezone_value)
+            try:
+                if instant == base_utc:
+                    dashas = base_chart.get("dashas") or []
+                else:
+                    dashas = calculate_dasha_fixed(
+                        local_moment.year,
+                        local_moment.month,
+                        local_moment.day,
+                        local_moment.hour,
+                        local_moment.minute,
+                        float(payload["lat"]),
+                        float(payload["lon"]),
+                        float(local_moment.utcoffset().total_seconds()) / 3600.0,
+                        second=local_moment.second,
+                        as_of=calculation_as_of,
+                        timezone_id=timezone_id,
+                    )
+                samples.append(
+                    {
+                        "sampleId": f"timing-boundary-{index + 1}",
+                        "roles": item["roles"],
+                        "birthMomentUtc": instant.isoformat(),
+                        "dashas": dashas,
+                    }
+                )
+            except Exception as exc:
+                errors.append(
+                    {
+                        "birthMomentUtc": instant.isoformat(),
+                        "error": str(exc),
+                    }
+                )
+
+        status = (
+            "complete"
+            if not errors and len(samples) == len(moments)
+            else ("partial" if samples else "failed")
+        )
+        return {
+            "schemaVersion": "vedicdust-timing-boundary-sampling/1.0.0",
+            "methodId": "vedicdust-vimshottari-boundary-envelope/1.0.0",
+            "status": status,
+            "coverage": "reported_window_endpoints",
+            "successfulSampleCount": len(samples),
+            "requestedSampleCount": len(moments),
+            "samples": samples,
+            "errors": errors,
+            "limitation": (
+                "The envelope covers the declared window endpoints and canonical input. "
+                "It does not assert unobserved monotonic behavior between samples."
+            ),
+        }
+
+    def _independent_reference_registry_path(self) -> Path | None:
+        resolver = getattr(self.settings, "independent_reference_registry_path", None)
+        if callable(resolver):
+            resolved = resolver()
+            return resolved if isinstance(resolved, Path) else None
+        return None
 
     def _birth_input_context(
         self,
@@ -320,6 +414,7 @@ class VedicCalculator:
                 "source": intake.time_source,
                 "normalized": payload["time"],
                 "timezone": place.timezone,
+                "utcOffsetSeconds": payload.get("utc_offset_seconds"),
                 "window": time_window,
             },
             "place": {
@@ -338,6 +433,13 @@ class VedicCalculator:
                 "matched": place.matched,
                 "rectificationAllowed": place_rectification_allowed,
                 "rectificationPolicy": self._place_rectification_policy(place),
+            },
+            "readingFocus": intake.reading_focus,
+            "subject": {
+                "readerRelationship": intake.reader_relationship,
+                "consultationTopics": (
+                    [intake.reading_focus.strip()] if intake.reading_focus.strip() else []
+                ),
             },
             "lifeEvents": life_event_ledger,
             "constraints": {
@@ -359,6 +461,7 @@ class VedicCalculator:
         *,
         calculate_signature: Any | None = None,
         life_event_ledger: dict[str, Any] | None = None,
+        reference_moment: datetime | None = None,
     ) -> dict[str, Any]:
         base_signature = self._chart_signature(base_chart)
         time_variants = self._time_scan_variants(
@@ -369,6 +472,8 @@ class VedicCalculator:
             intake.birth_time_precision,
             intake.time_source,
             calculate_signature=calculate_signature,
+            life_event_ledger=life_event_ledger or {},
+            reference_moment=reference_moment,
         )
         place_variants = self._place_scan_variants(
             calculate_full_chart,
@@ -378,24 +483,51 @@ class VedicCalculator:
             place,
         )
         place_rectification_allowed = self._place_rectification_allowed(place)
+        joint_variants = self._joint_time_place_variants(
+            calculate_full_chart,
+            calculate_signature,
+            base_chart,
+            base_signature,
+            payload,
+            intake.birth_time_precision,
+            intake.time_source,
+            place_variants if place_rectification_allowed else [],
+            life_event_ledger=life_event_ledger or {},
+            reference_moment=reference_moment,
+        )
         boundary_flags = self._boundary_flags(base_chart)
         summary = self._scan_summary(
             intake.birth_time_precision,
             place,
-            time_variants,
+            [*time_variants, *joint_variants],
             place_variants,
             boundary_flags,
         )
         candidate_groups = self._candidate_groups(
             base_signature,
-            time_variants,
-            place_variants if place_rectification_allowed else [],
+            [*time_variants, *joint_variants],
+            (place_variants if place_rectification_allowed and not joint_variants else []),
         )
         self._score_candidate_groups(
             candidate_groups,
             life_event_ledger or {},
             payload,
         )
+        scoring_errors = [
+            {
+                "candidateId": str(candidate.get("candidateId") or ""),
+                "error": str(candidate.get("scoringError")),
+            }
+            for candidate in candidate_groups
+            if candidate.get("scoringError")
+        ]
+        if scoring_errors:
+            summary["candidateScoringErrors"] = scoring_errors
+            summary["riskLevel"] = "high"
+            summary.setdefault("riskFactors", []).append(
+                f"candidate_scoring_errors:{len(scoring_errors)}"
+            )
+        self._assign_equivalence_classes(candidate_groups)
         stability = self._stability_map(
             set(summary["changedFields"]),
             summary["divisionalConfidence"],
@@ -416,6 +548,7 @@ class VedicCalculator:
             "reportReadiness": report_readiness,
             "timeVariants": time_variants,
             "placeVariants": place_variants,
+            "jointTimePlaceVariants": joint_variants,
             "boundaryFlags": boundary_flags,
             "rectificationGuardrails": self._rectification_guardrails(place),
         }
@@ -469,16 +602,35 @@ class VedicCalculator:
                     "signature": signature,
                     "interval": interval,
                     "representativeDatetime": variant.get("representativeDatetime"),
+                    "representativeUtc": variant.get("representativeUtc"),
+                    "utcOffsetSeconds": variant.get("utcOffsetSeconds"),
+                    "civilTimeFold": bool(variant.get("civilTimeFold")),
+                    "boundaryResolutionSeconds": int(
+                        variant.get("boundaryResolutionSeconds") or 60
+                    ),
+                    "leftBoundaryUncertainty": variant.get("leftBoundaryUncertainty"),
+                    "eventPeriodBoundaryChecked": bool(variant.get("eventPeriodBoundaryChecked")),
+                    "eventPeriodStableWithinInterval": bool(
+                        variant.get("eventPeriodStableWithinInterval")
+                    ),
                     "members": [
                         {
                             "axis": "time",
                             "label": variant.get("label"),
                             "datetime": variant.get("representativeDatetime"),
+                            "utcDatetime": variant.get("representativeUtc"),
+                            "utcOffsetSeconds": variant.get("utcOffsetSeconds"),
                             "interval": interval,
-                        }
+                        },
+                        *(
+                            [variant["placeMember"]]
+                            if isinstance(variant.get("placeMember"), dict)
+                            else []
+                        ),
                     ],
                     "changedFromBase": self._signature_changes(base_signature, signature),
-                    "isBase": bool(variant.get("isBase")),
+                    "isBase": bool(variant.get("isBase"))
+                    and not isinstance(variant.get("placeMember"), dict),
                 }
             )
 
@@ -510,6 +662,7 @@ class VedicCalculator:
                     "axis": "place",
                     "label": variant.get("label"),
                     "coordinates": variant.get("coordinates"),
+                    "timezone": variant.get("timezone"),
                     "radiusKm": variant.get("radiusKm"),
                 }
             )
@@ -539,15 +692,56 @@ class VedicCalculator:
             int(payload["day"]),
             int(payload["hour"]),
             int(payload["minute"]),
+            int(payload.get("second") or 0),
         )
         for candidate in candidates:
+            if isinstance(candidate.get("interval"), dict) and not candidate.get(
+                "eventPeriodBoundaryChecked"
+            ):
+                candidate.update(
+                    {
+                        "evidenceScores": [],
+                        "aggregateScore": None,
+                        "holdoutScore": None,
+                        "scoringError": (
+                            "Dated-event period evidence was not checked across the full "
+                            "candidate interval."
+                        ),
+                    }
+                )
+                continue
             raw_representative = candidate.get("representativeDatetime")
+            raw_representative_utc = candidate.get("representativeUtc")
             try:
                 representative = (
-                    datetime.strptime(str(raw_representative), "%Y-%m-%d %H:%M")
-                    if raw_representative
-                    else base_moment
+                    datetime.fromisoformat(str(raw_representative_utc)).astimezone(
+                        pytz.timezone(str(payload["timezone"]))
+                    )
+                    if raw_representative_utc
+                    else (
+                        datetime.strptime(str(raw_representative), "%Y-%m-%d %H:%M")
+                        if raw_representative
+                        else base_moment
+                    )
                 )
+                candidate_latitude = float(payload["lat"])
+                candidate_longitude = float(payload["lon"])
+                candidate_timezone = str(payload["timezone"])
+                for member in candidate.get("members") or []:
+                    if not isinstance(member, dict) or member.get("axis") != "place":
+                        continue
+                    coordinates = member.get("coordinates")
+                    if isinstance(coordinates, dict):
+                        candidate_latitude = float(coordinates.get("lat", candidate_latitude))
+                        candidate_longitude = float(coordinates.get("lon", candidate_longitude))
+                    if member.get("timezone"):
+                        candidate_timezone = str(member["timezone"])
+                    break
+                candidate["scoringLocation"] = {
+                    "latitude": candidate_latitude,
+                    "longitude": candidate_longitude,
+                    "timezoneId": candidate_timezone,
+                }
                 result = score_candidate_events(
                     candidate_id=str(candidate.get("candidateId") or "candidate"),
                     signature=(
@@ -556,9 +750,9 @@ class VedicCalculator:
                         else {}
                     ),
                     representative_moment=representative,
-                    latitude=float(payload["lat"]),
-                    longitude=float(payload["lon"]),
-                    timezone_id=str(payload["timezone"]),
+                    latitude=candidate_latitude,
+                    longitude=candidate_longitude,
+                    timezone_id=candidate_timezone,
                     ledger=life_event_ledger,
                 )
                 candidate.update(result)
@@ -581,6 +775,58 @@ class VedicCalculator:
             label = chr(ord("A") + remainder) + label
         return label
 
+    @classmethod
+    def _assign_equivalence_classes(cls, candidates: list[dict[str, Any]]) -> None:
+        """Group hypotheses that expose the same chart and event evidence.
+
+        Candidate rows remain separate because they retain distinct time/place
+        hypotheses. The class is used only to avoid redundant questions and to
+        propagate feedback across astrologically equivalent rows.
+        """
+
+        classes: dict[str, list[str]] = {}
+        for candidate in candidates:
+            evidence = [
+                {
+                    "eventId": score.get("eventId"),
+                    "role": score.get("role"),
+                    "score": score.get("score"),
+                    "supportScore": score.get("supportScore"),
+                    "contradictionScore": score.get("contradictionScore"),
+                    "observations": [
+                        {
+                            "component": observation.get("component"),
+                            "outcome": observation.get("outcome"),
+                            "weight": observation.get("weight"),
+                            "details": observation.get("details"),
+                        }
+                        for observation in score.get("observations") or []
+                        if isinstance(observation, dict)
+                    ],
+                }
+                for score in candidate.get("evidenceScores") or []
+                if isinstance(score, dict) and score.get("role") == "calibration"
+            ]
+            class_payload = {
+                "chartFingerprint": cls._signature_fingerprint(
+                    candidate.get("signature")
+                    if isinstance(candidate.get("signature"), dict)
+                    else {}
+                ),
+                "eventEvidence": evidence,
+            }
+            digest = hashlib.sha256(
+                json.dumps(class_payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()[:16]
+            class_id = f"equivalence.{digest}"
+            candidate["equivalenceClassId"] = class_id
+            classes.setdefault(class_id, []).append(str(candidate.get("candidateId") or ""))
+        for candidate in candidates:
+            candidate["equivalentCandidateIds"] = classes.get(
+                str(candidate.get("equivalenceClassId") or ""),
+                [],
+            )
+
     @staticmethod
     def _signature_fingerprint(signature: dict[str, Any]) -> str:
         stable_keys = [
@@ -589,11 +835,34 @@ class VedicCalculator:
             "moonNakshatra",
             "moonPada",
             "currentDasha",
+            "moonPhase",
         ]
-        stable_keys.extend(
-            VedicCalculator._divisional_field(factor) for factor in DIVISIONAL_FINGERPRINT_FACTORS
-        )
-        return "|".join(str(signature.get(key)) for key in stable_keys)
+        values = [str(signature.get(key)) for key in stable_keys]
+        for key in (
+            "charaKaraka7k",
+            "combustionStatus",
+            "shadbalaClassification",
+            "digbalaStatus",
+            "specialPointSigns",
+            "specialLagnaSigns",
+        ):
+            values.append(
+                json.dumps(
+                    signature.get(key),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+        d1_structure = signature.get("planetSignIndices")
+        values.append(json.dumps(d1_structure, sort_keys=True, separators=(",", ":")))
+        varga_structures = signature.get("vargaPlanetSignIndices")
+        for factor in DIVISIONAL_FINGERPRINT_FACTORS:
+            values.append(str(signature.get(VedicCalculator._divisional_field(factor))))
+            structure = (
+                varga_structures.get(f"D{factor}") if isinstance(varga_structures, dict) else None
+            )
+            values.append(json.dumps(structure, sort_keys=True, separators=(",", ":")))
+        return "|".join(values)
 
     @staticmethod
     def _divisional_key(factor: int) -> str:
@@ -613,6 +882,14 @@ class VedicCalculator:
                 "domain": "D1 identity, house lords, all house mapping",
                 "severity": "blocking",
             },
+            "d1Structure": {
+                "domain": "D1 graha signs and every relationship derived from them",
+                "severity": "blocking",
+            },
+            "moonSign": {
+                "domain": "Moon-sign anchors, Sade Sati, and Moon-dependent D1 structure",
+                "severity": "blocking",
+            },
             "moonNakshatra": {
                 "domain": "Nakshatra, Dasha balance, psychological anchors",
                 "severity": "blocking",
@@ -625,18 +902,52 @@ class VedicCalculator:
                 "domain": "current timing and validation windows",
                 "severity": "blocking",
             },
+            "charaKaraka7k": {
+                "domain": "7K Chara Karaka role assignments",
+                "severity": "high",
+            },
+            "moonPhase": {
+                "domain": "waxing or waning Moon phase",
+                "severity": "medium",
+            },
+            "combustionStatus": {
+                "domain": "graha combustion classifications",
+                "severity": "high",
+            },
+            "shadbalaClassification": {
+                "domain": "Shadbala interpretive strength bands",
+                "severity": "high",
+            },
+            "digbalaStatus": {
+                "domain": "directional-strength classifications",
+                "severity": "high",
+            },
+            "specialPointSigns": {
+                "domain": "Arudha and Upapada sign positions",
+                "severity": "high",
+            },
+            "specialLagnaSigns": {
+                "domain": "special Lagna sign positions",
+                "severity": "high",
+            },
         }
         for factor in DIVISIONAL_FACTORS:
             if factor == 1:
                 continue
-            policy = DIVISIONAL_POLICIES[factor]
+            policy = varga_domain_policy(factor)
             severity = "medium"
             if factor in {7, 9, 10}:
                 severity = "high"
             elif factor in {27, 30, 60}:
                 severity = "validation-only"
             field_impacts[self._divisional_field(factor)] = {
-                "domain": f"{self._divisional_key(factor)} {policy['role']}",
+                "domain": f"{self._divisional_key(factor)} {policy.scope}",
+                "severity": severity,
+            }
+            field_impacts[f"d{factor}Structure"] = {
+                "domain": (
+                    f"{self._divisional_key(factor)} graha signs and dependent house structure"
+                ),
                 "severity": severity,
             }
 
@@ -695,6 +1006,12 @@ class VedicCalculator:
             str(item) for item in stability.get("lowConfidenceDivisions", [])
         ]
         candidate_count = len(candidate_groups)
+        stable_bounded_window = (
+            candidate_count == 1
+            and not summary.get("changedFields")
+            and not summary.get("scanErrors")
+            and not summary.get("candidateScoringErrors")
+        )
 
         if risk_level == "low":
             mode = "standard_after_prevalidation"
@@ -704,6 +1021,11 @@ class VedicCalculator:
         elif risk_level == "medium":
             mode = "guarded_after_strong_prevalidation"
             min_hit_rate = 0.8
+            core_allowed_without_rectification = True
+            scope = "guarded_full_report"
+        elif stable_bounded_window:
+            mode = "guarded_after_strong_prevalidation"
+            min_hit_rate = 0.9
             core_allowed_without_rectification = True
             scope = "guarded_full_report"
         else:
@@ -721,6 +1043,10 @@ class VedicCalculator:
             blockers.append(f"time_precision:{precision}")
         if place.accuracy in {"city", "district"} and risk_level != "low":
             blockers.append(f"place_accuracy:{place.accuracy}")
+        if summary.get("scanErrors"):
+            blockers.append("scan_incomplete:resolve_civil_time_or_place_input")
+        if summary.get("candidateScoringErrors"):
+            blockers.append("candidate_scoring_incomplete:retry_deterministic_calculation")
 
         return {
             "mode": mode,
@@ -729,6 +1055,7 @@ class VedicCalculator:
             "minimumHitRateForCore": min_hit_rate,
             "coreAllowedWithoutRectification": core_allowed_without_rectification,
             "candidateCount": candidate_count,
+            "stableBoundedWindow": stable_bounded_window,
             "rectificationAxes": summary.get("rectificationAxes", ["time"]),
             "placeRectificationAllowed": summary.get("placeRectificationAllowed", False),
             "placeRectificationPolicy": summary.get(
@@ -761,30 +1088,87 @@ class VedicCalculator:
     def _time_window(
         self, payload: dict[str, Any], precision: str, time_source: str
     ) -> dict[str, Any]:
-        base = datetime(
-            int(payload["year"]),
-            int(payload["month"]),
-            int(payload["day"]),
-            int(payload["hour"]),
-            int(payload["minute"]),
-        )
+        base = self._resolved_payload_moment(payload)
+        override = payload.get("timing_window_override")
+        if isinstance(override, dict):
+            start = datetime.fromisoformat(str(override["start"]))
+            end_exclusive = datetime.fromisoformat(str(override["end"]))
+            if (
+                start.tzinfo is None
+                or end_exclusive.tzinfo is None
+                or start.utcoffset() is None
+                or end_exclusive.utcoffset() is None
+            ):
+                raise ValueError("rectified timing window override must include UTC offsets")
+            if not start <= base < end_exclusive:
+                raise ValueError("rectified canonical moment must be inside its selected interval")
+            timezone_value = pytz.timezone(str(payload["timezone"]))
+            local_start = start.astimezone(timezone_value)
+            local_end_exclusive = end_exclusive.astimezone(timezone_value)
+            local_end = local_end_exclusive - timedelta(seconds=1)
+            return {
+                "start": local_start.strftime("%Y-%m-%d %H:%M:%S"),
+                "end": local_end.strftime("%Y-%m-%d %H:%M:%S"),
+                "endExclusive": local_end_exclusive.strftime("%Y-%m-%d %H:%M:%S"),
+                "startUtc": start.astimezone(pytz.utc).isoformat(),
+                "endUtc": local_end.astimezone(pytz.utc).isoformat(),
+                "endExclusiveUtc": end_exclusive.astimezone(pytz.utc).isoformat(),
+                "reportedUtc": base.astimezone(pytz.utc).isoformat(),
+                "selectedUtcOffsetSeconds": int(base.utcoffset().total_seconds()),
+                "radiusMinutes": round(
+                    (end_exclusive - start).total_seconds() / 120.0,
+                    3,
+                ),
+                "scanMode": "selected_rectification_interval",
+                "resolutionMinutes": 1,
+                "sourcePolicy": {
+                    **self._time_source_policy(time_source),
+                    "windowOverride": "selected_rectification_candidate",
+                },
+            }
         if precision == "unknown":
-            start = base.replace(hour=0, minute=0)
-            end = base.replace(hour=23, minute=59)
+            local_date = base.date()
+            start = resolve_civil_time(
+                datetime.combine(local_date, datetime.min.time()),
+                str(payload["timezone"]),
+            )
+            next_midnight = resolve_civil_time(
+                datetime.combine(local_date + timedelta(days=1), datetime.min.time()),
+                str(payload["timezone"]),
+            )
+            end = self._shift_absolute(next_midnight, -1)
+            end_exclusive = next_midnight
             return {
                 "start": start.strftime("%Y-%m-%d %H:%M"),
                 "end": end.strftime("%Y-%m-%d %H:%M"),
-                "endExclusive": (end + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M"),
+                "endExclusive": end_exclusive.strftime("%Y-%m-%d %H:%M"),
+                "startUtc": start.astimezone(pytz.utc).isoformat(),
+                "endUtc": end.astimezone(pytz.utc).isoformat(),
+                "endExclusiveUtc": end_exclusive.astimezone(pytz.utc).isoformat(),
                 "radiusMinutes": 720,
                 "scanMode": "continuous_minute_grid",
                 "resolutionMinutes": 1,
+                "elapsedMinutes": int(
+                    (
+                        end_exclusive.astimezone(pytz.utc) - start.astimezone(pytz.utc)
+                    ).total_seconds()
+                    // 60
+                ),
                 "sourcePolicy": self._time_source_policy(time_source),
             }
         radius = self._time_radius_minutes(precision, time_source)
+        start = self._shift_absolute(base, -radius)
+        end = self._shift_absolute(base, radius)
+        end_exclusive = self._shift_absolute(base, radius + 1)
         return {
-            "start": (base - timedelta(minutes=radius)).strftime("%Y-%m-%d %H:%M"),
-            "end": (base + timedelta(minutes=radius)).strftime("%Y-%m-%d %H:%M"),
-            "endExclusive": (base + timedelta(minutes=radius + 1)).strftime("%Y-%m-%d %H:%M"),
+            "start": start.strftime("%Y-%m-%d %H:%M"),
+            "end": end.strftime("%Y-%m-%d %H:%M"),
+            "endExclusive": end_exclusive.strftime("%Y-%m-%d %H:%M"),
+            "startUtc": start.astimezone(pytz.utc).isoformat(),
+            "endUtc": end.astimezone(pytz.utc).isoformat(),
+            "endExclusiveUtc": end_exclusive.astimezone(pytz.utc).isoformat(),
+            "reportedUtc": base.astimezone(pytz.utc).isoformat(),
+            "selectedUtcOffsetSeconds": int(base.utcoffset().total_seconds()),
             "radiusMinutes": radius,
             "scanMode": "continuous_minute_grid",
             "resolutionMinutes": 1,
@@ -801,29 +1185,28 @@ class VedicCalculator:
         time_source: str,
         *,
         calculate_signature: Any | None = None,
+        life_event_ledger: dict[str, Any] | None = None,
+        calculate_event_period_fingerprint: Any | None = candidate_event_period_fingerprint,
+        reuse_base_signature_at_reported_time: bool = True,
+        reference_moment: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        base_dt = datetime(
-            int(payload["year"]),
-            int(payload["month"]),
-            int(payload["day"]),
-            int(payload["hour"]),
-            int(payload["minute"]),
-        )
-        if precision == "unknown":
-            start = base_dt.replace(hour=0, minute=0)
-            end = base_dt.replace(hour=23, minute=59)
-        else:
-            radius = self._time_radius_minutes(precision, time_source)
-            start = base_dt - timedelta(minutes=radius)
-            end = base_dt + timedelta(minutes=radius)
+        base_dt = self._resolved_payload_moment(payload)
+        window = self._time_window(payload, precision, time_source)
+        timezone_value = pytz.timezone(str(payload["timezone"]))
+        start = datetime.fromisoformat(str(window["startUtc"])).astimezone(timezone_value)
+        end = datetime.fromisoformat(str(window["endUtc"])).astimezone(timezone_value)
 
         points: list[dict[str, Any]] = []
         sample = start
         while sample <= end:
             try:
-                if sample == base_dt:
-                    signature = base_signature
+                if (
+                    sample.astimezone(pytz.utc) == base_dt.astimezone(pytz.utc)
+                    and reuse_base_signature_at_reported_time
+                ):
+                    signature = dict(base_signature)
                 elif calculate_signature is not None:
+                    offset_kwargs = self._ambiguous_offset_kwargs(sample, str(payload["timezone"]))
                     signature = calculate_signature(
                         sample.year,
                         sample.month,
@@ -833,9 +1216,12 @@ class VedicCalculator:
                         float(payload["lat"]),
                         float(payload["lon"]),
                         str(payload["timezone"]),
+                        second=sample.second,
+                        **offset_kwargs,
                     )
                     signature["currentDasha"] = base_signature.get("currentDasha")
                 else:
+                    offset_kwargs = self._ambiguous_offset_kwargs(sample, str(payload["timezone"]))
                     chart = calculate_full_chart(
                         sample.year,
                         sample.month,
@@ -845,12 +1231,31 @@ class VedicCalculator:
                         float(payload["lat"]),
                         float(payload["lon"]),
                         str(payload["timezone"]),
+                        second=sample.second,
+                        **offset_kwargs,
                     )
                     signature = self._chart_signature(chart)
+                event_period_fingerprint = None
+                if calculate_event_period_fingerprint is not None and (
+                    (life_event_ledger or {}).get("events") or reference_moment is not None
+                ):
+                    event_period_fingerprint = calculate_event_period_fingerprint(
+                        birth_moment=sample,
+                        latitude=float(payload["lat"]),
+                        longitude=float(payload["lon"]),
+                        timezone_id=str(payload["timezone"]),
+                        ledger=life_event_ledger or {},
+                        reference_moment=reference_moment,
+                    )
+                    if isinstance(event_period_fingerprint, dict) and event_period_fingerprint.get(
+                        "currentDasha"
+                    ):
+                        signature["currentDasha"] = event_period_fingerprint["currentDasha"]
                 points.append(
                     {
                         "moment": sample,
                         "signature": signature,
+                        "eventPeriodFingerprint": event_period_fingerprint,
                     }
                 )
             except Exception as exc:
@@ -860,8 +1265,425 @@ class VedicCalculator:
                         "error": str(exc),
                     }
                 )
-            sample += timedelta(minutes=1)
+            sample = self._shift_absolute(sample, 1)
         return self._coalesce_time_points(points, base_dt, base_signature)
+
+    def refine_selected_time_boundary(
+        self,
+        state: dict[str, Any],
+        birth_input_context: dict[str, Any],
+        *,
+        calculate_signature: Any | None = None,
+        target_resolution_seconds: int = SUB_MINUTE_BOUNDARY_TARGET_SECONDS,
+    ) -> dict[str, Any]:
+        """Refine every minute-grid transition touching the selected interval."""
+
+        selected_id = str(state.get("selectedCandidateId") or "")
+        working = self._refine_selected_left_time_boundary(
+            state,
+            birth_input_context,
+            calculate_signature=calculate_signature,
+            target_resolution_seconds=target_resolution_seconds,
+        )
+        results = [{"side": "left", **dict(working.get("boundaryRefinement") or {})}]
+        candidates = [
+            candidate
+            for candidate in working.get("candidates") or []
+            if isinstance(candidate, dict)
+        ]
+        selected = next(
+            (
+                candidate
+                for candidate in candidates
+                if str(candidate.get("candidateId") or "") == selected_id
+            ),
+            None,
+        )
+        place_context = birth_input_context.get("place")
+        if not isinstance(place_context, dict):
+            place_context = {}
+        coordinates = place_context.get("coordinates")
+        if not isinstance(coordinates, dict):
+            coordinates = {}
+        default_latitude = coordinates.get("lat")
+        default_longitude = coordinates.get("lon")
+        default_timezone = str(place_context.get("timezone") or "").strip()
+
+        if (
+            selected is not None
+            and default_latitude is not None
+            and default_longitude is not None
+            and default_timezone
+            and isinstance(selected.get("interval"), dict)
+        ):
+            selected_place_key = self._candidate_place_key(
+                selected,
+                default_latitude,
+                default_longitude,
+                default_timezone,
+            )
+            selected_end = self._interval_bound(selected["interval"], "end", selected_place_key[2])
+            for candidate in candidates:
+                uncertainty = candidate.get("leftBoundaryUncertainty")
+                if candidate is selected or not isinstance(uncertainty, dict):
+                    continue
+                candidate_place_key = self._candidate_place_key(
+                    candidate,
+                    default_latitude,
+                    default_longitude,
+                    default_timezone,
+                )
+                if candidate_place_key != selected_place_key:
+                    continue
+                uncertainty_end = self._interval_bound(uncertainty, "end", candidate_place_key[2])
+                if (
+                    selected_end is None
+                    or uncertainty_end is None
+                    or selected_end.astimezone(pytz.utc) != uncertainty_end.astimezone(pytz.utc)
+                ):
+                    continue
+                right_state = deepcopy(working)
+                right_state["selectedCandidateId"] = candidate.get("candidateId")
+                right_state = self._refine_selected_left_time_boundary(
+                    right_state,
+                    birth_input_context,
+                    calculate_signature=calculate_signature,
+                    target_resolution_seconds=target_resolution_seconds,
+                )
+                right_result = dict(right_state.get("boundaryRefinement") or {})
+                results.append({"side": "right", **right_result})
+                if right_result.get("status") in {"refined", "already_refined"}:
+                    working = right_state
+                break
+
+        working["selectedCandidateId"] = selected_id or None
+        statuses = {str(result.get("status") or "") for result in results}
+        aggregate_status = (
+            "refined"
+            if "refined" in statuses
+            else "already_refined"
+            if "already_refined" in statuses
+            else "not_applicable"
+            if statuses <= {"not_applicable"}
+            else "skipped"
+        )
+        aggregate = {
+            "status": aggregate_status,
+            "candidateId": selected_id or None,
+            "targetResolutionSeconds": target_resolution_seconds,
+            "d60Used": False,
+            "boundaries": results,
+        }
+        working["boundaryRefinement"] = aggregate
+        for candidate in working.get("candidates") or []:
+            if (
+                isinstance(candidate, dict)
+                and str(candidate.get("candidateId") or "") == selected_id
+            ):
+                candidate["boundaryRefinement"] = aggregate
+                break
+        return working
+
+    def _refine_selected_left_time_boundary(
+        self,
+        state: dict[str, Any],
+        birth_input_context: dict[str, Any],
+        *,
+        calculate_signature: Any | None = None,
+        target_resolution_seconds: int = SUB_MINUTE_BOUNDARY_TARGET_SECONDS,
+    ) -> dict[str, Any]:
+        """Narrow one selected chart-transition band without claiming an exact second.
+
+        The minute scan remains the exhaustive search. This method runs only after
+        evidence has selected a candidate and only inside its typed left-boundary
+        uncertainty interval. D60 and Dasha-only changes are intentionally excluded.
+        """
+
+        next_state = deepcopy(state)
+        selected_id = str(next_state.get("selectedCandidateId") or "")
+        candidates = [
+            candidate
+            for candidate in next_state.get("candidates") or []
+            if isinstance(candidate, dict)
+        ]
+        selected = next(
+            (
+                candidate
+                for candidate in candidates
+                if str(candidate.get("candidateId") or "") == selected_id
+            ),
+            None,
+        )
+
+        def finish(status: str, reason: str, **details: Any) -> dict[str, Any]:
+            result = {
+                "status": status,
+                "candidateId": selected_id or None,
+                "reason": reason,
+                "targetResolutionSeconds": target_resolution_seconds,
+                "d60Used": False,
+                **details,
+            }
+            next_state["boundaryRefinement"] = result
+            if selected is not None:
+                selected["boundaryRefinement"] = result
+            return next_state
+
+        if selected is None:
+            return finish("skipped", "No selected candidate is available for refinement.")
+        uncertainty = selected.get("leftBoundaryUncertainty")
+        if not isinstance(uncertainty, dict):
+            return finish("not_applicable", "The selected interval has no left transition band.")
+        current_resolution = int(selected.get("boundaryResolutionSeconds") or 60)
+        if current_resolution <= target_resolution_seconds:
+            return finish(
+                "already_refined",
+                "The selected transition band already meets the target resolution.",
+                resolutionSeconds=current_resolution,
+            )
+
+        place_context = birth_input_context.get("place")
+        if not isinstance(place_context, dict):
+            place_context = {}
+        coordinates = place_context.get("coordinates")
+        if not isinstance(coordinates, dict):
+            coordinates = {}
+        latitude = coordinates.get("lat")
+        longitude = coordinates.get("lon")
+        timezone_id = str(place_context.get("timezone") or "").strip()
+        for member in selected.get("members") or []:
+            if not isinstance(member, dict) or member.get("axis") != "place":
+                continue
+            member_coordinates = member.get("coordinates")
+            if isinstance(member_coordinates, dict):
+                latitude = member_coordinates.get("lat", latitude)
+                longitude = member_coordinates.get("lon", longitude)
+            timezone_id = str(member.get("timezone") or timezone_id).strip()
+            break
+        if latitude is None or longitude is None or not timezone_id:
+            return finish(
+                "skipped",
+                "Coordinates or timezone are unavailable for deterministic refinement.",
+            )
+
+        try:
+            lower = self._interval_bound(uncertainty, "start", timezone_id)
+            upper = self._interval_bound(uncertainty, "end", timezone_id)
+        except (TypeError, ValueError, AmbiguousCivilTimeError) as exc:
+            return finish("skipped", f"The transition band could not be resolved: {exc}")
+        if lower is None or upper is None or lower >= upper:
+            return finish("skipped", "The transition band is missing valid ordered bounds.")
+        initial_span = int(
+            round((upper.astimezone(pytz.utc) - lower.astimezone(pytz.utc)).total_seconds())
+        )
+        if initial_span > 60 or initial_span <= target_resolution_seconds:
+            return finish(
+                "skipped",
+                "Only a single minute-grid transition band can be refined.",
+                observedSpanSeconds=initial_span,
+            )
+
+        if calculate_signature is None:
+            from app.calculator.engine import calculate_rectification_signature
+
+            calculate_signature = calculate_rectification_signature
+
+        factors = [1, *DIVISIONAL_FINGERPRINT_FACTORS]
+
+        def signature_at(value: datetime) -> dict[str, Any]:
+            local_value = value.astimezone(pytz.timezone(timezone_id))
+            offset_kwargs = self._ambiguous_offset_kwargs(local_value, timezone_id)
+            signature = calculate_signature(
+                local_value.year,
+                local_value.month,
+                local_value.day,
+                local_value.hour,
+                local_value.minute,
+                float(latitude),
+                float(longitude),
+                timezone_id,
+                chart_factors=factors,
+                second=local_value.second,
+                **offset_kwargs,
+            )
+            signature["currentDasha"] = None
+            return signature
+
+        try:
+            before_signature = signature_at(lower)
+            after_signature = signature_at(upper)
+            target_signature = dict(selected.get("signature") or {})
+            target_signature["currentDasha"] = None
+            before_fingerprint = self._signature_fingerprint(before_signature)
+            after_fingerprint = self._signature_fingerprint(after_signature)
+            target_fingerprint = self._signature_fingerprint(target_signature)
+            if after_fingerprint != target_fingerprint:
+                return finish(
+                    "skipped",
+                    "The selected candidate does not match the deterministic upper-bound chart.",
+                )
+            if before_fingerprint == after_fingerprint:
+                return finish(
+                    "not_applicable",
+                    "The minute boundary is Dasha-only or otherwise absent from stable chart structure.",
+                )
+
+            while (
+                upper.astimezone(pytz.utc) - lower.astimezone(pytz.utc)
+            ).total_seconds() > target_resolution_seconds:
+                span_seconds = int(
+                    (upper.astimezone(pytz.utc) - lower.astimezone(pytz.utc)).total_seconds()
+                )
+                midpoint_utc = lower.astimezone(pytz.utc) + timedelta(
+                    seconds=max(1, span_seconds // 2)
+                )
+                midpoint = midpoint_utc.astimezone(lower.tzinfo)
+                midpoint_signature = signature_at(midpoint)
+                midpoint_fingerprint = self._signature_fingerprint(midpoint_signature)
+                if midpoint_fingerprint == before_fingerprint:
+                    lower = midpoint
+                elif midpoint_fingerprint == after_fingerprint:
+                    upper = midpoint
+                else:
+                    return finish(
+                        "skipped",
+                        "A third chart fingerprint exists inside the minute; preserve the original band.",
+                    )
+        except Exception as exc:
+            return finish("skipped", f"Deterministic boundary refinement failed: {exc}")
+
+        refined_uncertainty = self._interval_payload(lower, upper)
+        refined_resolution = max(
+            1,
+            int(
+                math.ceil((upper.astimezone(pytz.utc) - lower.astimezone(pytz.utc)).total_seconds())
+            ),
+        )
+        selected["leftBoundaryUncertainty"] = refined_uncertainty
+        selected["boundaryResolutionSeconds"] = refined_resolution
+        selected_interval = selected.get("interval")
+        if isinstance(selected_interval, dict):
+            selected_end = self._interval_bound(selected_interval, "end", timezone_id)
+            if selected_end is not None:
+                selected["interval"] = self._interval_payload(lower, selected_end)
+        for member in selected.get("members") or []:
+            if not isinstance(member, dict) or member.get("axis") != "time":
+                continue
+            member_interval = member.get("interval")
+            if isinstance(member_interval, dict):
+                member_end = self._interval_bound(member_interval, "end", timezone_id)
+                if member_end is not None:
+                    member["interval"] = self._interval_payload(lower, member_end)
+
+        selected_place_key = self._candidate_place_key(selected, latitude, longitude, timezone_id)
+        original_upper_utc = self._interval_bound(uncertainty, "end", timezone_id)
+        for candidate in candidates:
+            if candidate is selected or not isinstance(candidate.get("interval"), dict):
+                continue
+            if (
+                self._candidate_place_key(candidate, latitude, longitude, timezone_id)
+                != selected_place_key
+            ):
+                continue
+            candidate_signature = dict(candidate.get("signature") or {})
+            candidate_signature["currentDasha"] = None
+            if self._signature_fingerprint(candidate_signature) != before_fingerprint:
+                continue
+            candidate_end = self._interval_bound(candidate["interval"], "end", timezone_id)
+            if (
+                candidate_end is None
+                or original_upper_utc is None
+                or candidate_end.astimezone(pytz.utc) != original_upper_utc.astimezone(pytz.utc)
+            ):
+                continue
+            candidate_start = self._interval_bound(candidate["interval"], "start", timezone_id)
+            if candidate_start is not None:
+                candidate["interval"] = self._interval_payload(candidate_start, upper)
+
+        return finish(
+            "refined",
+            "The selected chart-transition band was narrowed without choosing an exact second.",
+            originalResolutionSeconds=current_resolution,
+            resolutionSeconds=refined_resolution,
+            uncertainty=refined_uncertainty,
+            changedFields=self._signature_changes(before_signature, after_signature),
+        )
+
+    def _joint_time_place_variants(
+        self,
+        calculate_full_chart: Any,
+        calculate_signature: Any | None,
+        base_chart: dict[str, Any],
+        base_signature: dict[str, Any],
+        payload: dict[str, Any],
+        precision: str,
+        time_source: str,
+        place_variants: list[dict[str, Any]],
+        *,
+        life_event_ledger: dict[str, Any] | None = None,
+        reference_moment: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Scan the reported time window at every admissible place hypothesis.
+
+        Independent time and place scans cannot reveal a boundary caused by both
+        axes moving together. The production fast-signature provider makes this
+        bounded Cartesian scan cheap enough for city/district uncertainty.
+        """
+
+        if calculate_signature is None:
+            return []
+        variants: list[dict[str, Any]] = []
+        for place_variant in place_variants:
+            coordinates = place_variant.get("coordinates")
+            if not isinstance(coordinates, dict):
+                continue
+            latitude = coordinates.get("lat")
+            longitude = coordinates.get("lon")
+            if latitude is None or longitude is None:
+                continue
+            timezone_id = str(place_variant.get("timezone") or payload["timezone"])
+            variant_payload = {
+                **payload,
+                "lat": float(latitude),
+                "lon": float(longitude),
+                "timezone": timezone_id,
+                "utc_offset_seconds": (
+                    payload.get("utc_offset_seconds")
+                    if timezone_id == str(payload["timezone"])
+                    else None
+                ),
+            }
+            place_member = {
+                "axis": "place",
+                "label": place_variant.get("label"),
+                "coordinates": {
+                    "lat": float(latitude),
+                    "lon": float(longitude),
+                },
+                "timezone": timezone_id,
+                "radiusKm": place_variant.get("radiusKm"),
+            }
+            scanned = self._time_scan_variants(
+                calculate_full_chart,
+                base_chart,
+                base_signature,
+                variant_payload,
+                precision,
+                time_source,
+                calculate_signature=calculate_signature,
+                life_event_ledger=life_event_ledger or {},
+                reuse_base_signature_at_reported_time=False,
+                reference_moment=reference_moment,
+            )
+            for time_variant in scanned:
+                time_variant["isBase"] = False
+                time_variant["placeMember"] = place_member
+                time_variant["label"] = (
+                    f"{place_variant.get('label') or 'place'} · "
+                    f"{time_variant.get('label') or 'time'}"
+                )
+                variants.append(time_variant)
+        return variants
 
     @staticmethod
     def _time_radius_minutes(precision: str, time_source: str) -> int:
@@ -885,6 +1707,116 @@ class VedicCalculator:
             ),
         }
 
+    @staticmethod
+    def _resolved_payload_moment(payload: dict[str, Any]) -> datetime:
+        return resolve_civil_time(
+            datetime(
+                int(payload["year"]),
+                int(payload["month"]),
+                int(payload["day"]),
+                int(payload["hour"]),
+                int(payload["minute"]),
+                int(payload.get("second") or 0),
+            ),
+            str(payload["timezone"]),
+            utc_offset_seconds=(
+                int(payload["utc_offset_seconds"])
+                if payload.get("utc_offset_seconds") is not None
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _shift_absolute(value: datetime, minutes: int) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value + timedelta(minutes=minutes)
+        return (value.astimezone(pytz.utc) + timedelta(minutes=minutes)).astimezone(value.tzinfo)
+
+    @staticmethod
+    def _is_aware(value: datetime) -> bool:
+        return value.tzinfo is not None and value.utcoffset() is not None
+
+    @classmethod
+    def _interval_payload(cls, start: datetime, end: datetime) -> dict[str, str]:
+        include_seconds = any(value.second or value.microsecond for value in (start, end))
+        local_format = "%Y-%m-%d %H:%M:%S" if include_seconds else "%Y-%m-%d %H:%M"
+        payload = {
+            "start": start.strftime(local_format),
+            "end": end.strftime(local_format),
+        }
+        if cls._is_aware(start) and cls._is_aware(end):
+            payload.update(
+                {
+                    "startUtc": start.astimezone(pytz.utc).isoformat(),
+                    "endUtc": end.astimezone(pytz.utc).isoformat(),
+                }
+            )
+        return payload
+
+    @staticmethod
+    def _interval_bound(interval: dict[str, Any], key: str, timezone_id: str) -> datetime | None:
+        utc_value = interval.get(f"{key}Utc")
+        if utc_value:
+            parsed = datetime.fromisoformat(str(utc_value))
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError(f"{key}Utc must include an offset")
+            return parsed.astimezone(pytz.timezone(timezone_id))
+        local_value = interval.get(key)
+        if not local_value:
+            return None
+        parsed = datetime.fromisoformat(str(local_value).replace(" ", "T"))
+        if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+            return parsed.astimezone(pytz.timezone(timezone_id))
+        return resolve_civil_time(parsed, timezone_id)
+
+    @staticmethod
+    def _candidate_place_key(
+        candidate: dict[str, Any],
+        default_latitude: object,
+        default_longitude: object,
+        default_timezone: str,
+    ) -> tuple[float, float, str]:
+        latitude = float(default_latitude)
+        longitude = float(default_longitude)
+        timezone_id = default_timezone
+        for member in candidate.get("members") or []:
+            if not isinstance(member, dict) or member.get("axis") != "place":
+                continue
+            coordinates = member.get("coordinates")
+            if isinstance(coordinates, dict):
+                latitude = float(coordinates.get("lat", latitude))
+                longitude = float(coordinates.get("lon", longitude))
+            timezone_id = str(member.get("timezone") or timezone_id)
+            break
+        return (round(latitude, 6), round(longitude, 6), timezone_id)
+
+    @classmethod
+    def _representative_metadata(cls, value: datetime) -> dict[str, Any]:
+        if not cls._is_aware(value):
+            return {}
+        timezone_id = getattr(value.tzinfo, "zone", None)
+        civil_time_fold = False
+        if timezone_id:
+            try:
+                resolve_civil_time(value.replace(tzinfo=None), str(timezone_id))
+            except AmbiguousCivilTimeError:
+                civil_time_fold = True
+        return {
+            "representativeUtc": value.astimezone(pytz.utc).isoformat(),
+            "utcOffsetSeconds": int(value.utcoffset().total_seconds()),
+            "civilTimeFold": civil_time_fold,
+        }
+
+    @staticmethod
+    def _ambiguous_offset_kwargs(value: datetime, timezone_id: str) -> dict[str, int]:
+        local_value = value.astimezone(pytz.timezone(timezone_id))
+        naive_value = local_value.replace(tzinfo=None)
+        try:
+            resolve_civil_time(naive_value, timezone_id)
+        except AmbiguousCivilTimeError:
+            return {"utc_offset_seconds": int(local_value.utcoffset().total_seconds())}
+        return {}
+
     def _coalesce_time_points(
         self,
         points: list[dict[str, Any]],
@@ -893,6 +1825,7 @@ class VedicCalculator:
     ) -> list[dict[str, Any]]:
         variants: list[dict[str, Any]] = []
         run: list[dict[str, Any]] = []
+        run_has_left_boundary = False
 
         def flush() -> None:
             if not run:
@@ -900,36 +1833,78 @@ class VedicCalculator:
             first = run[0]
             last = run[-1]
             signature = first.get("signature")
-            start = first["moment"]
-            end = last["moment"] + timedelta(minutes=1)
-            representative = start + (end - start) / 2
-            representative = representative.replace(second=0, microsecond=0)
+            sampled_start = first["moment"]
+            start = (
+                self._shift_absolute(sampled_start, -1) if run_has_left_boundary else sampled_start
+            )
+            sampled_end = self._shift_absolute(last["moment"], 1)
+            end = sampled_end
+            if self._is_aware(sampled_start) and self._is_aware(sampled_end):
+                representative_utc = (
+                    sampled_start.astimezone(pytz.utc)
+                    + (sampled_end.astimezone(pytz.utc) - sampled_start.astimezone(pytz.utc)) / 2
+                )
+                representative = representative_utc.astimezone(sampled_start.tzinfo).replace(
+                    second=0, microsecond=0
+                )
+            else:
+                representative = (sampled_start + (sampled_end - sampled_start) / 2).replace(
+                    second=0, microsecond=0
+                )
+            boundary_metadata = (
+                {
+                    "boundaryResolutionSeconds": 60,
+                    "leftBoundaryUncertainty": self._interval_payload(start, sampled_start),
+                }
+                if run_has_left_boundary
+                else {"boundaryResolutionSeconds": 60}
+            )
             if not isinstance(signature, dict):
                 variants.append(
                     {
-                        "label": start.strftime("%H:%M"),
-                        "interval": {
-                            "start": start.strftime("%Y-%m-%d %H:%M"),
-                            "end": end.strftime("%Y-%m-%d %H:%M"),
-                        },
+                        "label": sampled_start.strftime("%H:%M"),
+                        "interval": self._interval_payload(start, end),
                         "representativeDatetime": representative.strftime("%Y-%m-%d %H:%M"),
+                        **self._representative_metadata(representative),
                         "error": str(first.get("error") or "signature calculation failed"),
+                        **boundary_metadata,
                     }
                 )
                 return
+            internal_changed_fields = sorted(
+                {
+                    change
+                    for point in run[1:]
+                    if isinstance(point.get("signature"), dict)
+                    for change in self._signature_changes(signature, point["signature"])
+                }
+            )
+            changed_fields = sorted(
+                set(self._signature_changes(base_signature, signature))
+                | set(internal_changed_fields)
+            )
             variants.append(
                 {
                     "label": (
-                        f"{start.strftime('%H:%M')}-{(end - timedelta(minutes=1)).strftime('%H:%M')}"
+                        f"{sampled_start.strftime('%H:%M')}-"
+                        f"{self._shift_absolute(sampled_end, -1).strftime('%H:%M')}"
                     ),
-                    "interval": {
-                        "start": start.strftime("%Y-%m-%d %H:%M"),
-                        "end": end.strftime("%Y-%m-%d %H:%M"),
-                    },
+                    "interval": self._interval_payload(start, end),
                     "representativeDatetime": representative.strftime("%Y-%m-%d %H:%M"),
-                    "isBase": start <= base_dt < end,
-                    "changed": self._signature_changes(base_signature, signature),
+                    **self._representative_metadata(representative),
+                    "isBase": (
+                        sampled_start.astimezone(pytz.utc)
+                        <= base_dt.astimezone(pytz.utc)
+                        < sampled_end.astimezone(pytz.utc)
+                        if self._is_aware(sampled_start) and self._is_aware(base_dt)
+                        else sampled_start <= base_dt < sampled_end
+                    ),
+                    "eventPeriodBoundaryChecked": first.get("eventPeriodFingerprint") is not None,
+                    "eventPeriodStableWithinInterval": True,
+                    "internalChangedFields": internal_changed_fields,
+                    "changed": changed_fields,
                     "signature": signature,
+                    **boundary_metadata,
                 }
             )
 
@@ -945,6 +1920,7 @@ class VedicCalculator:
                 and isinstance(current_signature, dict)
                 and self._signature_fingerprint(previous_signature)
                 == self._signature_fingerprint(current_signature)
+                and previous.get("eventPeriodFingerprint") == point.get("eventPeriodFingerprint")
             ) or (
                 not isinstance(previous_signature, dict)
                 and not isinstance(current_signature, dict)
@@ -955,6 +1931,7 @@ class VedicCalculator:
                 continue
             flush()
             run = [point]
+            run_has_left_boundary = True
         flush()
         return variants
 
@@ -978,17 +1955,23 @@ class VedicCalculator:
                     "signature": base_signature,
                 }
             ]
-        scan_radius = min(radius_km, 30.0)
+        # radiusKm is the declared uncertainty envelope, not a display hint.
+        # Clipping it would exclude valid coordinate hypotheses from rectification.
+        scan_radius = radius_km
         lat = float(payload["lat"])
         lon = float(payload["lon"])
-        delta_lat = scan_radius / 111.0
-        cos_lat = max(abs(math.cos(math.radians(lat))), 0.2)
-        delta_lon = scan_radius / (111.0 * cos_lat)
         samples = [
-            ("north", lat + delta_lat, lon),
-            ("south", lat - delta_lat, lon),
-            ("east", lat, lon + delta_lon),
-            ("west", lat, lon - delta_lon),
+            (label, *self._destination_point(lat, lon, scan_radius, bearing))
+            for label, bearing in (
+                ("north", 0.0),
+                ("north-east", 45.0),
+                ("east", 90.0),
+                ("south-east", 135.0),
+                ("south", 180.0),
+                ("south-west", 225.0),
+                ("west", 270.0),
+                ("north-west", 315.0),
+            )
         ]
         variants = [
             {
@@ -1000,6 +1983,17 @@ class VedicCalculator:
         ]
         for label, sample_lat, sample_lon in samples:
             try:
+                sample_timezone = self._timezone_for_scan_point(
+                    sample_lat,
+                    sample_lon,
+                    str(payload["timezone"]),
+                )
+                offset_kwargs = (
+                    {"utc_offset_seconds": int(payload["utc_offset_seconds"])}
+                    if sample_timezone == str(payload["timezone"])
+                    and payload.get("utc_offset_seconds") is not None
+                    else {}
+                )
                 chart = calculate_full_chart(
                     int(payload["year"]),
                     int(payload["month"]),
@@ -1008,7 +2002,9 @@ class VedicCalculator:
                     int(payload["minute"]),
                     sample_lat,
                     sample_lon,
-                    str(payload["timezone"]),
+                    sample_timezone,
+                    second=int(payload.get("second") or 0),
+                    **offset_kwargs,
                 )
                 signature = self._chart_signature(chart)
                 variants.append(
@@ -1019,6 +2015,7 @@ class VedicCalculator:
                             "lat": round(sample_lat, 6),
                             "lon": round(sample_lon, 6),
                         },
+                        "timezone": sample_timezone,
                         "changed": self._signature_changes(base_signature, signature),
                         "signature": signature,
                     }
@@ -1033,6 +2030,47 @@ class VedicCalculator:
                 )
         return variants
 
+    @staticmethod
+    def _destination_point(
+        latitude: float,
+        longitude: float,
+        distance_km: float,
+        bearing_degrees: float,
+    ) -> tuple[float, float]:
+        """Return a spherical WGS84-envelope sample at distance and bearing."""
+
+        angular_distance = distance_km / 6371.0088
+        bearing = math.radians(bearing_degrees)
+        latitude_radians = math.radians(latitude)
+        longitude_radians = math.radians(longitude)
+        target_latitude = math.asin(
+            math.sin(latitude_radians) * math.cos(angular_distance)
+            + math.cos(latitude_radians) * math.sin(angular_distance) * math.cos(bearing)
+        )
+        target_longitude = longitude_radians + math.atan2(
+            math.sin(bearing) * math.sin(angular_distance) * math.cos(latitude_radians),
+            math.cos(angular_distance) - math.sin(latitude_radians) * math.sin(target_latitude),
+        )
+        normalized_longitude = (math.degrees(target_longitude) + 540.0) % 360.0 - 180.0
+        return round(math.degrees(target_latitude), 8), round(normalized_longitude, 8)
+
+    @staticmethod
+    def _timezone_for_scan_point(latitude: float, longitude: float, fallback: str) -> str:
+        try:
+            from timezonefinder import TimezoneFinder  # type: ignore
+
+            timezone_id = TimezoneFinder().timezone_at(lat=latitude, lng=longitude)
+        except Exception as exc:
+            raise RuntimeError(
+                f"timezone lookup failed for scan point {latitude:.6f},{longitude:.6f}"
+            ) from exc
+        if not timezone_id:
+            raise RuntimeError(
+                f"timezone lookup returned no zone for scan point "
+                f"{latitude:.6f},{longitude:.6f}; refusing fallback {fallback}"
+            )
+        return timezone_id
+
     def _chart_signature(self, chart: dict[str, Any]) -> dict[str, Any]:
         moon = chart.get("planets", {}).get("Moon", {})
         moon_nakshatra = moon.get("nakshatra") or {}
@@ -1043,11 +2081,41 @@ class VedicCalculator:
             "moonNakshatra": moon_nakshatra.get("name"),
             "moonPada": moon_nakshatra.get("pada"),
             "currentDasha": self._current_dasha_label(chart),
+            "charaKaraka7k": {
+                str(row[0]): str(row[1])
+                for row in ((chart.get("karakas") or {}).get("7k") or [])
+                if isinstance(row, (list, tuple)) and len(row) >= 2
+            },
+            "moonPhase": bool((chart.get("moon_phase") or {}).get("waxing")),
+            "combustionStatus": {
+                str(name): bool(value.get("is_combust"))
+                for name, value in (chart.get("combustion_statuses") or {}).items()
+                if isinstance(value, dict)
+            },
+            "shadbalaClassification": {
+                str(name): str(value.get("classification"))
+                for name, value in (chart.get("shadbala") or {}).items()
+                if isinstance(value, dict) and value.get("classification")
+            },
+            "digbalaStatus": {
+                str(name): bool(value) for name, value in (chart.get("digbala") or {}).items()
+            },
+            "specialPointSigns": {
+                str(name): int(value["sign_idx"])
+                for name, value in (chart.get("special_points") or {}).items()
+                if isinstance(value, dict) and value.get("sign_idx") is not None
+            },
+            "specialLagnaSigns": {
+                str(name): int(value["sign_idx"])
+                for name, value in (chart.get("special_lagnas") or {}).items()
+                if isinstance(value, dict) and value.get("sign_idx") is not None
+            },
             "planetSignIndices": {
                 name: int(position.get("sign_idx", 0))
                 for name, position in (chart.get("planets") or {}).items()
                 if isinstance(position, dict) and position.get("sign_idx") is not None
             },
+            "vargaPlanetSignIndices": {},
         }
         for factor in DIVISIONAL_FACTORS:
             if factor == 1:
@@ -1056,6 +2124,15 @@ class VedicCalculator:
                 chart,
                 factor,
             )
+            raw_chart = (chart.get("divisional_charts") or {}).get(f"D{factor}")
+            if isinstance(raw_chart, dict) and "error" not in raw_chart:
+                signature["vargaPlanetSignIndices"][f"D{factor}"] = {
+                    name: int(position["sign_idx"])
+                    for name, position in raw_chart.items()
+                    if name != "Lagna"
+                    and isinstance(position, dict)
+                    and position.get("sign_idx") is not None
+                }
         return signature
 
     @staticmethod
@@ -1077,10 +2154,21 @@ class VedicCalculator:
     ) -> list[str]:
         changes = []
         for key, base_value in base_signature.items():
-            if key == "lagnaDegree":
+            if key in {"lagnaDegree", "planetSignIndices", "vargaPlanetSignIndices"}:
                 continue
             if variant_signature.get(key) != base_value:
                 changes.append(key)
+        if variant_signature.get("planetSignIndices") != base_signature.get("planetSignIndices"):
+            changes.append("d1Structure")
+        base_structures = base_signature.get("vargaPlanetSignIndices")
+        variant_structures = variant_signature.get("vargaPlanetSignIndices")
+        if isinstance(base_structures, dict) or isinstance(variant_structures, dict):
+            base_structures = base_structures if isinstance(base_structures, dict) else {}
+            variant_structures = variant_structures if isinstance(variant_structures, dict) else {}
+            for varga_id in sorted(set(base_structures) | set(variant_structures)):
+                if base_structures.get(varga_id) != variant_structures.get(varga_id):
+                    factor = str(varga_id).removeprefix("D")
+                    changes.append(f"d{factor}Structure")
         return changes
 
     @staticmethod
@@ -1140,6 +2228,15 @@ class VedicCalculator:
         place_variants: list[dict[str, Any]],
         boundary_flags: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        scan_errors = [
+            {
+                "label": variant.get("label"),
+                "interval": variant.get("interval"),
+                "error": str(variant.get("error")),
+            }
+            for variant in [*time_variants, *place_variants]
+            if variant.get("error")
+        ]
         changed = {
             change
             for variant in [*time_variants, *place_variants]
@@ -1158,9 +2255,17 @@ class VedicCalculator:
             risk_factors.append(
                 "boundary_flags:" + ",".join(str(item["factor"]) for item in boundary_flags)
             )
+        if scan_errors:
+            risk_factors.append(f"scan_errors:{len(scan_errors)}")
 
         blocking_changed = sorted(changed & HIGH_RISK_CHANGED_FIELDS)
-        if precision in {"part_of_day", "unknown"} or bool(blocking_changed):
+        unresolved_place = place.accuracy in {"city", "district"}
+        if (
+            precision in {"part_of_day", "unknown"}
+            or blocking_changed
+            or scan_errors
+            or unresolved_place
+        ):
             risk_level = "high"
         elif risk_factors:
             risk_level = "medium"
@@ -1171,6 +2276,7 @@ class VedicCalculator:
         return {
             "riskLevel": risk_level,
             "riskFactors": risk_factors,
+            "scanErrors": scan_errors,
             "blockingChangedFields": blocking_changed,
             "changedFields": sorted(changed),
             "divisionalConfidence": divisional_confidence,
@@ -1192,46 +2298,51 @@ class VedicCalculator:
         for factor in DIVISIONAL_FACTORS:
             key = VedicCalculator._divisional_key(factor)
             field = VedicCalculator._divisional_field(factor)
-            policy = DIVISIONAL_POLICIES[factor]
+            policy = varga_domain_policy(factor)
             interval = round(120 / factor, 3)
+            structure_field = f"d{factor}Structure"
+            division_changed = field in changed or structure_field in changed
             confidence = VedicCalculator._confidence_for_division(
                 precision,
                 radius_minutes,
                 factor,
-                field in changed,
+                division_changed,
             )
             reasons = [
                 f"reported time window radius is +/-{radius_minutes}m",
                 f"approx average {key} Lagna slice is {interval}m",
             ]
-            if field in changed:
-                reasons.insert(0, f"{field} changed in sensitivity scan")
-            if policy["usageTier"] == "final_confirmation_only":
+            if division_changed:
+                changed_parts = [item for item in (field, structure_field) if item in changed]
+                reasons.insert(0, f"{', '.join(changed_parts)} changed in sensitivity scan")
+            if policy.usage_tier == "final_confirmation_only":
                 reasons.append(
                     "D60 is validation/final confirmation only until birth time is rectified"
                 )
-            elif policy["usageTier"] == "advanced_validation":
+            elif policy.usage_tier == "advanced_validation":
                 reasons.append(
                     "advanced varga should corroborate dated events, not drive first-pass claims"
                 )
 
             recommended_use = VedicCalculator._recommended_divisional_use(
                 confidence,
-                policy["usageTier"],
+                policy.usage_tier,
             )
             result[key] = {
                 "division": key,
                 "factor": factor,
                 "field": field,
-                "name": policy["name"],
-                "role": policy["role"],
-                "usageTier": policy["usageTier"],
+                "name": policy.name,
+                "role": policy.scope,
+                "usageTier": policy.usage_tier,
+                "policyId": VARGA_DOMAIN_POLICY_ID,
+                "sourceIds": list(VARGA_DOMAIN_SOURCE_IDS),
                 "confidence": confidence,
                 "approxLagnaIntervalMinutes": interval,
                 "timeWindowRadiusMinutes": radius_minutes,
                 "timeSensitive": True,
                 "locationSensitive": True,
-                "changedInScan": field in changed,
+                "changedInScan": division_changed,
                 "recommendedUse": recommended_use,
                 "useAsPrimaryEvidence": recommended_use == "primary_or_strong_support",
                 "reasons": reasons,
@@ -1306,6 +2417,8 @@ class VedicCalculator:
                 "name": item.get("name"),
                 "role": item.get("role"),
                 "usageTier": item.get("usageTier"),
+                "policyId": item.get("policyId"),
+                "sourceIds": item.get("sourceIds"),
                 "confidence": item.get("confidence"),
                 "approxLagnaIntervalMinutes": item.get("approxLagnaIntervalMinutes"),
                 "changedInScan": item.get("changedInScan"),
@@ -1329,6 +2442,8 @@ class VedicCalculator:
             if isinstance(item, dict) and item.get("recommendedUse") == "final_confirmation_only"
         ]
         return {
+            "policyId": VARGA_DOMAIN_POLICY_ID,
+            "sourceIds": list(VARGA_DOMAIN_SOURCE_IDS),
             "principle": (
                 "Use higher vargas after the birth-time window is narrowed. "
                 "Do not let advanced vargas override D1/Dasha/event evidence."
@@ -1448,11 +2563,15 @@ class VedicCalculator:
                     break
             return CurrentDasha(
                 mahadasha=dasha.get("planet"),
-                mahadasha_start=dasha.get("start"),
-                mahadasha_end=dasha.get("end"),
+                mahadasha_start=dasha.get("start_exact") or dasha.get("start"),
+                mahadasha_end=dasha.get("end_exact") or dasha.get("end"),
                 antardasha=current_ad.get("planet") if current_ad else None,
-                antardasha_start=current_ad.get("start") if current_ad else None,
-                antardasha_end=current_ad.get("end") if current_ad else None,
+                antardasha_start=(current_ad.get("start_exact") or current_ad.get("start"))
+                if current_ad
+                else None,
+                antardasha_end=(current_ad.get("end_exact") or current_ad.get("end"))
+                if current_ad
+                else None,
             )
         return CurrentDasha()
 
@@ -1482,12 +2601,14 @@ class VedicCalculator:
             "day": birth_date.day,
             "hour": birth_time.hour,
             "minute": birth_time.minute,
+            "second": birth_time.second,
             "dob": intake.birth_date,
             "time": birth_time.normalized,
             "place": place.label,
             "lat": place.lat,
             "lon": place.lon,
             "timezone": place.timezone,
+            "utc_offset_seconds": intake.utc_offset_seconds,
             "place_source": place.source,
             "place_accuracy": place.accuracy,
             "place_radius_km": place.radius_km,
@@ -1495,12 +2616,14 @@ class VedicCalculator:
             "place_coordinate_system": place.coordinate_system,
             "time_precision": self._precision_label(intake.birth_time_precision),
             "time_source": intake.time_source,
+            "reading_focus": intake.reading_focus,
             "life_events": intake.life_events,
             "effective_precision": (
                 "±分钟级" if intake.birth_time_precision == "exact" else "按出生时间精度降级解释"
             ),
             "gender": intake.gender,
             "relationship": intake.relationship,
+            "reader_relationship": intake.reader_relationship,
         }
 
     def _parse_birth_date(self, value: str) -> BirthDate:
@@ -1514,17 +2637,23 @@ class VedicCalculator:
 
     def _parse_birth_time(self, value: str, precision: str) -> BirthTime:
         if precision == "unknown" or not value:
-            return BirthTime(hour=12, minute=0, normalized="12:00")
+            return BirthTime(hour=12, minute=0, second=0, normalized="12:00")
         parts = value.split(":")
-        if len(parts) != 2:
-            raise ValueError("Birth time must be HH:MM")
-        hour, minute = [int(part) for part in parts]
-        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-            raise ValueError("Birth time must be a valid HH:MM value")
+        if len(parts) not in {2, 3}:
+            raise ValueError("Birth time must be HH:MM or HH:MM:SS")
+        hour, minute = [int(part) for part in parts[:2]]
+        second = int(parts[2]) if len(parts) == 3 else 0
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 59:
+            raise ValueError("Birth time must be a valid HH:MM or HH:MM:SS value")
         return BirthTime(
             hour=hour,
             minute=minute,
-            normalized=f"{hour:02d}:{minute:02d}",
+            second=second,
+            normalized=(
+                f"{hour:02d}:{minute:02d}:{second:02d}"
+                if len(parts) == 3
+                else f"{hour:02d}:{minute:02d}"
+            ),
         )
 
     def _precision_label(self, precision: str) -> str:

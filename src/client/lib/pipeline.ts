@@ -64,8 +64,9 @@ export function getPipelineData(
   const session = options.session ?? null;
   const calculatorNode = calculatorPipelineNode(session);
   const readerNode = readerPipelineNode(session, Boolean(options.readerRunning));
-  const setupNodes = [calculatorNode, readerNode].filter((node): node is PipelineNode =>
-    Boolean(node)
+  const judgementNode = judgementPipelineNode(session);
+  const setupNodes = [calculatorNode, readerNode, judgementNode].filter(
+    (node): node is PipelineNode => Boolean(node)
   );
 
   if (coreJob && coreJob.nodes.length > 0) {
@@ -218,6 +219,25 @@ function readerPipelineNode(
       feedback?.updatedAt ?? validationResult?.updatedAt ?? prevalidation?.updatedAt ?? null,
     durationSeconds: null,
     error: null
+  };
+}
+
+function judgementPipelineNode(session: SkillSessionResponse | null): PipelineNode | null {
+  const artifacts = session?.artifacts ?? [];
+  const context = artifacts.find((artifact) => artifact.path === "judgement_context.json");
+  const graph = artifacts.find((artifact) => artifact.path === "claim_graph.json");
+  if (!context && !graph) return null;
+  return {
+    id: "vedicdust_claims",
+    label: "Evidence Synthesis",
+    wave: 3,
+    status: context && graph ? "completed" : "failed",
+    files: ["judgement_context.json", "claim_graph.json"],
+    dependencies: ["reader_prevalidation"],
+    startedAt: null,
+    finishedAt: graph?.updatedAt ?? context?.updatedAt ?? null,
+    durationSeconds: null,
+    error: context && graph ? null : "Deterministic evidence synthesis is incomplete"
   };
 }
 

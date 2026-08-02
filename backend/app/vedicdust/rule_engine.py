@@ -3,30 +3,49 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from typing import Any
 
+from .fact_catalog import fact_definition
 from .models import ChartRecord, JyotishFact, MethodRule, RulePredicate
 
 
-def evaluate_method_rule(rule: MethodRule, record: ChartRecord) -> dict[str, Any]:
+def evaluate_method_rule(
+    rule: MethodRule,
+    record: ChartRecord,
+    *,
+    restricted_fact_ids: set[str] | None = None,
+    excluded_evidence_layers: set[str] | None = None,
+) -> dict[str, Any]:
     """Evaluate a catalog rule against deterministic ChartRecord facts."""
 
     matched_fact_ids: set[str] = set()
     failed: list[str] = []
+    restricted = restricted_fact_ids or set()
+    eligible_facts = [fact for fact in record.facts if fact.fact_id not in restricted]
+    excluded_layers = excluded_evidence_layers or set()
+    available_layers = {
+        fact_definition(fact.fact_type).evidence_layer for fact in eligible_facts
+    } - excluded_layers
+    rectification = getattr(record, "rectification", None)
+    if rectification is not None and getattr(rectification, "life_events", None):
+        available_layers.add("user_testimony")
+    missing_layers = sorted(set(getattr(rule, "required_evidence_layers", [])) - available_layers)
+    if missing_layers:
+        failed.append("requiredEvidenceLayers:" + ",".join(missing_layers))
 
     for predicate in rule.all_of:
-        passed, matches = _evaluate_predicate(predicate, record.facts)
+        passed, matches = _evaluate_predicate(predicate, eligible_facts)
         matched_fact_ids.update(matches)
         if not passed:
             failed.append(f"allOf:{_predicate_label(predicate)}")
 
     if rule.any_of:
-        any_results = [_evaluate_predicate(predicate, record.facts) for predicate in rule.any_of]
+        any_results = [_evaluate_predicate(predicate, eligible_facts) for predicate in rule.any_of]
         for _, matches in any_results:
             matched_fact_ids.update(matches)
         if not any(passed for passed, _ in any_results):
             failed.append("anyOf:" + "|".join(_predicate_label(item) for item in rule.any_of))
 
     for predicate in rule.none_of:
-        passed, matches = _evaluate_predicate(predicate, record.facts)
+        passed, matches = _evaluate_predicate(predicate, eligible_facts)
         if passed:
             matched_fact_ids.update(matches)
             failed.append(f"noneOf:{_predicate_label(predicate)}")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .fact_catalog import fact_definition
+from .judgement_kernel import INTERPRETATION_RULE_IDS, compile_topic_judgement
 from .models import (
     ChartRecord,
     JyotishFact,
@@ -14,8 +16,13 @@ from .models import (
     MethodRule,
     QualityCheck,
     RuleCatalog,
+    TimingPeriod,
 )
 from .rule_engine import evaluate_method_rule
+from .presentation_policy import (
+    ACTIVE_PRESENTATION_POLICY,
+    build_topic_presentation_priority,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,7 @@ class TopicDefinition:
     title: str
     purpose: str
     houses: tuple[int, ...]
+    anchor_houses: tuple[int, ...]
     karakas: tuple[str, ...]
     vargas: tuple[str, ...]
     rule_id: str
@@ -36,6 +44,7 @@ TOPICS = (
         "Chart foundation",
         "Establish the chart's organizing structure before domain conclusions.",
         (1,),
+        (1,),
         ("Sun", "Moon"),
         ("D9",),
         "judge.foundation.integrated",
@@ -46,6 +55,7 @@ TOPICS = (
         "Identity and agency",
         "Assess temperament, agency, and the conditions under which potential is expressed.",
         (1, 5, 9),
+        (1,),
         ("Sun", "Moon", "Jupiter"),
         ("D9",),
         "judge.identity.integrated",
@@ -56,6 +66,7 @@ TOPICS = (
         "Career and contribution",
         "Assess work direction, responsibility, authority, and sustainable contribution.",
         (2, 6, 10, 11),
+        (10,),
         ("Sun", "Mercury", "Jupiter", "Saturn"),
         ("D10",),
         "judge.career.d1-d10",
@@ -66,6 +77,7 @@ TOPICS = (
         "Resources and finance",
         "Assess resource formation, retention, material support, and financial pressure.",
         (2, 4, 8, 11),
+        (2, 11),
         ("Jupiter", "Venus", "Mercury"),
         ("D2", "D4"),
         "judge.finance.d1-d2-d4",
@@ -76,6 +88,7 @@ TOPICS = (
         "Relationships and partnership",
         "Assess partnership promise, reciprocity, maturity, and relationship conditions.",
         (2, 7, 8, 11),
+        (7,),
         ("Venus", "Jupiter", "Mars"),
         ("D9",),
         "judge.relationship.d1-d9",
@@ -86,6 +99,7 @@ TOPICS = (
         "Home and rootedness",
         "Assess home, property, mobility, emotional rootedness, and domestic stability.",
         (4, 8, 12),
+        (4,),
         ("Moon", "Venus", "Mars"),
         ("D4",),
         "judge.home.d1-d4",
@@ -96,9 +110,10 @@ TOPICS = (
         "Learning and vocation",
         "Assess learning style, formal study, mastery, and knowledge transmission.",
         (2, 4, 5, 9),
+        (5, 9),
         ("Mercury", "Jupiter"),
-        ("D5", "D24"),
-        "judge.learning.d1-d5-d24",
+        ("D24",),
+        "judge.learning.d1-d24",
         ("education", "study", "学习", "教育", "学业"),
     ),
     TopicDefinition(
@@ -106,6 +121,7 @@ TOPICS = (
         "Children and stewardship",
         "Assess the promise and responsibilities connected with children and mentorship.",
         (5, 9),
+        (5,),
         ("Jupiter", "Moon"),
         ("D7",),
         "judge.children.d1-d7",
@@ -116,6 +132,7 @@ TOPICS = (
         "Vitality and health patterns",
         "Assess vitality, strain patterns, recovery conditions, and preventive attention.",
         (1, 6, 8, 12),
+        (1, 6),
         ("Sun", "Moon", "Mars", "Saturn"),
         ("D30",),
         "judge.health.d1-d30",
@@ -126,6 +143,7 @@ TOPICS = (
         "Meaning and inner practice",
         "Assess values, meaning, spiritual practice, and the maturation of worldview.",
         (5, 9, 12),
+        (9,),
         ("Jupiter", "Ketu", "Sun"),
         ("D9", "D20"),
         "judge.dharma.d1-d9-d20",
@@ -136,6 +154,7 @@ TOPICS = (
         "Family and lineage",
         "Assess family roles, parental inheritance, lineage obligations, and support.",
         (2, 4, 9, 10),
+        (2, 4),
         ("Sun", "Moon", "Jupiter"),
         ("D12",),
         "judge.family.d1-d12",
@@ -160,7 +179,7 @@ def build_judgement_context(
     requested_topics: list[str] | None = None,
     now: datetime | None = None,
 ) -> JudgementContext:
-    """Build the deterministic evidence menu consumed by the judgement Agent."""
+    """Build the deterministic evidence and conclusion menu used to publish Claims."""
 
     restricted = restricted_fact_ids or set()
     facts_by_id = {fact.fact_id: fact for fact in record.facts}
@@ -172,6 +191,7 @@ def build_judgement_context(
     )
     reference_time = now or datetime.now(timezone.utc)
     relevant_period_ids = _relevant_period_ids(record, reference_time)
+    periods_by_id = {period.period_id: period for period in record.timing_periods}
     period_ids = [] if restrict_timing else relevant_period_ids
     active_rules = {
         rule.rule_id: rule
@@ -180,7 +200,12 @@ def build_judgement_context(
         and record.calculation_profile.profile_id in rule.method_profile_ids
     }
     rule_evaluations = {
-        rule.rule_id: evaluate_method_rule(rule, record)
+        rule.rule_id: evaluate_method_rule(
+            rule,
+            record,
+            restricted_fact_ids=restricted,
+            excluded_evidence_layers={"timing"} if restrict_timing else set(),
+        )
         for rule in active_rules.values()
         if rule.rule_kind in {"judgement", "workflow_gate"}
     }
@@ -194,6 +219,7 @@ def build_judgement_context(
             source_ids=rule.source_ids,
             required_evidence_layers=rule.required_evidence_layers,
             status=rule.status,
+            judgement_use=rule.judgement_use,
             evaluation_status=rule_evaluations[rule.rule_id]["evaluationStatus"],
             matched_fact_ids=rule_evaluations[rule.rule_id]["matchedFactIds"],
             failed_predicates=rule_evaluations[rule.rule_id]["failedPredicates"],
@@ -216,8 +242,31 @@ def build_judgement_context(
         if definition.rule_id in active_rules
         and rule_evaluations[definition.rule_id]["evaluationStatus"] == "eligible"
     ]
+    eligible_interpretation_rule_ids = [
+        rule_id
+        for rule_id in INTERPRETATION_RULE_IDS.values()
+        if rule_id in active_rules and rule_evaluations[rule_id]["evaluationStatus"] == "eligible"
+    ]
+    for topic in topics:
+        topic.rule_ids = list(dict.fromkeys([*topic.rule_ids, *eligible_interpretation_rule_ids]))
     topics.sort(key=lambda item: (-item.priority_score, item.topic_id))
-    units = [_build_judgement_unit(topic, active_rules, rule_evaluations) for topic in topics]
+    definitions_by_id = {definition.topic_id: definition for definition in TOPICS}
+    units = [
+        _build_judgement_unit(
+            topic,
+            definitions_by_id[topic.topic_id],
+            active_rules,
+            rule_evaluations,
+            facts_by_id,
+            periods_by_id,
+            record.subject.locale,
+            reference_time,
+        )
+        for topic in topics
+    ]
+    permitted_by_topic = {unit.topic_id: unit.permitted_rule_ids for unit in units}
+    for topic in topics:
+        topic.rule_ids = permitted_by_topic[topic.topic_id]
 
     checks = [
         QualityCheck(
@@ -234,6 +283,18 @@ def build_judgement_context(
             observed=len(topics),
             message="Topic evidence was selected from the active Chart Record.",
         ),
+        QualityCheck(
+            check_id="judgement-context.timing-horizon",
+            status="passed" if period_ids else "warning",
+            expected="Vimshottari periods covering the current to five-year horizon",
+            observed=len(period_ids),
+            message=(
+                "Timing periods cover the consultation horizon."
+                if period_ids
+                else "No declared Vimshottari period covers the consultation horizon; "
+                "timing conclusions are withheld."
+            ),
+        ),
     ]
     return JudgementContext(
         chart_record_id=record.chart_record_id,
@@ -242,6 +303,7 @@ def build_judgement_context(
         generated_at=reference_time,
         requested_topics=sorted(requested),
         rule_pack_version=f"vedicdust-rules-{catalog.catalog_version}",
+        presentation_policy=ACTIVE_PRESENTATION_POLICY,
         rules=rule_contexts,
         global_gate_rule_ids=[
             rule_id
@@ -259,8 +321,13 @@ def build_judgement_context(
 
 def _build_judgement_unit(
     topic: JudgementTopicContext,
+    definition: TopicDefinition,
     active_rules: dict[str, MethodRule],
     rule_evaluations: dict[str, dict[str, object]],
+    facts_by_id: dict[str, JyotishFact],
+    periods_by_id: dict[str, TimingPeriod],
+    locale: str,
+    reference_time: datetime,
 ) -> JudgementUnit:
     """Compile one topic into the exact semantic allowance exposed to the model."""
 
@@ -282,13 +349,21 @@ def _build_judgement_unit(
     ):
         permitted_rules.append(promise_gate.rule_id)
 
+    interpretation_rules: dict[str, str] = {}
+    for interpretation_key, rule_id in INTERPRETATION_RULE_IDS.items():
+        rule = active_rules.get(rule_id)
+        if rule is not None and rule_evaluations[rule.rule_id]["evaluationStatus"] == "eligible":
+            interpretation_rules[interpretation_key] = rule.rule_id
+            permitted_rules.append(rule.rule_id)
+            output_codes.append(rule.output_code)
+
     timing_rule = active_rules.get("judge.timing.vimshottari-activation")
     timing_gate = active_rules.get("sop.promise-capacity-before-timing")
     timing_is_eligible = all(
         rule is not None and rule_evaluations[rule.rule_id]["evaluationStatus"] == "eligible"
         for rule in (timing_rule, timing_gate)
     )
-    if timing_is_eligible and topic.timing_fact_ids and topic.timing_period_ids:
+    if timing_is_eligible and topic.timing_period_ids:
         assert timing_rule is not None and timing_gate is not None
         permitted_rules.extend([timing_rule.rule_id, timing_gate.rule_id])
         output_codes.append(timing_rule.output_code)
@@ -300,6 +375,61 @@ def _build_judgement_unit(
         limitations.append(
             "This domain synthesis is a provisional VedicDust product rule and cannot be high certainty."
         )
+        limitations.append(
+            "Calculation rules establish facts; separate VedicDust structural-bands 1.2.0 "
+            "interpretation rules determine whether those facts may carry direction. Current "
+            "SAV, dignity, Shadbala, and combustion interpretations remain descriptive."
+        )
+        limitations.append(
+            "A supportive or challenging domain direction requires convergence from at least "
+            "two validated directional interpretation methods agreeing on that direction; "
+            "one method or opposing single methods remain descriptive."
+        )
+
+    findings, conclusions = compile_topic_judgement(
+        topic_id=topic.topic_id,
+        topic_title=topic.title,
+        anchor_houses=definition.anchor_houses,
+        karakas=definition.karakas,
+        primary_rule_id=primary_rule.rule_id,
+        natal_fact_ids=topic.natal_fact_ids,
+        capacity_fact_ids=topic.capacity_fact_ids,
+        varga_fact_ids=eligible_varga_facts,
+        facts_by_id=facts_by_id,
+        locale=locale,
+        requested=topic.requested,
+        certainty_cap=certainty_cap,
+        limitations=list(dict.fromkeys(limitations)),
+        interpretation_rule_ids=interpretation_rules,
+        directional_judgement_rule_ids={
+            rule.rule_id
+            for rule in active_rules.values()
+            if rule.rule_kind == "judgement"
+            and rule.status == "validated"
+            and rule.judgement_use == "directional"
+        },
+        validated_derivation_rule_ids={
+            rule.rule_id
+            for rule in active_rules.values()
+            if rule.rule_kind == "derivation" and rule.status == "validated"
+        },
+        timing_rule_id=(timing_rule.rule_id if timing_is_eligible and timing_rule else None),
+        timing_gate_rule_id=(timing_gate.rule_id if timing_is_eligible and timing_gate else None),
+        timing_periods=[
+            periods_by_id[period_id]
+            for period_id in topic.timing_period_ids
+            if period_id in periods_by_id
+        ],
+        reference_time=reference_time,
+    )
+    used_rule_ids = {
+        primary_rule.rule_id,
+        *(finding.rule_id for finding in findings),
+        *(rule_id for conclusion in conclusions for rule_id in conclusion.rule_ids),
+    }
+    permitted_rules = [rule_id for rule_id in permitted_rules if rule_id in used_rule_ids]
+    output_codes = [active_rules[rule_id].output_code for rule_id in permitted_rules]
+    output_codes.extend(conclusion.conclusion_code for conclusion in conclusions)
 
     return JudgementUnit(
         unit_id=f"unit.{topic.topic_id}.{primary_rule.rule_id}",
@@ -313,6 +443,8 @@ def _build_judgement_unit(
         varga_fact_ids=eligible_varga_facts,
         timing_fact_ids=topic.timing_fact_ids if "timing" in allowed_scopes else [],
         timing_period_ids=topic.timing_period_ids if "timing" in allowed_scopes else [],
+        findings=findings,
+        conclusions=conclusions,
         certainty_cap=certainty_cap,
         limitations=list(dict.fromkeys(limitations)),
     )
@@ -387,27 +519,26 @@ def _build_topic(
         )
         if values
     ]
-    sav_values = [
-        float(facts_by_id[fact_id].value)
+    sav_evidence = [
+        (fact_id, float(facts_by_id[fact_id].value))
         for fact_id in capacity
         if facts_by_id[fact_id].fact_type == "ashtakavarga.sav.house"
     ]
-    average_sav_deviation = (
-        sum(abs(value - 28.0) for value in sav_values) / len(sav_values) if sav_values else 0.0
+    aspect_fact_ids = [
+        fact_id for fact_id in natal if facts_by_id[fact_id].fact_type == "aspect.graha_drishti"
+    ]
+    eligible_varga_fact_ids = [
+        fact_id
+        for fact_id in varga
+        if any(fact_id.startswith(f"fact.{varga_id}.") for varga_id in primary_vargas)
+    ]
+    score, priority_reasons = build_topic_presentation_priority(
+        topic_id=definition.topic_id,
+        requested=requested,
+        sav_evidence=sav_evidence,
+        aspect_fact_ids=aspect_fact_ids,
+        eligible_varga_fact_ids=eligible_varga_fact_ids,
     )
-    aspect_count = sum(
-        1 for fact_id in natal if facts_by_id[fact_id].fact_type == "aspect.graha_drishti"
-    )
-    score = 95 if definition.topic_id == "foundation" else 45
-    if requested:
-        score = 100
-    elif definition.topic_id != "foundation":
-        score = min(
-            92,
-            score + min(24, round(average_sav_deviation * 3)) + min(12, aspect_count * 2),
-        )
-    if primary_vargas:
-        score = min(100, score + 8)
     limitations: list[str] = []
     missing_primary = sorted(set(available_vargas) - set(primary_vargas))
     if missing_primary:
@@ -426,6 +557,7 @@ def _build_topic(
         purpose=definition.purpose,
         requested=requested,
         priority_score=score,
+        priority_reasons=priority_reasons,
         rule_ids=[definition.rule_id],
         natal_fact_ids=sorted(natal),
         capacity_fact_ids=sorted(capacity),
@@ -468,9 +600,31 @@ def _normalize_requested_topics(values: list[str]) -> set[str]:
     normalized: set[str] = set()
     for raw in values:
         value = raw.strip().lower()
+        matches: list[tuple[int, int, str, str]] = []
         for topic in TOPICS:
-            if value == topic.topic_id or any(alias in value for alias in topic.aliases):
-                normalized.add(topic.topic_id)
+            for phrase in (topic.topic_id, *topic.aliases):
+                escaped = re.escape(phrase)
+                pattern = rf"(?<![a-z0-9]){escaped}(?![a-z0-9])" if phrase.isascii() else escaped
+                matches.extend(
+                    (match.start(), match.end(), topic.topic_id, phrase)
+                    for match in re.finditer(pattern, value)
+                )
+        accepted: list[tuple[int, int, str, str]] = []
+        for match in sorted(
+            matches,
+            key=lambda item: (-(item[1] - item[0]), item[0], item[2], item[3]),
+        ):
+            start, end, topic_id, _ = match
+            shadowed = any(
+                outer_topic_id != topic_id
+                and outer_start <= start
+                and end <= outer_end
+                and (outer_start, outer_end) != (start, end)
+                for outer_start, outer_end, outer_topic_id, _ in accepted
+            )
+            if not shadowed:
+                accepted.append(match)
+        normalized.update(topic_id for _, _, topic_id, _ in accepted)
     return normalized
 
 
@@ -480,5 +634,5 @@ def _relevant_period_ids(record: ChartRecord, now: datetime) -> list[str]:
     return [
         period.period_id
         for period in record.timing_periods
-        if period.interval.end > start and period.interval.start < end
+        if period.end_boundary.latest > start and period.start_boundary.earliest < end
     ]

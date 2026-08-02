@@ -48,7 +48,7 @@ export function BirthInputLayout({
             className="border-0 bg-transparent text-[15px] font-bold uppercase tracking-[2px] text-cream"
             onClick={onBack}
           >
-            Veda<span>Light</span>
+            Vedic<span>Dust</span>
           </button>
           {navControls}
         </div>

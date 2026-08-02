@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.auth import AuthenticatedUser, require_user, resolve_session_user
+from app.calculator.civil_time import AmbiguousCivilTimeError
 from app.container import get_container
 from app.db.engine import close_db, database_diagnostic_context, init_db
 from app.schemas import (
@@ -25,6 +26,7 @@ from app.schemas import (
     CreemWebhookResponse,
     PrecisePlaceSearchResponse,
     PlaceSearchResponse,
+    RectificationLifeEventsInput,
     SkillBirthInput,
     SkillFeedbackInput,
     SkillRunInput,
@@ -43,6 +45,7 @@ async def lifespan(_: FastAPI):
     await init_db(settings)
     container = get_container()
     await container.metadata_store.backfill_all_sessions()
+    await container.core_job_runtime.restore_persisted_jobs()
     try:
         yield
     finally:
@@ -279,6 +282,8 @@ async def create_skill_session(
             input_data,
             owner_user_id=account_user.owner_user_id,
         )
+    except AmbiguousCivilTimeError as exc:
+        raise HTTPException(status_code=409, detail=exc.api_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
@@ -321,6 +326,33 @@ async def get_skill_session(
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, session_id, account_user)
         return container.skill_runtime.load_session(session_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/rectification-life-events", response_model=SkillSessionResponse)
+async def record_rectification_life_events(
+    input_data: RectificationLifeEventsInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> SkillSessionResponse:
+    try:
+        container = get_container()
+        account_user = await _sync_account_user(container, current_user)
+        await _claim_or_assert_session_access(
+            container,
+            input_data.session_id,
+            account_user,
+        )
+        return await container.skill_runtime.record_rectification_life_events(
+            input_data,
+            owner_user_id=account_user.owner_user_id,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -375,6 +407,8 @@ async def create_synastry_subject(
             input_data,
             owner_user_id=account_user.owner_user_id,
         )
+    except AmbiguousCivilTimeError as exc:
+        raise HTTPException(status_code=409, detail=exc.api_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:

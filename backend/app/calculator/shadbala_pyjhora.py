@@ -1,22 +1,17 @@
-"""
-shadbala_pyjhora.py v4 - 逐项修正版
-基于 JHora 桌面版子项拆分数据精确对标修正。
+"""VedicDust Shadbala compatibility adapter.
 
-已识别的 3 大差异根因:
-  1. Hora Bala: PyJHora 的 _hora_bala 给错了行星 → 需要修正 hora 计算
-  2. Dig Bala: PyJHora 两个 method 都不对 → 需要自建 dig bala
-  3. Paksha Bala: Moon 差 36.8 → PyJHora 公式可能有 bug
-
-已确认精确的子项（无需修正）:
-  - Naisargika Bala: 7/7 完美
-  - Cheshta Bala: Mars~Saturn 5/5 完美 (<1%)
-  - Tribhaga/Abda/Masa/Vaara/Ayana/Yuddha: 全部匹配
+The adapter corrects known PyJHora implementation behavior under the declared
+VedicDust profile. Its totals are covered by provider-compatibility regression
+tests. Cross-software equivalence with Jagannatha Hora remains unverified until
+the independent desktop-export corpus is populated.
 """
 
 from .pyjhora_compat import ensure_pyjhora_swe_compat
+from .provider_runtime import configure_vedicdust_pyjhora, serialized_provider_call
 
 
-def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
+@serialized_provider_call
+def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset, *, second=0):
     import sys
     import os
     import datetime
@@ -47,20 +42,17 @@ def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset
     from jhora.panchanga.drik import Place
     from jhora.horoscope.chart import strength, charts, house
 
-    drik.set_ayanamsa_mode("LAHIRI")
-    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
-    const._use_true_nodes_for_rahu_ketu = False
+    configure_vedicdust_pyjhora()
 
-    local_hour = hour + minute / 60.0
+    local_hour = hour + minute / 60.0 + second / 3600.0
     jd = swe.julday(year, month, day, local_hour)
     place = Place("birth_place", lat, lon, tz_offset)
 
     planets_list = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]
 
-    # ========== 1. STHANA BALA (修正: Saptavargaja 用 Hora Method 1) ==========
-    # PyJHora 的 Saptavargaja 硬编码用 hora chart_method=2 (Traditional Parasara)
-    # 但 JHora 的 Shadbala 实际用 method=1 (PVR/Parasara parivritti)
-    # Uchcha/OjaYugma/Kendra/Drekkana 子项完美匹配，无需修改
+    # ========== 1. STHANA BALA ==========
+    # The declared VedicDust D2 profile uses PyJHora Hora method 2:
+    # Traditional Parasara with the Leo/Cancer allocation.
 
     from jhora import utils as jhora_utils
 
@@ -73,17 +65,15 @@ def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset
                 : const._pp_count_upto_ketu
             ]
         else:
-            # Hora method=1 (PVR/parivritti) gives Sthana ALL MATCH
-            # Note: JHora's HoraPreference=6 is for DISPLAY D2, not for Saptavargaja
-            pp_sv[dcf] = charts.hora_chart(pp_rasi, chart_method=1)[: const._pp_count_upto_ketu]
+            pp_sv[dcf] = charts.hora_chart(pp_rasi, chart_method=2)[: const._pp_count_upto_ketu]
 
-    # Uchcha, OjaYugma, Kendra, Drekkana — use PyJHora (100% match)
+    # Uchcha, OjaYugma, Kendra, Drekkana use the pinned PyJHora provider.
     ub = strength._uchcha_bala(pp_sv[1])
     ob = strength._ojayugama_bala(pp_sv[1], pp_sv[9])
     kb = strength._kendra_bala(pp_sv[1])
     db = strength._dreshkon_bala(pp_sv[1])
 
-    # Saptavargaja — rebuild with corrected D2
+    # Saptavargaja — rebuild explicitly so the profile method cannot drift.
     h_to_p = jhora_utils.get_house_planet_list_from_planet_positions(pp_rasi)
     cr = house._get_compound_relationships_of_planets(h_to_p)
     sb_fac = {
@@ -303,17 +293,20 @@ def calculate_shadbala_fixed(year, month, day, hour, minute, lat, lon, tz_offset
         2,
     ]  # Sun=0, Venus=5, Mercury=3, Moon=1, Saturn=6, Jupiter=4, Mars=2
 
-    # 获取日出时间
+    # Hora Bala depends on the actual local sunrise. A guessed clock time would
+    # silently corrupt Kaala Bala, so malformed or unavailable sunrise data is
+    # a calculation failure rather than a recoverable fallback.
     try:
         sunrise_data = drik.sunrise(jd, place)
-        if isinstance(sunrise_data, (list, tuple)):
-            sunrise_hour = (
-                sunrise_data[0] if isinstance(sunrise_data[0], (int, float)) else local_hour - 6
-            )
-        else:
-            sunrise_hour = local_hour - 6
-    except:
-        sunrise_hour = 6.0  # fallback
+    except Exception as exc:
+        raise RuntimeError("Shadbala Hora Bala requires a valid local sunrise") from exc
+    if (
+        not isinstance(sunrise_data, (list, tuple))
+        or not sunrise_data
+        or not isinstance(sunrise_data[0], (int, float))
+    ):
+        raise RuntimeError("Shadbala Hora Bala received malformed sunrise data")
+    sunrise_hour = float(sunrise_data[0])
 
     # 日出制星期 (WeekdayDefinitionKaala=1)
     # 如果出生在日出之前，算前一天的星期

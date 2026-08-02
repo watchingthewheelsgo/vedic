@@ -27,6 +27,8 @@ Birth Assertion
 - `backend/app/vedicdust/models.py` defines machine contracts.
 - `backend/app/vedicdust/resources/sources.json` is the source registry.
 - `backend/app/vedicdust/profiles.py` declares calculation profiles.
+- `independent-reference.md` defines external desktop-software certification.
+- `vedicdust-professional-review.schema.json` defines retained blind-review evidence.
 - Generated JSON Schemas live in `docs/vedicdust/schemas/`.
 
 The deterministic engine is authoritative for calculation and candidate
@@ -42,10 +44,12 @@ tasks.
 - `judgement_context.json`: backend-selected evidence bundles, active rules,
   varga eligibility, restricted evidence, and bounded Judgement Units for the
   active chart revision.
-- `claim_graph.json`: evidence-linked judgements for the active chart revision.
-- `consultation_dossier.json`: approved reading scope, section plan, timing
-  windows, and unresolved questions.
-- `agent_context.json`: compact retrieval context for later consultation.
+- `claim_graph.json`: backend-published, evidence-linked judgements for the active chart revision.
+- `consultation_dossier.json`: approved Claim arrangement, with identity, scope,
+  confidence, audience, section presentation, omission language, unresolved
+  questions, and timing windows materialized by the backend.
+- `agent_context.json`: compact retrieval context for later consultation, including
+  authoritative age, life-stage, reader-relationship, and birth-date framing.
 - `consultation_report.md`: deterministic user-facing rendering of the approved
   Dossier and Claim Graph.
 - `synastry_context.json`: deterministic D1 whole-sign overlays and directed

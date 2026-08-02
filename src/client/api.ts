@@ -11,6 +11,7 @@ import type {
   PlaceSearchLevel,
   PlaceSearchResponse,
   PrecisePlaceSearchResponse,
+  RectificationLifeEventsInput,
   SkillBirthInput,
   SkillFeedbackInput,
   SkillRunInput,
@@ -27,6 +28,17 @@ const AUTH_REQUIRED_MESSAGE = "Sign in to continue";
 let authTokenProvider: AuthTokenProvider | null = null;
 let anonymousIdProvider: AnonymousIdProvider | null = null;
 let authFailureHandler: AuthFailureHandler | null = null;
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: unknown
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 export function setAuthTokenProvider(provider: AuthTokenProvider | null) {
   authTokenProvider = provider;
@@ -83,14 +95,20 @@ async function notifyAuthFailure(status: number, detail: string) {
 async function throwApiError(response: Response): Promise<never> {
   const error = (await response.json().catch(() => null)) as {
     error?: string;
-    detail?: string;
+    detail?: unknown;
   } | null;
-  const detail = error?.detail ?? error?.error ?? `Request failed: ${response.status}`;
-  if (isAuthFailure(response.status, detail)) {
-    await notifyAuthFailure(response.status, detail);
+  const rawDetail = error?.detail ?? error?.error ?? `Request failed: ${response.status}`;
+  const message =
+    typeof rawDetail === "string"
+      ? rawDetail
+      : rawDetail && typeof rawDetail === "object" && "message" in rawDetail
+        ? String(rawDetail.message)
+        : `Request failed: ${response.status}`;
+  if (isAuthFailure(response.status, message)) {
+    await notifyAuthFailure(response.status, message);
     throw new Error(AUTH_EXPIRED_MESSAGE);
   }
-  throw new Error(detail);
+  throw new ApiError(message, response.status, rawDetail);
 }
 
 async function postJson<TResponse, TBody>(
@@ -176,6 +194,13 @@ export const api = {
   },
   createSkillSession(input: SkillBirthInput) {
     return postJson<SkillSessionResponse, SkillBirthInput>("/api/skill-sessions", input);
+  },
+  recordRectificationLifeEvents(input: RectificationLifeEventsInput) {
+    return postJson<SkillSessionResponse, RectificationLifeEventsInput>(
+      "/api/rectification-life-events",
+      input,
+      { requireAuth: true }
+    );
   },
   createBaziSession(input: BaziSessionInput) {
     return postJson<SkillSessionResponse, BaziSessionInput>("/api/bazi-sessions", input);

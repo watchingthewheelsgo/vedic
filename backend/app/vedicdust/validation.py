@@ -1,15 +1,33 @@
 from __future__ import annotations
 
 from .fact_catalog import fact_definition
+from .claims import bounded_claim_certainty, build_claim_graph
+from .confidence import effective_fact_confidence, effective_timing_confidence, minimum_confidence
+from .judgement import build_judgement_context
+from .presentation_policy import ACTIVE_PRESENTATION_POLICY
 from .models import (
     AgentContext,
     ChartRecord,
     ClaimGraph,
+    ConfidenceGrade,
     ConsultationDossier,
     JudgementContext,
     RuleCatalog,
 )
 from .rule_engine import evaluate_method_rule
+from .rectification_policy import (
+    RECTIFICATION_EVENT_MAPPING_ID,
+    RECTIFICATION_HOLDOUT_POLICY_ID,
+    RECTIFICATION_SCORING_POLICY_ID,
+    RECTIFICATION_SOURCE_IDS,
+)
+from .source_registry import load_validation_fixture_registry, validate_profile_source_ids
+from .sensitivity import (
+    TIMING_SENSITIVITY_DEPENDENCIES,
+    expected_fact_input_stability,
+    expected_timing_input_stability,
+    fact_sensitivity_dependencies,
+)
 
 
 def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) -> None:
@@ -17,10 +35,54 @@ def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) 
 
     rules_by_id = {rule.rule_id: rule for rule in catalog.rules if rule.status != "retired"}
     errors: list[str] = []
+    expected_rule_pack = f"vedicdust-rules-{catalog.catalog_version}"
+    if record.calculation_profile.rule_pack_version != expected_rule_pack:
+        errors.append("calculation profile rule pack does not match the active catalog")
+    try:
+        validate_profile_source_ids(record.calculation_profile.source_ids)
+    except ValueError as error:
+        errors.append(str(error))
     provenance_items = [
         *(fact.provenance for fact in record.facts),
         *(period.provenance for period in record.timing_periods),
     ]
+    for fact in record.facts:
+        if record.input_sensitivity is None:
+            continue
+        expected_dependencies = fact_sensitivity_dependencies(fact.fact_type, fact.subject_ref)
+        if fact.sensitivity_dependencies != expected_dependencies:
+            errors.append(f"sensitivity dependency drift for {fact.fact_id}")
+        if fact.input_stability != expected_fact_input_stability(
+            fact,
+            record.charts,
+            record.input_sensitivity,
+        ):
+            errors.append(f"input stability drift for {fact.fact_id}")
+    if record.input_sensitivity is not None and record.canonical_moment is not None:
+        for period in record.timing_periods:
+            if period.sensitivity_dependencies != TIMING_SENSITIVITY_DEPENDENCIES:
+                errors.append(f"timing sensitivity dependency drift for {period.period_id}")
+            expected_stability = expected_timing_input_stability(
+                record.input_sensitivity,
+                record.canonical_moment.resolution_confidence,
+            )
+            if period.input_stability != expected_stability:
+                errors.append(f"timing input stability drift for {period.period_id}")
+            timing_status = record.input_sensitivity.timing_boundary_scan_status
+            expected_sample_count = record.input_sensitivity.timing_boundary_sample_count
+            for label, boundary in (
+                ("start", period.start_boundary),
+                ("end", period.end_boundary),
+            ):
+                if timing_status == "complete" and (
+                    boundary.coverage != "reported_window_endpoints"
+                    or boundary.sampled_hypotheses != expected_sample_count
+                ):
+                    errors.append(f"timing {label} boundary coverage drift for {period.period_id}")
+                if timing_status == "not_run" and boundary.coverage != "canonical_only":
+                    errors.append(
+                        f"timing {label} boundary must be canonical-only for {period.period_id}"
+                    )
     for provenance in provenance_items:
         rule = rules_by_id.get(provenance.rule_id)
         if rule is None:
@@ -34,6 +96,62 @@ def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) 
             errors.append(f"evidence class drift for {provenance.rule_id}")
         if provenance.source_ids != rule.source_ids:
             errors.append(f"source drift for {provenance.rule_id}")
+        if rule.status == "draft":
+            errors.append(f"draft rule {provenance.rule_id} cannot emit runtime evidence")
+        if rule.status == "provisional" and provenance.confidence not in {
+            ConfidenceGrade.UNAVAILABLE,
+            ConfidenceGrade.DISPUTED,
+            ConfidenceGrade.PROVISIONAL,
+        }:
+            errors.append(f"provisional rule {provenance.rule_id} overstates evidence confidence")
+    if record.rectification is not None:
+        fixture_registry = load_validation_fixture_registry()
+        for fixture_id in record.rectification.professional_review_fixture_ids:
+            fixture = fixture_registry.get(fixture_id)
+            if fixture is None:
+                errors.append(f"unknown rectification professional review fixture {fixture_id}")
+            elif fixture.fixture_kind != "professional_review":
+                errors.append(
+                    f"rectification fixture {fixture_id} is not a professional review fixture"
+                )
+        for candidate in record.rectification.candidates:
+            for score in candidate.evidence_scores:
+                unknown_rules = sorted(set(score.rule_ids) - set(rules_by_id))
+                if unknown_rules:
+                    errors.append("unknown rectification rule " + ", ".join(unknown_rules))
+                for rule_id in score.rule_ids:
+                    rule = rules_by_id.get(rule_id)
+                    if rule is None:
+                        continue
+                    if record.calculation_profile.profile_id not in rule.method_profile_ids:
+                        errors.append(f"rectification method profile mismatch for rule {rule_id}")
+                    if rule.topic != "rectification":
+                        errors.append(f"non-rectification rule {rule_id} used for event scoring")
+                expected_sources = sorted(
+                    {
+                        source_id
+                        for rule_id in score.rule_ids
+                        if (rule := rules_by_id.get(rule_id)) is not None
+                        for source_id in rule.source_ids
+                    }
+                )
+                if sorted(score.source_ids) != expected_sources:
+                    errors.append(f"rectification source drift for event {score.event_id}")
+                if sorted(score.source_ids) != sorted(RECTIFICATION_SOURCE_IDS):
+                    errors.append(f"rectification policy source drift for event {score.event_id}")
+                if score.scoring_policy_id != RECTIFICATION_SCORING_POLICY_ID:
+                    errors.append(f"rectification scoring policy drift for event {score.event_id}")
+                if score.event_mapping_id != RECTIFICATION_EVENT_MAPPING_ID:
+                    errors.append(f"rectification event mapping drift for event {score.event_id}")
+        if len(record.rectification.life_events) >= 3:
+            holdout_count = sum(
+                1 for event in record.rectification.life_events if event.role == "holdout"
+            )
+            if holdout_count != 1:
+                errors.append(
+                    "rectification evidence must retain exactly one holdout event under "
+                    f"{RECTIFICATION_HOLDOUT_POLICY_ID}"
+                )
     if errors:
         raise ValueError("; ".join(sorted(set(errors))))
 
@@ -47,6 +165,8 @@ def validate_claim_graph(
     """Validate cross-artifact references at the judgement seam."""
 
     errors: list[str] = []
+    if record.status not in {"ready_for_judgement", "rectified"}:
+        errors.append(f"chart record status {record.status} cannot publish claims")
     if graph.chart_record_id != record.chart_record_id:
         errors.append("claim graph chart record id does not match the active chart record")
     if graph.chart_revision != record.revision:
@@ -70,11 +190,20 @@ def validate_claim_graph(
     context_topics = {topic.topic_id: topic for topic in context.topics} if context else {}
     context_units = {unit.unit_id: unit for unit in context.units} if context else {}
     released_claims = [claim for claim in graph.claims if claim.status != "withheld"]
-    if context is not None and len(released_claims) < 5:
-        errors.append("claim graph requires at least five released synthesis claims")
+    if context is not None:
+        required_claim_count = min(
+            context.presentation_policy.minimum_structural_coverage,
+            len(context.units),
+        )
+        if len(released_claims) < required_claim_count:
+            errors.append(
+                "claim graph requires at least "
+                f"{required_claim_count} released synthesis claims for the available context"
+            )
     if any(check.status == "failed" for check in graph.quality_checks):
         errors.append("claim graph contains failed quality checks")
     for claim in graph.claims:
+        conclusion = None
         unit = context_units.get(claim.judgement_unit_id) if context is not None else None
         if context is not None and unit is None:
             errors.append(
@@ -82,16 +211,70 @@ def validate_claim_graph(
                 f"{claim.judgement_unit_id}"
             )
         elif unit is not None:
+            conclusions_by_id = {
+                conclusion.conclusion_id: conclusion for conclusion in unit.conclusions
+            }
+            conclusion = conclusions_by_id.get(claim.conclusion_id)
             if claim.topic != unit.topic_id:
                 errors.append(
                     f"claim {claim.claim_id} topic {claim.topic} does not match "
                     f"judgement unit {unit.topic_id}"
+                )
+            if conclusion is None:
+                errors.append(
+                    f"claim {claim.claim_id} references unknown conclusion {claim.conclusion_id}"
+                )
+            elif claim.judgement_code != conclusion.conclusion_code:
+                errors.append(
+                    f"claim {claim.claim_id} changes conclusion code {conclusion.conclusion_code}"
                 )
             if claim.judgement_code not in unit.allowed_output_codes:
                 errors.append(
                     f"claim {claim.claim_id} uses output code {claim.judgement_code} "
                     f"outside judgement unit"
                 )
+            if conclusion is not None:
+                semantic_drift = {
+                    "title": claim.title != conclusion.title,
+                    "scope": claim.scope != conclusion.scope,
+                    "plain statement": claim.plain_statement != conclusion.plain_statement,
+                    "technical statement": (
+                        claim.technical_statement != conclusion.technical_statement
+                    ),
+                    "real-world expressions": (
+                        claim.real_world_expressions != conclusion.real_world_expressions
+                    ),
+                    "conditions": claim.conditions != conclusion.conditions,
+                    "user relevance": claim.user_relevance != conclusion.user_relevance,
+                    "supporting facts": (
+                        set(claim.supporting_fact_ids) != set(conclusion.supporting_fact_ids)
+                    ),
+                    "context facts": (
+                        set(claim.context_fact_ids) != set(conclusion.context_fact_ids)
+                    ),
+                    "counter facts": (
+                        set(claim.counter_fact_ids) != set(conclusion.counter_fact_ids)
+                    ),
+                    "counter statements": (
+                        claim.counter_statements != conclusion.counter_statements
+                    ),
+                    "timing facts": (set(claim.timing_fact_ids) != set(conclusion.timing_fact_ids)),
+                    "timing periods": (
+                        set(claim.timing_period_ids) != set(conclusion.timing_period_ids)
+                    ),
+                    "rules": set(claim.rule_ids) != set(conclusion.rule_ids),
+                    "time scope": claim.time_scope != conclusion.time_scope,
+                    "practical implications": (
+                        claim.practical_implications != conclusion.practical_implications
+                    ),
+                    "limitations": set(claim.limitations) != set(conclusion.limitations),
+                }
+                changed_fields = [label for label, changed in semantic_drift.items() if changed]
+                if changed_fields:
+                    errors.append(
+                        f"claim {claim.claim_id} rewrites backend conclusion fields: "
+                        + ", ".join(changed_fields)
+                    )
             if claim.scope not in unit.allowed_scopes:
                 errors.append(
                     f"claim {claim.claim_id} uses scope {claim.scope} outside judgement unit"
@@ -110,7 +293,8 @@ def validate_claim_graph(
                 unit.natal_fact_ids + unit.capacity_fact_ids + unit.varga_fact_ids
             )
             invalid_domain_facts = sorted(
-                set(claim.supporting_fact_ids + claim.counter_fact_ids) - allowed_domain_facts
+                set(claim.supporting_fact_ids + claim.context_fact_ids + claim.counter_fact_ids)
+                - allowed_domain_facts
             )
             if invalid_domain_facts:
                 errors.append(
@@ -130,10 +314,12 @@ def validate_claim_graph(
                     + ", ".join(invalid_periods)
                 )
             certainty_rank = {"withheld": -1, "low": 0, "moderate": 1, "high": 2}
-            if certainty_rank[claim.certainty] > certainty_rank[unit.certainty_cap]:
+            certainty_cap = (
+                conclusion.certainty_cap if conclusion is not None else unit.certainty_cap
+            )
+            if certainty_rank[claim.certainty] > certainty_rank[certainty_cap]:
                 errors.append(
-                    f"claim {claim.claim_id} exceeds judgement unit certainty cap "
-                    f"{unit.certainty_cap}"
+                    f"claim {claim.claim_id} exceeds judgement unit certainty cap {certainty_cap}"
                 )
             missing_limitations = sorted(set(unit.limitations) - set(claim.limitations))
             if claim.status != "withheld" and missing_limitations:
@@ -144,10 +330,34 @@ def validate_claim_graph(
         referenced_facts = [
             facts_by_id[fact_id]
             for fact_id in claim.supporting_fact_ids
+            + claim.context_fact_ids
             + claim.counter_fact_ids
             + claim.timing_fact_ids
             if fact_id in facts_by_id
         ]
+        referenced_periods = [
+            timing_periods_by_id[period_id]
+            for period_id in claim.timing_period_ids
+            if period_id in timing_periods_by_id
+        ]
+        expected_evidence_confidence = minimum_confidence(
+            *(effective_fact_confidence(fact) for fact in referenced_facts),
+            *(effective_timing_confidence(period) for period in referenced_periods),
+        )
+        if claim.evidence_confidence != expected_evidence_confidence:
+            errors.append(
+                f"claim {claim.claim_id} evidence confidence does not match its referenced evidence"
+            )
+        if context is not None and unit is not None and conclusion is not None:
+            expected_certainty = bounded_claim_certainty(
+                record,
+                conclusion.certainty_cap,
+                evidence_confidence=expected_evidence_confidence,
+            )
+            if claim.certainty != "withheld" and claim.certainty != expected_certainty:
+                errors.append(
+                    f"claim {claim.claim_id} certainty does not match its evidence and input caps"
+                )
         evidence_layers = {
             fact_definition(fact.fact_type).evidence_layer for fact in referenced_facts
         }
@@ -157,7 +367,12 @@ def validate_claim_graph(
         judgement_rules = [rule for rule in claim_rules if rule.rule_kind == "judgement"]
         if not judgement_rules:
             errors.append(f"claim {claim.claim_id} requires at least one judgement rule")
-        for fact_id in claim.supporting_fact_ids + claim.counter_fact_ids + claim.timing_fact_ids:
+        for fact_id in (
+            claim.supporting_fact_ids
+            + claim.context_fact_ids
+            + claim.counter_fact_ids
+            + claim.timing_fact_ids
+        ):
             if fact_id not in facts_by_id:
                 errors.append(f"claim {claim.claim_id} references unknown fact {fact_id}")
         for rule_id in claim.rule_ids:
@@ -184,13 +399,25 @@ def validate_claim_graph(
                 errors.append(
                     f"claim {claim.claim_id} references unknown timing period {period_id}"
                 )
-        if set(claim.supporting_fact_ids) & set(claim.counter_fact_ids):
-            errors.append(
-                f"claim {claim.claim_id} uses the same fact as support and counter-evidence"
-            )
+        evidence_sets = (
+            set(claim.supporting_fact_ids),
+            set(claim.context_fact_ids),
+            set(claim.counter_fact_ids),
+        )
+        if any(
+            left & right
+            for index, left in enumerate(evidence_sets)
+            for right in evidence_sets[index + 1 :]
+        ):
+            errors.append(f"claim {claim.claim_id} assigns more than one role to one fact")
         if context is not None:
-            if set(claim.supporting_fact_ids) & set(context.restricted_fact_ids):
-                errors.append(f"claim {claim.claim_id} uses restricted facts as support")
+            if set(
+                claim.supporting_fact_ids
+                + claim.context_fact_ids
+                + claim.counter_fact_ids
+                + claim.timing_fact_ids
+            ) & set(context.restricted_fact_ids):
+                errors.append(f"claim {claim.claim_id} uses restricted facts as evidence")
             if set(claim.timing_period_ids) & set(context.restricted_timing_period_ids):
                 errors.append(f"claim {claim.claim_id} uses restricted timing periods")
             topic = context_topics.get(claim.topic)
@@ -211,7 +438,12 @@ def validate_claim_graph(
                     + topic.timing_fact_ids
                 )
                 invalid_facts = sorted(
-                    set(claim.supporting_fact_ids + claim.counter_fact_ids + claim.timing_fact_ids)
+                    set(
+                        claim.supporting_fact_ids
+                        + claim.context_fact_ids
+                        + claim.counter_fact_ids
+                        + claim.timing_fact_ids
+                    )
                     - permitted_facts
                 )
                 if invalid_facts:
@@ -227,15 +459,15 @@ def validate_claim_graph(
                         f"claim {claim.claim_id} uses timing periods outside topic "
                         f"{claim.topic}: " + ", ".join(invalid_periods)
                     )
-        supporting_vargas = {
+        evidence_vargas = {
             facts_by_id[fact_id].subject_ref.split(".", 1)[0]
-            for fact_id in claim.supporting_fact_ids
+            for fact_id in claim.supporting_fact_ids + claim.context_fact_ids
             if fact_id in facts_by_id
             and fact_definition(facts_by_id[fact_id].fact_type).evidence_layer
             == "varga_confirmation"
         }
-        if "D60" in supporting_vargas and "D60" not in eligible_vargas:
-            errors.append(f"claim {claim.claim_id} uses ineligible D60 as supporting evidence")
+        if "D60" in evidence_vargas and "D60" not in eligible_vargas:
+            errors.append(f"claim {claim.claim_id} uses ineligible D60 as evidence")
         if claim.scope == "timing" and "judge.timing.vimshottari-activation" not in claim.rule_ids:
             errors.append(
                 f"timing claim {claim.claim_id} requires judge.timing.vimshottari-activation"
@@ -257,7 +489,7 @@ def validate_claim_graph(
             "保证发生",
             "必ず起こる",
         }
-        if any(term in user_facing_text for term in prohibited):
+        if any(_contains_assertive_phrase(user_facing_text, term) for term in prohibited):
             errors.append(f"claim {claim.claim_id} uses prohibited certainty language")
         if claim.topic == "health" and any(
             term in user_facing_text
@@ -270,8 +502,45 @@ def validate_claim_graph(
         ):
             errors.append(f"finance claim {claim.claim_id} promises an outcome")
 
+    if context is not None and record.status in {"ready_for_judgement", "rectified"}:
+        expected_graph = build_claim_graph(record, context, generated_at=graph.generated_at)
+        if [claim.model_dump() for claim in graph.claims] != [
+            claim.model_dump() for claim in expected_graph.claims
+        ]:
+            errors.append("claim graph selection or ordering drifted from presentation policy")
+        if graph.omitted_topics != expected_graph.omitted_topics:
+            errors.append("claim graph omitted-topic accounting drifted")
+        if [check.model_dump() for check in graph.quality_checks] != [
+            check.model_dump() for check in expected_graph.quality_checks
+        ]:
+            errors.append("claim graph quality checks drifted")
+
     if errors:
         raise ValueError("; ".join(errors))
+
+
+def _contains_assertive_phrase(text: str, phrase: str) -> bool:
+    """Ignore a prohibited phrase when it is explicitly negated in nearby text."""
+
+    start = 0
+    negations = (
+        "not ",
+        "never ",
+        "cannot ",
+        "does not ",
+        "不",
+        "并非",
+        "不能",
+        "不是",
+        "ない",
+        "ません",
+    )
+    while (index := text.find(phrase, start)) >= 0:
+        prefix = text[max(0, index - 18) : index]
+        if not any(negation in prefix for negation in negations):
+            return True
+        start = index + len(phrase)
+    return False
 
 
 def validate_judgement_context(
@@ -290,6 +559,8 @@ def validate_judgement_context(
         errors.append("judgement context method profile does not match")
     if context.rule_pack_version != f"vedicdust-rules-{catalog.catalog_version}":
         errors.append("judgement context rule pack version does not match the active catalog")
+    if context.presentation_policy != ACTIVE_PRESENTATION_POLICY:
+        errors.append("judgement context presentation policy does not match the active policy")
 
     fact_ids = {fact.fact_id for fact in record.facts}
     period_ids = {period.period_id for period in record.timing_periods}
@@ -298,6 +569,13 @@ def validate_judgement_context(
         for rule in catalog.rules
         if rule.status != "retired"
         and record.calculation_profile.profile_id in rule.method_profile_ids
+    }
+    directional_judgement_rule_ids = {
+        rule.rule_id
+        for rule in catalog_rules.values()
+        if rule.rule_kind == "judgement"
+        and rule.status == "validated"
+        and rule.judgement_use == "directional"
     }
     for rule in context.rules:
         source = catalog_rules.get(rule.rule_id)
@@ -311,6 +589,7 @@ def validate_judgement_context(
             or rule.source_ids != source.source_ids
             or rule.required_evidence_layers != source.required_evidence_layers
             or rule.status != source.status
+            or rule.judgement_use != source.judgement_use
             or rule.limitations != source.limitations
         ):
             errors.append(f"judgement context rule drift for {rule.rule_id}")
@@ -319,7 +598,14 @@ def validate_judgement_context(
         if rule.evaluation_status == "ineligible" and not rule.failed_predicates:
             errors.append(f"ineligible rule {rule.rule_id} lacks a failed predicate")
         if source is not None:
-            expected_evaluation = evaluate_method_rule(source, record)
+            expected_evaluation = evaluate_method_rule(
+                source,
+                record,
+                restricted_fact_ids=set(context.restricted_fact_ids),
+                excluded_evidence_layers=(
+                    {"timing"} if context.restricted_timing_period_ids else set()
+                ),
+            )
             if (
                 rule.evaluation_status != expected_evaluation["evaluationStatus"]
                 or rule.matched_fact_ids != expected_evaluation["matchedFactIds"]
@@ -372,6 +658,61 @@ def validate_judgement_context(
             context_rule = next((item for item in context.rules if item.rule_id == rule_id), None)
             if rule is None or context_rule is None or context_rule.evaluation_status != "eligible":
                 errors.append(f"judgement unit {unit.unit_id} permits an ineligible rule {rule_id}")
+        for finding in unit.findings:
+            if (
+                finding.polarity != "context"
+                and finding.rule_id not in directional_judgement_rule_ids
+            ):
+                errors.append(
+                    f"judgement unit {unit.unit_id} releases direction from "
+                    f"non-directional rule {finding.rule_id}"
+                )
+        findings_by_id = {finding.finding_id: finding for finding in unit.findings}
+        for conclusion in unit.conclusions:
+            if conclusion.direction == "descriptive":
+                continue
+            directional_findings = [
+                findings_by_id[finding_id]
+                for finding_id in conclusion.finding_ids
+                if finding_id in findings_by_id and findings_by_id[finding_id].polarity != "context"
+            ]
+            if not directional_findings:
+                errors.append(
+                    f"judgement conclusion {conclusion.conclusion_id} has direction without "
+                    "directional findings"
+                )
+            invalid_directional_rules = sorted(
+                {
+                    finding.rule_id
+                    for finding in directional_findings
+                    if finding.rule_id not in directional_judgement_rule_ids
+                }
+            )
+            if invalid_directional_rules:
+                errors.append(
+                    f"judgement conclusion {conclusion.conclusion_id} uses non-directional rules: "
+                    + ", ".join(invalid_directional_rules)
+                )
+    expected_context = build_judgement_context(
+        record,
+        catalog,
+        restricted_fact_ids=set(context.restricted_fact_ids),
+        restrict_timing=bool(context.restricted_timing_period_ids),
+        requested_topics=context.requested_topics,
+        now=context.generated_at,
+    )
+    if [unit.model_dump() for unit in context.units] != [
+        unit.model_dump() for unit in expected_context.units
+    ]:
+        errors.append("judgement context deterministic findings or conclusions drifted")
+    if [topic.model_dump() for topic in context.topics] != [
+        topic.model_dump() for topic in expected_context.topics
+    ]:
+        errors.append("judgement context topic selection drifted")
+    if [check.model_dump() for check in context.quality_checks] != [
+        check.model_dump() for check in expected_context.quality_checks
+    ]:
+        errors.append("judgement context quality checks drifted")
     if set(context.restricted_fact_ids) - fact_ids:
         errors.append("judgement context contains unknown restricted facts")
     if set(context.restricted_timing_period_ids) - period_ids:
@@ -385,6 +726,7 @@ def validate_consultation_dossier(
     record: ChartRecord,
     graph: ClaimGraph,
     dossier: ConsultationDossier,
+    context: JudgementContext | None = None,
 ) -> None:
     """Validate that the released consultation is only an arrangement of approved claims."""
 
@@ -397,6 +739,42 @@ def validate_consultation_dossier(
         errors.append("consultation dossier method profile does not match the active chart record")
     if dossier.claim_graph_version != graph.schema_version:
         errors.append("consultation dossier claim graph version does not match")
+    if context is not None:
+        from .reporting import materialize_consultation_dossier
+
+        expected = materialize_consultation_dossier(record, graph, context, dossier)
+        if dossier.dossier_id != expected.dossier_id:
+            errors.append("consultation dossier id drifted from backend projection")
+        if dossier.generated_at != expected.generated_at:
+            errors.append("consultation dossier generated time is not backend-owned")
+        if dossier.locale != expected.locale or dossier.audience != expected.audience:
+            errors.append("consultation dossier audience or locale drifted from the Chart Record")
+        if dossier.scope != expected.scope:
+            errors.append(
+                "consultation dossier scope drifted from backend-owned consultation scope"
+            )
+        if dossier.confidence != expected.confidence:
+            errors.append("consultation dossier confidence drifted from backend-owned confidence")
+        if dossier.timing_windows != expected.timing_windows:
+            errors.append("consultation dossier timing windows drifted from approved timing Claims")
+        if dossier.release_status != expected.release_status:
+            errors.append("consultation dossier release status drifted from backend decision")
+        if dossier.quality_checks != expected.quality_checks:
+            errors.append("consultation dossier quality checks drifted from backend decision")
+        if dossier.sections != expected.sections:
+            errors.append("consultation dossier section presentation drifted from backend layout")
+        if dossier.omitted_claim_ids != expected.omitted_claim_ids:
+            errors.append("consultation dossier omission reasons drifted from backend language")
+        if dossier.unresolved_questions != expected.unresolved_questions:
+            errors.append("consultation dossier unresolved questions drifted from backend evidence")
+        expected_window_ids = {
+            section.section_id: section.timing_window_ids for section in expected.sections
+        }
+        if any(
+            section.timing_window_ids != expected_window_ids.get(section.section_id, [])
+            for section in dossier.sections
+        ):
+            errors.append("consultation section timing-window assignments drifted")
 
     claims_by_id = {claim.claim_id: claim for claim in graph.claims}
     facts_by_id = {fact.fact_id: fact for fact in record.facts}
@@ -419,6 +797,16 @@ def validate_consultation_dossier(
                 errors.append(f"section {section.section_id} references unknown claim {claim_id}")
             elif claims_by_id[claim_id].status == "withheld":
                 errors.append(f"section {section.section_id} includes withheld claim {claim_id}")
+            elif (
+                section.section_kind == "timing_outlook"
+                and claims_by_id[claim_id].scope != "timing"
+            ):
+                errors.append(f"timing outlook contains non-timing claim {claim_id}")
+            elif (
+                section.section_kind != "timing_outlook"
+                and claims_by_id[claim_id].scope == "timing"
+            ):
+                errors.append(f"timing claim {claim_id} is assigned outside timing outlook")
         for window_id in section.timing_window_ids:
             if window_id not in timing_windows_by_id:
                 errors.append(
@@ -553,12 +941,22 @@ def validate_agent_context(
     """Validate the compact future-Q&A context against its source artifacts."""
 
     errors: list[str] = []
+    if dossier.release_status != "approved" or any(
+        check.status != "passed" for check in dossier.quality_checks
+    ):
+        errors.append("agent context cannot be validated against an unapproved dossier")
     if context.dossier_id != dossier.dossier_id:
         errors.append("agent context dossier id does not match")
     if context.chart_record_id != record.chart_record_id:
         errors.append("agent context chart record id does not match")
     if context.chart_revision != record.revision:
         errors.append("agent context chart revision does not match")
+    if context.locale != dossier.locale:
+        errors.append("agent context locale does not match the consultation dossier")
+    if context.subject != record.subject:
+        errors.append("agent context subject framing does not match the Chart Record")
+    if context.reported_birth_date != record.birth_assertion.local_date:
+        errors.append("agent context reported birth date does not match the Chart Record")
 
     facts_by_id = {fact.fact_id for fact in record.facts}
     claims_by_id = {claim.claim_id: claim for claim in graph.claims}
@@ -581,7 +979,9 @@ def validate_agent_context(
             or fact.subject_ref != source.subject_ref
             or fact.value != source.value
             or fact.unit != source.unit
-            or fact.confidence != source.provenance.confidence
+            or fact.confidence != effective_fact_confidence(source)
+            or fact.calculation_confidence != source.provenance.confidence
+            or fact.input_stability != source.input_stability
         ):
             errors.append(f"agent context fact drift for {fact.fact_id}")
     for claim in context.approved_claims:
@@ -591,11 +991,18 @@ def validate_agent_context(
         elif source.status == "withheld":
             errors.append(f"agent context exposes withheld claim {claim.claim_id}")
         elif (
-            claim.supporting_fact_ids != source.supporting_fact_ids
+            claim.topic != source.topic
+            or claim.statement != source.plain_statement
+            or claim.user_relevance != source.user_relevance
+            or claim.certainty != source.certainty
+            or claim.supporting_fact_ids != source.supporting_fact_ids
+            or claim.context_fact_ids != source.context_fact_ids
             or claim.counter_fact_ids != source.counter_fact_ids
+            or claim.counter_statements != source.counter_statements
             or claim.rule_ids != source.rule_ids
             or claim.conditions != source.conditions
             or claim.practical_implications != source.practical_implications
+            or claim.limitations != source.limitations
             or claim.time_scope != source.time_scope
         ):
             errors.append(f"agent context claim drift for {claim.claim_id}")
@@ -605,6 +1012,13 @@ def validate_agent_context(
                     f"agent context claim {claim.claim_id} references unknown timing window "
                     f"{window_id}"
                 )
+
+    from .reporting import build_agent_context
+
+    if not errors:
+        expected = build_agent_context(record, graph, dossier)
+        if context.model_dump() != expected.model_dump():
+            errors.append("agent context deterministic projection drifted")
 
     if errors:
         raise ValueError("; ".join(errors))

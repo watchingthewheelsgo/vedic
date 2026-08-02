@@ -3,10 +3,18 @@ from __future__ import annotations
 import copy
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
-from app.schemas import BirthInput
+from app.schemas import BirthInput, ReaderRelationship
 from app.services.life_event_rectification import build_life_event_focus
+from app.vedicdust.rectification_policy import (
+    RECTIFICATION_EVENT_MAPPING_ID,
+    RECTIFICATION_HOLDOUT_POLICY_ID,
+    RECTIFICATION_METHOD_MATURITY,
+    RECTIFICATION_SCORING_POLICY,
+    RECTIFICATION_SOURCE_IDS,
+    RECTIFICATION_VALIDATION_STATUS,
+)
 
 
 class ChartRectificationService:
@@ -37,20 +45,55 @@ class ChartRectificationService:
             "rectificationAxes",
             ["time", "place"] if place_rectification_allowed else ["time"],
         )
-        life_event_ledger = birth_input_context.get("lifeEvents")
+        raw_life_event_ledger = birth_input_context.get("lifeEvents")
+        life_event_ledger_supplied = isinstance(raw_life_event_ledger, dict)
+        life_event_ledger = raw_life_event_ledger
         if not isinstance(life_event_ledger, dict):
             life_event_ledger = {}
 
-        scored_candidates = self._scoreless_candidates(candidates)
+        scored_candidates = self._normalized_candidates(candidates)
+        scan_errors = copy.deepcopy(scan_summary.get("scanErrors") or [])
+        candidate_scoring_errors = copy.deepcopy(scan_summary.get("candidateScoringErrors") or [])
 
-        if mode == "rectification_required" and len(candidates) > 1:
-            status = "candidate_feedback_pending"
-            gate_reason = "Chart-changing candidates must be confirmed by prevalidation feedback."
+        if scan_errors:
+            status = "input_resolution_required"
+            gate_reason = (
+                "Part of the reported search window could not be resolved as a valid civil "
+                "time or place. Narrow the input or resolve the timezone ambiguity first."
+            )
+            full_report_allowed = False
+        elif candidate_scoring_errors:
+            status = "calculation_failed"
+            gate_reason = (
+                "One or more candidate charts could not be scored consistently. Retry the "
+                "deterministic calculation before asking rectification questions."
+            )
+            full_report_allowed = False
+        elif mode == "rectification_required" and (
+            not life_event_ledger_supplied
+            or life_event_ledger.get("eventCollectionRequired") is True
+        ):
+            status = "collecting_evidence"
+            gate_reason = (
+                "Dated life events are required before chart candidates can be compared. "
+                "Generic traits cannot select a birth time."
+            )
+            full_report_allowed = False
+        elif mode == "rectification_required" and len(candidates) > 1:
+            status = "comparing_candidates"
+            gate_reason = (
+                "Chart-changing candidates require deterministic calibration ranking and a "
+                "reserved-event check. Reader testimony cannot select a candidate."
+            )
             full_report_allowed = False
         elif mode == "rectification_required":
-            status = "needs_boundary_scan"
-            gate_reason = "High-risk input needs a deeper boundary scan before full synthesis."
-            full_report_allowed = False
+            status = "not_required"
+            gate_reason = (
+                "The bounded sensitivity scan found one stable chart fingerprint across the "
+                "reported time and place window. The exact birth moment remains uncertain, so "
+                "the report must retain that interval and use only scan-stable evidence."
+            )
+            full_report_allowed = True
         else:
             status = "not_required"
             gate_reason = "Sensitivity scan does not require candidate rectification."
@@ -59,7 +102,6 @@ class ChartRectificationService:
         state = {
             "schemaVersion": self.schema_version,
             "revision": 0,
-            "rectificationRound": 0,
             "generatedAt": self._now(),
             "updatedAt": self._now(),
             "status": status,
@@ -69,13 +111,23 @@ class ChartRectificationService:
             "activeCandidateId": base_candidate_id,
             "selectedCandidateId": None,
             "selectionConfidence": "none",
-            "candidateBoundAnchorCount": 0,
-            "feedbackAnchorCount": 0,
+            "selectionPolicyId": RECTIFICATION_SCORING_POLICY.policy_id,
+            "eventMappingId": RECTIFICATION_EVENT_MAPPING_ID,
+            "holdoutPolicyId": RECTIFICATION_HOLDOUT_POLICY_ID,
+            "methodMaturity": RECTIFICATION_METHOD_MATURITY,
+            "validationStatus": RECTIFICATION_VALIDATION_STATUS,
+            "sourceIds": list(RECTIFICATION_SOURCE_IDS),
             "reportGate": {
                 "fullReportAllowed": full_report_allowed,
                 "reason": gate_reason,
-                "nextStep": "prevalidation"
-                if status == "candidate_feedback_pending"
+                "nextStep": "evaluate_calibration_events"
+                if status == "comparing_candidates"
+                else "resolve_civil_time_or_place_input"
+                if status == "input_resolution_required"
+                else "retry_deterministic_calculation"
+                if status == "calculation_failed"
+                else "collect_dated_life_events"
+                if status == "collecting_evidence"
                 else "standard_prevalidation",
             },
             "searchBounds": {
@@ -102,9 +154,8 @@ class ChartRectificationService:
                 if isinstance(scan_summary.get("advancedVargaPolicy"), dict)
                 else {}
             ),
-            "feedbackAnchors": [],
-            "roundHistory": [],
-            "anchorContractErrors": [],
+            "scanErrors": scan_errors,
+            "candidateScoringErrors": candidate_scoring_errors,
             "activeChartRevision": {
                 "revision": 0,
                 "source": "initial_input",
@@ -129,123 +180,290 @@ class ChartRectificationService:
             },
         }
         state["rectificationPlan"] = self._build_rectification_plan(state)
+        if state["status"] == "comparing_candidates":
+            state = self._apply_initial_deterministic_event_decision(state)
         return state
 
-    def update_from_feedback(
+    def _apply_initial_deterministic_event_decision(
         self,
         state: dict[str, Any],
-        prevalidation_markdown: str,
-        feedback_markdown: str,
-        prevalidation_result: dict[str, Any],
     ) -> dict[str, Any]:
+        """Select only from calibration scores, then evaluate the blind holdout.
+
+        The user's confirmation of an event they already submitted is not new
+        evidence and therefore cannot alter candidate ranking.
+        """
+
         next_state = copy.deepcopy(state)
-        anchors = self._parse_candidate_anchors(prevalidation_markdown, feedback_markdown)
         candidates = self._candidate_score_state(next_state.get("candidates"))
-        by_id = {str(candidate.get("candidateId")): candidate for candidate in candidates}
-        contract_errors = self.validate_prevalidation_contract(next_state, prevalidation_markdown)
-
-        candidate_bound_count = 0
-        next_round = int(next_state.get("rectificationRound") or 0) + 1
-        for anchor in anchors:
-            answer = str(anchor.get("answer") or "pending")
-            weight = self._answer_weight(answer)
-            candidate_ids = [
-                candidate_id
-                for candidate_id in anchor.get("candidateIds", [])
-                if candidate_id in by_id
-            ]
-            if candidate_ids:
-                candidate_bound_count += 1
-            for candidate_id in candidate_ids:
-                candidate = by_id[candidate_id]
-                candidate["score"] = round(float(candidate.get("score") or 0) + weight, 3)
-                if weight > 0:
-                    candidate["support"] = int(candidate.get("support") or 0) + 1
-                elif weight < 0:
-                    candidate["reject"] = int(candidate.get("reject") or 0) + 1
-            anchor["round"] = next_round
-
-        if contract_errors:
-            selected = None
-            status, confidence, gate = self._candidate_contract_error_state(contract_errors)
-        else:
-            selected = self._select_candidate(candidates)
-            status, confidence, gate = self._state_from_selection(
-                next_state,
-                selected,
-                candidate_bound_count,
-            )
-        holdout_result = self._holdout_result(selected, candidates)
-        if selected is not None and holdout_result == "failed":
-            status = "needs_more_feedback"
-            confidence = "none"
-            gate = {
-                "fullReportAllowed": False,
-                "reason": "The selected candidate did not lead the reserved life-event check.",
-                "nextStep": "ask_holdout_discriminator",
-            }
-        round_history = self._round_history(next_state)
-        round_history.append(
-            {
-                "round": next_round,
-                "status": status,
-                "selectedCandidateId": selected.get("candidateId") if selected else None,
-                "candidateBoundAnchorCount": candidate_bound_count,
-                "feedbackAnchorCount": len(anchors),
-                "anchorContractErrors": contract_errors,
-                "candidateScores": [
-                    {
-                        "candidateId": candidate.get("candidateId"),
-                        "score": candidate.get("score"),
-                        "support": candidate.get("support"),
-                        "reject": candidate.get("reject"),
-                    }
-                    for candidate in candidates
-                ],
-            }
+        selection_blockers = self._deterministic_selection_blockers(next_state, candidates)
+        selected = (
+            None if selection_blockers else self._select_deterministic_event_candidate(candidates)
         )
-        feedback_anchors = self._feedback_anchors(next_state)
-        feedback_anchors.extend(anchors)
+        next_state["selectionEvidence"] = self._selection_evidence_summary(
+            next_state,
+            selection_blockers=selection_blockers,
+        )
+        if selected is None:
+            next_state.update(
+                {
+                    "status": "underdetermined",
+                    "selectedCandidateId": None,
+                    "provisionalCandidateId": None,
+                    "selectionConfidence": "none",
+                    "holdoutResult": "not_run",
+                    "candidates": candidates,
+                    "reportGate": {
+                        "fullReportAllowed": False,
+                        "reason": (
+                            "Calibration evidence is not independently broad enough or does not "
+                            "separate the bounded chart candidates with the minimum deterministic "
+                            "margin. Reconfirm the source time or provide additional dated events "
+                            "from distinct life domains."
+                        ),
+                        "nextStep": "provide_more_precise_or_additional_event_evidence",
+                    },
+                }
+            )
+            next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
+            return next_state
 
+        equivalent_ids = self._equivalent_candidate_ids(selected, candidates)
+        holdout_result = self._holdout_result(
+            selected,
+            candidates,
+            selected_candidate_ids=equivalent_ids,
+        )
         next_state.update(
             {
-                "revision": int(next_state.get("revision") or 0) + 1,
-                "rectificationRound": next_round,
-                "updatedAt": self._now(),
-                "status": status,
-                "selectedCandidateId": selected.get("candidateId") if selected else None,
-                "selectionConfidence": confidence,
-                "holdoutResult": holdout_result,
-                "candidateBoundAnchorCount": int(next_state.get("candidateBoundAnchorCount") or 0)
-                + candidate_bound_count,
-                "currentRoundCandidateBoundAnchorCount": candidate_bound_count,
-                "feedbackAnchorCount": len(feedback_anchors),
                 "candidates": candidates,
-                "feedbackAnchors": feedback_anchors,
-                "roundHistory": round_history,
-                "anchorContractErrors": contract_errors,
-                "reportGate": gate,
+                "provisionalCandidateId": selected.get("candidateId"),
+                "holdoutResult": holdout_result,
             }
         )
+        if holdout_result != "passed":
+            next_state.update(
+                {
+                    "status": "underdetermined",
+                    "selectedCandidateId": None,
+                    "selectionConfidence": "none",
+                    "reportGate": {
+                        "fullReportAllowed": False,
+                        "reason": (
+                            "The calibration leader did not pass the reserved event check. "
+                            "The system will preserve the bounded candidate set rather than "
+                            "fit the reserved event or ask a circular confirmation question."
+                        ),
+                        "nextStep": "provide_more_precise_or_additional_event_evidence",
+                    },
+                }
+            )
+        elif len(equivalent_ids) > 1:
+            next_state.update(
+                {
+                    "status": "multiple_equivalent",
+                    "selectedCandidateId": None,
+                    "equivalentCandidateIds": equivalent_ids,
+                    "selectionConfidence": "medium",
+                    "reportGate": {
+                        "fullReportAllowed": False,
+                        "reason": (
+                            "Several bounded birth hypotheses remain equivalent under all "
+                            "calibration evidence. Preserve their stable intersection instead "
+                            "of choosing an exact time."
+                        ),
+                        "nextStep": "build_equivalent_candidate_intersection",
+                    },
+                }
+            )
+        else:
+            selected_id = str(selected.get("candidateId") or "")
+            next_state.update(
+                {
+                    "status": "needs_recalculation",
+                    "selectedCandidateId": selected_id,
+                    "equivalentCandidateIds": [],
+                    "selectionConfidence": "medium",
+                    "reportGate": {
+                        "fullReportAllowed": False,
+                        "reason": (
+                            "Calibration events selected a bounded interval and the reserved "
+                            "event independently validated it; materialize its representative "
+                            "moment before report synthesis."
+                        ),
+                        "nextStep": "apply_candidate_recalculation",
+                    },
+                }
+            )
         next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
         return next_state
+
+    @staticmethod
+    def _deterministic_selection_blockers(
+        state: dict[str, Any], candidates: list[dict[str, Any]]
+    ) -> list[str]:
+        ledger = state.get("lifeEventLedger")
+        ledger = ledger if isinstance(ledger, dict) else {}
+        events = ledger.get("events")
+        events = events if isinstance(events, list) else []
+        calibration_events = [
+            event
+            for event in events
+            if isinstance(event, dict) and event.get("role") == "calibration"
+        ]
+        categories = {
+            str(event.get("category"))
+            for event in calibration_events
+            if event.get("category") and event.get("category") != "unknown"
+        }
+        holdout_count = sum(
+            1 for event in events if isinstance(event, dict) and event.get("role") == "holdout"
+        )
+        blockers: list[str] = []
+        if len(calibration_events) < RECTIFICATION_SCORING_POLICY.minimum_calibration_events:
+            blockers.append("insufficient_calibration_events")
+        if len(categories) < RECTIFICATION_SCORING_POLICY.minimum_calibration_categories:
+            blockers.append("insufficient_calibration_category_diversity")
+        if holdout_count != 1:
+            blockers.append("missing_single_holdout_event")
+        if len(candidates) < 2:
+            blockers.append("insufficient_candidate_classes")
+        return blockers
+
+    @staticmethod
+    def _selection_evidence_summary(
+        state: dict[str, Any], *, selection_blockers: list[str]
+    ) -> dict[str, Any]:
+        ledger = state.get("lifeEventLedger")
+        ledger = ledger if isinstance(ledger, dict) else {}
+        events = ledger.get("events")
+        events = events if isinstance(events, list) else []
+        calibration = [
+            event
+            for event in events
+            if isinstance(event, dict) and event.get("role") == "calibration"
+        ]
+        return {
+            "selectionPolicyId": RECTIFICATION_SCORING_POLICY.policy_id,
+            "eventMappingId": RECTIFICATION_EVENT_MAPPING_ID,
+            "holdoutPolicyId": RECTIFICATION_HOLDOUT_POLICY_ID,
+            "methodMaturity": RECTIFICATION_METHOD_MATURITY,
+            "validationStatus": RECTIFICATION_VALIDATION_STATUS,
+            "sourceIds": list(RECTIFICATION_SOURCE_IDS),
+            "calibrationEventCount": len(calibration),
+            "calibrationCategoryCount": len(
+                {
+                    str(event.get("category"))
+                    for event in calibration
+                    if event.get("category") and event.get("category") != "unknown"
+                }
+            ),
+            "holdoutEventCount": sum(
+                1 for event in events if isinstance(event, dict) and event.get("role") == "holdout"
+            ),
+            "blockers": selection_blockers,
+        }
+
+    @staticmethod
+    def _select_deterministic_event_candidate(
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if len(candidates) < 2:
+            return None
+        event_sets: list[set[str]] = []
+        for candidate in candidates:
+            event_ids = {
+                str(item.get("eventId"))
+                for item in candidate.get("evidenceScores") or []
+                if isinstance(item, dict)
+                and item.get("role") == "calibration"
+                and item.get("eventId")
+            }
+            if len(event_ids) < RECTIFICATION_SCORING_POLICY.minimum_calibration_events:
+                return None
+            event_sets.append(event_ids)
+        if any(event_ids != event_sets[0] for event_ids in event_sets[1:]):
+            return None
+
+        representatives: list[dict[str, Any]] = []
+        seen_classes: set[str] = set()
+        for candidate in sorted(
+            candidates,
+            key=lambda item: (
+                float(item.get("deterministicScore") or 0.0),
+                1 if item.get("isBase") else 0,
+            ),
+            reverse=True,
+        ):
+            class_id = str(
+                candidate.get("equivalenceClassId") or candidate.get("candidateId") or ""
+            )
+            if class_id in seen_classes:
+                continue
+            seen_classes.add(class_id)
+            representatives.append(candidate)
+        if not representatives:
+            return None
+        top = representatives[0]
+        top_score = float(top.get("deterministicScore") or 0.0)
+        if top_score < RECTIFICATION_SCORING_POLICY.candidate_selection_min_score:
+            return None
+        if len(representatives) > 1:
+            second_score = float(representatives[1].get("deterministicScore") or 0.0)
+            if (
+                top_score - second_score
+                < RECTIFICATION_SCORING_POLICY.candidate_selection_min_margin
+            ):
+                return None
+        return top
 
     @staticmethod
     def _holdout_result(
         selected: dict[str, Any] | None,
         candidates: list[dict[str, Any]],
+        *,
+        selected_candidate_ids: list[str] | None = None,
     ) -> str:
         if selected is None or selected.get("holdoutScore") is None:
             return "not_run"
-        comparable = [
+        selected_ids = set(selected_candidate_ids or [])
+        selected_ids.add(str(selected.get("candidateId") or ""))
+        alternatives = [
             float(candidate["holdoutScore"])
             for candidate in candidates
             if candidate.get("holdoutScore") is not None
+            and str(candidate.get("candidateId") or "") not in selected_ids
         ]
-        if not comparable:
-            return "not_run"
         selected_score = float(selected["holdoutScore"])
-        return "passed" if selected_score >= max(comparable) - 0.05 else "failed"
+        if selected_score < RECTIFICATION_SCORING_POLICY.holdout_min_score:
+            return "inconclusive"
+        if not alternatives:
+            return "passed"
+        best_alternative = max(alternatives)
+        margin = selected_score - best_alternative
+        if margin >= RECTIFICATION_SCORING_POLICY.holdout_pass_margin:
+            return "passed"
+        if margin <= -RECTIFICATION_SCORING_POLICY.holdout_pass_margin:
+            return "failed"
+        return "inconclusive"
+
+    @staticmethod
+    def _equivalent_candidate_ids(
+        selected: dict[str, Any] | None,
+        candidates: list[dict[str, Any]],
+    ) -> list[str]:
+        if selected is None:
+            return []
+        selected_id = str(selected.get("candidateId") or "")
+        class_id = str(selected.get("equivalenceClassId") or "")
+        if not class_id:
+            return [selected_id] if selected_id else []
+        return [
+            str(candidate.get("candidateId"))
+            for candidate in candidates
+            if candidate.get("candidateId")
+            and str(candidate.get("equivalenceClassId") or "") == class_id
+        ]
 
     def rectified_birth_input(
         self,
@@ -254,7 +472,7 @@ class ChartRectificationService:
         chart_record: dict[str, Any],
     ) -> BirthInput | None:
         candidate = self.selected_candidate(state)
-        if not candidate or candidate.get("isBase"):
+        if not candidate:
             return None
 
         subject = chart_record.get("subject")
@@ -269,6 +487,13 @@ class ChartRectificationService:
         place_context = birth_input_context.get("place")
         if not isinstance(place_context, dict):
             place_context = {}
+        life_event_context = birth_input_context.get("lifeEvents")
+        if not isinstance(life_event_context, dict):
+            life_event_context = {}
+        locale = str(subject.get("locale")) if subject.get("locale") in {"zh", "en", "ja"} else "en"
+        missing_value = (
+            "未提供" if locale == "zh" else "未記入" if locale == "ja" else "[not provided]"
+        )
 
         birth_date = str(birth_assertion.get("localDate") or time_context.get("date") or "")
         birth_time = str(
@@ -310,9 +535,12 @@ class ChartRectificationService:
                 lat = coordinates.get("lat")
                 lon = coordinates.get("lon")
                 if lat is not None and lon is not None:
+                    timezone_id = str(member.get("timezone") or "").strip()
+                    timezone_token = f", tz={timezone_id}" if timezone_id else ""
                     birth_place = (
                         f"{birth_place.split('|', 1)[0].strip()} | "
-                        f"lat={lat}, lon={lon}, source=rectification, accuracy=coordinate"
+                        f"lat={lat}, lon={lon}{timezone_token}, "
+                        "source=rectification, accuracy=coordinate"
                     )
                     axis_changes.append("place")
 
@@ -323,16 +551,78 @@ class ChartRectificationService:
             birthDate=birth_date,
             birthTime=birth_time,
             birthPlace=birth_place,
-            birthTimePrecision=str(time_context.get("precision") or "approximate"),
-            gender=str(subject.get("genderContext") or "未提供"),
-            relationship=str(subject.get("relationshipStatus") or "未提供"),
+            # Internal calculation uses the representative moment of an already selected
+            # interval. The user's reported precision remains in the persisted assertion.
+            birthTimePrecision="exact",
+            gender=str(subject.get("genderContext") or missing_value),
+            relationship=str(subject.get("relationshipStatus") or missing_value),
+            readerRelationship=self._reader_relationship(subject),
             timeSource=self._rectified_time_source(time_context.get("source")),
-            locale="zh",
+            readingFocus=str(birth_input_context.get("readingFocus") or ""),
+            lifeEvents=str(life_event_context.get("raw") or ""),
+            utcOffsetSeconds=(
+                int(candidate["utcOffsetSeconds"])
+                if candidate.get("civilTimeFold") and candidate.get("utcOffsetSeconds") is not None
+                else None
+            ),
+            locale=locale,
+        )
+
+    def birth_input_with_life_events(
+        self,
+        birth_input_context: dict[str, Any],
+        chart_record: dict[str, Any],
+        life_events: str,
+    ) -> BirthInput:
+        """Rebuild the reported input while replacing only rectification evidence."""
+
+        subject = chart_record.get("subject")
+        subject = subject if isinstance(subject, dict) else {}
+        assertion = chart_record.get("birthAssertion")
+        assertion = assertion if isinstance(assertion, dict) else {}
+        time_context = birth_input_context.get("time")
+        time_context = time_context if isinstance(time_context, dict) else {}
+        place_context = birth_input_context.get("place")
+        place_context = place_context if isinstance(place_context, dict) else {}
+        locale = str(subject.get("locale")) if subject.get("locale") in {"zh", "en", "ja"} else "en"
+        missing_value = (
+            "未提供" if locale == "zh" else "未記入" if locale == "ja" else "[not provided]"
+        )
+        birth_date = str(assertion.get("localDate") or time_context.get("date") or "")
+        birth_place = str(
+            place_context.get("reported")
+            or assertion.get("reportedPlace")
+            or place_context.get("resolvedLabel")
+            or ""
+        )
+        if not birth_date or not birth_place:
+            raise ValueError("session is missing the reported birth date or place")
+        utc_offset = time_context.get("utcOffsetSeconds")
+        return BirthInput(
+            birthDate=birth_date,
+            birthTime=str(assertion.get("reportedLocalTime") or time_context.get("reported") or ""),
+            birthPlace=birth_place,
+            birthTimePrecision=str(time_context.get("precision") or "approximate"),
+            gender=str(subject.get("genderContext") or missing_value),
+            relationship=str(subject.get("relationshipStatus") or missing_value),
+            readerRelationship=self._reader_relationship(subject),
+            timeSource=str(time_context.get("source") or "未追问"),
+            readingFocus=str(birth_input_context.get("readingFocus") or ""),
+            lifeEvents=life_events,
+            utcOffsetSeconds=int(utc_offset) if utc_offset is not None else None,
+            locale=locale,
         )
 
     @staticmethod
     def _place_rectification_allowed(place_context: dict[str, Any]) -> bool:
         return str(place_context.get("accuracy") or "city") in {"city", "district"}
+
+    @staticmethod
+    def _reader_relationship(subject: dict[str, Any]) -> ReaderRelationship:
+        value = str(subject.get("readerRelationship") or "self")
+        if value not in {"self", "parent", "partner", "family", "professional"}:
+            return "self"
+        return cast(ReaderRelationship, value)
 
     def selected_candidate(self, state: dict[str, Any]) -> dict[str, Any] | None:
         selected_id = state.get("selectedCandidateId")
@@ -360,15 +650,43 @@ class ChartRectificationService:
                 "activeCandidateId": selected_id,
                 "reportGate": {
                     "fullReportAllowed": True,
-                    "reason": "A candidate chart was selected by feedback and recalculated.",
+                    "reason": (
+                        "Calibration events selected a bounded candidate, the reserved event "
+                        "validated it, and the chart was recalculated."
+                    ),
                     "nextStep": "full_report",
                 },
                 "activeChartRevision": {
                     "revision": chart_revision,
-                    "source": "prevalidation_feedback",
+                    "source": "deterministic_event_selection",
                     "candidateId": selected_id,
                 },
                 "rectifiedInput": rectified_input.model_dump(by_alias=True),
+            }
+        )
+        next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
+        return next_state
+
+    def reject_unmaterializable_selection(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Stop rectification when a selected hypothesis cannot become calculator input."""
+
+        next_state = copy.deepcopy(state)
+        next_state.update(
+            {
+                "revision": int(next_state.get("revision") or 0) + 1,
+                "updatedAt": self._now(),
+                "status": "underdetermined",
+                "selectedCandidateId": None,
+                "selectionConfidence": "none",
+                "reportGate": {
+                    "fullReportAllowed": False,
+                    "reason": (
+                        "The provisional candidate did not contain a bounded time or place that "
+                        "can be materialized as a deterministic calculation input. Preserve the "
+                        "candidate set instead of asking the Reader to choose a chart."
+                    ),
+                    "nextStep": "provide_more_precise_or_additional_event_evidence",
+                },
             }
         )
         next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
@@ -387,12 +705,22 @@ class ChartRectificationService:
             "selectedCandidateId": state.get("selectedCandidateId"),
             "activeCandidateId": state.get("activeCandidateId"),
             "selectionConfidence": state.get("selectionConfidence"),
-            "candidateBoundAnchorCount": state.get("candidateBoundAnchorCount"),
             "activeChartRevision": state.get("activeChartRevision"),
             "reason": gate.get("reason"),
             "plan": state.get("rectificationPlan"),
         }
-        if status in {"base_confirmed", "corrected_chart_ready"}:
+        if status == "not_required":
+            next_decision.update(
+                {
+                    "nextStep": "report_allowed_with_stable_interval",
+                    "timeConfidence": "low",
+                    "reportAllowed": True,
+                    "reportScope": "guarded_full_report",
+                    "reason": gate.get("reason")
+                    or "No chart-changing candidate exists inside the bounded input window.",
+                }
+            )
+        elif status == "corrected_chart_ready":
             next_decision.update(
                 {
                     "nextStep": "report_allowed_after_rectification",
@@ -404,11 +732,7 @@ class ChartRectificationService:
                     "reason": gate.get("reason") or "Rectification gate passed.",
                 }
             )
-        elif status in {
-            "needs_candidate_bound_checks",
-            "needs_more_feedback",
-            "needs_recalculation",
-        }:
+        elif status == "needs_recalculation":
             next_decision.update(
                 {
                     "nextStep": status,
@@ -416,6 +740,50 @@ class ChartRectificationService:
                     "reportAllowed": False,
                     "reportScope": "prevalidation_or_d1_only",
                     "reason": gate.get("reason") or "Candidate rectification is not complete.",
+                }
+            )
+        elif status == "underdetermined":
+            next_decision.update(
+                {
+                    "nextStep": "rectification_inconclusive",
+                    "timeConfidence": "low",
+                    "reportAllowed": False,
+                    "reportScope": "prevalidation_or_d1_only",
+                    "reason": gate.get("reason")
+                    or "The reported birth-time interval remains underdetermined.",
+                }
+            )
+        elif status == "multiple_equivalent":
+            next_decision.update(
+                {
+                    "nextStep": "build_equivalent_candidate_intersection",
+                    "timeConfidence": "low",
+                    "reportAllowed": False,
+                    "reportScope": "prevalidation_or_d1_only",
+                    "reason": gate.get("reason")
+                    or "Multiple bounded hypotheses remain equivalent for rectification.",
+                }
+            )
+        elif status == "input_resolution_required":
+            next_decision.update(
+                {
+                    "nextStep": "resolve_civil_time_or_place_input",
+                    "timeConfidence": "low",
+                    "reportAllowed": False,
+                    "reportScope": "input_resolution_only",
+                    "reason": gate.get("reason")
+                    or "The reported search window contains unresolved civil-time or place input.",
+                }
+            )
+        elif status == "calculation_failed":
+            next_decision.update(
+                {
+                    "nextStep": "retry_deterministic_calculation",
+                    "timeConfidence": "low",
+                    "reportAllowed": False,
+                    "reportScope": "calculation_retry_only",
+                    "reason": gate.get("reason")
+                    or "Candidate scoring did not complete for every birth-time hypothesis.",
                 }
             )
         return next_decision
@@ -427,22 +795,15 @@ class ChartRectificationService:
         *,
         enforce_user_facing_quality: bool = False,
     ) -> list[str]:
-        """Return user-facing quality and candidate-binding contract errors."""
+        """Validate Reader questions without granting candidate-selection authority."""
 
-        raw_candidates = state.get("candidates")
-        candidates = raw_candidates if isinstance(raw_candidates, list) else []
-        candidate_ids = {
-            str(candidate.get("candidateId"))
-            for candidate in candidates
-            if isinstance(candidate, dict) and candidate.get("candidateId")
-        }
         anchors = self._parse_prevalidation_blocks(prevalidation_markdown)
         errors: list[str] = []
         if not anchors:
             return ["reader_prevalidation.md does not contain numbered validation anchors."]
         if enforce_user_facing_quality:
-            if not 3 <= len(anchors) <= 5:
-                errors.append("reader_prevalidation.md must contain 3 to 5 validation questions.")
+            if not 1 <= len(anchors) <= 5:
+                errors.append("reader_prevalidation.md must contain 1 to 5 validation questions.")
 
             for anchor in anchors:
                 index = int(anchor["index"])
@@ -462,42 +823,6 @@ class ChartRectificationService:
                     )
                 if not re.search(r"(?im)^>\s*(?:推导|Derivation|根拠)\s*[：:]", block):
                     errors.append(f"Anchor {index} is missing a quoted derivation line.")
-
-        if not self._requires_candidate_bound_anchors(state):
-            return errors
-
-        for anchor in anchors:
-            index = int(anchor["index"])
-            block = str(anchor["block"])
-            anchor_candidate_ids = self._candidate_ids_from_block(block)
-            fields = self._unstable_fields_from_block(block)
-            event_refs = self._event_refs_from_block(block)
-            if not anchor_candidate_ids:
-                errors.append(f"Anchor {index} is missing a machine-readable Candidate line.")
-            invalid_ids = [
-                candidate_id
-                for candidate_id in anchor_candidate_ids
-                if candidate_id not in candidate_ids
-            ]
-            if invalid_ids:
-                errors.append(
-                    f"Anchor {index} references unknown candidate ID(s): {', '.join(invalid_ids)}."
-                )
-            if not fields:
-                errors.append(f"Anchor {index} is missing a machine-readable Field line.")
-            if self._requires_life_event_bound_anchors(state):
-                if not event_refs:
-                    errors.append(f"Anchor {index} is missing a machine-readable Event line.")
-                invalid_event_refs = [
-                    event_ref
-                    for event_ref in event_refs
-                    if event_ref not in self._known_event_refs(state)
-                ]
-                if invalid_event_refs:
-                    errors.append(
-                        f"Anchor {index} references unknown event(s): "
-                        f"{', '.join(invalid_event_refs)}."
-                    )
         return errors
 
     @staticmethod
@@ -534,7 +859,7 @@ class ChartRectificationService:
         ]
 
     @staticmethod
-    def _scoreless_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _normalized_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
         result = []
         for candidate in candidates:
             item = copy.deepcopy(candidate)
@@ -544,8 +869,6 @@ class ChartRectificationService:
                 round(float(deterministic_score), 3) if deterministic_score is not None else None
             )
             item["score"] = item["deterministicScore"] or 0.0
-            item["support"] = 0
-            item["reject"] = 0
             result.append(item)
         return result
 
@@ -574,51 +897,20 @@ class ChartRectificationService:
             if not isinstance(candidate, dict):
                 continue
             item = copy.deepcopy(candidate)
-            item["score"] = round(float(item.get("score") or 0.0), 3)
-            item["support"] = int(item.get("support") or 0)
-            item["reject"] = int(item.get("reject") or 0)
+            deterministic = item.get("deterministicScore")
+            if deterministic is None:
+                deterministic = item.get("aggregateScore")
+            item["deterministicScore"] = (
+                round(float(deterministic), 3) if deterministic is not None else None
+            )
+            item["score"] = item["deterministicScore"] or 0.0
             result.append(item)
         return result
 
     @staticmethod
-    def _round_history(state: dict[str, Any]) -> list[dict[str, Any]]:
-        history = state.get("roundHistory")
-        if not isinstance(history, list):
-            return []
-        return [copy.deepcopy(item) for item in history if isinstance(item, dict)]
-
-    @staticmethod
-    def _feedback_anchors(state: dict[str, Any]) -> list[dict[str, Any]]:
-        anchors = state.get("feedbackAnchors")
-        if not isinstance(anchors, list):
-            return []
-        return [copy.deepcopy(item) for item in anchors if isinstance(item, dict)]
-
-    def _parse_candidate_anchors(
-        self,
-        prevalidation_markdown: str,
-        feedback_markdown: str,
-    ) -> list[dict[str, Any]]:
-        anchors = self._parse_prevalidation_blocks(prevalidation_markdown)
-        answers = self._parse_feedback_answers(feedback_markdown)
-        parsed = []
-        for anchor in anchors:
-            index = int(anchor["index"])
-            parsed.append(
-                {
-                    "index": index,
-                    "candidateIds": self._candidate_ids_from_block(str(anchor["block"])),
-                    "unstableFields": self._unstable_fields_from_block(str(anchor["block"])),
-                    "eventRefs": self._event_refs_from_block(str(anchor["block"])),
-                    "answer": answers.get(index, "pending"),
-                }
-            )
-        return parsed
-
-    @staticmethod
     def _statement_from_anchor_block(block: str) -> str:
         statement = re.sub(
-            r"(?m)^>\s*(?:推导|Derivation|根拠|Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段|Event|事件)\s*[：:].*$",
+            r"(?m)^>\s*(?:推导|Derivation|根拠|Candidate|候选盘|候選盤|Field|Fields|字段|不稳定字段|Event|事件|Contrast|对比|對比)\s*[：:].*$",
             "",
             block,
         )
@@ -633,231 +925,6 @@ class ChartRectificationService:
         for match in pattern.finditer(content):
             anchors.append({"index": int(match.group(1)), "block": match.group(2).strip()})
         return anchors
-
-    @staticmethod
-    def _parse_feedback_answers(content: str) -> dict[int, str]:
-        answers: dict[int, str] = {}
-        anchor_pattern = re.compile(
-            r"(?ms)^####\s+Anchor\s+(\d+)\s*\n(.*?)(?=^####\s+Anchor\s+\d+\s*\n|\Z)"
-        )
-        for match in anchor_pattern.finditer(content):
-            answer_raw = re.search(r"(?m)^-\s*User answer:\s*(.+)$", match.group(2))
-            if answer_raw:
-                answers[int(match.group(1))] = ChartRectificationService._normalize_answer(
-                    answer_raw.group(1)
-                )
-        if answers:
-            return answers
-        for line in content.splitlines():
-            match = re.match(r"\s*(?:\*\*)?(\d+)(?:\.\*\*|[.、:：])?\s*(准|部分准|不准)", line)
-            if match:
-                answers[int(match.group(1))] = ChartRectificationService._normalize_answer(
-                    match.group(2)
-                )
-        return answers
-
-    @staticmethod
-    def _normalize_answer(raw: str) -> str:
-        value = raw.strip().lower()
-        if "inaccurate" in value or "not accurate" in value or "不准" in raw:
-            return "inaccurate"
-        if "partly" in value or "部分" in raw:
-            return "partly"
-        if "accurate" in value or "准" in raw:
-            return "accurate"
-        return "recorded"
-
-    @staticmethod
-    def _candidate_ids_from_block(block: str) -> list[str]:
-        ids: list[str] = []
-        pattern = re.compile(
-            r"(?im)^>[ \t]*(?:Candidate(?:[ \t]+IDs?)?|候选盘|候選盤)"
-            r"[ \t]*[：:][ \t]*([A-Z]+(?:[ \t]*[,/，、][ \t]*[A-Z]+)*)[ \t]*$"
-        )
-        for match in pattern.finditer(block):
-            for candidate_id in re.findall(r"\b[A-Z]+\b", match.group(1)):
-                if candidate_id not in ids:
-                    ids.append(candidate_id)
-        return ids
-
-    @staticmethod
-    def _unstable_fields_from_block(block: str) -> list[str]:
-        match = re.search(
-            r"(?im)^>\s*(?:Field|Fields|Unstable Fields?|字段|不稳定字段)\s*[：:]\s*(.+)$",
-            block,
-        )
-        if not match:
-            return []
-        fields = []
-        for raw in re.split(r"[,/，、\s]+", match.group(1).strip()):
-            if raw and raw not in fields:
-                fields.append(raw)
-        return fields
-
-    @staticmethod
-    def _event_refs_from_block(block: str) -> list[str]:
-        refs: list[str] = []
-        for match in re.finditer(r"(?im)^>\s*(?:Event|事件)\s*[：:]\s*(.+)$", block):
-            for raw in re.split(r"[,/，、\s]+", match.group(1).strip()):
-                if raw and raw not in refs:
-                    refs.append(raw)
-        return refs
-
-    @staticmethod
-    def _answer_weight(answer: str) -> float:
-        if answer == "accurate":
-            return 1.0
-        if answer == "partly":
-            return 0.35
-        if answer == "inaccurate":
-            return -1.0
-        return 0.0
-
-    @staticmethod
-    def _select_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
-        if not candidates:
-            return None
-        ordered = sorted(
-            candidates,
-            key=lambda item: (
-                float(item.get("score") or 0),
-                int(item.get("support") or 0),
-                1 if item.get("isBase") else 0,
-            ),
-            reverse=True,
-        )
-        top = ordered[0]
-        second_score = float(ordered[1].get("score") or 0) if len(ordered) > 1 else 0.0
-        top_score = float(top.get("score") or 0)
-        support = int(top.get("support") or 0)
-        clear_margin = top_score - second_score >= 0.75
-        enough_positive_support = support >= 2 and top_score >= 1.25
-        alternatives_rejected = bool(ordered[1:]) and all(
-            int(candidate.get("reject") or 0) >= 1 for candidate in ordered[1:]
-        )
-        one_positive_with_rejections = support >= 1 and top_score >= 1.0 and alternatives_rejected
-        if clear_margin and (enough_positive_support or one_positive_with_rejections):
-            return top
-        return None
-
-    @staticmethod
-    def _requires_candidate_bound_anchors(state: dict[str, Any]) -> bool:
-        status = str(state.get("status") or "")
-        mode = str(state.get("reportReadinessMode") or "")
-        candidates = state.get("candidates") if isinstance(state.get("candidates"), list) else []
-        return (
-            mode == "rectification_required"
-            and len(candidates) > 1
-            and status
-            in {
-                "candidate_feedback_pending",
-                "needs_candidate_bound_checks",
-                "needs_more_feedback",
-            }
-        )
-
-    @staticmethod
-    def _requires_life_event_bound_anchors(state: dict[str, Any]) -> bool:
-        if not ChartRectificationService._requires_candidate_bound_anchors(state):
-            return False
-        plan = (
-            state.get("rectificationPlan")
-            if isinstance(state.get("rectificationPlan"), dict)
-            else {}
-        )
-        focus = plan.get("lifeEventFocus") if isinstance(plan, dict) else None
-        return isinstance(focus, list) and len(focus) > 0
-
-    @staticmethod
-    def _known_event_refs(state: dict[str, Any]) -> set[str]:
-        ledger = state.get("lifeEventLedger")
-        events = ledger.get("events") if isinstance(ledger, dict) else None
-        refs: set[str] = set()
-        if not isinstance(events, list):
-            return refs
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            for key in ("eventId", "category"):
-                value = event.get(key)
-                if value:
-                    refs.add(str(value))
-        return refs
-
-    @staticmethod
-    def _candidate_contract_error_state(
-        errors: list[str],
-    ) -> tuple[str, str, dict[str, Any]]:
-        return (
-            "needs_candidate_bound_checks",
-            "none",
-            {
-                "fullReportAllowed": False,
-                "reason": "Reader validation anchors do not satisfy the candidate-bound contract: "
-                + "; ".join(errors[:3]),
-                "nextStep": "rerun_reader_with_candidate_bound_anchors",
-            },
-        )
-
-    def _state_from_selection(
-        self,
-        state: dict[str, Any],
-        selected: dict[str, Any] | None,
-        candidate_bound_count: int,
-    ) -> tuple[str, str, dict[str, Any]]:
-        current_status = str(state.get("status") or "")
-        if current_status == "not_required":
-            return (
-                "not_required",
-                "none",
-                {
-                    "fullReportAllowed": True,
-                    "reason": "Rectification is not required for this chart.",
-                    "nextStep": "full_report",
-                },
-            )
-        if candidate_bound_count == 0 and current_status == "candidate_feedback_pending":
-            return (
-                "needs_candidate_bound_checks",
-                "none",
-                {
-                    "fullReportAllowed": False,
-                    "reason": (
-                        "High-risk input needs validation anchors bound to chart candidate IDs."
-                    ),
-                    "nextStep": "rerun_reader_with_candidate_bound_anchors",
-                },
-            )
-        if selected:
-            confidence = "high" if int(selected.get("support") or 0) >= 2 else "medium"
-            if selected.get("isBase"):
-                return (
-                    "base_confirmed",
-                    confidence,
-                    {
-                        "fullReportAllowed": True,
-                        "reason": "Prevalidation feedback confirmed the base candidate chart.",
-                        "nextStep": "full_report",
-                    },
-                )
-            return (
-                "needs_recalculation",
-                confidence,
-                {
-                    "fullReportAllowed": False,
-                    "reason": "A non-base candidate was selected and must be recalculated.",
-                    "nextStep": "apply_candidate_recalculation",
-                },
-            )
-        return (
-            "needs_more_feedback",
-            "none",
-            {
-                "fullReportAllowed": False,
-                "reason": "Feedback did not select a chart candidate clearly enough.",
-                "nextStep": "continue_rectification",
-            },
-        )
 
     def _build_rectification_plan(self, state: dict[str, Any]) -> dict[str, Any]:
         """Build the backend-owned next step for multi-round birth time correction."""
@@ -884,50 +951,68 @@ class ChartRectificationService:
             if isinstance(state.get("advancedVargaPolicy"), dict)
             else {}
         )
-        round_number = int(state.get("rectificationRound") or 0)
         gate = state.get("reportGate") if isinstance(state.get("reportGate"), dict) else {}
 
         if status == "not_required":
             action = "full_report"
             directive = "Rectification is not required; run standard prevalidation only."
-        elif status == "base_confirmed":
-            action = "full_report"
-            directive = (
-                "Base candidate is confirmed; full report may proceed with recorded confidence."
-            )
         elif status == "corrected_chart_ready":
             action = "full_report"
             directive = "Rectified chart has been recalculated; use activeChartRevision as source."
         elif status == "needs_recalculation":
             action = "apply_candidate_recalculation"
-            directive = "Selected non-base candidate must be recalculated before report synthesis."
-        elif status == "needs_candidate_bound_checks":
-            action = "rerun_reader"
+            directive = "Selected bounded candidate must be recalculated before report synthesis."
+        elif status == "underdetermined":
+            action = "rectification_inconclusive"
             directive = (
-                "Regenerate prevalidation anchors with machine-readable Candidate and Field lines; "
-                "when lifeEventFocus exists, also include Event lines."
+                "Stop adaptive questioning. Preserve the bounded candidate set and ask "
+                "for a narrower source time or additional dated events."
             )
-        elif status == "needs_more_feedback":
-            action = "next_rectification_round"
+        elif status == "multiple_equivalent":
+            action = "build_equivalent_candidate_intersection"
             directive = (
-                "Ask narrower candidate-discriminating anchors using target candidates, fields, "
-                "and dated life events where available."
+                "Stop asking questions that cannot distinguish equivalent candidates. "
+                "Preserve every bounded hypothesis and calculate their shared stable facts "
+                "before releasing any scoped interpretation."
+            )
+        elif status == "input_resolution_required":
+            action = "resolve_civil_time_or_place_input"
+            directive = (
+                "Do not ask astrological discriminator questions. Ask the user to narrow the "
+                "reported time/place or explicitly resolve the civil-time ambiguity."
+            )
+        elif status == "calculation_failed":
+            action = "retry_deterministic_calculation"
+            directive = (
+                "Do not ask rectification questions or compare incomplete candidate scores. "
+                "Retry the deterministic calculation and rebuild the candidate set."
+            )
+        elif status == "collecting_evidence":
+            action = "collect_dated_life_events"
+            directive = (
+                "Collect 3 to 5 dated, user-supplied life events before generating any "
+                "candidate-scoring question."
+            )
+        elif status == "comparing_candidates":
+            action = "evaluate_calibration_events"
+            directive = (
+                "Evaluate versioned calibration scores and the reserved event in the backend. "
+                "Do not invoke Reader or accept testimony as candidate-selection evidence."
             )
         elif status == "needs_boundary_scan":
             action = "boundary_scan"
             directive = "Run a deeper time boundary scan before allowing report synthesis."
         else:
-            action = "first_rectification_round"
-            directive = (
-                "Ask candidate-bound prevalidation anchors before any deterministic full report."
-            )
+            action = "stop_unknown_rectification_state"
+            directive = "Stop and rebuild the rectification state from deterministic artifacts."
 
         return {
             "schemaVersion": "chart-rectification-plan/v1",
+            "selectionPolicyId": RECTIFICATION_SCORING_POLICY.policy_id,
+            "eventMappingId": RECTIFICATION_EVENT_MAPPING_ID,
+            "holdoutPolicyId": RECTIFICATION_HOLDOUT_POLICY_ID,
             "status": status,
             "action": action,
-            "round": round_number,
-            "maxRounds": 8,
             "targetCandidateIds": target_ids,
             "candidateSummaries": [
                 self._candidate_summary(candidate) for candidate in target_candidates
@@ -944,19 +1029,19 @@ class ChartRectificationService:
             "advancedVargaPolicy": advanced_varga_policy,
             "eventCollectionRequired": event_collection_required,
             "eventQuestionStrategy": (
-                "Use dated life events as primary rectification anchors. Prefer stable D1, "
-                "Dasha, D7/D9/D10/D12 differences when available; use D16/D20/D24/D27/D30 "
-                "only as corroboration and D60 only as final confirmation after the time "
-                "window is very narrow."
+                "Collect genuinely new structured dated events when evidence is insufficient. "
+                "Never restate an existing event to create another vote. D16/D20/D24/D27/D30 "
+                "remain corroborative and D60 remains final-confirmation-only."
             ),
-            "requiredAnchorCount": self._required_anchor_count(status, target_candidates),
             "directive": directive,
             "gateReason": gate.get("reason"),
             "stopConditions": [
-                "A candidate has clear score margin and enough candidate-bound support.",
-                "The base chart is confirmed by candidate-bound anchors.",
-                "A non-base candidate is selected and recalculated.",
-                "Eight rounds are reached without convergence; keep report D1-only/low-confidence.",
+                "A candidate has clear calibration margin and passes a reserved life event.",
+                "A bounded interval has a clear calibration margin, passes holdout evidence, "
+                "and is recalculated before report synthesis.",
+                "Equivalent candidates remain explicit; do not publish one exact interval.",
+                "If dated calibration evidence remains tied, return underdetermined rather than "
+                "using generic testimony to force a birth time.",
             ],
         }
 
@@ -1036,12 +1121,19 @@ class ChartRectificationService:
                 if candidate.get("isBase") and str(candidate.get("candidateId")) != str(selected_id)
             ]
             return (selected + base)[:2] or selected
-        viable = [
-            candidate
-            for candidate in sorted_candidates
-            if int(candidate.get("reject") or 0) == 0 or int(candidate.get("support") or 0) > 0
-        ]
-        return (viable or sorted_candidates)[: min(3, len(sorted_candidates))]
+        representatives: list[dict[str, Any]] = []
+        seen_classes: set[str] = set()
+        for candidate in sorted_candidates:
+            class_id = str(
+                candidate.get("equivalenceClassId") or candidate.get("candidateId") or ""
+            )
+            if class_id in seen_classes:
+                continue
+            seen_classes.add(class_id)
+            representatives.append(candidate)
+            if len(representatives) == 3:
+                break
+        return representatives
 
     @staticmethod
     def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -1049,24 +1141,21 @@ class ChartRectificationService:
             "candidateId": candidate.get("candidateId"),
             "isBase": bool(candidate.get("isBase")),
             "score": round(float(candidate.get("score") or 0), 3),
-            "support": int(candidate.get("support") or 0),
-            "reject": int(candidate.get("reject") or 0),
+            "deterministicScore": candidate.get("deterministicScore"),
             "changedFromBase": candidate.get("changedFromBase") or [],
+            "equivalenceClassId": candidate.get("equivalenceClassId"),
+            "equivalentCandidateIds": candidate.get("equivalentCandidateIds") or [],
             "members": candidate.get("members") or [],
         }
 
     def _discriminating_fields(
         self,
         candidates: list[dict[str, Any]],
-        state: dict[str, Any],
+        _state: dict[str, Any],
     ) -> list[str]:
         fields: list[str] = []
         for candidate in candidates:
             for field in candidate.get("changedFromBase") or []:
-                if isinstance(field, str) and field and field not in fields:
-                    fields.append(field)
-        for anchor in self._feedback_anchors(state):
-            for field in anchor.get("unstableFields") or []:
                 if isinstance(field, str) and field and field not in fields:
                     fields.append(field)
         if fields:
@@ -1194,23 +1283,20 @@ class ChartRectificationService:
         }
 
     @staticmethod
-    def _required_anchor_count(status: str, candidates: list[dict[str, Any]]) -> int:
-        if status in {"not_required", "base_confirmed", "corrected_chart_ready"}:
-            return 0
-        if len(candidates) <= 1:
-            return 3
-        return min(5, max(3, len(candidates) + 1))
-
-    @staticmethod
     def _parse_datetime(value: str) -> datetime | None:
-        try:
-            return datetime.strptime(value.strip(), "%Y-%m-%d %H:%M")
-        except ValueError:
-            return None
+        for format_string in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(value.strip(), format_string)
+            except ValueError:
+                continue
+        return None
 
     @staticmethod
     def _split_datetime(value: str) -> tuple[str | None, str | None]:
-        match = re.match(r"^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})$", value.strip())
+        match = re.match(
+            r"^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)$",
+            value.strip(),
+        )
         if not match:
             return None, None
         return match.group(1), match.group(2)
@@ -1218,7 +1304,7 @@ class ChartRectificationService:
     @staticmethod
     def _rectified_time_source(source: object) -> str:
         raw = str(source or "未追问")
-        value = f"rectified-from-feedback; original={raw}"
+        value = f"rectified-from-event-evidence; original={raw}"
         return value[:120]
 
     @staticmethod

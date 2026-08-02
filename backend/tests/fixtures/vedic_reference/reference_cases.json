@@ -1,6 +1,6 @@
 {
   "schemaVersion": "vedic-reference-cases/v1",
-  "calculationProfile": "LAHIRI mean nodes whole-sign PyJHora chart_method=1",
+  "calculationProfile": "VedicDust parashari-lahiri-1.1.0 per-varga methods",
   "sourceNotes": [
     "Inputs are adapted from PyJHora's bundled jhora.tests.book_chart_data samples.",
     "expectedSnapshot is a product-level drift fixture for the current backend profile.",
@@ -21,6 +21,7 @@
       "tz_offset": -4.0,
       "source": "PyJHora book_chart_data.chart_1",
       "expectedSnapshot": {
+        "kendraTrikonaYogaCount": 2,
         "ayanamsa": 23.860894,
         "lagna": {
           "sign": "Virgo",
@@ -71,13 +72,13 @@
           }
         ],
         "shadbalaRupas": {
-          "Sun": 8.9,
+          "Sun": 9.27,
           "Moon": 7.49,
-          "Mars": 6.63,
-          "Mercury": 5.71,
-          "Jupiter": 6.8,
-          "Venus": 6.58,
-          "Saturn": 7.95
+          "Mars": 6.75,
+          "Mercury": 5.58,
+          "Jupiter": 7.05,
+          "Venus": 6.45,
+          "Saturn": 7.7
         }
       }
     },
@@ -95,6 +96,7 @@
       "tz_offset": 5.5,
       "source": "PyJHora book_chart_data.chart_3",
       "expectedSnapshot": {
+        "kendraTrikonaYogaCount": 0,
         "ayanamsa": 22.83725,
         "lagna": {
           "sign": "Scorpio",
@@ -146,11 +148,11 @@
         ],
         "shadbalaRupas": {
           "Sun": 6.28,
-          "Moon": 5.22,
-          "Mars": 7.41,
-          "Mercury": 8.12,
-          "Jupiter": 7.37,
-          "Venus": 6.14,
+          "Moon": 5.47,
+          "Mars": 7.04,
+          "Mercury": 8.0,
+          "Jupiter": 7.24,
+          "Venus": 5.79,
           "Saturn": 5.22
         }
       }
@@ -169,6 +171,7 @@
       "tz_offset": -6.0,
       "source": "PyJHora book_chart_data.chart_7",
       "expectedSnapshot": {
+        "kendraTrikonaYogaCount": 1,
         "ayanamsa": 22.615485,
         "lagna": {
           "sign": "Scorpio",
@@ -219,13 +222,13 @@
           }
         ],
         "shadbalaRupas": {
-          "Sun": 5.41,
-          "Moon": 6.25,
+          "Sun": 5.78,
+          "Moon": 6.5,
           "Mars": 5.83,
-          "Mercury": 7.72,
-          "Jupiter": 5.39,
-          "Venus": 7.72,
-          "Saturn": 6.45
+          "Mercury": 7.25,
+          "Jupiter": 5.48,
+          "Venus": 7.78,
+          "Saturn": 6.54
         }
       }
     }

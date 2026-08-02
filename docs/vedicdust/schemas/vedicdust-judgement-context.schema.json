@@ -12,6 +12,354 @@
       "title": "EvidenceClass",
       "type": "string"
     },
+    "JudgementConclusion": {
+      "additionalProperties": false,
+      "description": "Backend-owned semantic result that a claim may select but cannot rewrite.",
+      "properties": {
+        "conclusionId": {
+          "pattern": "^conclusion\\.[a-z0-9._-]+$",
+          "title": "Conclusionid",
+          "type": "string"
+        },
+        "conclusionCode": {
+          "pattern": "^[a-z0-9][a-z0-9._-]+$",
+          "title": "Conclusioncode",
+          "type": "string"
+        },
+        "direction": {
+          "enum": ["supportive", "mixed", "challenging", "descriptive"],
+          "title": "Direction",
+          "type": "string"
+        },
+        "scope": {
+          "enum": ["natal_promise", "capacity", "timing", "rectification", "context"],
+          "title": "Scope",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "plainStatement": {
+          "minLength": 3,
+          "title": "Plainstatement",
+          "type": "string"
+        },
+        "technicalStatement": {
+          "minLength": 3,
+          "title": "Technicalstatement",
+          "type": "string"
+        },
+        "userRelevance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Userrelevance"
+        },
+        "findingIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Findingids",
+          "type": "array"
+        },
+        "supportingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supportingfactids",
+          "type": "array"
+        },
+        "contextFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contextfactids",
+          "type": "array"
+        },
+        "counterFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterfactids",
+          "type": "array"
+        },
+        "counterStatements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterstatements",
+          "type": "array"
+        },
+        "timingFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingfactids",
+          "type": "array"
+        },
+        "timingPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingperiodids",
+          "type": "array"
+        },
+        "ruleIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Ruleids",
+          "type": "array"
+        },
+        "timeScope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "realWorldExpressions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Realworldexpressions",
+          "type": "array"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "practicalImplications": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Practicalimplications",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "certaintyCap": {
+          "enum": ["high", "moderate", "low"],
+          "title": "Certaintycap",
+          "type": "string"
+        }
+      },
+      "required": [
+        "conclusionId",
+        "conclusionCode",
+        "direction",
+        "scope",
+        "title",
+        "plainStatement",
+        "technicalStatement",
+        "findingIds",
+        "ruleIds",
+        "certaintyCap"
+      ],
+      "title": "JudgementConclusion",
+      "type": "object"
+    },
+    "JudgementFinding": {
+      "additionalProperties": false,
+      "description": "One deterministic, fact-bound observation produced by the judgement kernel.",
+      "properties": {
+        "findingId": {
+          "pattern": "^finding\\.[a-z0-9._-]+$",
+          "title": "Findingid",
+          "type": "string"
+        },
+        "findingCode": {
+          "pattern": "^[a-z0-9][a-z0-9._-]+$",
+          "title": "Findingcode",
+          "type": "string"
+        },
+        "ruleId": {
+          "pattern": "^[a-z0-9][a-z0-9._-]+$",
+          "title": "Ruleid",
+          "type": "string"
+        },
+        "polarity": {
+          "enum": ["supportive", "challenging", "context"],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "weight": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Weight",
+          "type": "number"
+        },
+        "factIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Factids",
+          "type": "array"
+        },
+        "timingPeriodIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Timingperiodids",
+          "type": "array"
+        },
+        "technicalStatement": {
+          "minLength": 3,
+          "title": "Technicalstatement",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        }
+      },
+      "required": [
+        "findingId",
+        "findingCode",
+        "ruleId",
+        "polarity",
+        "weight",
+        "factIds",
+        "technicalStatement"
+      ],
+      "title": "JudgementFinding",
+      "type": "object"
+    },
+    "JudgementPresentationPolicy": {
+      "additionalProperties": false,
+      "description": "Versioned product policy controlling report breadth and ordering.",
+      "properties": {
+        "policyId": {
+          "const": "vedicdust-presentation-selection/1.0.0",
+          "default": "vedicdust-presentation-selection/1.0.0",
+          "title": "Policyid",
+          "type": "string"
+        },
+        "scoreSemantics": {
+          "const": "presentation_salience_not_astrological_strength",
+          "default": "presentation_salience_not_astrological_strength",
+          "title": "Scoresemantics",
+          "type": "string"
+        },
+        "foundationAlwaysIncluded": {
+          "const": true,
+          "default": true,
+          "title": "Foundationalwaysincluded",
+          "type": "boolean"
+        },
+        "requestedTopicsFirst": {
+          "const": true,
+          "default": true,
+          "title": "Requestedtopicsfirst",
+          "type": "boolean"
+        },
+        "timingClaimsForRequestedTopicsOnly": {
+          "const": true,
+          "default": true,
+          "title": "Timingclaimsforrequestedtopicsonly",
+          "type": "boolean"
+        },
+        "structuralTopicLimit": {
+          "const": 8,
+          "default": 8,
+          "title": "Structuraltopiclimit",
+          "type": "integer"
+        },
+        "totalClaimLimit": {
+          "const": 10,
+          "default": 10,
+          "title": "Totalclaimlimit",
+          "type": "integer"
+        },
+        "minimumStructuralCoverage": {
+          "const": 5,
+          "default": 5,
+          "title": "Minimumstructuralcoverage",
+          "type": "integer"
+        },
+        "foundationBaseline": {
+          "const": 95,
+          "default": 95,
+          "title": "Foundationbaseline",
+          "type": "integer"
+        },
+        "domainBaseline": {
+          "const": 45,
+          "default": 45,
+          "title": "Domainbaseline",
+          "type": "integer"
+        },
+        "requestedTopicTarget": {
+          "const": 100,
+          "default": 100,
+          "title": "Requestedtopictarget",
+          "type": "integer"
+        },
+        "savNeutralReference": {
+          "default": 28.0,
+          "maximum": 28.0,
+          "minimum": 28.0,
+          "title": "Savneutralreference",
+          "type": "number"
+        },
+        "savDeviationMultiplier": {
+          "const": 3,
+          "default": 3,
+          "title": "Savdeviationmultiplier",
+          "type": "integer"
+        },
+        "savDeviationCap": {
+          "const": 24,
+          "default": 24,
+          "title": "Savdeviationcap",
+          "type": "integer"
+        },
+        "aspectPointsPerFact": {
+          "const": 2,
+          "default": 2,
+          "title": "Aspectpointsperfact",
+          "type": "integer"
+        },
+        "aspectPointsCap": {
+          "const": 12,
+          "default": 12,
+          "title": "Aspectpointscap",
+          "type": "integer"
+        },
+        "eligibleVargaBoost": {
+          "const": 8,
+          "default": 8,
+          "title": "Eligiblevargaboost",
+          "type": "integer"
+        }
+      },
+      "title": "JudgementPresentationPolicy",
+      "type": "object"
+    },
     "JudgementRuleContext": {
       "additionalProperties": false,
       "properties": {
@@ -55,6 +403,11 @@
           "title": "Status",
           "type": "string"
         },
+        "judgementUse": {
+          "enum": ["context_only", "directional"],
+          "title": "Judgementuse",
+          "type": "string"
+        },
         "evaluationStatus": {
           "enum": ["eligible", "ineligible"],
           "title": "Evaluationstatus",
@@ -90,6 +443,7 @@
         "evidenceClass",
         "sourceIds",
         "status",
+        "judgementUse",
         "evaluationStatus"
       ],
       "title": "JudgementRuleContext",
@@ -120,6 +474,14 @@
           "minimum": 0,
           "title": "Priorityscore",
           "type": "integer"
+        },
+        "priorityReasons": {
+          "items": {
+            "$ref": "#/$defs/PresentationPriorityReason"
+          },
+          "minItems": 1,
+          "title": "Priorityreasons",
+          "type": "array"
         },
         "ruleIds": {
           "items": {
@@ -187,7 +549,7 @@
           "type": "array"
         }
       },
-      "required": ["topicId", "title", "purpose", "priorityScore", "ruleIds"],
+      "required": ["topicId", "title", "purpose", "priorityScore", "priorityReasons", "ruleIds"],
       "title": "JudgementTopicContext",
       "type": "object"
     },
@@ -268,6 +630,22 @@
           "title": "Timingperiodids",
           "type": "array"
         },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/JudgementFinding"
+          },
+          "minItems": 1,
+          "title": "Findings",
+          "type": "array"
+        },
+        "conclusions": {
+          "items": {
+            "$ref": "#/$defs/JudgementConclusion"
+          },
+          "minItems": 1,
+          "title": "Conclusions",
+          "type": "array"
+        },
         "certaintyCap": {
           "enum": ["high", "moderate", "low"],
           "title": "Certaintycap",
@@ -288,9 +666,49 @@
         "permittedRuleIds",
         "allowedOutputCodes",
         "allowedScopes",
+        "findings",
+        "conclusions",
         "certaintyCap"
       ],
       "title": "JudgementUnit",
+      "type": "object"
+    },
+    "PresentationPriorityReason": {
+      "additionalProperties": false,
+      "description": "Auditable contribution to report salience, never an astrological strength score.",
+      "properties": {
+        "reasonCode": {
+          "enum": [
+            "baseline",
+            "requested_topic",
+            "sav_deviation_salience",
+            "natal_aspect_salience",
+            "eligible_varga"
+          ],
+          "title": "Reasoncode",
+          "type": "string"
+        },
+        "appliedPoints": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Appliedpoints",
+          "type": "integer"
+        },
+        "evidenceFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidencefactids",
+          "type": "array"
+        },
+        "detail": {
+          "minLength": 3,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": ["reasonCode", "appliedPoints", "detail"],
+      "title": "PresentationPriorityReason",
       "type": "object"
     },
     "QualityCheck": {
@@ -333,13 +751,31 @@
       "required": ["checkId", "status", "message"],
       "title": "QualityCheck",
       "type": "object"
+    },
+    "TimeRange": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["start", "end"],
+      "title": "TimeRange",
+      "type": "object"
     }
   },
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-judgement-context/1.1.0",
-      "default": "vedicdust-judgement-context/1.1.0",
+      "const": "vedicdust-judgement-context/1.6.0",
+      "default": "vedicdust-judgement-context/1.6.0",
       "title": "Schemaversion",
       "type": "string"
     },
@@ -371,6 +807,9 @@
     "rulePackVersion": {
       "title": "Rulepackversion",
       "type": "string"
+    },
+    "presentationPolicy": {
+      "$ref": "#/$defs/JudgementPresentationPolicy"
     },
     "rules": {
       "items": {
@@ -431,6 +870,7 @@
     "methodProfileId",
     "generatedAt",
     "rulePackVersion",
+    "presentationPolicy",
     "rules",
     "topics",
     "units"

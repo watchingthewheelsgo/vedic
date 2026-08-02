@@ -59,6 +59,10 @@ class Settings(BaseSettings):
 
     vedic_astro_skills_root: str | None = Field(default=None, alias="VEDIC_ASTRO_SKILLS_ROOT")
     vedic_geonames_path: str | None = Field(default=None, alias="VEDIC_GEONAMES_PATH")
+    vedic_independent_reference_registry: str | None = Field(
+        default=None,
+        alias="VEDIC_INDEPENDENT_REFERENCE_REGISTRY",
+    )
     vedic_ai_mode: str = Field(default="", alias="VEDIC_AI_MODE")
     amap_web_service_key: str = Field(default="", alias="AMAP_WEB_SERVICE_KEY")
     amap_place_fallback_enabled: bool = Field(default=False, alias="AMAP_PLACE_FALLBACK_ENABLED")
@@ -88,6 +92,10 @@ class Settings(BaseSettings):
     agent_effort: str = Field(default="max", alias="AGENT_EFFORT")
     agent_max_turns: int = Field(default=8, alias="AGENT_MAX_TURNS")
     agent_timeout_ms: int = Field(default=420_000, alias="AGENT_TIMEOUT_MS")
+    agent_transient_retries: int = Field(default=2, alias="AGENT_TRANSIENT_RETRIES", ge=0, le=5)
+    agent_retry_base_delay_ms: int = Field(
+        default=750, alias="AGENT_RETRY_BASE_DELAY_MS", ge=0, le=30_000
+    )
 
     @property
     def project_root(self) -> Path:
@@ -100,6 +108,11 @@ class Settings(BaseSettings):
     @property
     def calculator_root(self) -> Path:
         return self.project_root / "backend" / "app" / "calculator"
+
+    def independent_reference_registry_path(self) -> Path | None:
+        if not self.vedic_independent_reference_registry:
+            return None
+        return Path(self.vedic_independent_reference_registry).expanduser().resolve()
 
     @property
     def default_database_url(self) -> str:

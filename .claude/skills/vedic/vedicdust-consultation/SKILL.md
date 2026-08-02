@@ -48,13 +48,18 @@ English technical terms in the appendix. Define a technical term on first use.
 3. Assign every included Claim to exactly one section; record omitted Claims
    and why. Leave `technical_evidence.claimIds` empty because the deterministic
    renderer supplies the evidence table.
-4. Build timing windows only from approved timing Claims and exact Chart Record
-   periods. State conditions and ranges, never guaranteed events.
-5. Keep unresolved questions explicit so later consultations know what remains
-   open.
+4. Assign timing Claims only to `timing_outlook`. Leave `timingWindows` empty;
+   the backend derives exact windows and confidence from approved Claims.
+5. Leave `unresolvedQuestions` empty. The backend projects unresolved
+   rectification questions from authoritative evidence and replaces section
+   titles, order, purposes, omission language, and presentation metadata.
 6. Let the backend derive `consultation_report_manifest.json`,
    `consultation_report.md`, and `agent_context.json`. Do not hand-write them.
-7. Treat the Claim Graph as the complete judgement input.
+7. Treat the Claim Graph as the complete judgement input. Dossier identity,
+   scope, confidence, locale, audience, timing-window semantics, section
+   presentation, omission reasons, and unresolved questions are backend-owned.
+   Preserve each Claim's `evidenceConfidence`; never rewrite or promote
+   `certainty`.
 
 Complete only when the dossier conforms to
 `vedicdust-consultation-dossier/1.0.0` and every released Claim is accounted for.

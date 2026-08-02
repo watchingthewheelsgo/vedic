@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "ValidationFixtureReference": {
+      "additionalProperties": false,
+      "properties": {
+        "fixtureId": {
+          "pattern": "^[a-z0-9][a-z0-9._-]+$",
+          "title": "Fixtureid",
+          "type": "string"
+        },
+        "fixtureKind": {
+          "enum": [
+            "contract",
+            "invariant",
+            "same_provider_regression",
+            "independent_external",
+            "professional_review"
+          ],
+          "title": "Fixturekind",
+          "type": "string"
+        },
+        "testNodes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Testnodes",
+          "type": "array"
+        },
+        "description": {
+          "minLength": 3,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidenceArtifactPath": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidenceartifactpath"
+        },
+        "evidenceArtifactSha256": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidenceartifactsha256"
+        },
+        "reviewProtocolId": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._/-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewprotocolid"
+        },
+        "reviewedBy": {
+          "anyOf": [
+            {
+              "minLength": 3,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewedby"
+        },
+        "reviewedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewedat"
+        },
+        "reviewedCaseIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reviewedcaseids",
+          "type": "array"
+        }
+      },
+      "required": ["fixtureId", "fixtureKind", "testNodes", "description"],
+      "title": "ValidationFixtureReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-validation-fixtures/1.0.0",
+      "default": "vedicdust-validation-fixtures/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "fixtures": {
+      "items": {
+        "$ref": "#/$defs/ValidationFixtureReference"
+      },
+      "title": "Fixtures",
+      "type": "array"
+    }
+  },
+  "required": ["fixtures"],
+  "title": "ValidationFixtureRegistry",
+  "type": "object"
+}

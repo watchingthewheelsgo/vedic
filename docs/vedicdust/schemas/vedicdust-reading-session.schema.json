@@ -56,6 +56,8 @@
     "rectificationStatus": {
       "enum": [
         "not_required",
+        "input_resolution_required",
+        "calculation_failed",
         "collecting_evidence",
         "comparing_candidates",
         "bounded_interval",

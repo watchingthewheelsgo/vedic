@@ -1,0 +1,212 @@
+{
+  "$defs": {
+    "IndependentReferenceCertificationCase": {
+      "additionalProperties": false,
+      "properties": {
+        "caseId": {
+          "title": "Caseid",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/IndependentReferenceSelector"
+        },
+        "sourceSystem": {
+          "title": "Sourcesystem",
+          "type": "string"
+        },
+        "sourceVersion": {
+          "title": "Sourceversion",
+          "type": "string"
+        },
+        "sourceArtifactSha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Sourceartifactsha256",
+          "type": "string"
+        },
+        "coverageTags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coveragetags",
+          "type": "array"
+        },
+        "status": {
+          "enum": ["passed", "failed"],
+          "title": "Status",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "caseId",
+        "selector",
+        "sourceSystem",
+        "sourceVersion",
+        "sourceArtifactSha256",
+        "coverageTags",
+        "status"
+      ],
+      "title": "IndependentReferenceCertificationCase",
+      "type": "object"
+    },
+    "IndependentReferenceSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "localDate": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Localdate",
+          "type": "string"
+        },
+        "localTime": {
+          "pattern": "^\\d{2}:\\d{2}(?::\\d{2})?$",
+          "title": "Localtime",
+          "type": "string"
+        },
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        },
+        "timezoneId": {
+          "minLength": 1,
+          "title": "Timezoneid",
+          "type": "string"
+        },
+        "utcOffsetSeconds": {
+          "anyOf": [
+            {
+              "maximum": 50400,
+              "minimum": -50400,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Utcoffsetseconds"
+        },
+        "methodProfileId": {
+          "title": "Methodprofileid",
+          "type": "string"
+        },
+        "coordinateToleranceDeg": {
+          "default": 0.0001,
+          "exclusiveMinimum": 0,
+          "maximum": 0.01,
+          "title": "Coordinatetolerancedeg",
+          "type": "number"
+        }
+      },
+      "required": [
+        "localDate",
+        "localTime",
+        "latitude",
+        "longitude",
+        "timezoneId",
+        "methodProfileId"
+      ],
+      "title": "IndependentReferenceSelector",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "default": "vedicdust-independent-reference-certification/1.0.0",
+      "pattern": "^vedicdust-independent-reference-certification/1\\.0\\.0$",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "methodProfileId": {
+      "title": "Methodprofileid",
+      "type": "string"
+    },
+    "minimumCases": {
+      "minimum": 1,
+      "title": "Minimumcases",
+      "type": "integer"
+    },
+    "requiredCoverageTags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requiredcoveragetags",
+      "type": "array"
+    },
+    "observedCoverageTags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Observedcoveragetags",
+      "type": "array"
+    },
+    "totalCases": {
+      "minimum": 0,
+      "title": "Totalcases",
+      "type": "integer"
+    },
+    "passedCases": {
+      "minimum": 0,
+      "title": "Passedcases",
+      "type": "integer"
+    },
+    "failedCases": {
+      "minimum": 0,
+      "title": "Failedcases",
+      "type": "integer"
+    },
+    "policyFailures": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Policyfailures",
+      "type": "array"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/IndependentReferenceCertificationCase"
+      },
+      "title": "Cases",
+      "type": "array"
+    },
+    "status": {
+      "enum": ["passed", "failed"],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "generatedAt",
+    "methodProfileId",
+    "minimumCases",
+    "requiredCoverageTags",
+    "observedCoverageTags",
+    "totalCases",
+    "passedCases",
+    "failedCases",
+    "cases",
+    "status"
+  ],
+  "title": "IndependentReferenceCertificationReport",
+  "type": "object"
+}

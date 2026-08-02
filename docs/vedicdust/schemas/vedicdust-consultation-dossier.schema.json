@@ -323,7 +323,7 @@
       "type": "string"
     },
     "claimGraphVersion": {
-      "const": "vedicdust-claim-graph/1.1.0",
+      "const": "vedicdust-claim-graph/1.6.0",
       "title": "Claimgraphversion",
       "type": "string"
     },

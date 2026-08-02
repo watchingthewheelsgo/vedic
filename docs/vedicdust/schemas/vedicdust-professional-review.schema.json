@@ -1,0 +1,181 @@
+{
+  "$defs": {
+    "ProfessionalReviewAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "methodFidelity": {
+          "enum": ["accepted", "reservation", "rejected", "not_applicable"],
+          "title": "Methodfidelity",
+          "type": "string"
+        },
+        "evidenceTraceability": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Evidencetraceability",
+          "type": "string"
+        },
+        "uncertaintyCalibration": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Uncertaintycalibration",
+          "type": "string"
+        },
+        "readerComprehensibility": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Readercomprehensibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "methodFidelity",
+        "evidenceTraceability",
+        "uncertaintyCalibration",
+        "readerComprehensibility"
+      ],
+      "title": "ProfessionalReviewAssessment",
+      "type": "object"
+    },
+    "ProfessionalReviewCase": {
+      "additionalProperties": false,
+      "properties": {
+        "caseId": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{2,79}$",
+          "title": "Caseid",
+          "type": "string"
+        },
+        "chartRecord": {
+          "$ref": "#/$defs/RetainedReviewArtifact"
+        },
+        "claimGraph": {
+          "$ref": "#/$defs/RetainedReviewArtifact"
+        },
+        "consultationDossier": {
+          "$ref": "#/$defs/RetainedReviewArtifact"
+        },
+        "expectedDisposition": {
+          "enum": ["publish", "withhold"],
+          "title": "Expecteddisposition",
+          "type": "string"
+        },
+        "observedDisposition": {
+          "enum": ["publish", "withhold"],
+          "title": "Observeddisposition",
+          "type": "string"
+        },
+        "decision": {
+          "enum": ["accepted", "accepted_with_reservations", "rejected"],
+          "title": "Decision",
+          "type": "string"
+        },
+        "assessment": {
+          "$ref": "#/$defs/ProfessionalReviewAssessment"
+        },
+        "disagreements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Disagreements",
+          "type": "array"
+        },
+        "rationale": {
+          "minLength": 20,
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "caseId",
+        "chartRecord",
+        "claimGraph",
+        "consultationDossier",
+        "expectedDisposition",
+        "observedDisposition",
+        "decision",
+        "assessment",
+        "rationale"
+      ],
+      "title": "ProfessionalReviewCase",
+      "type": "object"
+    },
+    "RetainedReviewArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": ["path", "sha256"],
+      "title": "RetainedReviewArtifact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-professional-review/1.0.0",
+      "default": "vedicdust-professional-review/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "protocolId": {
+      "pattern": "^[a-z0-9][a-z0-9._/-]+$",
+      "title": "Protocolid",
+      "type": "string"
+    },
+    "reviewerId": {
+      "minLength": 3,
+      "title": "Reviewerid",
+      "type": "string"
+    },
+    "reviewerCredentials": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Reviewercredentials",
+      "type": "array"
+    },
+    "reviewedAt": {
+      "format": "date-time",
+      "title": "Reviewedat",
+      "type": "string"
+    },
+    "blindedToSubjectIdentity": {
+      "title": "Blindedtosubjectidentity",
+      "type": "boolean"
+    },
+    "blindedToSystemAuthorship": {
+      "title": "Blindedtosystemauthorship",
+      "type": "boolean"
+    },
+    "reviewerIndependentOfImplementation": {
+      "title": "Reviewerindependentofimplementation",
+      "type": "boolean"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/ProfessionalReviewCase"
+      },
+      "minItems": 1,
+      "title": "Cases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "protocolId",
+    "reviewerId",
+    "reviewerCredentials",
+    "reviewedAt",
+    "blindedToSubjectIdentity",
+    "blindedToSystemAuthorship",
+    "reviewerIndependentOfImplementation",
+    "cases"
+  ],
+  "title": "ProfessionalReviewArtifact",
+  "type": "object"
+}

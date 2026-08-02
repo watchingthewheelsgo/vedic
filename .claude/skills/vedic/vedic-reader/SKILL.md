@@ -1,10 +1,10 @@
 ---
 name: vedic-reader
-description: Generate evidence-seeking birth-time validation questions from a VedicDust Chart Record and backend-owned candidate plan.
+description: Generate neutral pre-reading quality checks for a scan-stable VedicDust Chart Record.
 disable-model-invocation: true
 ---
 
-# VedicDust Birth-Time Validation
+# VedicDust Pre-Reading Validation
 
 ## Authoritative inputs
 
@@ -13,24 +13,43 @@ disable-model-invocation: true
 - `birth_input_context.json`
 - `sensitivity_scan.json`
 - `chart_rectification_state.json`
-- prior `rectification_question_set.json`, answer batch, and user feedback when present
+- prior user feedback when present
+
+The runtime supplies a calibration-only snapshot of these inputs. Reserved
+holdout events, scores, decisions, and derived partitions are structurally
+excluded from the Agent context and must never be requested or reconstructed.
+
+Birth-time candidate ranking is not an Agent responsibility. The backend alone
+scores structured calibration events, evaluates the reserved holdout, and
+materializes a selected bounded interval. This skill is invoked only when the
+bounded sensitivity scan is stable and `chart_rectification_state.status` is
+`not_required`.
 
 ## Output
 
-Write only `reader_prevalidation.md` in the runtime response contract. The backend parses it into typed `rectification_question_set.json`, scores answers, updates `chart_rectification_state.json`, and recalculates a new Chart Record revision when a candidate is selected.
+Write only `reader_prevalidation.md` in the runtime response contract. The
+backend parses it into typed questions and uses the answers as reading-quality
+context. These answers cannot select a birth-time candidate, move the reported
+time/place, or recalculate the Chart Record.
 
 ## Question method
 
-1. Read `rectificationPlan` before asking anything.
-2. Ask only about facts that discriminate at least two surviving candidates.
-3. Prefer dated, externally checkable life events over personality language.
-4. Keep each question neutral and falsifiable. Include why it is asked without revealing the preferred candidate.
-5. Never turn a vague match into confirmation; preserve partly accurate, inaccurate, unknown, and contradictory answers.
-6. Stop when the required anchor count is reached. Do not pad a round.
+1. Confirm that the state is `not_required`; otherwise stop rather than inventing
+   a question set.
+2. Ask 1-5 short questions about concrete, user-answerable past facts supported
+   by facts that are stable across the reported input window.
+3. Prefer externally checkable events over personality language.
+4. Keep each question neutral and falsifiable. Include a concise derivation for
+   audit, but never expose technical astrology in the visible question.
+5. Never turn a vague match into confirmation; preserve partly accurate,
+   inaccurate, unknown, and contradictory answers.
+6. Do not emit Candidate, Contrast, Event, or Field machine mappings. Submitted
+   life events are not independent again merely because the Agent restates them.
 
 ## Release discipline
 
-- Exact or high-confidence input still receives a short holdout check.
+- Holdout evaluation is backend-only; the Agent never sees or asks about the
+  reserved event.
 - Coarse time or city-level place expands the candidate window within user-provided bounds.
 - Precise verified POI coordinates lock the place axis; only time may be rectified.
 - No answer may move the time or place outside the reported window/radius.

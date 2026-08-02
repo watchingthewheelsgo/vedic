@@ -56,13 +56,31 @@
       "citationStatus": "pending-edition-pin"
     },
     {
-      "sourceId": "lineage.pvr-integrated-approach.pending-edition",
+      "sourceId": "lineage.pvr-integrated-approach-2000-2010",
       "evidenceClass": "lineage_commentary",
       "title": "Vedic Astrology: An Integrated Approach",
-      "locator": null,
-      "edition": null,
-      "url": null,
-      "citationStatus": "pending-edition-pin"
+      "locator": "First published 2000; author update 18 March 2010; PDF p. 41 (book p. 29: published natural-benefic classification), p. 51 (book p. 39: later friendly/inimical-house references mean compound relationships), pp. 71-73 (Table 11: varga significations and domain selection), p. 83 (naisargika karakas as natural significators used in general Phalita Jyotish), p. 136 (book pp. 124-125: Gaja-Kesari definition and all-required-conditions caution), pp. 143 and 146 (book pp. 131 and 134: house-lord exchange definition and Parivartana as one of three association forms), and pp. 431-449 (birth-time sensitivity, broad/fine rectification, and event-led method selection)",
+      "edition": "First published 2000; author update 2010",
+      "url": "https://www.vedicastrologer.org/articles/vedic_astro_textbook.pdf",
+      "citationStatus": "pinned"
+    },
+    {
+      "sourceId": "lineage.pvr-lessons-volume-1-2005",
+      "evidenceClass": "lineage_commentary",
+      "title": "Lessons on Vedic Astrology, Volume I, Lessons 1 to 45",
+      "locator": "First Print 2005; PDF pp. 9-10 (Lesson 1: Lagna, Sun, and Moon as three primary reference points and the D1 chart), PDF pp. 12-13 (Lessons 2-3: natural and temporary relationships, Panchadha Maitri, sign dignity, and kendra-trikona Raja Yoga structure), PDF pp. 13-16 (Lessons 3-4: Graha Drishti), PDF pp. 25-28 (Lessons 7-8: judgement order and D10), PDF pp. 44-45 (book pp. 72-73, Lesson 17), PDF p. 76 (same-house conjunction proximity by longitude), and PDF p. 100 (Lesson 40, points 17 and 19: dispositor influence and lordship/placement distinction)",
+      "edition": "First Print, 2005",
+      "url": "https://vedicastrologer.org/classes/book1-for-CD.pdf",
+      "citationStatus": "pinned"
+    },
+    {
+      "sourceId": "research.pvr-nakshatra-dasha-lord-transit-2009",
+      "evidenceClass": "lineage_commentary",
+      "title": "Transit of Nakshatra Dasa Lord: A Specific Principle",
+      "locator": "Version 2, 31 December 2009; PDF pp. 1 and 10",
+      "edition": "Version 2, 2009",
+      "url": "https://www.vedicastrologer.org/articles/dasa_lord_transit.pdf",
+      "citationStatus": "pinned"
     },
     {
       "sourceId": "software.pyjhora.compatibility",

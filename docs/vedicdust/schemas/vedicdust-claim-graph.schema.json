@@ -15,21 +15,17 @@
           "title": "Judgementunitid",
           "type": "string"
         },
+        "conclusionId": {
+          "title": "Conclusionid",
+          "type": "string"
+        },
         "judgementCode": {
           "title": "Judgementcode",
           "type": "string"
         },
         "title": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Title"
+          "title": "Title",
+          "type": "string"
         },
         "plainStatement": {
           "title": "Plainstatement",
@@ -69,8 +65,14 @@
           "items": {
             "type": "string"
           },
-          "minItems": 1,
           "title": "Supportingfactids",
+          "type": "array"
+        },
+        "contextFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contextfactids",
           "type": "array"
         },
         "counterFactIds": {
@@ -78,6 +80,13 @@
             "type": "string"
           },
           "title": "Counterfactids",
+          "type": "array"
+        },
+        "counterStatements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterstatements",
           "type": "array"
         },
         "timingFactIds": {
@@ -101,6 +110,9 @@
           "minItems": 1,
           "title": "Ruleids",
           "type": "array"
+        },
+        "evidenceConfidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
         },
         "certainty": {
           "enum": ["high", "moderate", "low", "withheld"],
@@ -148,16 +160,23 @@
         "claimId",
         "topic",
         "judgementUnitId",
+        "conclusionId",
         "judgementCode",
+        "title",
         "plainStatement",
         "technicalStatement",
-        "supportingFactIds",
         "ruleIds",
+        "evidenceConfidence",
         "certainty",
         "scope"
       ],
       "title": "Claim",
       "type": "object"
+    },
+    "ConfidenceGrade": {
+      "enum": ["verified", "corroborated", "provisional", "disputed", "unavailable"],
+      "title": "ConfidenceGrade",
+      "type": "string"
     },
     "QualityCheck": {
       "additionalProperties": false,
@@ -222,8 +241,8 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-claim-graph/1.1.0",
-      "default": "vedicdust-claim-graph/1.1.0",
+      "const": "vedicdust-claim-graph/1.6.0",
+      "default": "vedicdust-claim-graph/1.6.0",
       "title": "Schemaversion",
       "type": "string"
     },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,9 +23,19 @@ from app.schemas import (
     AdminSessionProgress,
     AdminSessionStatus,
     AdminSessionSummary,
+    CoreJobNode,
+    CoreJobProgress,
     CoreJobResponse,
+    CoreJobWave,
 )
 from app.services.skill_workspace import SkillWorkspace
+
+
+@dataclass(frozen=True)
+class PersistedCoreJob:
+    response: CoreJobResponse
+    owner_user_id: str | None
+    user_message: str
 
 
 class MetadataStore:
@@ -185,6 +196,133 @@ class MetadataStore:
             )
             await db.commit()
 
+    async def restore_core_jobs(self, *, limit: int = 500) -> list[PersistedCoreJob]:
+        """Load durable job snapshots and close work interrupted by a process restart.
+
+        Agent calls are never restarted implicitly: doing so could duplicate model
+        charges or artifact writes. A new explicit core-job request can safely resume
+        from the artifact checkpoints already written by completed nodes.
+        """
+
+        interrupted_message = (
+            "Generation was interrupted by a backend restart. Completed sections are saved; "
+            "retry will resume from unfinished steps."
+        )
+        interrupted_error = "Backend process restarted before this node completed."
+        now = datetime.now(timezone.utc)
+
+        async with self._session() as db:
+            result = await db.execute(
+                select(VedicCoreJobRecord)
+                .order_by(VedicCoreJobRecord.updated_at.desc())
+                .limit(limit)
+            )
+            records = list(result.scalars().all())
+
+            restored: list[PersistedCoreJob] = []
+            for record in records:
+                node_result = await db.execute(
+                    select(VedicCoreJobNodeRecord)
+                    .where(VedicCoreJobNodeRecord.job_id == record.job_id)
+                    .order_by(VedicCoreJobNodeRecord.id.asc())
+                )
+                nodes = list(node_result.scalars().all())
+
+                if record.status in {"queued", "running"}:
+                    record.status = "failed"
+                    record.message = interrupted_message
+                    record.finished_at = now
+                    record.error = interrupted_error
+                    record.updated_at = now
+                    for node in nodes:
+                        if node.status == "running":
+                            node.status = "failed"
+                            node.finished_at = now
+                            node.error = interrupted_error
+                            node.updated_at = now
+                    self._refresh_job_progress(record, nodes)
+                    await self._mark_session_interrupted(
+                        db,
+                        record,
+                        interrupted_error=interrupted_error,
+                    )
+                    self._write_interrupted_metrics(record, nodes)
+
+                restored.append(self._persisted_core_job(record, nodes))
+
+            await db.commit()
+            return restored
+
+    async def _mark_session_interrupted(
+        self,
+        db: AsyncSession,
+        job: VedicCoreJobRecord,
+        *,
+        interrupted_error: str,
+    ) -> None:
+        session = await self._get_session_record(db, job.session_id)
+        if session is None:
+            return
+        session.status = "failed"
+        session.stage = "error"
+        session.active_job_id = job.job_id
+        session.active_node = None
+        session.progress_total = job.progress_total
+        session.progress_completed = job.progress_completed
+        session.progress_running = 0
+        session.progress_failed = job.progress_failed
+        session.progress_percent = job.progress_percent
+        session.duration_seconds = job.duration_seconds
+        session.error = interrupted_error
+        session.updated_at = datetime.now(timezone.utc)
+
+    def _write_interrupted_metrics(
+        self,
+        job: VedicCoreJobRecord,
+        nodes: list[VedicCoreJobNodeRecord],
+    ) -> None:
+        session_dir = self.workspace.session_dir(job.session_id)
+        if not session_dir.is_dir():
+            return
+        path = session_dir / "run_metrics.json"
+        payload = self._read_json(path) or {}
+        payload.update(
+            {
+                "jobId": job.job_id,
+                "sessionId": job.session_id,
+                "status": job.status,
+                "message": job.message,
+                "startedAt": self._iso(job.started_at),
+                "finishedAt": self._iso(job.finished_at),
+                "durationSeconds": job.duration_seconds,
+                "progress": {
+                    "total": job.progress_total,
+                    "completed": job.progress_completed,
+                    "failed": job.progress_failed,
+                },
+                "nodes": [
+                    {
+                        "id": node.node_id,
+                        "label": node.label,
+                        "wave": node.wave,
+                        "files": list(node.files or []),
+                        "dependencies": list(node.dependencies or []),
+                        "status": node.status,
+                        "startedAt": self._iso(node.started_at),
+                        "finishedAt": self._iso(node.finished_at),
+                        "durationSeconds": node.duration_seconds,
+                        "error": node.error,
+                    }
+                    for node in nodes
+                ],
+            }
+        )
+        self.workspace.write_artifact(
+            job.session_id,
+            "run_metrics.json",
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+
     async def list_session_summaries(
         self, owner_user_id: str | None = None
     ) -> list[AdminSessionSummary]:
@@ -311,6 +449,82 @@ class MetadataStore:
             )
         )
         return result.scalar_one_or_none()
+
+    def _persisted_core_job(
+        self,
+        record: VedicCoreJobRecord,
+        nodes: list[VedicCoreJobNodeRecord],
+    ) -> PersistedCoreJob:
+        node_models = [
+            CoreJobNode(
+                id=node.node_id,
+                label=node.label,
+                files=[str(item) for item in (node.files or [])],
+                dependencies=[str(item) for item in (node.dependencies or [])],
+                wave=node.wave,
+                status=node.status,  # type: ignore[arg-type]
+                startedAt=self._iso(node.started_at),
+                finishedAt=self._iso(node.finished_at),
+                durationSeconds=node.duration_seconds,
+                error=node.error,
+            )
+            for node in nodes
+        ]
+        waves: list[CoreJobWave] = []
+        for wave in sorted({node.wave for node in node_models}):
+            wave_nodes = [node for node in node_models if node.wave == wave]
+            durations = [
+                node.duration_seconds for node in wave_nodes if node.duration_seconds is not None
+            ]
+            waves.append(
+                CoreJobWave(
+                    wave=wave,
+                    total=len(wave_nodes),
+                    completed=sum(
+                        1 for node in wave_nodes if node.status in {"completed", "skipped"}
+                    ),
+                    running=sum(1 for node in wave_nodes if node.status == "running"),
+                    failed=sum(1 for node in wave_nodes if node.status == "failed"),
+                    durationSeconds=max(durations) if durations else None,
+                )
+            )
+
+        response = CoreJobResponse(
+            jobId=record.job_id,
+            sessionId=record.session_id,
+            status=record.status,  # type: ignore[arg-type]
+            message=record.message,
+            startedAt=self._iso(record.started_at),
+            finishedAt=self._iso(record.finished_at),
+            durationSeconds=record.duration_seconds,
+            progress=CoreJobProgress(
+                total=record.progress_total,
+                completed=record.progress_completed,
+                running=record.progress_running,
+                failed=record.progress_failed,
+                percent=record.progress_percent,
+            ),
+            waves=waves,
+            nodes=node_models,
+        )
+        return PersistedCoreJob(
+            response=response,
+            owner_user_id=record.owner_user_id,
+            user_message=record.user_message,
+        )
+
+    @staticmethod
+    def _refresh_job_progress(
+        record: VedicCoreJobRecord,
+        nodes: list[VedicCoreJobNodeRecord],
+    ) -> None:
+        total = len(nodes)
+        completed = sum(1 for node in nodes if node.status in {"completed", "skipped"})
+        record.progress_total = total
+        record.progress_completed = completed
+        record.progress_running = sum(1 for node in nodes if node.status == "running")
+        record.progress_failed = sum(1 for node in nodes if node.status == "failed")
+        record.progress_percent = int(round((completed / total) * 100)) if total else 0
 
     async def _replace_artifacts(
         self,

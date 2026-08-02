@@ -208,7 +208,7 @@ function AdminHeader({
     <header className="border-b border-gold/25 bg-cream/95 px-5 py-4 backdrop-blur-lg sm:px-8">
       <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4">
         <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-          Veda<span>Light</span>
+          Vedic<span>Dust</span>
         </button>
         <div className="h-8 w-px bg-gold/25" />
         <div>

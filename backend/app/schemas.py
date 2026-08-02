@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ApiModel(BaseModel):
@@ -12,11 +12,24 @@ class ApiModel(BaseModel):
 
 BirthTimePrecision = Literal["exact", "approximate", "part_of_day", "unknown"]
 AppLocale = Literal["zh", "en", "ja"]
+ReaderRelationship = Literal["self", "parent", "partner", "family", "professional"]
+LifeEventCategory = Literal[
+    "education",
+    "career",
+    "relationship",
+    "relocation",
+    "child",
+    "health",
+    "family",
+    "finance",
+    "property",
+    "legal",
+    "loss",
+    "spiritual",
+]
 SkillName = Literal[
     "vedic-reader",
     "vedic-core",
-    "vedic-career",
-    "vedic-love",
     "vedic-rectifier",
     "vedic-synastry",
     "bazi-calculator",
@@ -32,12 +45,49 @@ class BirthInput(ApiModel):
     gender: str = Field(default="[待填]", max_length=80)
     relationship: str = Field(default="[待填]", max_length=120)
     time_source: str = Field(default="未追问", alias="timeSource", max_length=120)
+    reading_focus: str = Field(default="", alias="readingFocus", max_length=1000)
     life_events: str = Field(default="", alias="lifeEvents", max_length=4000)
+    reader_relationship: ReaderRelationship = Field(
+        default="self",
+        alias="readerRelationship",
+    )
+    utc_offset_seconds: int | None = Field(
+        default=None,
+        alias="utcOffsetSeconds",
+        ge=-50400,
+        le=50400,
+    )
     locale: AppLocale = "en"
 
 
 class SkillBirthInput(BirthInput):
     pass
+
+
+class RectificationLifeEventInput(ApiModel):
+    date: str = Field(pattern=r"^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?$")
+    category: LifeEventCategory
+    description: str = Field(min_length=3, max_length=240)
+
+
+class RectificationLifeEventsInput(ApiModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    events: list[RectificationLifeEventInput] = Field(min_length=3, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_independent_events(self) -> RectificationLifeEventsInput:
+        fingerprints = [
+            (event.date, event.category, " ".join(event.description.casefold().split()))
+            for event in self.events
+        ]
+        if len(fingerprints) != len(set(fingerprints)):
+            raise ValueError("rectification life events must be distinct")
+        return self
+
+    def ledger_text(self) -> str:
+        return "\n".join(
+            f"{event.date} {event.category}: {event.description.strip()}" for event in self.events
+        )
 
 
 BaziCalendarType = Literal["solar", "lunar"]
@@ -196,8 +246,6 @@ class SkillSessionResponse(ApiModel):
         "reader_validation",
         "core_in_progress",
         "core_complete",
-        "career_complete",
-        "love_complete",
         "rectifier_complete",
         "synastry_ready",
         "synastry_complete",

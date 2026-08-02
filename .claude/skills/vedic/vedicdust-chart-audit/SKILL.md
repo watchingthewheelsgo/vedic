@@ -13,7 +13,7 @@ contracts; it does not calculate a chart or interpret a life.
 
 ## Inputs
 
-- `chart_record.json`, conforming to `vedicdust-chart-record/1.0.0`
+- `chart_record.json`, conforming to `vedicdust-chart-record/1.3.0`
 - `docs/vedicdust/methodology.md`
 - `docs/vedicdust/schemas/vedicdust-chart-record.schema.json`
 
@@ -23,6 +23,8 @@ If the chart record is missing or fails schema validation, stop with a blocking 
 
 1. Validate the JSON contract and schema version.
    Complete when every invalid or unknown field is recorded.
+   Reject any fact whose declared sensitivity dependencies or input stability do not
+   match the backend-owned `inputSensitivity` assessment.
 2. Audit Birth Assertion evidence, time window, place precision, IANA time-zone
    resolution, and subject/audience context.
    Complete when every unresolved input has a severity and required action.

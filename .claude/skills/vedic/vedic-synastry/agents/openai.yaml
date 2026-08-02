@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vedic Synastry Consultation"
+  short_description: "Interpret a deterministic VedicDust relationship context"
+  default_prompt: "Use $vedic-synastry to interpret this approved VedicDust synastry context."

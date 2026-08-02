@@ -4,6 +4,7 @@ extras_pyjhora.py - PyJHora 额外功能封装
 """
 
 from .pyjhora_compat import ensure_pyjhora_swe_compat
+from .provider_runtime import configure_vedicdust_pyjhora, serialized_provider_call
 
 
 def _setup():
@@ -35,14 +36,13 @@ def _setup():
     from jhora import const
     from jhora.panchanga import drik
 
-    drik.set_ayanamsa_mode("LAHIRI")
-    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
-    const._use_true_nodes_for_rahu_ketu = False
+    configure_vedicdust_pyjhora()
 
     return swe, const, drik
 
 
-def calculate_bhava_bala(year, month, day, hour, minute, lat, lon, tz_offset):
+@serialized_provider_call
+def calculate_bhava_bala(year, month, day, hour, minute, lat, lon, tz_offset, *, second=0):
     """
     使用 PyJHora 计算 Bhava Bala (宫位力量)。
 
@@ -58,7 +58,7 @@ def calculate_bhava_bala(year, month, day, hour, minute, lat, lon, tz_offset):
     from jhora.panchanga.drik import Place
     from jhora.horoscope.chart import strength
 
-    local_hour = hour + minute / 60.0
+    local_hour = hour + minute / 60.0 + second / 3600.0
     jd_local = swe.julday(year, month, day, local_hour)
     place = Place("birth_place", lat, lon, tz_offset)
 
@@ -86,7 +86,8 @@ def calculate_bhava_bala(year, month, day, hour, minute, lat, lon, tz_offset):
         return {"error": str(e)}
 
 
-def calculate_special_lagnas(year, month, day, hour, minute, lat, lon, tz_offset):
+@serialized_provider_call
+def calculate_special_lagnas(year, month, day, hour, minute, lat, lon, tz_offset, *, second=0):
     """
     计算特殊 Lagna: Hora Lagna, Ghati Lagna, Sree Lagna, Indu Lagna,
     Pranapada Lagna, Bhava Lagna.
@@ -112,7 +113,7 @@ def calculate_special_lagnas(year, month, day, hour, minute, lat, lon, tz_offset
         "Pisces",
     ]
 
-    local_hour = hour + minute / 60.0
+    local_hour = hour + minute / 60.0 + second / 3600.0
     jd_local = swe.julday(year, month, day, local_hour)
     place = Place("birth_place", lat, lon, tz_offset)
 
@@ -146,12 +147,13 @@ def calculate_special_lagnas(year, month, day, hour, minute, lat, lon, tz_offset
                 "longitude": round(sign_idx * 30 + degree, 4),
             }
         except Exception as e:
-            result[name] = {"error": str(e)}
+            result.setdefault("_provider_errors", {})[name] = str(e)
 
     return result
 
 
-def calculate_vargeeya_bala(year, month, day, hour, minute, lat, lon, tz_offset):
+@serialized_provider_call
+def calculate_vargeeya_bala(year, month, day, hour, minute, lat, lon, tz_offset, *, second=0):
     """
     计算 Pancha Vargeeya Bala 和 Dwadhasa Vargeeya Bala。
 
@@ -167,7 +169,7 @@ def calculate_vargeeya_bala(year, month, day, hour, minute, lat, lon, tz_offset)
 
     PLANETS = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]
 
-    local_hour = hour + minute / 60.0
+    local_hour = hour + minute / 60.0 + second / 3600.0
     jd_local = swe.julday(year, month, day, local_hour)
     place = Place("birth_place", lat, lon, tz_offset)
 

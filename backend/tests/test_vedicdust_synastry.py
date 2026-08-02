@@ -101,6 +101,8 @@ def _record(
             )
             for house in range(1, 13)
         ],
+        input_stability="verified",
+        calculation_assurance="astronomical_authority",
         confidence="verified",
         eligible_as_primary_evidence=True,
     )

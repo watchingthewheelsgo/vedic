@@ -1,9 +1,11 @@
 """PyJHora Ashtakavarga adapter for the pinned VedicDust method profile."""
 
 from .pyjhora_compat import ensure_pyjhora_swe_compat
+from .provider_runtime import configure_vedicdust_pyjhora, serialized_provider_call
 
 
-def calculate_ashtakavarga_fixed(year, month, day, hour, minute, lat, lon, tz_offset):
+@serialized_provider_call
+def calculate_ashtakavarga_fixed(year, month, day, hour, minute, lat, lon, tz_offset, *, second=0):
     """
     使用固定版本 PyJHora 计算 SAV/BAV；桌面 JHora 一致性由独立基准测试决定。
 
@@ -44,13 +46,10 @@ def calculate_ashtakavarga_fixed(year, month, day, hour, minute, lat, lon, tz_of
     from jhora.panchanga.drik import Place
     from jhora.horoscope.chart import ashtakavarga, charts
 
-    # 设置对齐
-    drik.set_ayanamsa_mode("LAHIRI")
-    const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
-    const._use_true_nodes_for_rahu_ketu = False
+    configure_vedicdust_pyjhora()
 
     # JD = local time（和 Shadbala 一致）
-    local_hour = hour + minute / 60.0
+    local_hour = hour + minute / 60.0 + second / 3600.0
     jd_local = swe.julday(year, month, day, local_hour)
     place = Place("birth_place", lat, lon, tz_offset)
 

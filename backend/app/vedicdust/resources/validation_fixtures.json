@@ -1,0 +1,295 @@
+{
+  "schemaVersion": "vedicdust-validation-fixtures/1.0.0",
+  "fixtures": [
+    {
+      "fixtureId": "calculator.combustion-boundaries",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_combustion_policy_has_explicit_inclusive_boundaries"
+      ],
+      "description": "Checks inclusive combustion thresholds and the first value outside each declared boundary."
+    },
+    {
+      "fixtureId": "calculator.combustion-status-provenance",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks typed combustion facts, thresholds, and rule provenance in the Chart Record."
+    },
+    {
+      "fixtureId": "calculator.d1-d9-vargottama-equality",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks that Lagna and graha Vargottama facts equal the corresponding D1 and D9 sign placements."
+    },
+    {
+      "fixtureId": "calculator.directional-strength-houses",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_directional_strength_policy_uses_declared_full_strength_house"
+      ],
+      "description": "Checks the declared full-strength house for every supported graha."
+    },
+    {
+      "fixtureId": "calculator.double-transit-house-intersection",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_transit_snapshot_uses_explicit_utc_instant"
+      ],
+      "description": "Checks Saturn and Jupiter whole-sign activation intersection for an explicit UTC instant."
+    },
+    {
+      "fixtureId": "calculator.kendra-trikona-same-sign-association",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_kendra_trikona_association_uses_declared_house_lordship_only"
+      ],
+      "description": "Checks that the structural association uses declared kendra and trikona lordship only."
+    },
+    {
+      "fixtureId": "calculator.parivartana-house-exchange",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_parivartana_requires_exact_mutual_house_lord_placement"
+      ],
+      "description": "Checks that Parivartana is emitted only when two distinct D1 house lords occupy each other's houses."
+    },
+    {
+      "fixtureId": "calculator.lunar-phase-hemicycle-boundary",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_lunar_phase_hemicycle_boundary"
+      ],
+      "description": "Checks the bright and dark hemicycle boundary convention."
+    },
+    {
+      "fixtureId": "calculator.parashari-dignity-and-panchadha",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_dignity.py::test_compound_relationship_matrix",
+        "backend/tests/test_dignity.py::test_special_sign_status_sets_effective_status_without_erasing_panchadha"
+      ],
+      "description": "Checks natural, temporary, compound, and special-sign dignity without overwriting evidence layers."
+    },
+    {
+      "fixtureId": "calculator.parashari-graha-drishti-matrix",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_parashari_graha_drishti_matrix_matches_declared_profile"
+      ],
+      "description": "Checks the declared Parashari graha-drishti source and target matrix."
+    },
+    {
+      "fixtureId": "calculator.parashari-node-source-exclusion",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_profile_excludes_node_aspect_sources_but_keeps_them_as_targets"
+      ],
+      "description": "Checks that mean nodes remain aspect targets but are excluded as graha-drishti sources."
+    },
+    {
+      "fixtureId": "calculator.rectification-dasha-graha-drishti",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_dasha_activation_includes_declared_graha_drishti"
+      ],
+      "description": "Checks declared graha-drishti as one event-bound Dasha activation dimension."
+    },
+    {
+      "fixtureId": "calculator.rectification-varga-domain-activation",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_varga_score_uses_domain_house_structure"
+      ],
+      "description": "Checks that rectification scores only the declared event-domain varga structure."
+    },
+    {
+      "fixtureId": "calculator.sade-sati-sign-phase",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_sade_sati_sign_phase_boundaries"
+      ],
+      "description": "Checks the three sign-relative Sade Sati phases and inactive states."
+    },
+    {
+      "fixtureId": "calculator.transit-position-explicit-utc",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_transit_snapshot_uses_explicit_utc_instant"
+      ],
+      "description": "Checks transit positions at an explicit timezone-aware UTC instant."
+    },
+    {
+      "fixtureId": "calculator.vimshottari-exact-boundaries",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_dasha_adapter_preserves_exact_period_boundaries",
+        "backend/tests/test_vedic_reference_regression.py::test_dasha_period_boundaries_are_half_open"
+      ],
+      "description": "Checks exact Vimshottari boundaries and half-open period membership."
+    },
+    {
+      "fixtureId": "contract.judgement.capacity-rule-separation",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedicdust_contracts.py::test_directional_convergence_requires_permitted_same_polarity_methods"
+      ],
+      "description": "Checks that context-only capacity rules cannot independently publish a direction."
+    },
+    {
+      "fixtureId": "contract.judgement.structural-method-separation",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks that house-lord, occupancy, graha-drishti, varga-confirmation, association, natural-karaka, and dispositor-path findings retain distinct context-only rule provenance."
+    },
+    {
+      "fixtureId": "contract.judgement.integrated-topic-and-timing-projection",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks every integrated topic rule is projected into a typed Judgement Unit and that eligible Vimshottari timing remains a separate bounded conclusion."
+    },
+    {
+      "fixtureId": "contract.rashi.dispositor-chain",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks typed D1 dispositor-chain facts and their derivation provenance."
+    },
+    {
+      "fixtureId": "contract.rashi.house-ownership",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks complete typed whole-sign house ownership facts."
+    },
+    {
+      "fixtureId": "contract.rashi.same-sign-contact",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_pyjhora_vargas_honor_the_profile_mean_node_setting"
+      ],
+      "description": "Checks same-sign contact facts remain distinct from directed graha drishti."
+    },
+    {
+      "fixtureId": "contract.rashi.whole-sign-house",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks complete D1 whole-sign house assignments in the typed Chart Record."
+    },
+    {
+      "fixtureId": "contract.rectification.event-evidence-ranking",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_caps_correlated_matches_and_localizes_event_time"
+      ],
+      "description": "Checks event-bound scoring, correlated-match caps, and localized event intervals."
+    },
+    {
+      "fixtureId": "contract.transit.whole-sign-house",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks that Lagna-relative transit houses are separate from transit astronomy facts."
+    },
+    {
+      "fixtureId": "contract.workflow.d60-eligibility",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_input_sensitivity.py::test_candidate_groups_use_rectification_vargas_but_not_d60_noise"
+      ],
+      "description": "Checks that D60 cannot split broad rectification candidates or act as primary early evidence."
+    },
+    {
+      "fixtureId": "contract.workflow.promise-before-varga",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks the backend judgement context preserves D1 promise before varga confirmation."
+    },
+    {
+      "fixtureId": "contract.workflow.promise-capacity-before-timing",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_reference_calculation_builds_a_typed_chart_record"
+      ],
+      "description": "Checks the backend judgement order separates promise, capacity, and eligible timing."
+    },
+    {
+      "fixtureId": "calculator.gaja-kesari-structural-conditions",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_gaja_kesari_requires_every_source_pinned_structural_condition"
+      ],
+      "description": "Checks the Moon-Jupiter quadrant, benefic contact, and Jupiter disqualifier gates without asserting outcomes."
+    },
+    {
+      "fixtureId": "contract.judgement.gaja-kesari-context-only",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_gaja_kesari_judgement_is_source_bound_and_context_only"
+      ],
+      "description": "Checks that a complete Gaja-Kesari fact uses its dedicated judgement rule, remains context-only, and emits no outcome promise."
+    },
+    {
+      "fixtureId": "invariant.sav-total-337",
+      "fixtureKind": "invariant",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_vedic_engine_adapter_matches_direct_pyjhora_for_all_vargas_sav_and_dasha"
+      ],
+      "description": "Checks the Sarvashtakavarga invariant total of 337."
+    },
+    {
+      "fixtureId": "vedic-reference.pyjhora-ashtakavarga",
+      "fixtureKind": "same_provider_regression",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_vedic_engine_adapter_matches_direct_pyjhora_for_all_vargas_sav_and_dasha"
+      ],
+      "description": "Compares the adapter Ashtakavarga output with direct calls to the pinned PyJHora provider."
+    },
+    {
+      "fixtureId": "vedic-reference.pyjhora-shadbala",
+      "fixtureKind": "same_provider_regression",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_vedic_engine_adapter_matches_direct_pyjhora_for_all_vargas_sav_and_dasha"
+      ],
+      "description": "Compares adapter Shadbala output with direct calls to the pinned PyJHora provider."
+    },
+    {
+      "fixtureId": "vedic-reference.pyjhora-vargas",
+      "fixtureKind": "same_provider_regression",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_vedic_engine_adapter_matches_direct_pyjhora_for_all_vargas_sav_and_dasha"
+      ],
+      "description": "Compares every supported divisional chart with direct calls to the pinned PyJHora provider."
+    },
+    {
+      "fixtureId": "vedic-reference.pyjhora-vimshottari",
+      "fixtureKind": "same_provider_regression",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_vedic_engine_adapter_matches_direct_pyjhora_for_all_vargas_sav_and_dasha"
+      ],
+      "description": "Compares the first Vimshottari Mahadashas with direct calls to the pinned PyJHora provider."
+    },
+    {
+      "fixtureId": "vedic-reference.swiss-core-positions",
+      "fixtureKind": "same_provider_regression",
+      "testNodes": [
+        "backend/tests/test_vedic_reference_regression.py::test_vedic_engine_matches_swiss_ephemeris_core_positions"
+      ],
+      "description": "Compares engine D1 longitudes and Lagna with direct pinned Swiss Ephemeris calls."
+    }
+  ]
+}

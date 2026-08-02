@@ -27,6 +27,9 @@
           "default": null,
           "title": "Userrelevance"
         },
+        "evidenceConfidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
         "certainty": {
           "enum": ["high", "moderate", "low"],
           "title": "Certainty",
@@ -39,11 +42,25 @@
           "title": "Supportingfactids",
           "type": "array"
         },
+        "contextFactIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contextfactids",
+          "type": "array"
+        },
         "counterFactIds": {
           "items": {
             "type": "string"
           },
           "title": "Counterfactids",
+          "type": "array"
+        },
+        "counterStatements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterstatements",
           "type": "array"
         },
         "ruleIds": {
@@ -93,7 +110,7 @@
           "type": "array"
         }
       },
-      "required": ["claimId", "topic", "statement", "certainty"],
+      "required": ["claimId", "topic", "statement", "evidenceConfidence", "certainty"],
       "title": "AgentClaimContext",
       "type": "object"
     },
@@ -110,7 +127,12 @@
             "rashi.graha.position",
             "rashi.house.lord",
             "rashi.house.occupant",
+            "role.house_ownership",
             "relationship.same_sign",
+            "relationship.parivartana",
+            "yoga.raja.kendra_trikona",
+            "yoga.gaja_kesari.structure",
+            "relationship.dispositor_chain",
             "varga.lagna.position",
             "varga.graha.position",
             "varga.house.lord",
@@ -129,6 +151,7 @@
             "state.moon_phase",
             "aspect.graha_drishti",
             "timing.transit.position",
+            "timing.transit.house",
             "timing.transit.sade_sati",
             "timing.transit.double_transit"
           ],
@@ -156,9 +179,23 @@
         },
         "confidence": {
           "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "calculationConfidence": {
+          "$ref": "#/$defs/ConfidenceGrade"
+        },
+        "inputStability": {
+          "$ref": "#/$defs/ConfidenceGrade"
         }
       },
-      "required": ["factId", "factType", "subjectRef", "value", "confidence"],
+      "required": [
+        "factId",
+        "factType",
+        "subjectRef",
+        "value",
+        "confidence",
+        "calculationConfidence",
+        "inputStability"
+      ],
       "title": "AgentFactContext",
       "type": "object"
     },
@@ -166,6 +203,100 @@
       "enum": ["verified", "corroborated", "provisional", "disputed", "unavailable"],
       "title": "ConfidenceGrade",
       "type": "string"
+    },
+    "SubjectContext": {
+      "additionalProperties": false,
+      "properties": {
+        "subjectId": {
+          "title": "Subjectid",
+          "type": "string"
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displayname"
+        },
+        "locale": {
+          "default": "en",
+          "enum": ["zh", "en", "ja"],
+          "title": "Locale",
+          "type": "string"
+        },
+        "currentAge": {
+          "anyOf": [
+            {
+              "maximum": 130,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentage"
+        },
+        "lifeStage": {
+          "anyOf": [
+            {
+              "enum": ["child", "teen", "young_adult", "adult", "elder"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifestage"
+        },
+        "readerRelationship": {
+          "default": "self",
+          "enum": ["self", "parent", "partner", "family", "professional"],
+          "title": "Readerrelationship",
+          "type": "string"
+        },
+        "genderContext": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gendercontext"
+        },
+        "relationshipStatus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationshipstatus"
+        },
+        "consultationTopics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Consultationtopics",
+          "type": "array"
+        }
+      },
+      "required": ["subjectId"],
+      "title": "SubjectContext",
+      "type": "object"
     },
     "TimeRange": {
       "additionalProperties": false,
@@ -268,8 +399,8 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-agent-context/1.0.0",
-      "default": "vedicdust-agent-context/1.0.0",
+      "const": "vedicdust-agent-context/1.5.0",
+      "default": "vedicdust-agent-context/1.5.0",
       "title": "Schemaversion",
       "type": "string"
     },
@@ -294,6 +425,14 @@
     "locale": {
       "enum": ["zh", "en", "ja"],
       "title": "Locale",
+      "type": "string"
+    },
+    "subject": {
+      "$ref": "#/$defs/SubjectContext"
+    },
+    "reportedBirthDate": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Reportedbirthdate",
       "type": "string"
     },
     "stableFactIds": {
@@ -370,7 +509,15 @@
       "type": "object"
     }
   },
-  "required": ["dossierId", "chartRecordId", "chartRevision", "generatedAt", "locale"],
+  "required": [
+    "dossierId",
+    "chartRecordId",
+    "chartRevision",
+    "generatedAt",
+    "locale",
+    "subject",
+    "reportedBirthDate"
+  ],
   "title": "AgentContext",
   "type": "object"
 }

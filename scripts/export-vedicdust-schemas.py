@@ -13,11 +13,15 @@ from app.vedicdust.models import (
     ConsultationReportManifest,
     JudgementContext,
     ReadingSession,
-    RectificationAnswerBatch,
-    RectificationQuestionSet,
     RuleCatalog,
     SynastryContext,
+    ValidationFixtureRegistry,
 )
+from app.vedicdust.independent_reference import (
+    IndependentReferenceCertificationReport,
+    IndependentReferenceRegistry,
+)
+from app.vedicdust.professional_review import ProfessionalReviewArtifact
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,14 +30,18 @@ SCHEMAS = {
     "vedicdust-chart-record.schema.json": ChartRecord,
     "vedicdust-reading-session.schema.json": ReadingSession,
     "vedicdust-chart-audit.schema.json": ChartAudit,
-    "vedicdust-question-set.schema.json": RectificationQuestionSet,
-    "vedicdust-answer-batch.schema.json": RectificationAnswerBatch,
     "vedicdust-claim-graph.schema.json": ClaimGraph,
     "vedicdust-judgement-context.schema.json": JudgementContext,
     "vedicdust-consultation-dossier.schema.json": ConsultationDossier,
     "vedicdust-agent-context.schema.json": AgentContext,
     "vedicdust-report-manifest.schema.json": ConsultationReportManifest,
     "vedicdust-rule-catalog.schema.json": RuleCatalog,
+    "vedicdust-validation-fixtures.schema.json": ValidationFixtureRegistry,
+    "vedicdust-professional-review.schema.json": ProfessionalReviewArtifact,
+    "vedicdust-independent-reference-registry.schema.json": IndependentReferenceRegistry,
+    "vedicdust-independent-reference-certification.schema.json": (
+        IndependentReferenceCertificationReport
+    ),
     "vedicdust-synastry-context.schema.json": SynastryContext,
 }
 

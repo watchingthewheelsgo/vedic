@@ -39,6 +39,19 @@ It contains no astrological interpretation.
 A deterministic value derived from an Astronomy Snapshot under one Calculation
 Profile, such as a graha's house, a varga placement, Shadbala, or a Dasha period.
 
+## Calculation Assurance
+
+The evidence grade for how a calculated value was produced and checked. It
+distinguishes astronomical authority, pinned-provider regression, and an exact
+independent external match. It does not describe whether the user's reported
+birth input is stable.
+
+## Input Stability
+
+The evidence grade for whether a Jyotish Fact remains unchanged across the
+user-supported time and place uncertainty. It cannot upgrade Calculation
+Assurance. Effective judgement confidence is the lower of these two axes.
+
 ## Fact Catalog
 
 The closed vocabulary of Jyotish Fact types, subject references, value shapes,
@@ -46,8 +59,9 @@ derivation rules, and evidence layers accepted by VedicDust.
 
 ## Method Rule
 
-A versioned transformation from Jyotish Facts to a structured judgement. Every
-Method Rule identifies its lineage and source references.
+A versioned derivation, workflow gate, or judgement policy. Every Method Rule
+identifies its applicable Calculation Profiles, evidence requirements,
+lineage, source references, validation state, and limitations.
 
 ## Evidence Class
 
@@ -75,30 +89,45 @@ or declare the rectification underdetermined.
 
 ## Claim
 
-A user-facing conclusion supported by explicit Jyotish Facts, Method Rules,
-counter-evidence, conditions, user relevance, and a certainty grade. A Claim is
-not free-form model output and cannot silently absorb a new chart fact.
+A released selection of exactly one Judgement Conclusion. It copies the
+backend-owned meaning, facts, rules, scope, timing evidence, user relevance,
+and limitations without rewriting them, then assigns a bounded certainty and
+publication status.
+
+## Judgement Finding
+
+One deterministic observation produced by applying a Method Rule to exact
+Jyotish Facts. It records polarity, weight, parameters, provenance rule, and any
+Timing Period used. A Finding is technical evidence, not reader-facing prose.
+
+## Judgement Conclusion
+
+A backend-owned synthesis of Judgement Findings for one topic and scope. It is
+the smallest semantic result that may be published as a Claim. Its wording,
+support and counter-evidence, rules, timing range, conditions, relevance, and
+certainty cap are immutable downstream.
 
 ## Judgement Context
 
-The deterministic evidence menu for one Chart Record revision. It resolves the
+The deterministic judgement package for one Chart Record revision. It resolves
 active Method Rules, requested and salient topics, allowed fact and timing IDs,
-eligible vargas, and restricted evidence before an Agent forms Claims. It is
-not a judgement and contains no report prose.
+eligible vargas, restricted evidence, executable Findings, and selectable
+Conclusions before the backend deterministically publishes Claims. It is not the final report.
 
 ## Timing Window
 
-A bounded historical, current, near-term, or strategic interval backed by one
-or more approved timing Claims and exact Chart Record timing periods. It
-describes possible constructive and pressure expressions plus their conditions;
+A backend-materialized historical, current, near-term, or strategic interval
+backed by exactly one approved timing Claim and its exact Chart Record period.
+Its expressions, conditions, confidence, and limits are copied from that Claim;
 it is not a guaranteed event date.
 
 ## Consultation Dossier
 
 The versioned consultation plan for one Chart Record revision. It selects the
 few Claims relevant to the user's questions, assigns each released Claim to one
-reader-facing section, records Timing Windows and unresolved questions, and
-holds the release decision. It contains no new astrological judgement.
+reader-facing section, records unresolved questions, and holds the release
+decision. The backend projects scope, confidence, audience, and Timing Windows
+onto it before release. It contains no new astrological judgement.
 
 ## Consultation Report
 
@@ -109,6 +138,7 @@ absent from the Claim Graph.
 ## Agent Context
 
 A compact, versioned retrieval projection of an approved Consultation Dossier
-for later questions. It contains approved Claims, referenced stable facts,
+for later questions. It contains approved Claims, referenced facts with separate
+calculation-confidence and input-stability fields,
 Timing Windows, confirmed events, rejected hypotheses, uncertainties, and open
 questions. It cannot modify the Chart Record or promote a withheld Claim.

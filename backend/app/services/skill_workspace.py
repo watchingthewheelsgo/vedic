@@ -16,12 +16,11 @@ class SkillWorkspace:
     ROOT_ARTIFACTS = {
         "birth_input_context.json",
         "sensitivity_scan.json",
+        "active_chart_sensitivity.json",
         "chart_record.json",
         "reading_session.json",
         "chart_audit.json",
         "chart_rectification_state.json",
-        "rectification_question_set.json",
-        "rectification_answer_batch.json",
         "reader_prevalidation.md",
         "prevalidation_result.json",
         "user_context.md",
@@ -31,8 +30,6 @@ class SkillWorkspace:
         "consultation_report_manifest.json",
         "agent_context.json",
         "consultation_report.md",
-        "career_report.md",
-        "love_report.md",
         "rectification_report.md",
         "run_metrics.json",
     }
@@ -57,8 +54,7 @@ class SkillWorkspace:
         "consultation_dossier.json",
         "consultation_report_manifest.json",
         "agent_context.json",
-        "rectification_question_set.json",
-        "rectification_answer_batch.json",
+        "active_chart_sensitivity.json",
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -70,8 +66,8 @@ class SkillWorkspace:
     def root(self) -> Path:
         return self.settings.project_root / "backend" / "data" / "sessions"
 
-    def create_session(self) -> str:
-        session_id = make_id("session")
+    def create_session(self, session_id: str | None = None) -> str:
+        session_id = session_id or make_id("session")
         self.session_dir(session_id).mkdir(parents=True, exist_ok=False)
         return session_id
 

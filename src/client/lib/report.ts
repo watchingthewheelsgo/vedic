@@ -3,8 +3,6 @@ import { messages, reportTitleKeys, type LocaleCode } from "../i18n/messages";
 
 export const reportOrder = [
   "consultation_report.md",
-  "career_phase4a.md",
-  "love_report.md",
   "rectification_report.md",
   "bazi_data_audit.md",
   "bazi_overview.md",
@@ -16,8 +14,6 @@ export const reportOrder = [
 
 export const reportTitles: Record<string, string> = {
   "consultation_report.md": "VedicDust Consultation",
-  "career_phase4a.md": "Career Guidance",
-  "love_report.md": "Relationship Guidance",
   "rectification_report.md": "Birth Time Review",
   "bazi_data_audit.md": "BaZi Data Audit",
   "bazi_overview.md": "BaZi Overview",
@@ -43,8 +39,6 @@ export function isReportArtifact(artifact: SkillArtifact) {
   }
   return (
     path === "consultation_report.md" ||
-    path.startsWith("career_") ||
-    path.startsWith("love_") ||
     (path.startsWith("bazi_") && path !== "bazi_chart_foundation.md") ||
     path === "rectification_report.md" ||
     path.includes("/reports/")
@@ -79,8 +73,6 @@ export function getReportSections(session: SkillSessionResponse | null) {
   return sections.filter(
     (section) =>
       section.path === "consultation_report.md" ||
-      section.path.startsWith("career_") ||
-      section.path.startsWith("love_") ||
       section.path === "rectification_report.md" ||
       section.path.includes("/reports/")
   );

@@ -14,7 +14,7 @@ import type { PipelineData, PipelineNode } from "../lib/pipeline";
  */
 
 function buildSimulatedNodeOrder(): string[] {
-  return ["chart_facts", "reader_prevalidation", "vedicdust_judgement", "vedicdust_consultation"];
+  return ["chart_facts", "reader_prevalidation", "vedicdust_claims", "vedicdust_consultation"];
 }
 
 const SIMULATED_ORDER = buildSimulatedNodeOrder();

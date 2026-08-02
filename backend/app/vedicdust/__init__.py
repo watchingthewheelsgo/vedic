@@ -9,13 +9,17 @@ from .models import (
     ConsultationReportManifest,
     JudgementContext,
     ReadingSession,
-    RectificationAnswerBatch,
-    RectificationQuestionSet,
 )
 from .chart_record_builder import ChartRecordBuildInput, build_chart_record
 from .judgement import build_judgement_context
+from .claims import build_claim_graph
 from .profiles import parashari_lahiri_profile
-from .reporting import build_agent_context, build_report_manifest, render_consultation_report
+from .reporting import (
+    build_agent_context,
+    build_report_manifest,
+    materialize_consultation_dossier,
+    render_consultation_report,
+)
 
 __all__ = [
     "AgentContext",
@@ -30,9 +34,9 @@ __all__ = [
     "build_agent_context",
     "build_chart_record",
     "build_judgement_context",
+    "build_claim_graph",
     "build_report_manifest",
+    "materialize_consultation_dossier",
     "render_consultation_report",
-    "RectificationAnswerBatch",
-    "RectificationQuestionSet",
     "parashari_lahiri_profile",
 ]

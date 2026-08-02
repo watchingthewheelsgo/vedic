@@ -25,36 +25,6 @@ class BackendToolRunner:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def scan_rectification_time(
-        self,
-        *,
-        date: str,
-        time_utc: str,
-        lat: float,
-        lon: float,
-        range_minutes: int,
-        save_path: Path | None = None,
-    ) -> ToolRunResult:
-        args = [
-            "--date",
-            date,
-            "--time",
-            time_utc,
-            "--lat",
-            str(lat),
-            "--lon",
-            str(lon),
-            "--range",
-            str(range_minutes),
-        ]
-        if save_path is not None:
-            args.extend(["--save", str(save_path)])
-        return self._run_python_script(
-            "vedic_rectifier_time_scan",
-            self._tool_path("rectifier", "time_scan.py"),
-            args,
-        )
-
     def calculate_bazi_chart(
         self,
         *,
@@ -127,30 +97,6 @@ class BackendToolRunner:
         from claude_agent_sdk import tool
 
         @tool(
-            "vedic_rectifier_time_scan",
-            "Scan Lagna/D9/D10 changes across a UTC birth-time range.",
-            {
-                "date": str,
-                "time_utc": str,
-                "lat": float,
-                "lon": float,
-                "range_minutes": int,
-                "save_path": str,
-            },
-        )
-        async def time_scan(args: dict[str, Any]) -> dict[str, Any]:
-            save_value = args.get("save_path")
-            result = self.scan_rectification_time(
-                date=args["date"],
-                time_utc=args["time_utc"],
-                lat=float(args["lat"]),
-                lon=float(args["lon"]),
-                range_minutes=int(args.get("range_minutes") or 30),
-                save_path=Path(save_value) if save_value else None,
-            )
-            return _tool_text(result.output)
-
-        @tool(
             "bazi_calculate_chart",
             "Calculate BaZi four pillars, ten gods, relations, major luck, and optional report artifacts.",
             {
@@ -198,10 +144,7 @@ class BackendToolRunner:
             )
             return _tool_text(result.output)
 
-        return [
-            time_scan,
-            bazi_calculate_chart,
-        ]
+        return [bazi_calculate_chart]
 
     def _tool_path(self, group: str, filename: str) -> Path:
         return self.settings.project_root / "backend" / "app" / "tools" / group / filename

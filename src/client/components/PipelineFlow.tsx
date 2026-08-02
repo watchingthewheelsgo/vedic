@@ -38,8 +38,8 @@ export const WORKSHOP_STAGES: StageDef[] = [
   {
     id: "judgement",
     label: "Evidence Synthesis",
-    sub: "facts into claims",
-    match: (id) => id === "vedicdust_judgement"
+    sub: "verified facts into claims",
+    match: (id) => id === "vedicdust_claims"
   },
   {
     id: "consultation",

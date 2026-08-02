@@ -1,0 +1,276 @@
+{
+  "$defs": {
+    "IndependentReferenceDasha": {
+      "additionalProperties": false,
+      "properties": {
+        "lord": {
+          "enum": ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"],
+          "title": "Lord",
+          "type": "string"
+        },
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["lord", "start", "end"],
+      "title": "IndependentReferenceDasha",
+      "type": "object"
+    },
+    "IndependentReferencePosition": {
+      "additionalProperties": false,
+      "properties": {
+        "sign": {
+          "title": "Sign",
+          "type": "string"
+        },
+        "degreeInSign": {
+          "exclusiveMaximum": 30,
+          "minimum": 0,
+          "title": "Degreeinsign",
+          "type": "number"
+        }
+      },
+      "required": ["sign", "degreeInSign"],
+      "title": "IndependentReferencePosition",
+      "type": "object"
+    },
+    "IndependentReferenceSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "localDate": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Localdate",
+          "type": "string"
+        },
+        "localTime": {
+          "pattern": "^\\d{2}:\\d{2}(?::\\d{2})?$",
+          "title": "Localtime",
+          "type": "string"
+        },
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        },
+        "timezoneId": {
+          "minLength": 1,
+          "title": "Timezoneid",
+          "type": "string"
+        },
+        "utcOffsetSeconds": {
+          "anyOf": [
+            {
+              "maximum": 50400,
+              "minimum": -50400,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Utcoffsetseconds"
+        },
+        "methodProfileId": {
+          "title": "Methodprofileid",
+          "type": "string"
+        },
+        "coordinateToleranceDeg": {
+          "default": 0.0001,
+          "exclusiveMinimum": 0,
+          "maximum": 0.01,
+          "title": "Coordinatetolerancedeg",
+          "type": "number"
+        }
+      },
+      "required": [
+        "localDate",
+        "localTime",
+        "latitude",
+        "longitude",
+        "timezoneId",
+        "methodProfileId"
+      ],
+      "title": "IndependentReferenceSelector",
+      "type": "object"
+    },
+    "IndependentReferenceSnapshot": {
+      "additionalProperties": false,
+      "description": "Normalized output transcribed from software outside the active calculation chain.",
+      "properties": {
+        "sourceSystem": {
+          "minLength": 2,
+          "title": "Sourcesystem",
+          "type": "string"
+        },
+        "sourceVersion": {
+          "minLength": 1,
+          "title": "Sourceversion",
+          "type": "string"
+        },
+        "sourceArtifactSha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Sourceartifactsha256",
+          "type": "string"
+        },
+        "methodProfileId": {
+          "title": "Methodprofileid",
+          "type": "string"
+        },
+        "d1Positions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/IndependentReferencePosition"
+          },
+          "title": "D1Positions",
+          "type": "object"
+        },
+        "vargaSigns": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Vargasigns",
+          "type": "object"
+        },
+        "savBySign": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Savbysign",
+          "type": "object"
+        },
+        "shadbalaRupas": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Shadbalarupas",
+          "type": "object"
+        },
+        "mahadashas": {
+          "items": {
+            "$ref": "#/$defs/IndependentReferenceDasha"
+          },
+          "maxItems": 9,
+          "minItems": 9,
+          "title": "Mahadashas",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sourceSystem",
+        "sourceVersion",
+        "sourceArtifactSha256",
+        "methodProfileId",
+        "d1Positions",
+        "vargaSigns",
+        "savBySign",
+        "shadbalaRupas",
+        "mahadashas"
+      ],
+      "title": "IndependentReferenceSnapshot",
+      "type": "object"
+    },
+    "RegisteredIndependentReference": {
+      "additionalProperties": false,
+      "properties": {
+        "caseId": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._-]{2,79}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caseid"
+        },
+        "coverageTags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coveragetags",
+          "type": "array"
+        },
+        "selector": {
+          "$ref": "#/$defs/IndependentReferenceSelector"
+        },
+        "reference": {
+          "$ref": "#/$defs/IndependentReferenceSnapshot"
+        },
+        "sourceArtifactPath": {
+          "minLength": 1,
+          "title": "Sourceartifactpath",
+          "type": "string"
+        },
+        "normalizationProtocol": {
+          "default": "dual-entry-manual-v1",
+          "pattern": "^dual-entry-manual-v1$",
+          "title": "Normalizationprotocol",
+          "type": "string"
+        },
+        "normalizedBy": {
+          "minLength": 3,
+          "title": "Normalizedby",
+          "type": "string"
+        },
+        "reviewedBy": {
+          "minLength": 3,
+          "title": "Reviewedby",
+          "type": "string"
+        },
+        "reviewedAt": {
+          "format": "date-time",
+          "title": "Reviewedat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector",
+        "reference",
+        "sourceArtifactPath",
+        "normalizedBy",
+        "reviewedBy",
+        "reviewedAt"
+      ],
+      "title": "RegisteredIndependentReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "default": "vedicdust-independent-reference-registry/1.1.0",
+      "pattern": "^vedicdust-independent-reference-registry/1\\.1\\.0$",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/RegisteredIndependentReference"
+      },
+      "title": "Entries",
+      "type": "array"
+    }
+  },
+  "required": ["entries"],
+  "title": "IndependentReferenceRegistry",
+  "type": "object"
+}

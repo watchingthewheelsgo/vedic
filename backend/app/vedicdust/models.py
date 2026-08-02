@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .fact_catalog import FactType, validate_fact_payload
+from .varga_policy import INDEPENDENT_REFERENCE_VARGA_IDS
 
 
 def _to_camel(value: str) -> str:
@@ -39,6 +40,16 @@ class ConfidenceGrade(StrEnum):
     DISPUTED = "disputed"
     UNAVAILABLE = "unavailable"
 
+    @property
+    def rank(self) -> int:
+        return {
+            ConfidenceGrade.UNAVAILABLE: 0,
+            ConfidenceGrade.DISPUTED: 1,
+            ConfidenceGrade.PROVISIONAL: 2,
+            ConfidenceGrade.CORROBORATED: 3,
+            ConfidenceGrade.VERIFIED: 4,
+        }[self]
+
 
 class SourceReference(ContractModel):
     source_id: str = Field(min_length=3)
@@ -48,6 +59,25 @@ class SourceReference(ContractModel):
     edition: str | None = None
     url: str | None = None
     citation_status: Literal["pinned", "pending-edition-pin", "informational"]
+
+    @model_validator(mode="after")
+    def validate_pinned_citation(self) -> SourceReference:
+        if self.citation_status != "pinned":
+            return self
+        if not self.locator or not self.locator.strip():
+            raise ValueError("pinned source requires a reproducible locator")
+        if self.evidence_class in {
+            EvidenceClass.ASTRONOMICAL_AUTHORITY,
+            EvidenceClass.CLASSICAL_TEXT,
+            EvidenceClass.LINEAGE_COMMENTARY,
+        } and (not self.url or not self.url.strip()):
+            raise ValueError("pinned external source requires a retrievable URL")
+        if self.evidence_class in {
+            EvidenceClass.CLASSICAL_TEXT,
+            EvidenceClass.LINEAGE_COMMENTARY,
+        } and (not self.edition or not self.edition.strip()):
+            raise ValueError("pinned textual source requires an edition")
+        return self
 
 
 class RuleProvenance(ContractModel):
@@ -143,6 +173,13 @@ class AyanamsaSetting(ContractModel):
     implementation: str
 
 
+class VargaMethodSetting(ContractModel):
+    factor: int = Field(ge=1, le=360)
+    algorithm_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
+    provider: str = Field(min_length=3)
+    provider_method: int | None = Field(default=None, ge=1)
+
+
 class CalculationProfile(ContractModel):
     profile_id: str
     profile_version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
@@ -154,13 +191,25 @@ class CalculationProfile(ContractModel):
     bhava_cusp_model: str | None = None
     varga_scheme: str
     supported_vargas: list[int]
+    varga_methods: list[VargaMethodSetting]
     aspect_model: str
     dasha_model: str
     dasha_year_days: float = Field(gt=300, lt=400)
     coordinate_datum: Literal["WGS84"] = "WGS84"
     ephemeris_provider: str
+    planet_position_model: Literal["geocentric_apparent"]
+    ephemeris_flags: list[str] = Field(min_length=1)
     rule_pack_version: str
     source_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_varga_methods(self) -> CalculationProfile:
+        factors = [setting.factor for setting in self.varga_methods]
+        if len(factors) != len(set(factors)):
+            raise ValueError("varga methods cannot contain duplicate factors")
+        if set(factors) != set(self.supported_vargas):
+            raise ValueError("varga methods must cover every supported varga exactly once")
+        return self
 
 
 class NakshatraPosition(ContractModel):
@@ -241,6 +290,12 @@ class VargaChart(ContractModel):
     lagna: ChartPlacement
     placements: list[ChartPlacement]
     house_lords: list[VargaHouseLord] = Field(min_length=12, max_length=12)
+    input_stability: ConfidenceGrade
+    calculation_assurance: Literal[
+        "astronomical_authority",
+        "internal_provider_regression",
+        "independent_external_match",
+    ]
     confidence: ConfidenceGrade
     eligible_as_primary_evidence: bool
 
@@ -254,6 +309,24 @@ class VargaChart(ContractModel):
         houses = [entry.house for entry in self.house_lords]
         if sorted(houses) != list(range(1, 13)):
             raise ValueError("varga chart requires exactly one lord entry for each house")
+        if self.factor == 1 and self.calculation_assurance != "astronomical_authority":
+            raise ValueError("D1 calculation assurance must be astronomical authority")
+        if self.factor != 1 and self.calculation_assurance == "astronomical_authority":
+            raise ValueError("non-D1 varga calculation assurance cannot be astronomical authority")
+        calculation_confidence = (
+            ConfidenceGrade.CORROBORATED
+            if self.calculation_assurance == "internal_provider_regression"
+            else ConfidenceGrade.VERIFIED
+        )
+        expected_confidence = min(
+            self.input_stability,
+            calculation_confidence,
+            key=lambda value: value.rank,
+        )
+        if self.confidence != expected_confidence:
+            raise ValueError(
+                "varga confidence must be the lower of calculation assurance and input stability"
+            )
         return self
 
 
@@ -264,10 +337,14 @@ class JyotishFact(ContractModel):
     value: Any
     unit: str | None = None
     provenance: RuleProvenance
+    input_stability: ConfidenceGrade = ConfidenceGrade.VERIFIED
+    sensitivity_dependencies: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_catalog_contract(self) -> JyotishFact:
         validate_fact_payload(self.fact_type, self.subject_ref, self.value)
+        if len(self.sensitivity_dependencies) != len(set(self.sensitivity_dependencies)):
+            raise ValueError("fact sensitivity dependencies must be unique")
         return self
 
 
@@ -303,6 +380,7 @@ class MethodRule(ContractModel):
     evidence_class: EvidenceClass
     source_ids: list[str] = Field(min_length=1)
     status: Literal["draft", "provisional", "validated", "retired"]
+    judgement_use: Literal["context_only", "directional"] = "context_only"
     validation_fixture_ids: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 
@@ -320,6 +398,108 @@ class RuleCatalog(ContractModel):
         return self
 
 
+class ValidationFixtureReference(ContractModel):
+    fixture_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
+    fixture_kind: Literal[
+        "contract",
+        "invariant",
+        "same_provider_regression",
+        "independent_external",
+        "professional_review",
+    ]
+    test_nodes: list[str] = Field(min_length=1)
+    description: str = Field(min_length=3)
+    evidence_artifact_path: str | None = Field(default=None, min_length=1)
+    evidence_artifact_sha256: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    review_protocol_id: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9._/-]+$",
+    )
+    reviewed_by: str | None = Field(default=None, min_length=3)
+    reviewed_at: datetime | None = None
+    reviewed_case_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_test_nodes(self) -> ValidationFixtureReference:
+        if len(self.test_nodes) != len(set(self.test_nodes)):
+            raise ValueError("validation fixture cannot contain duplicate test nodes")
+        if any("::test_" not in node for node in self.test_nodes):
+            raise ValueError("validation fixture test nodes must name an explicit pytest test")
+        if len(self.reviewed_case_ids) != len(set(self.reviewed_case_ids)) or any(
+            not case_id.strip() for case_id in self.reviewed_case_ids
+        ):
+            raise ValueError("reviewed case ids must be unique and non-empty")
+        evidence_backed = self.fixture_kind in {"independent_external", "professional_review"}
+        evidence_fields = (self.evidence_artifact_path, self.evidence_artifact_sha256)
+        if evidence_backed and not all(evidence_fields):
+            raise ValueError(
+                f"{self.fixture_kind} fixture requires an evidence artifact path and SHA-256"
+            )
+        if self.fixture_kind == "professional_review":
+            required_review_fields = (
+                self.review_protocol_id,
+                self.reviewed_by,
+                self.reviewed_at,
+            )
+            if not all(required_review_fields) or not self.reviewed_case_ids:
+                raise ValueError(
+                    "professional review fixture requires protocol, reviewer, timestamp, "
+                    "and reviewed case ids"
+                )
+            if self.reviewed_at is not None and (
+                self.reviewed_at.tzinfo is None or self.reviewed_at.utcoffset() is None
+            ):
+                raise ValueError("professional review timestamp must include a UTC offset")
+        elif (
+            any(
+                value is not None
+                for value in (self.review_protocol_id, self.reviewed_by, self.reviewed_at)
+            )
+            or self.reviewed_case_ids
+        ):
+            raise ValueError("review metadata is reserved for professional review fixtures")
+        return self
+
+
+class ValidationFixtureRegistry(ContractModel):
+    schema_version: Literal["vedicdust-validation-fixtures/1.0.0"] = (
+        "vedicdust-validation-fixtures/1.0.0"
+    )
+    fixtures: list[ValidationFixtureReference]
+
+    @model_validator(mode="after")
+    def validate_unique_fixture_ids(self) -> ValidationFixtureRegistry:
+        fixture_ids = [fixture.fixture_id for fixture in self.fixtures]
+        if len(fixture_ids) != len(set(fixture_ids)):
+            raise ValueError("validation fixture registry contains duplicate fixture ids")
+        return self
+
+
+class TimingBoundaryEnvelope(ContractModel):
+    earliest: datetime
+    latest: datetime
+    sampled_hypotheses: int = Field(ge=1)
+    coverage: Literal[
+        "reported_window_endpoints",
+        "partial_window_sampling",
+        "canonical_only",
+    ]
+    method_id: Literal["vedicdust-vimshottari-boundary-envelope/1.0.0"] = (
+        "vedicdust-vimshottari-boundary-envelope/1.0.0"
+    )
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> TimingBoundaryEnvelope:
+        if self.earliest.tzinfo is None or self.latest.tzinfo is None:
+            raise ValueError("timing boundary envelope must include UTC offsets")
+        if self.latest < self.earliest:
+            raise ValueError("timing boundary envelope latest must not precede earliest")
+        return self
+
+
 class TimingPeriod(ContractModel):
     period_id: str
     system: str
@@ -327,6 +507,125 @@ class TimingPeriod(ContractModel):
     lords: list[str] = Field(min_length=1)
     interval: TimeRange
     provenance: RuleProvenance
+    input_stability: ConfidenceGrade
+    sensitivity_dependencies: list[str] = Field(min_length=1)
+    start_boundary: TimingBoundaryEnvelope
+    end_boundary: TimingBoundaryEnvelope
+
+    @model_validator(mode="after")
+    def validate_sensitivity_dependencies(self) -> TimingPeriod:
+        if len(self.sensitivity_dependencies) != len(set(self.sensitivity_dependencies)):
+            raise ValueError("timing sensitivity dependencies must be unique")
+        if not self.start_boundary.earliest <= self.interval.start <= self.start_boundary.latest:
+            raise ValueError("timing start boundary must contain the canonical period start")
+        if not self.end_boundary.earliest <= self.interval.end <= self.end_boundary.latest:
+            raise ValueError("timing end boundary must contain the canonical period end")
+        return self
+
+
+class IndependentReferencePosition(ContractModel):
+    sign: str
+    degree_in_sign: float = Field(ge=0, lt=30)
+
+
+class IndependentReferenceDasha(ContractModel):
+    lord: Literal["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"]
+    start: datetime
+    end: datetime
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> IndependentReferenceDasha:
+        if self.start.tzinfo is None or self.end.tzinfo is None:
+            raise ValueError("independent Dasha boundaries must include UTC offsets")
+        if self.end <= self.start:
+            raise ValueError("independent Dasha end must be after its start")
+        return self
+
+
+class IndependentReferenceSnapshot(ContractModel):
+    """Normalized output transcribed from software outside the active calculation chain."""
+
+    source_system: str = Field(min_length=2)
+    source_version: str = Field(min_length=1)
+    source_artifact_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    method_profile_id: str
+    d1_positions: dict[str, IndependentReferencePosition]
+    varga_signs: dict[str, dict[str, str]]
+    sav_by_sign: dict[str, int]
+    shadbala_rupas: dict[str, float]
+    mahadashas: list[IndependentReferenceDasha] = Field(min_length=9, max_length=9)
+
+    @model_validator(mode="after")
+    def validate_reference_coverage(self) -> IndependentReferenceSnapshot:
+        supported_external_systems = {
+            "jagannatha hora",
+            "parashara's light",
+        }
+        if self.source_system.casefold() not in supported_external_systems:
+            raise ValueError("independent reference uses an unsupported external source system")
+        expected_bodies = {
+            "Lagna",
+            "Sun",
+            "Moon",
+            "Mars",
+            "Mercury",
+            "Jupiter",
+            "Venus",
+            "Saturn",
+            "Rahu",
+            "Ketu",
+        }
+        if set(self.d1_positions) != expected_bodies:
+            raise ValueError("independent reference requires all D1 bodies")
+        expected_vargas = set(INDEPENDENT_REFERENCE_VARGA_IDS)
+        if set(self.varga_signs) != expected_vargas:
+            raise ValueError("independent reference requires every supported non-D1 varga")
+        if any(set(positions) != expected_bodies for positions in self.varga_signs.values()):
+            raise ValueError("independent reference requires all bodies in every supported varga")
+        if set(self.sav_by_sign) != set(
+            [
+                "Aries",
+                "Taurus",
+                "Gemini",
+                "Cancer",
+                "Leo",
+                "Virgo",
+                "Libra",
+                "Scorpio",
+                "Sagittarius",
+                "Capricorn",
+                "Aquarius",
+                "Pisces",
+            ]
+        ):
+            raise ValueError("independent reference requires SAV for all signs")
+        if set(self.shadbala_rupas) != {
+            "Sun",
+            "Moon",
+            "Mars",
+            "Mercury",
+            "Jupiter",
+            "Venus",
+            "Saturn",
+        }:
+            raise ValueError("independent reference requires seven-graha Shadbala")
+        expected_dasha_lords = {
+            "Sun",
+            "Moon",
+            "Mars",
+            "Mercury",
+            "Jupiter",
+            "Venus",
+            "Saturn",
+            "Rahu",
+            "Ketu",
+        }
+        if {period.lord for period in self.mahadashas} != expected_dasha_lords:
+            raise ValueError("independent reference requires one complete nine-lord Dasha cycle")
+        for current, following in zip(self.mahadashas, self.mahadashas[1:], strict=False):
+            if current.end != following.start:
+                raise ValueError("independent Mahadasha boundaries must be contiguous")
+        return self
 
 
 class QualityCheck(ContractModel):
@@ -341,9 +640,39 @@ class SensitivityBoundary(ContractModel):
     boundary_id: str
     axis: Literal["time", "place", "method_profile"]
     at: datetime | None = None
-    changed_fact_ids: list[str] = Field(min_length=1)
+    uncertainty_interval: TimeRange | None = None
+    resolution_seconds: int = Field(gt=0)
+    changed_fields: list[str] = Field(min_length=1)
     before_fingerprint: str
     after_fingerprint: str
+
+
+class InputSensitivityAssessment(ContractModel):
+    schema_version: Literal["vedicdust-input-sensitivity/1.1.0"] = (
+        "vedicdust-input-sensitivity/1.1.0"
+    )
+    policy_id: Literal["vedicdust-fact-sensitivity/1.0.0"] = "vedicdust-fact-sensitivity/1.0.0"
+    scan_status: Literal["complete", "partial", "failed"]
+    changed_fields: list[str] = Field(default_factory=list)
+    scan_error_count: int = Field(default=0, ge=0)
+    timing_boundary_scan_status: Literal["complete", "partial", "failed", "not_run"] = "not_run"
+    timing_boundary_sample_count: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_scan_status(self) -> InputSensitivityAssessment:
+        if len(self.changed_fields) != len(set(self.changed_fields)):
+            raise ValueError("input sensitivity changed fields must be unique")
+        if self.scan_status == "complete" and self.scan_error_count:
+            raise ValueError("complete sensitivity assessment cannot contain scan errors")
+        if self.scan_status == "failed" and self.scan_error_count == 0:
+            raise ValueError("failed sensitivity assessment requires a scan error")
+        if self.timing_boundary_scan_status == "complete" and self.timing_boundary_sample_count < 2:
+            raise ValueError("complete timing boundary scan requires at least two hypotheses")
+        if self.timing_boundary_scan_status in {"failed", "not_run"} and (
+            self.timing_boundary_sample_count
+        ):
+            raise ValueError("failed or unrun timing boundary scan cannot claim samples")
+        return self
 
 
 class LifeEvent(ContractModel):
@@ -356,14 +685,66 @@ class LifeEvent(ContractModel):
     evidence: EvidenceItem
 
 
+class RectificationEvidenceObservation(ContractModel):
+    observation_id: str
+    component: Literal["dasha", "varga", "double_transit"]
+    outcome: Literal["support", "contradiction", "missing"]
+    weight: float = Field(ge=0, le=1)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_weight_semantics(self) -> RectificationEvidenceObservation:
+        if self.outcome == "missing" and self.weight != 0:
+            raise ValueError("missing rectification evidence must have zero weight")
+        if self.outcome != "missing" and self.weight <= 0:
+            raise ValueError("support or contradiction evidence must have positive weight")
+        return self
+
+
 class CandidateEvidenceScore(ContractModel):
     event_id: str
+    role: Literal["calibration", "holdout"]
     score: float = Field(ge=-1, le=1)
-    supporting_fact_ids: list[str] = Field(default_factory=list)
-    contradicting_fact_ids: list[str] = Field(default_factory=list)
-    neutral_evidence_ids: list[str] = Field(default_factory=list)
-    rule_ids: list[str] = Field(default_factory=list)
+    support_score: float = Field(ge=0, le=1)
+    contradiction_score: float = Field(ge=0, le=1)
+    observations: list[RectificationEvidenceObservation] = Field(min_length=1)
+    rule_ids: list[str] = Field(min_length=1)
+    source_ids: list[str] = Field(min_length=1)
+    scoring_policy_id: str
+    event_mapping_id: str
     explanation: str
+
+    @model_validator(mode="after")
+    def validate_score_reconciliation(self) -> CandidateEvidenceScore:
+        observation_ids = [item.observation_id for item in self.observations]
+        if len(observation_ids) != len(set(observation_ids)):
+            raise ValueError("rectification evidence contains duplicate observation ids")
+        support = round(
+            min(sum(item.weight for item in self.observations if item.outcome == "support"), 1),
+            3,
+        )
+        contradiction = round(
+            min(
+                sum(item.weight for item in self.observations if item.outcome == "contradiction"),
+                1,
+            ),
+            3,
+        )
+        expected_score = round(max(-1.0, min(1.0, support - contradiction)), 3)
+        if self.support_score != support:
+            raise ValueError("rectification support score does not match observations")
+        if self.contradiction_score != contradiction:
+            raise ValueError("rectification contradiction score does not match observations")
+        if self.score != expected_score:
+            raise ValueError("rectification net score does not match observations")
+        return self
+
+
+class CandidatePlaceHypothesis(ContractModel):
+    label: str | None = None
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    timezone_id: str = Field(min_length=1)
 
 
 class CandidateInterval(ContractModel):
@@ -371,8 +752,12 @@ class CandidateInterval(ContractModel):
     interval: TimeRange
     representative_moment: datetime
     fingerprint: str
+    hypothesis_axes: list[Literal["time", "place"]] = Field(default_factory=lambda: ["time"])
+    place_hypothesis: CandidatePlaceHypothesis | None = None
     evidence_scores: list[CandidateEvidenceScore] = Field(default_factory=list)
     aggregate_score: float | None = None
+    boundary_resolution_seconds: int = Field(default=60, gt=0)
+    left_boundary_uncertainty: TimeRange | None = None
     eligible: bool = True
     exclusion_reason: str | None = None
 
@@ -380,12 +765,20 @@ class CandidateInterval(ContractModel):
     def validate_representative_moment(self) -> CandidateInterval:
         if not self.interval.start <= self.representative_moment < self.interval.end:
             raise ValueError("representative moment must be inside the candidate interval")
+        if len(self.hypothesis_axes) != len(set(self.hypothesis_axes)):
+            raise ValueError("candidate hypothesis axes must be unique")
+        if "place" in self.hypothesis_axes and self.place_hypothesis is None:
+            raise ValueError("place-axis candidate requires a place hypothesis")
+        if self.place_hypothesis is not None and "place" not in self.hypothesis_axes:
+            raise ValueError("place hypothesis requires the place axis")
         return self
 
 
 class RectificationDecision(ContractModel):
     status: Literal[
         "not_required",
+        "input_resolution_required",
+        "calculation_failed",
         "collecting_evidence",
         "comparing_candidates",
         "bounded_interval",
@@ -394,22 +787,98 @@ class RectificationDecision(ContractModel):
     ]
     selected_candidate_ids: list[str] = Field(default_factory=list)
     resulting_interval: TimeRange | None = None
+    resulting_intervals: list[TimeRange] = Field(default_factory=list)
     confidence: ConfidenceGrade
     reasons: list[str] = Field(default_factory=list)
-    holdout_result: Literal["passed", "failed", "not_run"] = "not_run"
+    holdout_result: Literal["passed", "failed", "inconclusive", "not_run"] = "not_run"
     unresolved_questions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_result_shape(self) -> RectificationDecision:
+        if self.status == "bounded_interval":
+            if len(self.selected_candidate_ids) != 1:
+                raise ValueError("bounded-interval decision requires exactly one candidate")
+            if self.resulting_interval is None:
+                raise ValueError("bounded-interval decision requires a resulting interval")
+            if self.resulting_intervals:
+                raise ValueError("bounded-interval decision cannot contain multiple intervals")
+            if self.holdout_result != "passed":
+                raise ValueError("bounded-interval decision requires a passed holdout event")
+        elif self.status == "multiple_equivalent":
+            if len(self.selected_candidate_ids) < 2:
+                raise ValueError("multiple-equivalent decision requires at least two candidates")
+            if len(self.resulting_intervals) != len(self.selected_candidate_ids):
+                raise ValueError("multiple-equivalent decision requires one interval per candidate")
+            if self.resulting_interval is not None:
+                raise ValueError("multiple-equivalent decision cannot claim one resulting interval")
+            if self.holdout_result != "passed":
+                raise ValueError("multiple-equivalent decision requires a passed holdout event")
+        else:
+            if self.resulting_interval is not None:
+                raise ValueError("only bounded-interval decisions can claim one resulting interval")
+            if self.resulting_intervals:
+                raise ValueError(
+                    "resulting intervals are reserved for multiple-equivalent decisions"
+                )
+        return self
 
 
 class RectificationRecord(ContractModel):
-    schema_version: Literal["vedicdust-rectification/1.0.0"] = "vedicdust-rectification/1.0.0"
+    schema_version: Literal["vedicdust-rectification/1.1.0"] = "vedicdust-rectification/1.1.0"
+    selection_policy_id: str | None = None
+    event_mapping_id: str | None = None
+    holdout_policy_id: str | None = None
+    method_maturity: Literal["product_hypothesis", "professionally_validated"] = (
+        "product_hypothesis"
+    )
+    validation_status: Literal[
+        "internal_regression_only",
+        "independent_professional_review",
+    ] = "internal_regression_only"
+    source_ids: list[str] = Field(default_factory=list)
+    professional_review_fixture_ids: list[str] = Field(default_factory=list)
     reported_window: TimeRange | None = None
     life_events: list[LifeEvent] = Field(default_factory=list)
     candidates: list[CandidateInterval] = Field(default_factory=list)
     decision: RectificationDecision
 
+    @model_validator(mode="after")
+    def validate_method_assurance(self) -> RectificationRecord:
+        if len(self.professional_review_fixture_ids) != len(
+            set(self.professional_review_fixture_ids)
+        ):
+            raise ValueError("rectification professional review fixtures must be unique")
+        professionally_reviewed = (
+            self.method_maturity == "professionally_validated"
+            and self.validation_status == "independent_professional_review"
+        )
+        if (self.method_maturity == "professionally_validated") != (
+            self.validation_status == "independent_professional_review"
+        ):
+            raise ValueError(
+                "professional rectification maturity requires independent professional review"
+            )
+        if professionally_reviewed and not self.professional_review_fixture_ids:
+            raise ValueError(
+                "professionally reviewed rectification requires a professional review fixture"
+            )
+        if not professionally_reviewed and self.professional_review_fixture_ids:
+            raise ValueError(
+                "professional review fixtures are reserved for professionally reviewed rectification"
+            )
+        if (
+            not professionally_reviewed
+            and self.decision.status in {"bounded_interval", "multiple_equivalent"}
+            and self.decision.confidence.rank > ConfidenceGrade.PROVISIONAL.rank
+        ):
+            raise ValueError(
+                "internally validated rectification cannot exceed provisional confidence"
+            )
+        return self
+
 
 class ChartRecord(ContractModel):
-    schema_version: Literal["vedicdust-chart-record/1.0.0"] = "vedicdust-chart-record/1.0.0"
+    schema_version: Literal["vedicdust-chart-record/1.3.0"] = "vedicdust-chart-record/1.3.0"
     chart_record_id: str
     reading_session_id: str
     revision: int = Field(ge=1)
@@ -423,6 +892,7 @@ class ChartRecord(ContractModel):
     facts: list[JyotishFact] = Field(default_factory=list)
     timing_periods: list[TimingPeriod] = Field(default_factory=list)
     quality_checks: list[QualityCheck] = Field(default_factory=list)
+    input_sensitivity: InputSensitivityAssessment | None = None
     sensitivity_boundaries: list[SensitivityBoundary] = Field(default_factory=list)
     rectification: RectificationRecord | None = None
     status: Literal[
@@ -447,6 +917,8 @@ class ChartRecord(ContractModel):
             self.canonical_moment is None or self.astronomy is None
         ):
             raise ValueError("calculated chart records require canonical moment and astronomy")
+        if self.status in calculated_states and self.input_sensitivity is None:
+            raise ValueError("calculated chart records require an input sensitivity assessment")
         if self.status == "ready_for_judgement" and any(
             check.status == "failed" for check in self.quality_checks
         ):
@@ -551,6 +1023,8 @@ class ReadingSession(ContractModel):
     ]
     rectification_status: Literal[
         "not_required",
+        "input_resolution_required",
+        "calculation_failed",
         "collecting_evidence",
         "comparing_candidates",
         "bounded_interval",
@@ -558,47 +1032,6 @@ class ReadingSession(ContractModel):
         "underdetermined",
     ]
     report_status: Literal["not_started", "in_progress", "ready", "blocked"] = "not_started"
-
-
-class DiscriminatorOption(ContractModel):
-    option_id: str
-    label: str
-    supports_candidate_ids: list[str] = Field(default_factory=list)
-    contradicts_candidate_ids: list[str] = Field(default_factory=list)
-
-
-class RectificationQuestion(ContractModel):
-    question_id: str
-    prompt: str
-    answer_kind: Literal["single_choice", "multiple_choice", "date", "short_text"]
-    discriminating_fact_ids: list[str] = Field(min_length=1)
-    candidate_ids: list[str] = Field(min_length=2)
-    options: list[DiscriminatorOption] = Field(default_factory=list)
-    why_asked: str
-    prohibited_inference: str | None = None
-
-
-class RectificationQuestionSet(ContractModel):
-    schema_version: Literal["vedicdust-question-set/1.0.0"] = "vedicdust-question-set/1.0.0"
-    chart_record_id: str
-    round: int = Field(ge=1)
-    questions: list[RectificationQuestion] = Field(min_length=1, max_length=5)
-    completion_condition: str
-
-
-class RectificationAnswer(ContractModel):
-    question_id: str
-    selected_option_ids: list[str] = Field(default_factory=list)
-    text: str | None = None
-    event_interval: TimeRange | None = None
-    confidence: Literal["certain", "fairly_certain", "uncertain", "unknown"]
-
-
-class RectificationAnswerBatch(ContractModel):
-    schema_version: Literal["vedicdust-answer-batch/1.0.0"] = "vedicdust-answer-batch/1.0.0"
-    chart_record_id: str
-    round: int = Field(ge=1)
-    answers: list[RectificationAnswer] = Field(min_length=1, max_length=5)
 
 
 class AuditFinding(ContractModel):
@@ -642,18 +1075,22 @@ class Claim(ContractModel):
     claim_id: str
     topic: str
     judgement_unit_id: str
+    conclusion_id: str
     judgement_code: str
-    title: str | None = None
+    title: str
     plain_statement: str
     technical_statement: str
     real_world_expressions: list[str] = Field(default_factory=list)
     user_relevance: str | None = None
     conditions: list[str] = Field(default_factory=list)
-    supporting_fact_ids: list[str] = Field(min_length=1)
+    supporting_fact_ids: list[str] = Field(default_factory=list)
+    context_fact_ids: list[str] = Field(default_factory=list)
     counter_fact_ids: list[str] = Field(default_factory=list)
+    counter_statements: list[str] = Field(default_factory=list)
     timing_fact_ids: list[str] = Field(default_factory=list)
     timing_period_ids: list[str] = Field(default_factory=list)
     rule_ids: list[str] = Field(min_length=1)
+    evidence_confidence: ConfidenceGrade
     certainty: Literal["high", "moderate", "low", "withheld"]
     scope: Literal["natal_promise", "capacity", "timing", "rectification", "context"]
     status: Literal["supported", "tentative", "withheld"] = "supported"
@@ -670,8 +1107,11 @@ class Claim(ContractModel):
                 raise ValueError("timing claim requires a time scope")
             if not self.timing_fact_ids and not self.timing_period_ids:
                 raise ValueError("timing claim requires timing evidence")
+        if bool(self.counter_fact_ids) != bool(self.counter_statements):
+            raise ValueError("counter facts and readable counter statements must agree")
         for label, values in (
             ("supporting facts", self.supporting_fact_ids),
+            ("context facts", self.context_fact_ids),
             ("counter facts", self.counter_fact_ids),
             ("timing facts", self.timing_fact_ids),
             ("timing periods", self.timing_period_ids),
@@ -679,11 +1119,24 @@ class Claim(ContractModel):
         ):
             if len(values) != len(set(values)):
                 raise ValueError(f"claim contains duplicate {label}")
+        evidence_sets = (
+            set(self.supporting_fact_ids),
+            set(self.context_fact_ids),
+            set(self.counter_fact_ids),
+        )
+        if any(
+            left & right
+            for index, left in enumerate(evidence_sets)
+            for right in evidence_sets[index + 1 :]
+        ):
+            raise ValueError("claim fact roles must be disjoint")
+        if not any((self.supporting_fact_ids, self.context_fact_ids, self.timing_fact_ids)):
+            raise ValueError("claim requires support, context, or timing facts")
         return self
 
 
 class ClaimGraph(ContractModel):
-    schema_version: Literal["vedicdust-claim-graph/1.1.0"] = "vedicdust-claim-graph/1.1.0"
+    schema_version: Literal["vedicdust-claim-graph/1.6.0"] = "vedicdust-claim-graph/1.6.0"
     chart_record_id: str
     chart_revision: int = Field(default=1, ge=1)
     method_profile_id: str
@@ -698,6 +1151,9 @@ class ClaimGraph(ContractModel):
         claim_ids = [claim.claim_id for claim in self.claims]
         if len(claim_ids) != len(set(claim_ids)):
             raise ValueError("claim graph contains duplicate claim ids")
+        conclusion_ids = [claim.conclusion_id for claim in self.claims]
+        if len(conclusion_ids) != len(set(conclusion_ids)):
+            raise ValueError("claim graph cannot publish one conclusion more than once")
         return self
 
 
@@ -712,10 +1168,52 @@ class JudgementRuleContext(ContractModel):
         Literal["natal_promise", "capacity", "varga_confirmation", "timing", "user_testimony"]
     ] = Field(default_factory=list)
     status: Literal["draft", "provisional", "validated"]
+    judgement_use: Literal["context_only", "directional"]
     evaluation_status: Literal["eligible", "ineligible"]
     matched_fact_ids: list[str] = Field(default_factory=list)
     failed_predicates: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+
+
+class PresentationPriorityReason(ContractModel):
+    """Auditable contribution to report salience, never an astrological strength score."""
+
+    reason_code: Literal[
+        "baseline",
+        "requested_topic",
+        "sav_deviation_salience",
+        "natal_aspect_salience",
+        "eligible_varga",
+    ]
+    applied_points: int = Field(ge=0, le=100)
+    evidence_fact_ids: list[str] = Field(default_factory=list)
+    detail: str = Field(min_length=3)
+
+
+class JudgementPresentationPolicy(ContractModel):
+    """Versioned product policy controlling report breadth and ordering."""
+
+    policy_id: Literal["vedicdust-presentation-selection/1.0.0"] = (
+        "vedicdust-presentation-selection/1.0.0"
+    )
+    score_semantics: Literal["presentation_salience_not_astrological_strength"] = (
+        "presentation_salience_not_astrological_strength"
+    )
+    foundation_always_included: Literal[True] = True
+    requested_topics_first: Literal[True] = True
+    timing_claims_for_requested_topics_only: Literal[True] = True
+    structural_topic_limit: Literal[8] = 8
+    total_claim_limit: Literal[10] = 10
+    minimum_structural_coverage: Literal[5] = 5
+    foundation_baseline: Literal[95] = 95
+    domain_baseline: Literal[45] = 45
+    requested_topic_target: Literal[100] = 100
+    sav_neutral_reference: float = Field(default=28.0, ge=28.0, le=28.0)
+    sav_deviation_multiplier: Literal[3] = 3
+    sav_deviation_cap: Literal[24] = 24
+    aspect_points_per_fact: Literal[2] = 2
+    aspect_points_cap: Literal[12] = 12
+    eligible_varga_boost: Literal[8] = 8
 
 
 class JudgementTopicContext(ContractModel):
@@ -724,6 +1222,7 @@ class JudgementTopicContext(ContractModel):
     purpose: str
     requested: bool = False
     priority_score: int = Field(ge=0, le=100)
+    priority_reasons: list[PresentationPriorityReason] = Field(min_length=1)
     rule_ids: list[str] = Field(min_length=1)
     natal_fact_ids: list[str] = Field(default_factory=list)
     capacity_fact_ids: list[str] = Field(default_factory=list)
@@ -735,6 +1234,118 @@ class JudgementTopicContext(ContractModel):
         Field(default_factory=list)
     )
     limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_presentation_priority(self) -> JudgementTopicContext:
+        reason_codes = [reason.reason_code for reason in self.priority_reasons]
+        if len(reason_codes) != len(set(reason_codes)):
+            raise ValueError("topic presentation priority contains duplicate reason codes")
+        if sum(reason.applied_points for reason in self.priority_reasons) != self.priority_score:
+            raise ValueError("topic presentation priority reasons do not sum to priority score")
+        topic_fact_ids = set(
+            self.natal_fact_ids
+            + self.capacity_fact_ids
+            + self.varga_fact_ids
+            + self.timing_fact_ids
+        )
+        unknown_reason_facts = sorted(
+            {
+                fact_id
+                for reason in self.priority_reasons
+                for fact_id in reason.evidence_fact_ids
+                if fact_id not in topic_fact_ids
+            }
+        )
+        if unknown_reason_facts:
+            raise ValueError(
+                "topic presentation priority references facts outside its evidence bundle: "
+                + ", ".join(unknown_reason_facts)
+            )
+        return self
+
+
+class JudgementFinding(ContractModel):
+    """One deterministic, fact-bound observation produced by the judgement kernel."""
+
+    finding_id: str = Field(pattern=r"^finding\.[a-z0-9._-]+$")
+    finding_code: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
+    rule_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
+    polarity: Literal["supportive", "challenging", "context"]
+    weight: float = Field(gt=0, le=1)
+    fact_ids: list[str] = Field(min_length=1)
+    timing_period_ids: list[str] = Field(default_factory=list)
+    technical_statement: str = Field(min_length=3)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_finding_contract(self) -> JudgementFinding:
+        if len(self.fact_ids) != len(set(self.fact_ids)):
+            raise ValueError("judgement finding contains duplicate facts")
+        if len(self.timing_period_ids) != len(set(self.timing_period_ids)):
+            raise ValueError("judgement finding contains duplicate timing periods")
+        return self
+
+
+class JudgementConclusion(ContractModel):
+    """Backend-owned semantic result that a claim may select but cannot rewrite."""
+
+    conclusion_id: str = Field(pattern=r"^conclusion\.[a-z0-9._-]+$")
+    conclusion_code: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
+    direction: Literal["supportive", "mixed", "challenging", "descriptive"]
+    scope: Literal["natal_promise", "capacity", "timing", "rectification", "context"]
+    title: str = Field(min_length=3)
+    plain_statement: str = Field(min_length=3)
+    technical_statement: str = Field(min_length=3)
+    user_relevance: str | None = None
+    finding_ids: list[str] = Field(min_length=1)
+    supporting_fact_ids: list[str] = Field(default_factory=list)
+    context_fact_ids: list[str] = Field(default_factory=list)
+    counter_fact_ids: list[str] = Field(default_factory=list)
+    counter_statements: list[str] = Field(default_factory=list)
+    timing_fact_ids: list[str] = Field(default_factory=list)
+    timing_period_ids: list[str] = Field(default_factory=list)
+    rule_ids: list[str] = Field(min_length=1)
+    time_scope: TimeRange | None = None
+    real_world_expressions: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    practical_implications: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    certainty_cap: Literal["high", "moderate", "low"]
+
+    @model_validator(mode="after")
+    def validate_conclusion_contract(self) -> JudgementConclusion:
+        for label, values in (
+            ("findings", self.finding_ids),
+            ("supporting facts", self.supporting_fact_ids),
+            ("context facts", self.context_fact_ids),
+            ("counter facts", self.counter_fact_ids),
+            ("timing facts", self.timing_fact_ids),
+            ("timing periods", self.timing_period_ids),
+            ("rules", self.rule_ids),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"judgement conclusion contains duplicate {label}")
+        evidence_sets = (
+            set(self.supporting_fact_ids),
+            set(self.context_fact_ids),
+            set(self.counter_fact_ids),
+        )
+        if any(
+            left & right
+            for index, left in enumerate(evidence_sets)
+            for right in evidence_sets[index + 1 :]
+        ):
+            raise ValueError("judgement conclusion fact roles must be disjoint")
+        if not any((self.supporting_fact_ids, self.context_fact_ids, self.timing_fact_ids)):
+            raise ValueError("judgement conclusion requires support, context, or timing facts")
+        if bool(self.counter_fact_ids) != bool(self.counter_statements):
+            raise ValueError("counter facts and readable counter statements must agree")
+        if self.scope == "timing":
+            if self.time_scope is None or not self.timing_period_ids:
+                raise ValueError("timing conclusion requires an exact period and time scope")
+        elif self.time_scope is not None or self.timing_fact_ids or self.timing_period_ids:
+            raise ValueError("non-timing conclusion cannot carry timing evidence")
+        return self
 
 
 class JudgementUnit(ContractModel):
@@ -753,6 +1364,8 @@ class JudgementUnit(ContractModel):
     varga_fact_ids: list[str] = Field(default_factory=list)
     timing_fact_ids: list[str] = Field(default_factory=list)
     timing_period_ids: list[str] = Field(default_factory=list)
+    findings: list[JudgementFinding] = Field(min_length=1)
+    conclusions: list[JudgementConclusion] = Field(min_length=1)
     certainty_cap: Literal["high", "moderate", "low"]
     limitations: list[str] = Field(default_factory=list)
 
@@ -772,18 +1385,58 @@ class JudgementUnit(ContractModel):
         ):
             if len(values) != len(set(values)):
                 raise ValueError(f"judgement unit contains duplicate {label}")
+        finding_ids = [finding.finding_id for finding in self.findings]
+        conclusion_ids = [conclusion.conclusion_id for conclusion in self.conclusions]
+        if len(finding_ids) != len(set(finding_ids)):
+            raise ValueError("judgement unit contains duplicate finding ids")
+        if len(conclusion_ids) != len(set(conclusion_ids)):
+            raise ValueError("judgement unit contains duplicate conclusion ids")
+        available_facts = set(
+            self.natal_fact_ids
+            + self.capacity_fact_ids
+            + self.varga_fact_ids
+            + self.timing_fact_ids
+        )
+        for finding in self.findings:
+            if finding.rule_id not in self.permitted_rule_ids:
+                raise ValueError("judgement finding uses a rule outside its unit")
+            if not set(finding.fact_ids) <= available_facts:
+                raise ValueError("judgement finding uses facts outside its unit")
+        available_findings = set(finding_ids)
+        available_periods = set(self.timing_period_ids)
+        certainty_rank = {"low": 0, "moderate": 1, "high": 2}
+        for conclusion in self.conclusions:
+            if certainty_rank[conclusion.certainty_cap] > certainty_rank[self.certainty_cap]:
+                raise ValueError("judgement conclusion exceeds its unit certainty cap")
+            if not set(conclusion.finding_ids) <= available_findings:
+                raise ValueError("judgement conclusion uses unknown findings")
+            if (
+                not set(
+                    conclusion.supporting_fact_ids
+                    + conclusion.context_fact_ids
+                    + conclusion.counter_fact_ids
+                )
+                <= available_facts
+            ):
+                raise ValueError("judgement conclusion uses facts outside its unit")
+            if not set(conclusion.timing_fact_ids) <= set(self.timing_fact_ids):
+                raise ValueError("judgement conclusion uses timing facts outside its unit")
+            if not set(conclusion.timing_period_ids) <= available_periods:
+                raise ValueError("judgement conclusion uses timing periods outside its unit")
+            if not set(conclusion.rule_ids) <= set(self.permitted_rule_ids):
+                raise ValueError("judgement conclusion uses rules outside its unit")
+            if conclusion.scope not in self.allowed_scopes:
+                raise ValueError("judgement conclusion uses a scope outside its unit")
         if not self.natal_fact_ids or not self.capacity_fact_ids:
             raise ValueError("judgement unit requires natal-promise and capacity facts")
-        if "timing" in self.allowed_scopes and not (
-            self.timing_fact_ids and self.timing_period_ids
-        ):
-            raise ValueError("timing-enabled judgement unit requires facts and periods")
+        if "timing" in self.allowed_scopes and not self.timing_period_ids:
+            raise ValueError("timing-enabled judgement unit requires exact periods")
         return self
 
 
 class JudgementContext(ContractModel):
-    schema_version: Literal["vedicdust-judgement-context/1.1.0"] = (
-        "vedicdust-judgement-context/1.1.0"
+    schema_version: Literal["vedicdust-judgement-context/1.6.0"] = (
+        "vedicdust-judgement-context/1.6.0"
     )
     chart_record_id: str
     chart_revision: int = Field(ge=1)
@@ -791,6 +1444,7 @@ class JudgementContext(ContractModel):
     generated_at: datetime
     requested_topics: list[str] = Field(default_factory=list)
     rule_pack_version: str
+    presentation_policy: JudgementPresentationPolicy
     rules: list[JudgementRuleContext] = Field(min_length=1)
     global_gate_rule_ids: list[str] = Field(default_factory=list)
     topics: list[JudgementTopicContext] = Field(min_length=1)
@@ -896,7 +1550,7 @@ class ConsultationReportManifest(ContractModel):
     dossier_id: str | None = None
     chart_record_id: str
     chart_revision: int = Field(default=1, ge=1)
-    claim_graph_version: Literal["vedicdust-claim-graph/1.1.0"]
+    claim_graph_version: Literal["vedicdust-claim-graph/1.6.0"]
     generated_at: datetime | None = None
     locale: Literal["zh", "en", "ja"]
     audience: Literal["self", "parent", "partner", "family", "professional"]
@@ -913,7 +1567,7 @@ class ConsultationDossier(ContractModel):
     chart_record_id: str
     chart_revision: int = Field(ge=1)
     method_profile_id: str
-    claim_graph_version: Literal["vedicdust-claim-graph/1.1.0"]
+    claim_graph_version: Literal["vedicdust-claim-graph/1.6.0"]
     generated_at: datetime
     locale: Literal["zh", "en", "ja"]
     audience: Literal["self", "parent", "partner", "family", "professional"]
@@ -986,9 +1640,12 @@ class AgentClaimContext(ContractModel):
     topic: str
     statement: str
     user_relevance: str | None = None
+    evidence_confidence: ConfidenceGrade
     certainty: Literal["high", "moderate", "low"]
     supporting_fact_ids: list[str] = Field(default_factory=list)
+    context_fact_ids: list[str] = Field(default_factory=list)
     counter_fact_ids: list[str] = Field(default_factory=list)
+    counter_statements: list[str] = Field(default_factory=list)
     rule_ids: list[str] = Field(default_factory=list)
     conditions: list[str] = Field(default_factory=list)
     practical_implications: list[str] = Field(default_factory=list)
@@ -1004,15 +1661,19 @@ class AgentFactContext(ContractModel):
     value: Any
     unit: str | None = None
     confidence: ConfidenceGrade
+    calculation_confidence: ConfidenceGrade
+    input_stability: ConfidenceGrade
 
 
 class AgentContext(ContractModel):
-    schema_version: Literal["vedicdust-agent-context/1.0.0"] = "vedicdust-agent-context/1.0.0"
+    schema_version: Literal["vedicdust-agent-context/1.5.0"] = "vedicdust-agent-context/1.5.0"
     dossier_id: str
     chart_record_id: str
     chart_revision: int = Field(ge=1)
     generated_at: datetime
     locale: Literal["zh", "en", "ja"]
+    subject: SubjectContext
+    reported_birth_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     stable_fact_ids: list[str] = Field(default_factory=list)
     stable_facts: list[AgentFactContext] = Field(default_factory=list)
     approved_claims: list[AgentClaimContext] = Field(default_factory=list)

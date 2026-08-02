@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import copy
+import hashlib
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from app.agents.claude_runtime import ClaudeRuntime
+from app.calculator.civil_time import resolve_civil_time
 from app.schemas import (
     BaziSessionInput,
+    BirthInput,
+    RectificationLifeEventsInput,
     SkillBirthInput,
     SkillRunInput,
     SkillSessionResponse,
@@ -21,23 +28,22 @@ from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
 from app.tools.registry import BackendToolRunner
 from app.utils.ids import make_id
 from app.vedicdust.models import (
+    CandidateInterval,
     ChartRecord,
     ClaimGraph,
     ConfidenceGrade,
     ConsultationDossier,
-    DiscriminatorOption,
     JudgementContext,
     ReadingSession,
-    RectificationAnswer,
-    RectificationAnswerBatch,
-    RectificationQuestion,
-    RectificationQuestionSet,
+    TimeRange,
 )
 from app.vedicdust.judgement import build_judgement_context
+from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.orchestrator import audit_chart_record
 from app.vedicdust.reporting import (
     build_agent_context,
     build_report_manifest,
+    materialize_consultation_dossier,
     render_consultation_report,
 )
 from app.vedicdust.source_registry import load_rule_catalog
@@ -58,13 +64,33 @@ CONSULTATION_DOSSIER_JSON = "consultation_dossier.json"
 CONSULTATION_REPORT_MANIFEST_JSON = "consultation_report_manifest.json"
 AGENT_CONTEXT_JSON = "agent_context.json"
 CONSULTATION_REPORT_MD = "consultation_report.md"
+ACTIVE_CHART_SENSITIVITY_JSON = "active_chart_sensitivity.json"
 CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
+PREVALIDATION_DEPENDENCY_PATHS = [
+    CHART_RECORD_JSON,
+    "sensitivity_scan.json",
+    "reader_prevalidation.md",
+    "user_context.md",
+]
+
+READER_AGENT_INPUT_ARTIFACTS = frozenset(
+    {
+        CHART_RECORD_JSON,
+        "chart_audit.json",
+        "birth_input_context.json",
+        "sensitivity_scan.json",
+        "chart_rectification_state.json",
+        "prevalidation_result.json",
+        "user_context.md",
+    }
+)
 
 
 @dataclass(frozen=True)
 class _AgentWorkspaceSnapshot:
     files: dict[str, bytes]
+    writable_files: dict[str, bytes | None]
 
 
 class SkillRuntime:
@@ -84,10 +110,77 @@ class SkillRuntime:
         self.tools = BackendToolRunner(workspace.settings)
         self.rectification = ChartRectificationService()
 
+    def _write_agent_prompt_trace(
+        self,
+        session_id: str,
+        run_id: str,
+        attempt: int,
+        prompt: str,
+    ) -> tuple[str, str]:
+        prompt_path = f".runtime/prompts/{run_id}/attempt-{attempt:02d}.md"
+        self.workspace.write_artifact(session_id, prompt_path, prompt)
+        return prompt_path, hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+    def _persist_agent_run_trace(
+        self,
+        session_id: str,
+        scope_kind: str,
+        scope_id: str,
+        execution: dict[str, object],
+    ) -> None:
+        safe_scope = re.sub(r"[^a-zA-Z0-9._-]+", "-", scope_id).strip("-") or "unknown"
+        path = f".runtime/agent-runs/{scope_kind}/{safe_scope}.json"
+        existing = self._json_dict(self.workspace.read_artifact_text(session_id, path) or "")
+        raw_attempts = execution.get("attempts")
+        attempts = raw_attempts if isinstance(raw_attempts, list) else []
+        stored_execution = {
+            **execution,
+            "attemptCount": len(attempts),
+            "retryCount": max(0, len(attempts) - 1),
+            "finalStatus": (
+                str(attempts[-1].get("status"))
+                if attempts and isinstance(attempts[-1], dict)
+                else "unknown"
+            ),
+        }
+        raw_executions = existing.get("executions")
+        executions = (
+            [
+                item
+                for item in raw_executions
+                if isinstance(item, dict) and item.get("runId") != stored_execution.get("runId")
+            ]
+            if isinstance(raw_executions, list)
+            else []
+        )
+        executions.append(stored_execution)
+        payload = {
+            "schemaVersion": "vedicdust-agent-run-trace/1.0.0",
+            "scopeKind": scope_kind,
+            "scopeId": scope_id,
+            "executions": executions[-20:],
+        }
+        self.workspace.write_artifact(
+            session_id,
+            path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+
+    @staticmethod
+    def _agent_result_trace(result: object) -> dict[str, object]:
+        return {
+            "sdkSessionId": getattr(result, "session_id", None),
+            "durationMs": getattr(result, "duration_ms", None),
+            "totalCostUsd": getattr(result, "total_cost_usd", None),
+            "stopReason": getattr(result, "stop_reason", None),
+            "model": getattr(result, "model", None),
+            "mode": getattr(result, "mode", None),
+        }
+
     async def create_reader_session(
         self, input_data: SkillBirthInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
-        session_id = self.workspace.create_session()
+        session_id = make_id("session")
         started = datetime.now(timezone.utc)
         identity = ChartRecordIdentity(
             reading_session_id=session_id,
@@ -95,6 +188,7 @@ class SkillRuntime:
             subject_id=make_id("subject"),
         )
         calculation = self.calculator.calculate(input_data, identity=identity)
+        self.workspace.create_session(session_id)
         finished = datetime.now(timezone.utc)
         self.workspace.write_artifact(
             session_id,
@@ -111,18 +205,41 @@ class SkillRuntime:
             CHART_RECORD_JSON,
             calculation.chart_record_json,
         )
-        self._write_reading_session(
-            session_id,
-            identity=identity,
-            locale=input_data.locale,
-            stage="chart_ready",
-            rectification_status=self._chart_rectification_status(calculation.chart_record_json),
-        )
-        self._write_chart_audit(session_id, calculation.chart_record_json)
-        self._write_initial_rectification_state(
+        updated_state = self._write_initial_rectification_state(
             session_id,
             calculation.birth_input_context_json,
             calculation.sensitivity_scan_json,
+        )
+        current_artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
+        }
+        updated_state = self._materialize_rectification_selection(
+            session_id,
+            updated_state,
+            current_artifacts,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+        )
+        self._sync_chart_record_rectification(session_id, updated_state)
+        self._checkpoint_active_chart_sensitivity(session_id)
+        updated_chart_record = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if updated_chart_record is None:
+            raise ValueError("initial chart setup did not persist chart_record.json")
+        self._write_reading_session(
+            session_id,
+            identity=identity,
+            locale=self.workspace.read_session_locale(session_id),
+            stage="chart_ready",
+            rectification_status=self._chart_rectification_status(updated_chart_record),
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            READING_SESSION_JSON,
+            producer="vedicdust-reading-orchestrator",
         )
         self.workspace.write_artifact(
             session_id,
@@ -177,6 +294,132 @@ class SkillRuntime:
             chat_message=chat_message,
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="birth_input_context.json",
+        )
+
+    async def record_rectification_life_events(
+        self,
+        input_data: RectificationLifeEventsInput,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SkillSessionResponse:
+        session_id = input_data.session_id
+        artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
+        }
+        context = self._json_dict(artifacts.get("birth_input_context.json", ""))
+        record_payload = self._json_dict(artifacts.get(CHART_RECORD_JSON, ""))
+        state = self._json_dict(artifacts.get("chart_rectification_state.json", ""))
+        if not context or not record_payload or not state:
+            raise ValueError("session is missing the chart inputs required to add life events")
+        plan = state.get("rectificationPlan")
+        plan = plan if isinstance(plan, dict) else {}
+        if plan.get("eventCollectionRequired") is not True:
+            raise ValueError("this rectification session does not require more life events")
+
+        current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
+        revision = current_record.revision + 1
+        birth_input = self.rectification.birth_input_with_life_events(
+            context,
+            record_payload,
+            input_data.ledger_text(),
+        )
+        identity = self._chart_record_identity(session_id, revision=revision)
+        calculation = self.calculator.calculate(birth_input, identity=identity)
+        updated_context = self._json_dict(calculation.birth_input_context_json)
+        event_ledger = updated_context.get("lifeEvents")
+        if (
+            not isinstance(event_ledger, dict)
+            or int(event_ledger.get("eligibleEventCount") or 0) < 3
+        ):
+            raise ValueError("at least three dated, recognized life events are required")
+
+        self._archive_current_chart_artifacts(session_id, current_record.revision, artifacts)
+        session_dir = self.workspace.require_session_dir(session_id)
+        for stale_path in [
+            "reader_prevalidation.md",
+            "prevalidation_result.json",
+            "user_context.md",
+            "rectification_question_set.json",
+            "rectification_answer_batch.json",
+            ACTIVE_CHART_SENSITIVITY_JSON,
+        ]:
+            (session_dir / stale_path).unlink(missing_ok=True)
+        self._write_chart_calculation(
+            session_id,
+            calculation.birth_input_context_json,
+            calculation.sensitivity_scan_json,
+            calculation.chart_record_json,
+            producer="calculator:life-event-evidence",
+            identity=identity,
+        )
+        updated_state = self._write_initial_rectification_state(
+            session_id,
+            calculation.birth_input_context_json,
+            calculation.sensitivity_scan_json,
+        )
+        current_artifacts = {
+            artifact.path: artifact.content
+            for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
+        }
+        updated_state = self._materialize_rectification_selection(
+            session_id,
+            updated_state,
+            current_artifacts,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+        )
+        self._sync_chart_record_rectification(session_id, updated_state)
+        self._checkpoint_active_chart_sensitivity(session_id)
+        updated_chart_record = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if updated_chart_record is None:
+            raise ValueError("life-event recalculation did not persist chart_record.json")
+        active_record = ChartRecord.model_validate_json(updated_chart_record)
+        active_identity = ChartRecordIdentity(
+            reading_session_id=session_id,
+            chart_record_id=active_record.chart_record_id,
+            subject_id=active_record.subject.subject_id,
+            revision=active_record.revision,
+        )
+        self._write_reading_session(
+            session_id,
+            identity=active_identity,
+            locale=self.workspace.read_session_locale(session_id),
+            stage="rectification",
+            rectification_status=self._chart_rectification_status(updated_chart_record),
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            READING_SESSION_JSON,
+            producer="vedicdust-reading-orchestrator",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            "chart_rectification_state.json",
+            producer="chart-rectification:life-event-evidence",
+        )
+        self.workspace.write_session_manifest(
+            session_id,
+            locale=self.workspace.read_session_locale(session_id),
+        )
+        await self._sync_metadata(
+            session_id,
+            stage="reader_ready",
+            status="draft",
+            owner_user_id=owner_user_id,
+        )
+        return SkillSessionResponse(
+            session_id=session_id,
+            stage="reader_ready",
+            chat_message=(
+                "Your dated life events are saved. The system can now compare the bounded "
+                "birth-time candidates."
+            ),
+            artifacts=self.workspace.read_artifacts(session_id),
+            active_artifact="chart_rectification_state.json",
         )
 
     async def create_bazi_session(
@@ -386,24 +629,108 @@ class SkillRuntime:
         self.workspace.require_session_dir(input_data.session_id)
         if input_data.skill == "vedic-core":
             return await self._run_core(input_data, owner_user_id=owner_user_id)
+        if input_data.skill == "vedic-reader":
+            self._assert_reader_readiness(input_data.session_id)
 
         base_prompt = self._artifact_prompt_for(input_data)
         prompt = base_prompt
-        max_attempts = 2 if input_data.skill == "vedic-reader" else 1
+        max_contract_attempts = 2 if input_data.skill == "vedic-reader" else 1
+        max_transient_retries, retry_base_delay_ms = self._agent_retry_policy()
+        contract_rejections = 0
+        transient_failures = 0
+        attempt = 0
         parsed: dict[str, object] | None = None
-        for attempt in range(max_attempts):
-            result = await self.agent_runtime.run_skill_prompt_task(
-                input_data.skill,
+        trace_run_id = make_id("agent_run")
+        trace_attempts: list[dict[str, object]] = []
+        trace_execution: dict[str, object] = {
+            "runId": trace_run_id,
+            "taskName": input_data.skill,
+            "startedAt": datetime.now(timezone.utc).isoformat(),
+            "attempts": trace_attempts,
+        }
+        while True:
+            attempt += 1
+            prompt_path, prompt_sha256 = self._write_agent_prompt_trace(
+                input_data.session_id,
+                trace_run_id,
+                attempt,
                 prompt,
-                skills=[input_data.skill],
-                max_turns=self._max_turns_for(input_data.skill),
             )
+            attempt_trace: dict[str, object] = {
+                "attempt": attempt,
+                "promptPath": prompt_path,
+                "promptSha256": prompt_sha256,
+                "startedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                result = await self.agent_runtime.run_skill_prompt_task(
+                    input_data.skill,
+                    prompt,
+                    skills=[input_data.skill],
+                    max_turns=self._max_turns_for(input_data.skill),
+                    allow_file_tools=input_data.skill != "vedic-reader",
+                )
+            except Exception as exc:
+                retryable = self._is_transient_agent_error(exc)
+                will_retry = retryable and transient_failures < max_transient_retries
+                delay_ms = retry_base_delay_ms * (2**transient_failures) if will_retry else 0
+                attempt_trace.update(
+                    {
+                        "status": "agent_failed",
+                        "error": str(exc),
+                        "retryable": retryable,
+                        "willRetry": will_retry,
+                        "retryDelayMs": delay_ms,
+                        "finishedAt": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                trace_attempts.append(attempt_trace)
+                trace_execution["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                self._persist_agent_run_trace(
+                    input_data.session_id,
+                    "skill",
+                    input_data.skill,
+                    trace_execution,
+                )
+                if will_retry:
+                    transient_failures += 1
+                    if delay_ms:
+                        await asyncio.sleep(delay_ms / 1000)
+                    continue
+                raise
+            attempt_trace.update(self._agent_result_trace(result))
             try:
                 parsed = self._parse_artifact_response(result.raw_text)
                 self._validate_skill_artifacts(input_data.session_id, input_data.skill, parsed)
+                attempt_trace["status"] = "accepted"
+                attempt_trace["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                trace_attempts.append(attempt_trace)
+                trace_execution["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                self._persist_agent_run_trace(
+                    input_data.session_id,
+                    "skill",
+                    input_data.skill,
+                    trace_execution,
+                )
                 break
             except ValueError as exc:
-                if attempt + 1 >= max_attempts:
+                contract_rejections += 1
+                attempt_trace.update(
+                    {
+                        "status": "contract_rejected",
+                        "error": str(exc),
+                        "finishedAt": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                trace_attempts.append(attempt_trace)
+                trace_execution["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                self._persist_agent_run_trace(
+                    input_data.session_id,
+                    "skill",
+                    input_data.skill,
+                    trace_execution,
+                )
+                if contract_rejections >= max_contract_attempts:
                     raise
                 prompt = (
                     f"{base_prompt}\n\n"
@@ -427,7 +754,6 @@ class SkillRuntime:
             )
         if input_data.skill == "vedic-reader":
             self._write_prevalidation_result(input_data.session_id, feedback_markdown="")
-            self._write_rectification_question_set(input_data.session_id)
         stage = self._stage_for(input_data.skill)
         await self._sync_metadata(
             input_data.session_id,
@@ -462,6 +788,12 @@ class SkillRuntime:
             None,
         )
         if batch is None:
+            self._finalize_consultation_artifacts(input_data.session_id)
+            if not self._consultation_artifacts_complete(input_data.session_id):
+                raise ValueError(
+                    "VedicDust core batches exist, but the released consultation artifacts "
+                    "are missing or stale. Regenerate the consultation dossier."
+                )
             return self.core_progress_response(
                 session_id=input_data.session_id,
                 stage="core_complete",
@@ -487,6 +819,30 @@ class SkillRuntime:
                 )
         result_path = session_dir / "prevalidation_result.json"
         if not result_path.exists():
+            state_path = session_dir / "chart_rectification_state.json"
+            state_text = (
+                read_artifact_text(session_id, "chart_rectification_state.json")
+                if callable(read_artifact_text)
+                else state_path.read_text(encoding="utf-8")
+                if state_path.exists()
+                else ""
+            )
+            state = self._json_dict(state_text or "")
+            state_status = str(state.get("status") or "")
+            raw_state_gate = state.get("reportGate")
+            state_gate: dict[str, object] = (
+                raw_state_gate if isinstance(raw_state_gate, dict) else {}
+            )
+            if (
+                state_status == "corrected_chart_ready"
+                and state.get("holdoutResult") == "passed"
+                and state_gate.get("fullReportAllowed") is True
+            ):
+                if callable(read_artifact_text) and read_artifact_text(
+                    session_id, CHART_RECORD_JSON
+                ):
+                    self._prepare_judgement_context(session_id, user_message)
+                return
             raise ValueError(
                 "请先运行验前事并提交反馈。完整报告需要 prevalidation_result.json "
                 "确认输入风险和命中率后才能生成。"
@@ -495,12 +851,42 @@ class SkillRuntime:
             result = json.loads(result_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("prevalidation_result.json 格式损坏，请重新运行验前事。") from exc
+        if (
+            not isinstance(result, dict)
+            or result.get("schemaVersion") != "vedic-prevalidation-result/2.0.0"
+        ):
+            raise ValueError("prevalidation_result.json 合同版本已过期，请重新运行验前事。")
+        checkpoint_valid = getattr(self.workspace, "artifact_checkpoint_valid", None)
+        if callable(checkpoint_valid) and not checkpoint_valid(
+            session_id,
+            "prevalidation_result.json",
+            producer="vedic-reader:prevalidation-result",
+            dependency_paths=PREVALIDATION_DEPENDENCY_PATHS,
+        ):
+            raise ValueError(
+                "prevalidation_result.json 已过期或被修改，请基于当前盘面重新运行验前事。"
+            )
+        chart_record_text = (
+            read_artifact_text(session_id, CHART_RECORD_JSON)
+            if callable(read_artifact_text)
+            else None
+        )
+        if isinstance(chart_record_text, str) and chart_record_text:
+            active_record = ChartRecord.model_validate_json(chart_record_text)
+            expected_hash = hashlib.sha256(chart_record_text.encode("utf-8")).hexdigest()
+            if (
+                not isinstance(result, dict)
+                or result.get("chartRecordId") != active_record.chart_record_id
+                or result.get("chartRevision") != active_record.revision
+                or result.get("chartRecordSha256") != expected_hash
+            ):
+                raise ValueError("prevalidation_result.json 不属于当前盘面版本，请重新运行验前事。")
         decision = result.get("decision") if isinstance(result, dict) else {}
         if not isinstance(decision, dict):
             raise ValueError("prevalidation_result.json 缺少 decision，请重新运行验前事。")
         if decision.get("reportAllowed") is not True:
             reason = decision.get("reason") or "输入风险或验前事反馈未达到完整报告门槛。"
-            next_step = decision.get("nextStep") or "boundary_scan_or_rectifier"
+            next_step = decision.get("nextStep") or "review_birth_details_or_stop"
             raise ValueError(f"完整报告暂不允许生成：{reason} 下一步：{next_step}")
         scope = str(decision.get("reportScope") or "")
         if scope == "prevalidation_or_d1_only":
@@ -509,6 +895,22 @@ class SkillRuntime:
             )
         if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
             self._prepare_judgement_context(session_id, user_message)
+
+    def _assert_reader_readiness(self, session_id: str) -> None:
+        read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
+        if not callable(read_artifact_text):
+            return
+        state_text = read_artifact_text(session_id, "chart_rectification_state.json")
+        if not state_text:
+            return
+        state = self._json_dict(state_text)
+        status = str(state.get("status") or "")
+        if status != "not_required":
+            raise ValueError(
+                "vedic-reader is limited to scan-stable charts. Birth-time candidate selection "
+                "is backend-owned; collect dated events or follow the deterministic "
+                f"rectification result instead (status={status or 'unknown'})."
+            )
 
     def core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, object]]:
         return self._core_batches(user_message, locale)
@@ -536,6 +938,26 @@ class SkillRuntime:
                 **({"dependency_paths": dependency_paths} if dependency_paths else {}),
             )
             for path in expected
+        )
+
+    def _consultation_artifacts_complete(self, session_id: str) -> bool:
+        dependency_paths = [
+            JUDGEMENT_CONTEXT_JSON,
+            CLAIM_GRAPH_JSON,
+            CONSULTATION_DOSSIER_JSON,
+        ]
+        return all(
+            self.workspace.artifact_checkpoint_valid(
+                session_id,
+                path,
+                producer="vedicdust-consultation-renderer",
+                dependency_paths=dependency_paths,
+            )
+            for path in (
+                CONSULTATION_REPORT_MANIFEST_JSON,
+                AGENT_CONTEXT_JSON,
+                CONSULTATION_REPORT_MD,
+            )
         )
 
     def core_progress_response(
@@ -591,15 +1013,78 @@ class SkillRuntime:
         is_consultation_batch = batch_id == "vedicdust_consultation"
         prompt = str(batch["prompt"])
         result = None
-        for attempt in range(2):
-            workspace_snapshot = self._snapshot_agent_workspace(session_dir, expected)
-            result = await self.agent_runtime.run_skill_task(
-                str(batch.get("task_name") or input_data.skill),
+        trace_run_id = make_id("agent_run")
+        trace_attempts: list[dict[str, object]] = []
+        trace_execution: dict[str, object] = {
+            "runId": trace_run_id,
+            "taskName": str(batch.get("task_name") or input_data.skill),
+            "batchId": batch_id,
+            "skills": selected_skills,
+            "expectedArtifacts": sorted(expected),
+            "startedAt": datetime.now(timezone.utc).isoformat(),
+            "attempts": trace_attempts,
+        }
+        max_transient_retries, retry_base_delay_ms = self._agent_retry_policy()
+        contract_rejections = 0
+        transient_failures = 0
+        attempt = 0
+        while True:
+            attempt += 1
+            prompt_path, prompt_sha256 = self._write_agent_prompt_trace(
+                input_data.session_id,
+                trace_run_id,
+                attempt,
                 prompt,
-                cwd=session_dir,
-                skills=selected_skills,
-                max_turns=max(self._max_turns_for(skill) for skill in selected_skills),
             )
+            attempt_trace: dict[str, object] = {
+                "attempt": attempt,
+                "promptPath": prompt_path,
+                "promptSha256": prompt_sha256,
+                "startedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            workspace_snapshot = self._snapshot_agent_workspace(session_dir, expected)
+            try:
+                result = await self.agent_runtime.run_skill_task(
+                    str(batch.get("task_name") or input_data.skill),
+                    prompt,
+                    cwd=session_dir,
+                    skills=selected_skills,
+                    max_turns=max(self._max_turns_for(skill) for skill in selected_skills),
+                )
+            except Exception as exc:
+                self._restore_failed_agent_attempt(
+                    session_dir,
+                    expected,
+                    workspace_snapshot,
+                )
+                retryable = self._is_transient_agent_error(exc)
+                will_retry = retryable and transient_failures < max_transient_retries
+                delay_ms = retry_base_delay_ms * (2**transient_failures) if will_retry else 0
+                attempt_trace.update(
+                    {
+                        "status": "agent_failed",
+                        "error": str(exc),
+                        "retryable": retryable,
+                        "willRetry": will_retry,
+                        "retryDelayMs": delay_ms,
+                        "finishedAt": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                trace_attempts.append(attempt_trace)
+                trace_execution["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                self._persist_agent_run_trace(
+                    input_data.session_id,
+                    "core",
+                    batch_id,
+                    trace_execution,
+                )
+                if will_retry:
+                    transient_failures += 1
+                    if delay_ms:
+                        await asyncio.sleep(delay_ms / 1000)
+                    continue
+                raise
+            attempt_trace.update(self._agent_result_trace(result))
             boundary_errors = self._restore_agent_workspace_boundary(
                 session_dir,
                 expected,
@@ -615,12 +1100,37 @@ class SkillRuntime:
                     )
                 if missing:
                     raise ValueError("missing expected artifact(s): " + ", ".join(missing))
-                self._validate_native_core_batch(input_data.session_id, batch_id)
                 if is_consultation_batch:
                     self._finalize_consultation_artifacts(input_data.session_id)
+                attempt_trace["status"] = "accepted"
+                attempt_trace["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                trace_attempts.append(attempt_trace)
+                trace_execution["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                self._persist_agent_run_trace(
+                    input_data.session_id,
+                    "core",
+                    batch_id,
+                    trace_execution,
+                )
                 break
             except ValueError as exc:
-                if attempt == 1:
+                contract_rejections += 1
+                attempt_trace.update(
+                    {
+                        "status": "contract_rejected",
+                        "error": str(exc),
+                        "finishedAt": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                trace_attempts.append(attempt_trace)
+                trace_execution["finishedAt"] = datetime.now(timezone.utc).isoformat()
+                self._persist_agent_run_trace(
+                    input_data.session_id,
+                    "core",
+                    batch_id,
+                    trace_execution,
+                )
+                if contract_rejections >= 2:
                     raise ValueError(
                         f"VedicDust {batch_id} failed its deterministic contract after retry: {exc}"
                     ) from exc
@@ -647,7 +1157,7 @@ class SkillRuntime:
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         core_complete = all(
             self.core_batch_resume_valid(input_data.session_id, item) for item in batches
-        )
+        ) and self._consultation_artifacts_complete(input_data.session_id)
         await self._sync_metadata(
             input_data.session_id,
             stage="core_complete" if core_complete else "core_in_progress",
@@ -667,6 +1177,94 @@ class SkillRuntime:
             active_artifact=self._active_artifact_for_batch(batch, artifacts),
         )
 
+    def agent_run_summary(
+        self,
+        session_id: str,
+        *,
+        scope: str,
+        key: str,
+    ) -> dict[str, object] | None:
+        path = (
+            self.workspace.session_dir(session_id)
+            / ".runtime"
+            / "agent-runs"
+            / scope
+            / f"{key}.json"
+        )
+        if not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        executions = payload.get("executions") if isinstance(payload, dict) else None
+        if not isinstance(executions, list) or not executions:
+            return None
+        latest = executions[-1]
+        if not isinstance(latest, dict):
+            return None
+        return {
+            "runId": latest.get("runId"),
+            "attemptCount": latest.get("attemptCount", 0),
+            "retryCount": latest.get("retryCount", 0),
+            "finalStatus": latest.get("finalStatus"),
+        }
+
+    def _agent_retry_policy(self) -> tuple[int, int]:
+        settings = getattr(self.agent_runtime, "settings", None)
+        return (
+            int(getattr(settings, "agent_transient_retries", 2)),
+            int(getattr(settings, "agent_retry_base_delay_ms", 0)),
+        )
+
+    @staticmethod
+    def _is_transient_agent_error(exc: Exception) -> bool:
+        error_type = type(exc).__name__
+        message = str(exc).lower()
+        permanent_markers = (
+            "not configured",
+            "not found or not installed",
+            "invalid api key",
+            "invalid authentication",
+            "authentication_error",
+            "permission denied",
+            "unauthorized",
+            "forbidden",
+        )
+        if any(marker in message for marker in permanent_markers):
+            return False
+        if isinstance(exc, (TimeoutError, ConnectionError)):
+            return True
+        if error_type in {
+            "CLIConnectionError",
+            "CLIJSONDecodeError",
+            "MessageParseError",
+        }:
+            return error_type != "CLINotFoundError"
+        transient_markers = (
+            "connection closed",
+            "connection reset",
+            "connection refused",
+            "timed out",
+            "timeout",
+            "rate limit",
+            "rate_limit",
+            "overloaded",
+            "temporarily unavailable",
+            "service unavailable",
+            "http 429",
+            "status 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "status 500",
+            "status 502",
+            "status 503",
+            "status 504",
+        )
+        return any(marker in message for marker in transient_markers)
+
     @staticmethod
     def _snapshot_agent_workspace(
         session_dir: Path,
@@ -680,7 +1278,31 @@ class SkillRuntime:
             if relative in writable_paths or relative.startswith(".meta/"):
                 continue
             files[relative] = path.read_bytes()
-        return _AgentWorkspaceSnapshot(files=files)
+        writable_files = {
+            relative: (
+                (session_dir / relative).read_bytes()
+                if (session_dir / relative).is_file()
+                else None
+            )
+            for relative in writable_paths
+        }
+        return _AgentWorkspaceSnapshot(files=files, writable_files=writable_files)
+
+    @classmethod
+    def _restore_failed_agent_attempt(
+        cls,
+        session_dir: Path,
+        writable_paths: set[str],
+        snapshot: _AgentWorkspaceSnapshot,
+    ) -> None:
+        cls._restore_agent_workspace_boundary(session_dir, writable_paths, snapshot)
+        for relative, original in snapshot.writable_files.items():
+            target = session_dir / relative
+            if original is None:
+                target.unlink(missing_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(original)
 
     @staticmethod
     def _restore_agent_workspace_boundary(
@@ -721,6 +1343,7 @@ class SkillRuntime:
         *,
         owner_user_id: str | None = None,
     ) -> SkillSessionResponse:
+        self._assert_reader_readiness(session_id)
         existing = ""
         artifacts = {
             artifact.path: artifact.content
@@ -741,17 +1364,17 @@ class SkillRuntime:
         prevalidation_result = self._write_prevalidation_result(
             session_id, feedback_markdown=feedback_markdown
         )
-        self._write_rectification_answer_batch(session_id, feedback_markdown)
         if prevalidation_result is not None:
-            self._apply_rectification_feedback(
+            self._apply_reader_quality_decision(
                 session_id,
                 prevalidation_result,
-                feedback_markdown=feedback_markdown,
             )
         decision = (
             prevalidation_result.get("decision") if isinstance(prevalidation_result, dict) else None
         )
         report_allowed = isinstance(decision, dict) and decision.get("reportAllowed") is True
+        read_locale = getattr(self.workspace, "read_session_locale", None)
+        locale = read_locale(session_id) if callable(read_locale) else "en"
         await self._sync_metadata(
             session_id,
             stage="reader_validation",
@@ -761,17 +1384,32 @@ class SkillRuntime:
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_validation",
-            chat_message=(
-                "Your feedback has been saved. The full reading can now begin."
-                if report_allowed
-                else (
-                    "Your feedback has been saved. The chart still needs more confirmation "
-                    "before the full reading."
-                )
-            ),
+            chat_message=self._reader_quality_message(locale, report_allowed),
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="user_context.md",
         )
+
+    @staticmethod
+    def _reader_quality_message(locale: str, report_allowed: bool) -> str:
+        messages = {
+            "zh": (
+                "反馈已保存，可以开始完整解读。",
+                "反馈已保存，但当前质量校验未达到完整报告门槛。请复核出生信息，"
+                "不要为了生成报告而强行确定盘面。",
+            ),
+            "ja": (
+                "フィードバックを保存しました。完全なリーディングを開始できます。",
+                "フィードバックを保存しましたが、完全なレポートの品質基準を満たしていません。"
+                "出生情報を再確認し、無理にチャートを確定しないでください。",
+            ),
+            "en": (
+                "Your feedback has been saved. The full reading can now begin.",
+                "Your feedback has been saved, but the quality check did not meet the full-report "
+                "threshold. Review the recorded birth details instead of forcing a chart.",
+            ),
+        }
+        allowed, blocked = messages.get(locale, messages["en"])
+        return allowed if report_allowed else blocked
 
     async def _sync_metadata(
         self,
@@ -794,8 +1432,6 @@ class SkillRuntime:
     def _status_for_stage(self, stage: str) -> str:
         if stage in {
             "core_complete",
-            "career_complete",
-            "love_complete",
             "rectifier_complete",
             "synastry_complete",
             "bazi_complete",
@@ -838,7 +1474,7 @@ class SkillRuntime:
         session_id: str,
         birth_input_context_json: str,
         sensitivity_scan_json: str,
-    ) -> None:
+    ) -> dict[str, object]:
         state = self.rectification.initial_state(
             self._json_dict(birth_input_context_json),
             self._json_dict(sensitivity_scan_json),
@@ -848,6 +1484,7 @@ class SkillRuntime:
             "chart_rectification_state.json",
             json.dumps(state, ensure_ascii=False, indent=2) + "\n",
         )
+        return state
 
     def _write_prevalidation_result(
         self, session_id: str, *, feedback_markdown: str | None = None
@@ -879,15 +1516,14 @@ class SkillRuntime:
             session_id,
             "prevalidation_result.json",
             producer="vedic-reader:prevalidation-result",
+            dependency_paths=PREVALIDATION_DEPENDENCY_PATHS,
         )
         return result
 
-    def _apply_rectification_feedback(
+    def _apply_reader_quality_decision(
         self,
         session_id: str,
         prevalidation_result: dict[str, object],
-        *,
-        feedback_markdown: str | None = None,
     ) -> None:
         artifacts = {
             artifact.path: artifact.content
@@ -896,14 +1532,42 @@ class SkillRuntime:
         state = self._json_dict(artifacts.get("chart_rectification_state.json", ""))
         if not state:
             return
-        updated_state = self.rectification.update_from_feedback(
-            state,
-            artifacts.get("reader_prevalidation.md", ""),
-            feedback_markdown
-            if feedback_markdown is not None
-            else artifacts.get("user_context.md", ""),
-            prevalidation_result,
+        if state.get("status") == "not_required":
+            decision = prevalidation_result.get("decision")
+            if isinstance(decision, dict):
+                prevalidation_result["decision"] = self.rectification.apply_prevalidation_decision(
+                    decision,
+                    state,
+                )
+                self.workspace.write_artifact(
+                    session_id,
+                    "prevalidation_result.json",
+                    json.dumps(prevalidation_result, ensure_ascii=False, indent=2) + "\n",
+                )
+                self.workspace.mark_artifact_checkpoint(
+                    session_id,
+                    "prevalidation_result.json",
+                    producer="vedic-reader:prevalidation-result",
+                )
+            return
+        raise ValueError(
+            "Reader feedback cannot update a chart-candidate state. Rebuild the session from "
+            "structured dated events and the deterministic rectification policy."
         )
+
+    def _materialize_rectification_selection(
+        self,
+        session_id: str,
+        updated_state: dict[str, Any],
+        artifacts: dict[str, str],
+    ) -> dict[str, Any]:
+        """Refine and recalculate an already selected bounded candidate."""
+
+        if updated_state.get("status") == "needs_recalculation":
+            updated_state = self.calculator.refine_selected_time_boundary(
+                updated_state,
+                self._json_dict(artifacts.get("birth_input_context.json", "")),
+            )
 
         if updated_state.get("status") == "needs_recalculation":
             rectified_input = self.rectification.rectified_birth_input(
@@ -918,14 +1582,63 @@ class SkillRuntime:
                     session_id,
                     revision=chart_revision,
                 )
-                calculation = self.calculator.calculate(rectified_input, identity=identity)
+                previous_record = ChartRecord.model_validate_json(
+                    artifacts.get(CHART_RECORD_JSON, "")
+                )
+                selected_id = str(updated_state.get("selectedCandidateId") or "")
+                selected_candidate = next(
+                    (
+                        candidate
+                        for candidate in updated_state.get("candidates") or []
+                        if isinstance(candidate, dict)
+                        and str(candidate.get("candidateId") or "") == selected_id
+                    ),
+                    None,
+                )
+                selected_window = (
+                    self._state_time_range(
+                        selected_candidate.get("interval"),
+                        previous_record.canonical_moment.timezone_id,
+                    )
+                    if isinstance(selected_candidate, dict)
+                    and previous_record.canonical_moment is not None
+                    else None
+                )
+                if selected_window is None:
+                    raise ValueError(
+                        "Rectification selection is missing its authoritative candidate interval"
+                    )
+                calculation = self.calculator.calculate(
+                    rectified_input,
+                    identity=identity,
+                    timing_window_override=selected_window,
+                )
+                recalculated_record = ChartRecord.model_validate_json(calculation.chart_record_json)
+                recalculated_record.birth_assertion = previous_record.birth_assertion
+                recalculated_record.rectification = previous_record.rectification
+                recalculated_record.sensitivity_boundaries = previous_record.sensitivity_boundaries
+                recalculated_record.status = "rectification_required"
+                recalculated_chart_record_json = (
+                    recalculated_record.model_dump_json(by_alias=True, indent=2) + "\n"
+                )
+                recalculated_input_context_json = self._preserve_reported_input_context(
+                    artifacts.get("birth_input_context.json", ""),
+                    calculation.birth_input_context_json,
+                    rectified_input,
+                    updated_state,
+                )
                 self._write_chart_calculation(
                     session_id,
-                    calculation.birth_input_context_json,
-                    calculation.sensitivity_scan_json,
-                    calculation.chart_record_json,
+                    recalculated_input_context_json,
+                    artifacts.get("sensitivity_scan.json", "") or calculation.sensitivity_scan_json,
+                    recalculated_chart_record_json,
                     producer="calculator:rectification",
                     identity=identity,
+                )
+                self.workspace.write_artifact(
+                    session_id,
+                    ACTIVE_CHART_SENSITIVITY_JSON,
+                    calculation.sensitivity_scan_json,
                 )
                 self.workspace.write_session_manifest(
                     session_id, locale=self.workspace.read_session_locale(session_id)
@@ -936,41 +1649,76 @@ class SkillRuntime:
                     chart_revision=chart_revision,
                 )
             else:
-                updated_state["status"] = "needs_more_feedback"
-                updated_state["reportGate"] = {
-                    "fullReportAllowed": False,
-                    "reason": "Selected candidate did not contain a deterministic time or place correction.",
-                    "nextStep": "continue_rectification",
-                }
+                updated_state = self.rectification.reject_unmaterializable_selection(updated_state)
+        return updated_state
 
-        self.workspace.write_artifact(
-            session_id,
-            "chart_rectification_state.json",
-            json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
-        )
-        self.workspace.mark_artifact_checkpoint(
-            session_id,
-            "chart_rectification_state.json",
-            producer="chart-rectification",
-        )
-        self._sync_chart_record_rectification(session_id, updated_state)
+    def _preserve_reported_input_context(
+        self,
+        original_context_json: str,
+        recalculated_context_json: str,
+        rectified_input: BirthInput,
+        rectification_state: dict[str, Any] | None = None,
+    ) -> str:
+        """Keep user assertions distinct from the active rectified calculation input."""
 
-        decision = prevalidation_result.get("decision")
-        if isinstance(decision, dict):
-            prevalidation_result["decision"] = self.rectification.apply_prevalidation_decision(
-                decision,
-                updated_state,
-            )
-            self.workspace.write_artifact(
-                session_id,
-                "prevalidation_result.json",
-                json.dumps(prevalidation_result, ensure_ascii=False, indent=2) + "\n",
-            )
-            self.workspace.mark_artifact_checkpoint(
-                session_id,
-                "prevalidation_result.json",
-                producer="vedic-reader:prevalidation-result",
-            )
+        original = self._json_dict(original_context_json)
+        recalculated = self._json_dict(recalculated_context_json)
+        original_time = original.get("time")
+        original_time = original_time if isinstance(original_time, dict) else {}
+        original_place = original.get("place")
+        original_place = original_place if isinstance(original_place, dict) else {}
+        active_time = recalculated.get("time")
+        active_time = active_time if isinstance(active_time, dict) else {}
+        active_place = recalculated.get("place")
+        active_place = active_place if isinstance(active_place, dict) else {}
+        selected_id = str((rectification_state or {}).get("selectedCandidateId") or "")
+        selected_candidate = next(
+            (
+                candidate
+                for candidate in (rectification_state or {}).get("candidates") or []
+                if isinstance(candidate, dict)
+                and str(candidate.get("candidateId") or "") == selected_id
+            ),
+            None,
+        )
+        selected_interval = (
+            selected_candidate.get("interval") if isinstance(selected_candidate, dict) else None
+        )
+
+        recalculated["reportedInput"] = {
+            "time": copy.deepcopy(original_time),
+            "place": copy.deepcopy(original_place),
+        }
+        recalculated["activeCanonicalInput"] = {
+            "localDate": rectified_input.birth_date,
+            "localTime": rectified_input.birth_time,
+            "place": {
+                "resolvedLabel": active_place.get("resolvedLabel"),
+                "coordinates": copy.deepcopy(active_place.get("coordinates")),
+                "timezone": active_place.get("timezone"),
+            },
+            "source": "deterministic_event_selection",
+            "precision": "bounded_interval",
+            "candidateId": (
+                selected_candidate.get("candidateId")
+                if isinstance(selected_candidate, dict)
+                else None
+            ),
+            "selectedInterval": copy.deepcopy(selected_interval),
+        }
+        for field in ("reported", "date", "precision", "source", "window"):
+            if field in original_time:
+                active_time[field] = copy.deepcopy(original_time[field])
+        active_time["rectificationApplied"] = True
+        active_time["rectifiedNormalized"] = rectified_input.birth_time
+        if "reported" in original_place:
+            active_place["reported"] = original_place["reported"]
+        recalculated["time"] = active_time
+        recalculated["place"] = active_place
+        for field in ("readingFocus", "lifeEvents", "constraints"):
+            if field in original:
+                recalculated[field] = copy.deepcopy(original[field])
+        return json.dumps(recalculated, ensure_ascii=False, indent=2) + "\n"
 
     def _write_chart_calculation(
         self,
@@ -1021,6 +1769,16 @@ class SkillRuntime:
                 producer="vedicdust-chart-audit",
             )
 
+    def _checkpoint_active_chart_sensitivity(self, session_id: str) -> None:
+        if self.workspace.read_artifact_text(session_id, ACTIVE_CHART_SENSITIVITY_JSON) is None:
+            return
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            ACTIVE_CHART_SENSITIVITY_JSON,
+            producer="calculator:rectification-active-sensitivity",
+            dependency_paths=[CHART_RECORD_JSON],
+        )
+
     def _archive_current_chart_artifacts(
         self,
         session_id: str,
@@ -1030,6 +1788,7 @@ class SkillRuntime:
         for path in [
             "birth_input_context.json",
             "sensitivity_scan.json",
+            ACTIVE_CHART_SENSITIVITY_JSON,
             CHART_RECORD_JSON,
             JUDGEMENT_CONTEXT_JSON,
             CLAIM_GRAPH_JSON,
@@ -1113,7 +1872,9 @@ class SkillRuntime:
             created_at=created_at,
             updated_at=now,
             locale=locale if locale in {"zh", "en", "ja"} else "en",
-            stage=stage,
+            stage="blocked"
+            if rectification_status in {"input_resolution_required", "calculation_failed"}
+            else stage,
             rectification_status=rectification_status,
             report_status=resolved_report_status,
         )
@@ -1150,18 +1911,56 @@ class SkillRuntime:
         record = ChartRecord.model_validate_json(content)
         if record.rectification is None:
             return
+        record.rectification.selection_policy_id = str(state.get("selectionPolicyId") or "") or None
+        record.rectification.event_mapping_id = str(state.get("eventMappingId") or "") or None
+        record.rectification.holdout_policy_id = str(state.get("holdoutPolicyId") or "") or None
+        method_maturity = str(state.get("methodMaturity") or "product_hypothesis")
+        record.rectification.method_maturity = (
+            "professionally_validated"
+            if method_maturity == "professionally_validated"
+            else "product_hypothesis"
+        )
+        validation_status = str(state.get("validationStatus") or "internal_regression_only")
+        record.rectification.validation_status = (
+            "independent_professional_review"
+            if validation_status == "independent_professional_review"
+            else "internal_regression_only"
+        )
+        record.rectification.source_ids = [
+            str(source_id) for source_id in (state.get("sourceIds") or []) if source_id
+        ]
+        self._sync_candidate_time_bounds(record, state)
         rectification_state_status = str(state.get("status") or "")
         if rectification_state_status == "not_required":
             decision_status = "not_required"
-        elif rectification_state_status in {"base_confirmed", "corrected_chart_ready"}:
+        elif rectification_state_status == "input_resolution_required":
+            decision_status = "input_resolution_required"
+        elif rectification_state_status == "calculation_failed":
+            decision_status = "calculation_failed"
+        elif rectification_state_status == "corrected_chart_ready":
             decision_status = "bounded_interval"
+        elif rectification_state_status == "underdetermined":
+            decision_status = "underdetermined"
+        elif rectification_state_status == "multiple_equivalent":
+            decision_status = "multiple_equivalent"
         elif rectification_state_status == "needs_recalculation":
             decision_status = "comparing_candidates"
         else:
             decision_status = "collecting_evidence"
         selected = state.get("selectedCandidateId")
+        equivalent_ids = [
+            str(candidate_id)
+            for candidate_id in (state.get("equivalentCandidateIds") or [])
+            if candidate_id
+        ]
         record.rectification.decision.status = decision_status
-        record.rectification.decision.selected_candidate_ids = [str(selected)] if selected else []
+        record.rectification.decision.selected_candidate_ids = (
+            equivalent_ids
+            if decision_status == "multiple_equivalent"
+            else [str(selected)]
+            if selected
+            else []
+        )
         record.rectification.decision.confidence = self._selection_confidence(
             state.get("selectionConfidence")
         )
@@ -1170,6 +1969,8 @@ class SkillRuntime:
             record.rectification.decision.holdout_result = "passed"
         elif holdout_result == "failed":
             record.rectification.decision.holdout_result = "failed"
+        elif holdout_result == "inconclusive":
+            record.rectification.decision.holdout_result = "inconclusive"
         else:
             record.rectification.decision.holdout_result = "not_run"
         raw_report_gate = state.get("reportGate")
@@ -1183,8 +1984,6 @@ class SkillRuntime:
             )
         ]
         if decision_status == "bounded_interval":
-            record.status = "rectified"
-            record.rectification.decision.unresolved_questions = []
             selected_candidate = next(
                 (
                     candidate
@@ -1193,19 +1992,77 @@ class SkillRuntime:
                 ),
                 None,
             )
-            record.rectification.decision.resulting_interval = (
-                selected_candidate.interval if selected_candidate is not None else None
-            )
             if selected_candidate is None:
-                record.rectification.decision.reasons.append(
-                    "The selected candidate has no persisted time interval; the result remains provisional."
+                raise ValueError(
+                    "Rectification selected candidate is absent from the persisted candidate set"
+                )
+            record.status = "rectified"
+            record.rectification.decision.unresolved_questions = []
+            record.rectification.decision.resulting_interval = selected_candidate.interval
+            record.rectification.decision.resulting_intervals = []
+            if record.canonical_moment is not None:
+                place_confidences = [
+                    evidence.confidence for evidence in record.canonical_moment.place.evidence
+                ]
+                record.canonical_moment.resolution_confidence = self._minimum_confidence(
+                    [
+                        record.rectification.decision.confidence,
+                        *place_confidences,
+                    ]
                 )
         elif decision_status == "not_required":
             record.status = "ready_for_judgement"
             record.rectification.decision.resulting_interval = None
+            record.rectification.decision.resulting_intervals = []
+        elif decision_status == "input_resolution_required":
+            record.status = "blocked"
+            record.rectification.decision.resulting_interval = None
+            record.rectification.decision.resulting_intervals = []
+            record.rectification.decision.unresolved_questions = [
+                "Resolve the civil-time ambiguity or place input before rectification."
+            ]
+        elif decision_status == "calculation_failed":
+            record.status = "blocked"
+            record.rectification.decision.resulting_interval = None
+            record.rectification.decision.resulting_intervals = []
+            record.rectification.decision.unresolved_questions = [
+                "Retry deterministic candidate scoring before rectification."
+            ]
+        elif decision_status == "underdetermined":
+            record.status = "rectification_required"
+            record.rectification.decision.resulting_interval = None
+            record.rectification.decision.unresolved_questions = [
+                "The birth-time interval remains underdetermined; provide a narrower source "
+                "time or additional dated life events."
+            ]
+            record.rectification.decision.resulting_intervals = []
+        elif decision_status == "multiple_equivalent":
+            record.status = "rectification_required"
+            record.rectification.decision.resulting_interval = None
+            candidates_by_id = {
+                candidate.candidate_id: candidate for candidate in record.rectification.candidates
+            }
+            missing_candidate_ids = [
+                candidate_id
+                for candidate_id in equivalent_ids
+                if candidate_id not in candidates_by_id
+            ]
+            if missing_candidate_ids:
+                raise ValueError(
+                    "Equivalent rectification candidates are absent from the persisted candidate set: "
+                    + ", ".join(missing_candidate_ids)
+                )
+            record.rectification.decision.resulting_intervals = [
+                candidates_by_id[candidate_id].interval for candidate_id in equivalent_ids
+            ]
+            record.rectification.decision.unresolved_questions = [
+                "Equivalent bounded hypotheses remain; calculate their shared stable-fact "
+                "intersection before releasing a scoped report."
+            ]
         else:
             record.status = "rectification_required"
             record.rectification.decision.resulting_interval = None
+            record.rectification.decision.resulting_intervals = []
         updated = record.model_dump_json(by_alias=True, indent=2) + "\n"
         self.workspace.write_artifact(session_id, CHART_RECORD_JSON, updated)
         self.workspace.mark_artifact_checkpoint(
@@ -1220,6 +2077,85 @@ class SkillRuntime:
             producer="vedicdust-chart-audit",
         )
 
+    @classmethod
+    def _sync_candidate_time_bounds(
+        cls,
+        record: ChartRecord,
+        state: dict[str, object],
+    ) -> None:
+        if record.rectification is None or record.canonical_moment is None:
+            return
+        timezone_id = record.canonical_moment.timezone_id
+        raw_candidates = {
+            str(candidate.get("candidateId") or ""): candidate
+            for candidate in state.get("candidates") or []
+            if isinstance(candidate, dict) and candidate.get("candidateId")
+        }
+        synchronized: list[CandidateInterval] = []
+        for candidate in record.rectification.candidates:
+            raw = raw_candidates.get(candidate.candidate_id)
+            if not isinstance(raw, dict):
+                synchronized.append(candidate)
+                continue
+            interval = cls._state_time_range(raw.get("interval"), timezone_id)
+            left_uncertainty = cls._state_time_range(
+                raw.get("leftBoundaryUncertainty"), timezone_id
+            )
+            payload = candidate.model_dump(by_alias=False)
+            if interval is not None:
+                payload["interval"] = interval
+            payload["boundary_resolution_seconds"] = int(
+                raw.get("boundaryResolutionSeconds") or candidate.boundary_resolution_seconds
+            )
+            payload["left_boundary_uncertainty"] = left_uncertainty
+            synchronized.append(CandidateInterval.model_validate(payload))
+        record.rectification.candidates = synchronized
+
+        for raw in raw_candidates.values():
+            members = raw.get("members") or []
+            if any(
+                isinstance(member, dict) and member.get("axis") == "place" for member in members
+            ):
+                continue
+            refined = cls._state_time_range(raw.get("leftBoundaryUncertainty"), timezone_id)
+            resolution = int(raw.get("boundaryResolutionSeconds") or 60)
+            if refined is None or resolution >= 60:
+                continue
+            for boundary in record.sensitivity_boundaries:
+                uncertainty = boundary.uncertainty_interval
+                if (
+                    boundary.axis == "time"
+                    and uncertainty is not None
+                    and uncertainty.start <= refined.start
+                    and refined.end <= uncertainty.end
+                ):
+                    boundary.uncertainty_interval = refined
+                    boundary.at = refined.end
+                    boundary.resolution_seconds = resolution
+                    break
+
+    @staticmethod
+    def _state_time_range(value: object, timezone_id: str) -> TimeRange | None:
+        if not isinstance(value, dict):
+            return None
+
+        def parse(key: str) -> datetime:
+            utc_value = value.get(f"{key}Utc")
+            if utc_value:
+                parsed = datetime.fromisoformat(str(utc_value))
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError(f"{key}Utc must include an offset")
+                return parsed
+            local_value = value.get(key)
+            if not local_value:
+                raise ValueError(f"candidate interval is missing {key}")
+            parsed = datetime.fromisoformat(str(local_value).replace(" ", "T"))
+            if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+                return parsed
+            return resolve_civil_time(parsed, timezone_id)
+
+        return TimeRange(start=parse("start"), end=parse("end"))
+
     @staticmethod
     def _selection_confidence(value: object) -> ConfidenceGrade:
         normalized = str(value or "").lower()
@@ -1228,6 +2164,17 @@ class SkillRuntime:
         if normalized == "medium":
             return ConfidenceGrade.PROVISIONAL
         return ConfidenceGrade.PROVISIONAL
+
+    @staticmethod
+    def _minimum_confidence(values: list[ConfidenceGrade]) -> ConfidenceGrade:
+        rank = {
+            ConfidenceGrade.UNAVAILABLE: 0,
+            ConfidenceGrade.DISPUTED: 1,
+            ConfidenceGrade.PROVISIONAL: 2,
+            ConfidenceGrade.CORROBORATED: 3,
+            ConfidenceGrade.VERIFIED: 4,
+        }
+        return min(values, key=lambda value: rank[value])
 
     def _sync_reading_session_stage(self, session_id: str, runtime_stage: str) -> None:
         if self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON) is None:
@@ -1247,17 +2194,17 @@ class SkillRuntime:
             ),
             "core_in_progress": "report_in_progress",
             "core_complete": "report_ready",
-            "career_complete": "report_ready",
-            "love_complete": "report_ready",
-            "rectifier_complete": "ready_for_judgement",
+            "rectifier_complete": (
+                "ready_for_judgement"
+                if rectification_status in {"not_required", "bounded_interval"}
+                else "rectification"
+            ),
             "qa_complete": "report_ready",
             "error": "blocked",
         }
         report_status_map = {
             "core_in_progress": "in_progress",
             "core_complete": "ready",
-            "career_complete": "ready",
-            "love_complete": "ready",
             "qa_complete": "ready",
             "error": "blocked",
         }
@@ -1304,6 +2251,10 @@ class SkillRuntime:
         chart_record_json: str,
         sensitivity_scan_json: str,
     ) -> dict[str, object]:
+        try:
+            chart_payload = json.loads(chart_record_json) if chart_record_json.strip() else {}
+        except json.JSONDecodeError:
+            chart_payload = {}
         anchors = self._parse_prevalidation_anchors(prevalidation_markdown)
         answers = self._parse_prevalidation_feedback(feedback_markdown)
         subject = self._prevalidation_subject_context(chart_record_json, sensitivity_scan_json)
@@ -1341,8 +2292,15 @@ class SkillRuntime:
             ),
         )
         return {
-            "schemaVersion": "vedic-prevalidation-result/v1",
+            "schemaVersion": "vedic-prevalidation-result/2.0.0",
             "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "chartRecordId": (
+                chart_payload.get("chartRecordId") if isinstance(chart_payload, dict) else None
+            ),
+            "chartRevision": (
+                chart_payload.get("revision") if isinstance(chart_payload, dict) else None
+            ),
+            "chartRecordSha256": hashlib.sha256(chart_record_json.encode("utf-8")).hexdigest(),
             "status": status,
             "subject": subject,
             "score": {
@@ -1402,168 +2360,61 @@ class SkillRuntime:
                 answers[int(match.group(1))] = self._normalize_prevalidation_answer(match.group(2))
         return answers
 
-    def _write_rectification_question_set(self, session_id: str) -> None:
-        read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
-        if not callable(read_artifact_text):
-            return
-        chart_record_json = read_artifact_text(session_id, CHART_RECORD_JSON)
-        prevalidation = read_artifact_text(session_id, "reader_prevalidation.md")
-        state_json = read_artifact_text(session_id, "chart_rectification_state.json")
-        if not chart_record_json or not prevalidation or not state_json:
-            return
-        state = self._json_dict(state_json)
-        candidates = state.get("candidates")
-        if not isinstance(candidates, list):
-            return
-        candidate_ids = [
-            str(candidate.get("candidateId"))
-            for candidate in candidates
-            if isinstance(candidate, dict) and candidate.get("candidateId")
-        ]
-        if len(candidate_ids) < 2:
-            return
-        parsed_anchors = self.rectification._parse_candidate_anchors(prevalidation, "")
-        blocks = {
-            int(item["index"]): str(item["block"])
-            for item in self.rectification._parse_prevalidation_blocks(prevalidation)
-        }
-        record = ChartRecord.model_validate_json(chart_record_json)
-        round_number = int(state.get("rectificationRound") or 0) + 1
-        questions: list[RectificationQuestion] = []
-        for anchor in parsed_anchors:
-            supported = [
-                str(candidate_id)
-                for candidate_id in anchor.get("candidateIds", [])
-                if str(candidate_id) in candidate_ids
-            ]
-            fields = [str(value) for value in anchor.get("unstableFields", [])]
-            if not supported or not fields:
-                continue
-            index = int(anchor["index"])
-            contradicted = [
-                candidate_id for candidate_id in candidate_ids if candidate_id not in supported
-            ]
-            questions.append(
-                RectificationQuestion(
-                    question_id=f"rectification.r{round_number}.q{index}",
-                    prompt=self.rectification._statement_from_anchor_block(blocks.get(index, "")),
-                    answer_kind="single_choice",
-                    discriminating_fact_ids=[
-                        self._discriminating_fact_id(field) for field in fields
-                    ],
-                    candidate_ids=candidate_ids,
-                    options=[
-                        DiscriminatorOption(
-                            option_id="accurate",
-                            label="准确",
-                            supports_candidate_ids=supported,
-                            contradicts_candidate_ids=contradicted,
-                        ),
-                        DiscriminatorOption(
-                            option_id="partly",
-                            label="部分准确",
-                        ),
-                        DiscriminatorOption(
-                            option_id="inaccurate",
-                            label="不准确",
-                            supports_candidate_ids=contradicted,
-                            contradicts_candidate_ids=supported,
-                        ),
-                        DiscriminatorOption(
-                            option_id="unknown",
-                            label="不确定",
-                        ),
-                    ],
-                    why_asked=(
-                        "This answer distinguishes chart candidates that differ on "
-                        + ", ".join(fields)
-                        + "."
-                    ),
-                    prohibited_inference=(
-                        "The answer may score only the supplied candidates and cannot create "
-                        "a chart fact."
-                    ),
-                )
-            )
-        if not questions:
-            return
-        question_set = RectificationQuestionSet(
-            chart_record_id=record.chart_record_id,
-            round=round_number,
-            questions=questions[:5],
-            completion_condition=(
-                "Submit one observable answer per question, including unknown when memory "
-                "is insufficient; the backend then reevaluates all candidates."
-            ),
-        )
-        self.workspace.write_artifact(
-            session_id,
-            "rectification_question_set.json",
-            question_set.model_dump_json(by_alias=True, indent=2) + "\n",
-        )
-        self.workspace.mark_artifact_checkpoint(
-            session_id,
-            "rectification_question_set.json",
-            producer="vedicdust-rectification-dialogue",
-        )
-
-    def _write_rectification_answer_batch(
-        self,
-        session_id: str,
-        feedback_markdown: str,
-    ) -> None:
-        read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
-        if not callable(read_artifact_text):
-            return
-        question_set_json = read_artifact_text(session_id, "rectification_question_set.json")
-        if not question_set_json:
-            return
-        question_set = RectificationQuestionSet.model_validate_json(question_set_json)
-        feedback = self._parse_prevalidation_feedback(feedback_markdown)
-        answers: list[RectificationAnswer] = []
-        for question in question_set.questions:
-            match = re.search(r"\.q(\d+)$", question.question_id)
-            if match is None:
-                continue
-            normalized = feedback.get(int(match.group(1)), "recorded")
-            selected = (
-                normalized if normalized in {"accurate", "partly", "inaccurate"} else "unknown"
-            )
-            answers.append(
-                RectificationAnswer(
-                    question_id=question.question_id,
-                    selected_option_ids=[selected],
-                    confidence=(
-                        "uncertain" if selected in {"partly", "unknown"} else "fairly_certain"
-                    ),
-                )
-            )
-        if not answers:
-            return
-        batch = RectificationAnswerBatch(
-            chart_record_id=question_set.chart_record_id,
-            round=question_set.round,
-            answers=answers,
-        )
-        self.workspace.write_artifact(
-            session_id,
-            "rectification_answer_batch.json",
-            batch.model_dump_json(by_alias=True, indent=2) + "\n",
-        )
-        self.workspace.mark_artifact_checkpoint(
-            session_id,
-            "rectification_answer_batch.json",
-            producer="vedicdust-rectification-feedback",
-        )
-
     @staticmethod
-    def _discriminating_fact_id(field: str) -> str:
-        match = re.fullmatch(r"d(\d+)Lagna", field)
-        if match:
-            return f"fact.D{match.group(1)}.Lagna.position"
+    def _discriminating_fact_ids(
+        record: ChartRecord,
+        field: str,
+        candidates: list[object],
+    ) -> list[str]:
+        existing = {fact.fact_id for fact in record.facts}
+        lagna_match = re.fullmatch(r"[dD](\d+)Lagna", field)
+        if lagna_match:
+            fact_id = f"fact.D{lagna_match.group(1)}.Lagna.position"
+            return [fact_id] if fact_id in existing else []
+
+        structure_match = re.fullmatch(r"[dD](\d+)Structure", field)
+        if structure_match:
+            factor = structure_match.group(1)
+            structures: list[dict[str, object]] = []
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                signature = candidate.get("signature")
+                if not isinstance(signature, dict):
+                    continue
+                if factor == "1":
+                    structure = signature.get("planetSignIndices")
+                else:
+                    varga_structures = signature.get("vargaPlanetSignIndices")
+                    structure = (
+                        varga_structures.get(f"D{factor}")
+                        if isinstance(varga_structures, dict)
+                        else None
+                    )
+                if isinstance(structure, dict):
+                    structures.append(structure)
+
+            grahas = sorted({str(name) for structure in structures for name in structure})
+            changed_grahas = [
+                graha
+                for graha in grahas
+                if len(
+                    {json.dumps(structure.get(graha), sort_keys=True) for structure in structures}
+                )
+                > 1
+            ]
+            return [
+                fact_id
+                for graha in changed_grahas
+                for fact_id in [f"fact.D{factor}.{graha}.position"]
+                if fact_id in existing
+            ]
+
         if field in {"moonSign", "moonNakshatra", "moonPada", "currentDasha"}:
-            return "fact.D1.Moon.position"
-        return "fact.D1.Lagna.position"
+            return ["fact.D1.Moon.position"] if "fact.D1.Moon.position" in existing else []
+        if field in {"lagna", "lagnaSign", "ascendant"}:
+            return ["fact.D1.Lagna.position"] if "fact.D1.Lagna.position" in existing else []
+        return []
 
     def _normalize_prevalidation_answer(self, raw: str) -> str:
         value = raw.strip().lower()
@@ -1689,7 +2540,7 @@ class SkillRuntime:
         reliable_exact = time_reliability == "reliable_exact"
         if mode == "rectification_required" and not reliable_exact:
             return {
-                "nextStep": "candidate_confirmation_or_rectifier",
+                "nextStep": "complete_deterministic_rectification",
                 "timeConfidence": "low",
                 "reportAllowed": False,
                 "reportScope": scope,
@@ -1697,7 +2548,7 @@ class SkillRuntime:
                 "llmContract": llm_contract,
                 "reason": (
                     "Input sensitivity scan found chart-changing candidates. "
-                    "Run candidate confirmation or rectifier before full report."
+                    "Complete deterministic dated-event rectification before the full report."
                 ),
             }
         if reliable_exact:
@@ -1732,7 +2583,9 @@ class SkillRuntime:
             }
         if threshold_medium:
             return {
-                "nextStep": "report_allowed_with_limits",
+                "nextStep": "report_allowed_with_limits"
+                if input_risk_level == "low"
+                else "review_birth_details_or_stop",
                 "timeConfidence": "medium",
                 "reportAllowed": input_risk_level == "low",
                 "reportScope": "guarded_full_report" if input_risk_level == "low" else scope,
@@ -1740,17 +2593,21 @@ class SkillRuntime:
                 "llmContract": llm_contract,
                 "reason": (
                     "Medium validation score is enough only for low input-risk sessions; "
-                    "medium/high risk sessions need stronger feedback or rectification."
+                    "medium/high risk sessions should review the recorded birth details before "
+                    "continuing. Reader feedback cannot choose another chart."
                 ),
             }
         return {
-            "nextStep": "boundary_scan_or_rectifier",
+            "nextStep": "review_birth_details_or_stop",
             "timeConfidence": "low",
             "reportAllowed": False,
             "reportScope": scope,
             "inputRiskLevel": input_risk_level,
             "llmContract": llm_contract,
-            "reason": "Uncertain time and low validation score; run boundary correction or rectifier before full report.",
+            "reason": (
+                "The scan-stable reading did not meet the quality threshold. Review the recorded "
+                "birth details or stop; Reader feedback cannot alter the calculated chart."
+            ),
         }
 
     def _plain_markdown_text(self, value: str) -> str:
@@ -1768,7 +2625,7 @@ class SkillRuntime:
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 准 / 不准 / 部分准.
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: 在进入完整分析之前，我先验证几个时间锚点来确认出生数据的精度——
-  - Output 3 to 5 numbered items only.
+- Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question in Chinese, e.g. **1.** 2018年前后，您是否经历过一次工作方向的明显变化？
   - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Prefer a dated major event when evidence supports one.
   - Keep the visible question to one short sentence, ideally no more than 45 Chinese characters, and end it with ？.
@@ -1777,34 +2634,31 @@ class SkillRuntime:
   - For a minor, never ask about adult marriage, career, or childbirth; use already-observable family, development, education, or care facts.
   - Each item is followed by one blank line and a quoted derivation line: > 推导：...
   - Do not add signal tables, Yoga tables, 综合轮廓, advice, disclaimers, or app-specific explanation.
-  - If sensitivity_scan.reportReadiness.mode=rectification_required, each item must distinguish candidate signatures or unstable fields through a lived-experience difference; keep all candidate and field terminology out of the visible question.
-  - For rectification_required anchors, add quoted machine lines after 推导 using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
+  - Do not emit Candidate, Contrast, Event, or Field machine lines. This check cannot select or reject a birth-time candidate.
   - End with: 请逐条回复：**准 / 不准 / 部分准**"""
         if locale == "ja":
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 正確 / 不正確 / 一部正確.
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: 完全な分析に入る前に、出生データの精度を確認するため、いくつかの時間アンカーを検証します——
-  - Output 3 to 5 numbered items only.
+- Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one short, direct lived-experience question in Japanese, ending with ？.
   - The visible question must cover exactly one concrete or dated fact and must not expose planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning.
   - Do not ask flattering personality generalities or bundle unrelated events. For a minor, do not ask adult marriage, career, or childbirth questions.
   - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
-  - If sensitivity_scan.reportReadiness.mode=rectification_required, distinguish candidates through a lived-experience difference while keeping candidate and field terminology out of the visible question.
-  - For rectification_required anchors, add quoted machine lines after 根拠 using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
+  - Do not emit Candidate, Contrast, Event, or Field machine lines. This check cannot select or reject a birth-time candidate.
   - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
         return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: Before entering the full analysis, I will first validate several timing anchors to check the precision of the birth data—
-  - Output 3 to 5 numbered items only.
+- Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question, e.g. **1.** Around 2018, did you make one major change in your work direction?
   - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Keep it to one short sentence, ideally no more than 35 words.
   - Never put planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning in the visible question.
   - Do not ask flattering personality generalities, leading questions, or bundle unrelated events. For a minor, do not ask about adult marriage, career, or childbirth.
   - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
-  - If sensitivity_scan.reportReadiness.mode=rectification_required, distinguish candidates through a lived-experience difference while keeping candidate and field terminology out of the visible question.
-  - For rectification_required anchors, add quoted machine lines after Derivation using exactly: > Candidate: A, > Field: d9Lagna, and when rectificationPlan.lifeEventFocus is non-empty, > Event: evt_1_201810_marriage. Use candidate IDs, fields, and event IDs from chart_rectification_state.json.
+  - Do not emit Candidate, Contrast, Event, or Field machine lines. This check cannot select or reject a birth-time candidate.
   - End with: Reply to each anchor: **Accurate / Not accurate / Partly accurate**"""
 
     def _validate_skill_artifacts(
@@ -1867,10 +2721,6 @@ class SkillRuntime:
     def _allowed_output_artifacts(skill: str) -> set[str] | None:
         if skill == "vedic-reader":
             return {"reader_prevalidation.md"}
-        if skill == "vedic-career":
-            return {"career_report.md"}
-        if skill == "vedic-love":
-            return {"love_report.md"}
         if skill == "vedic-rectifier":
             return {"rectification_report.md"}
         return None
@@ -1881,10 +2731,6 @@ class SkillRuntime:
             return self._reader_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-core":
             raise ValueError("vedic-core must run through the native core job")
-        if input_data.skill == "vedic-career":
-            return self._career_prompt(input_data.user_message, locale)
-        if input_data.skill == "vedic-love":
-            return self._love_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-rectifier":
             return self._rectifier_prompt(input_data.user_message, locale)
         if input_data.skill == "vedic-synastry":
@@ -1900,8 +2746,65 @@ class SkillRuntime:
             input_data.skill,
             self.workspace.read_artifacts(input_data.session_id, include_internal=True),
         )
+        if input_data.skill == "vedic-reader":
+            artifacts = self._reader_agent_artifacts(artifacts)
         base_prompt = self._prompt_for(input_data)
         return self._artifact_prompt(base_prompt, artifacts)
+
+    @classmethod
+    def _reader_agent_artifacts(cls, artifacts: dict[str, str]) -> dict[str, str]:
+        """Build the minimal blind-calibration view supplied to the Reader Agent."""
+
+        sanitized: dict[str, str] = {}
+        for path, content in artifacts.items():
+            if path not in READER_AGENT_INPUT_ARTIFACTS:
+                continue
+            if not path.endswith(".json"):
+                sanitized[path] = content
+                continue
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                # Fail closed: malformed structured input cannot be proven free
+                # of reserved evidence and therefore is not Agent-visible.
+                continue
+            sanitized[path] = (
+                json.dumps(
+                    cls._without_holdout_evidence(payload),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n"
+            )
+        return sanitized
+
+    @classmethod
+    def _without_holdout_evidence(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return [
+                cls._without_holdout_evidence(item)
+                for item in value
+                if not (isinstance(item, dict) and item.get("role") == "holdout")
+            ]
+        if isinstance(value, dict):
+            is_life_event_ledger = value.get("schemaVersion") == "life-event-ledger/v1"
+            hidden_ledger_fields = {
+                "raw",
+                "categoryCounts",
+                "eligibleEventCount",
+                "eventCollectionRequired",
+                "recommendedMinimumEvents",
+                "recommendedRectificationUse",
+            }
+            return {
+                key: cls._without_holdout_evidence(item)
+                for key, item in value.items()
+                if "holdout" not in key.lower()
+                and not (is_life_event_ledger and key in hidden_ledger_fields)
+            }
+        if isinstance(value, str) and "holdout" in value.lower():
+            return "Reserved validation evidence is hidden from the Agent."
+        return value
 
     def _artifact_prompt(self, base_prompt: str, artifacts: dict[str, str]) -> str:
         artifact_context = "\n\n".join(
@@ -1936,76 +2839,10 @@ Rules:
         language_instruction = self._language_instruction(locale)
         return [
             {
-                "id": "vedicdust_judgement",
-                "label": "VedicDust 证据判断",
-                "files": [CLAIM_GRAPH_JSON],
-                "dependencies": [],
-                "active": "reader_prevalidation.md",
-                "progress_message": "盘面证据判断已完成。",
-                "task_name": "vedicdust-judgement",
-                "skills": ["vedicdust-judgement"],
-                "prompt": f"""Build the native VedicDust Claim Graph for this reading.
-
-Read exactly these authoritative inputs:
-- chart_record.json: deterministic Jyotish facts and timing periods;
-- chart_audit.json: calculation and release permissions;
-- judgement_context.json: backend-selected topic evidence, allowed rules, eligible
-  vargas, restricted facts, and restricted timing periods;
-- prevalidation_result.json and chart_rectification_state.json: input confidence
-  and unresolved rectification limits.
-
-Use only the listed typed contracts. Do not use any prior prose as evidence.
-
-{language_instruction}
-
-Write exactly one file: {CLAIM_GRAPH_JSON}
-The file must be valid camelCase JSON conforming to
-vedicdust-claim-graph/1.1.0. Do not write Markdown or any other file.
-
-Hard contract:
-- Copy chartRecordId, chartRevision, and methodProfileId exactly.
-- Every Claim must bind to exactly one backend-generated Judgement Unit using
-  judgementUnitId. Copy judgementCode from that unit's allowedOutputCodes.
-- Use only that unit's permittedRuleIds, allowed scopes, fact IDs, timing IDs,
-  and timing period IDs. The unit's certaintyCap is an absolute maximum.
-- Copy every limitation carried by the Judgement Unit into a released Claim.
-- Use only topic IDs, fact IDs, timingPeriodIds, and rule IDs exposed by
-  judgement_context.json. A rule is usable only when evaluationStatus is
-  eligible; matchedFactIds and the topic evidence lists are hard boundaries.
-- Every Claim must use its topic's eligible judgement rule. Workflow gates may
-  be added only when they are eligible and their required evidence is cited.
-- Use 5 to 10 synthesis Claims. Include chart foundation, the user's requested
-  topics, and only the highest-priority remaining topics. Do not produce one
-  Claim per planet, house, or varga.
-- Each released Claim requires D1 natal promise and capacity evidence. Eligible
-  varga evidence may confirm; it may never create the promise.
-- A timing Claim requires a domain judgement rule,
-  judge.timing.vimshottari-activation, sop.promise-capacity-before-timing, an
-  exact timeScope, and exact timingPeriodIds.
-- Never use restrictedFactIds as supportingFactIds. Never use
-  restrictedTimingPeriodIds. Ineligible D60 cannot support a Claim.
-- Record counter-evidence, conditions, and limitations before certainty.
-- Use high only for convergent evidence with no material unresolved input risk;
-  otherwise use moderate, low/tentative, or withheld.
-- User testimony may explain relevance but cannot become a chart promise.
-- Health Claims describe wellbeing patterns only; no diagnosis. Finance Claims
-  describe conditions only; no promised return. No fatalistic event certainty.
-- For omitted requested topics, add an explicit omittedTopics reason.
-
-Each Claim must contain:
-claimId, topic, judgementUnitId, judgementCode, title, plainStatement, technicalStatement,
-realWorldExpressions, userRelevance, conditions, supportingFactIds,
-counterFactIds, timingFactIds, timingPeriodIds, ruleIds, certainty, scope,
-status, timeScope, practicalImplications, limitations.
-
-User request:
-{user_line}""",
-            },
-            {
                 "id": "vedicdust_consultation",
                 "label": "VedicDust 专业咨询档案",
                 "files": [CONSULTATION_DOSSIER_JSON],
-                "dependencies": ["vedicdust_judgement"],
+                "dependencies": [],
                 "active": CONSULTATION_REPORT_MD,
                 "progress_message": "VedicDust 专业咨询档案已完成。",
                 "task_name": "vedicdust-consultation",
@@ -2037,12 +2874,14 @@ Hard contract:
   omittedClaimIds. Executive Claims belong to executive_synthesis.
 - chart_foundation and decision_support each require their own assigned Claim.
   technical_evidence must keep claimIds empty.
-- A Timing Window may use only a timing Claim and its exact fact and period IDs.
-  State opportunities, pressures, conditions, and limits; never a guaranteed event.
+- Assign timing Claims only to timing_outlook. Return timingWindows as an empty list;
+  the backend materializes exact windows, intervals, evidence, language, and confidence.
 - Organize priority domains by requested topic and judgementContext priority,
   not by the calculator's technical order.
-- Confidence must reflect Birth Assertion, rectification result, Claim
-  certainty, and residual uncertainty. Do not invent percentages.
+- The backend replaces dossier ID, scope, confidence, timing windows, locale,
+  audience, section titles/order/purpose, omission reasons, unresolved questions,
+  visual references, and confidence-disclosure flags from authoritative contracts.
+  Do not try to reinterpret those release fields.
 - Preserve child/adult life-stage and reader-relationship framing from the Chart Record.
 - releaseStatus may be approved only when chart_audit permits judgement, all
   released Claims are accounted for, and dossier qualityChecks pass. Otherwise
@@ -2061,8 +2900,6 @@ User request:
 
     @staticmethod
     def _core_batch_dependency_paths(batch_id: str) -> list[str]:
-        if batch_id == "vedicdust_judgement":
-            return [JUDGEMENT_CONTEXT_JSON]
         if batch_id == "vedicdust_consultation":
             return [JUDGEMENT_CONTEXT_JSON, CLAIM_GRAPH_JSON]
         return []
@@ -2074,29 +2911,12 @@ User request:
             if path.is_file()
         }
 
-    def _validate_native_core_batch(self, session_id: str, batch_id: str) -> None:
-        if batch_id != "vedicdust_judgement":
-            return
-        chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
-        context_json = self.workspace.read_artifact_text(session_id, JUDGEMENT_CONTEXT_JSON)
-        graph_json = self.workspace.read_artifact_text(session_id, CLAIM_GRAPH_JSON)
-        if not chart_record_json or not context_json or not graph_json:
-            raise ValueError("VedicDust judgement batch is missing a required contract")
-        record = ChartRecord.model_validate_json(chart_record_json)
-        context = JudgementContext.model_validate_json(context_json)
-        graph = ClaimGraph.model_validate_json(graph_json)
-        catalog = load_rule_catalog()
-        validate_judgement_context(record, context, catalog)
-        validate_claim_graph(record, graph, catalog, context)
-
     def _prepare_judgement_context(self, session_id: str, user_message: str = "") -> None:
         chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         if not chart_record_json:
             raise ValueError("Session is missing chart_record.json")
         record = ChartRecord.model_validate_json(chart_record_json)
-        sensitivity = self._json_dict(
-            self.workspace.read_artifact_text(session_id, "sensitivity_scan.json") or ""
-        )
+        sensitivity = self._judgement_sensitivity(session_id)
         restricted_fact_ids, restrict_timing = self._restricted_judgement_evidence(
             record, sensitivity
         )
@@ -2110,6 +2930,8 @@ User request:
             now=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
         )
         validate_judgement_context(record, context, catalog)
+        graph = build_claim_graph(record, context)
+        validate_claim_graph(record, graph, catalog, context)
         self.workspace.write_artifact(
             session_id,
             JUDGEMENT_CONTEXT_JSON,
@@ -2120,6 +2942,22 @@ User request:
             JUDGEMENT_CONTEXT_JSON,
             producer="vedicdust-judgement-context",
         )
+        self.workspace.write_artifact(
+            session_id,
+            CLAIM_GRAPH_JSON,
+            graph.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CLAIM_GRAPH_JSON,
+            producer="vedicdust-claim-graph",
+            dependency_paths=[JUDGEMENT_CONTEXT_JSON],
+        )
+
+    def _judgement_sensitivity(self, session_id: str) -> dict[str, object]:
+        active = self.workspace.read_artifact_text(session_id, ACTIVE_CHART_SENSITIVITY_JSON)
+        original = self.workspace.read_artifact_text(session_id, "sensitivity_scan.json")
+        return self._json_dict(active or original or "")
 
     @staticmethod
     def _restricted_judgement_evidence(
@@ -2132,26 +2970,147 @@ User request:
         contract_data = contract if isinstance(contract, dict) else {}
         values = contract_data.get("mustNotUseAsPrimaryEvidence")
         restrictions = [str(value) for value in values] if isinstance(values, list) else []
-        restricted: set[str] = set()
+        restricted: set[str] = {
+            fact.fact_id
+            for fact in record.facts
+            if getattr(fact, "input_stability", ConfidenceGrade.VERIFIED).rank
+            < ConfidenceGrade.CORROBORATED.rank
+        }
         restrict_timing = False
+
+        d1_lagna_dependent_types = {
+            "rashi.lagna.position",
+            "rashi.house.lord",
+            "rashi.house.occupant",
+            "role.house_ownership",
+            "relationship.parivartana",
+            "yoga.raja.kendra_trikona",
+            "strength.shadbala",
+            "strength.digbala",
+            "strength.bhava_bala",
+            "ashtakavarga.sav.house",
+            "point.arudha",
+            "timing.transit.house",
+            "timing.transit.double_transit",
+        }
 
         for value in restrictions:
             normalized = value.strip()
             lagna_match = re.fullmatch(r"[dD](\d+)Lagna", normalized)
+            structure_match = re.fullmatch(r"[dD](\d+)Structure", normalized)
             varga_match = re.fullmatch(r"[dD](\d+)", normalized)
             if lagna_match:
-                restricted.add(f"fact.D{lagna_match.group(1)}.Lagna.position")
+                factor = lagna_match.group(1)
+                if factor == "1":
+                    restricted.update(
+                        fact.fact_id
+                        for fact in record.facts
+                        if fact.fact_type in d1_lagna_dependent_types
+                        or (
+                            fact.fact_type == "aspect.graha_drishti"
+                            and re.search(r"->H(?:[1-9]|1[0-2])$", fact.subject_ref)
+                        )
+                    )
+                else:
+                    prefix = f"fact.D{factor}."
+                    restricted.update(
+                        fact.fact_id for fact in record.facts if fact.fact_id.startswith(prefix)
+                    )
+            elif structure_match:
+                factor = structure_match.group(1)
+                if factor == "1":
+                    restricted.update(
+                        fact.fact_id
+                        for fact in record.facts
+                        if fact.fact_id.startswith("fact.D1.")
+                        and fact.fact_id != "fact.D1.Lagna.position"
+                    )
+                else:
+                    prefix = f"fact.D{factor}."
+                    restricted.update(
+                        fact.fact_id for fact in record.facts if fact.fact_id.startswith(prefix)
+                    )
+                    if factor == "9":
+                        restricted.update(
+                            fact.fact_id
+                            for fact in record.facts
+                            if fact.fact_type == "varga.vargottama"
+                        )
             elif varga_match:
                 prefix = f"fact.D{varga_match.group(1)}."
                 restricted.update(
                     fact.fact_id for fact in record.facts if fact.fact_id.startswith(prefix)
                 )
             elif normalized in {"lagna", "ascendant", "lagnaSign"}:
-                restricted.add("fact.D1.Lagna.position")
-            elif normalized in {"moonSign", "moonNakshatra", "moonPada"}:
-                restricted.add("fact.D1.Moon.position")
+                restricted.update(
+                    fact.fact_id
+                    for fact in record.facts
+                    if fact.fact_type in d1_lagna_dependent_types
+                    or (
+                        fact.fact_type == "aspect.graha_drishti"
+                        and re.search(r"->H(?:[1-9]|1[0-2])$", fact.subject_ref)
+                    )
+                )
+            elif normalized == "moonSign":
+                restricted.update(
+                    fact.fact_id
+                    for fact in record.facts
+                    if fact.fact_id == "fact.D1.Moon.position"
+                    or fact.fact_type == "timing.transit.sade_sati"
+                    or (
+                        fact.fact_type
+                        in {
+                            "rashi.house.occupant",
+                            "relationship.same_sign",
+                            "relationship.parivartana",
+                            "relationship.dispositor_chain",
+                            "aspect.graha_drishti",
+                            "strength.dignity",
+                            "yoga.raja.kendra_trikona",
+                            "yoga.gaja_kesari.structure",
+                        }
+                        and "Moon" in fact.subject_ref
+                    )
+                )
+            elif normalized in {"moonNakshatra", "moonPada"}:
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_id == "fact.D1.Moon.position"
+                )
+                restrict_timing = True
             elif normalized in {"currentDasha", "dasha", "vimshottari"}:
                 restrict_timing = True
+            elif normalized == "charaKaraka7k":
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_type == "karaka.chara"
+                )
+            elif normalized == "moonPhase":
+                restricted.update(
+                    fact.fact_id
+                    for fact in record.facts
+                    if fact.fact_type in {"state.moon_phase", "yoga.gaja_kesari.structure"}
+                )
+            elif normalized == "combustionStatus":
+                restricted.update(
+                    fact.fact_id
+                    for fact in record.facts
+                    if fact.fact_type in {"strength.combustion", "yoga.gaja_kesari.structure"}
+                )
+            elif normalized == "shadbalaClassification":
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_type == "strength.shadbala"
+                )
+            elif normalized == "digbalaStatus":
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_type == "strength.digbala"
+                )
+            elif normalized == "specialPointSigns":
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_type == "point.arudha"
+                )
+            elif normalized == "specialLagnaSigns":
+                restricted.update(
+                    fact.fact_id for fact in record.facts if fact.fact_type == "point.special_lagna"
+                )
         return restricted, restrict_timing
 
     def _finalize_consultation_artifacts(self, session_id: str) -> None:
@@ -2176,7 +3135,13 @@ User request:
         catalog = load_rule_catalog()
         validate_judgement_context(record, context, catalog)
         validate_claim_graph(record, graph, catalog, context)
-        validate_consultation_dossier(record, graph, dossier)
+        dossier = materialize_consultation_dossier(record, graph, context, dossier)
+        self.workspace.write_artifact(
+            session_id,
+            CONSULTATION_DOSSIER_JSON,
+            dossier.model_dump_json(by_alias=True, indent=2) + "\n",
+        )
+        validate_consultation_dossier(record, graph, dossier, context)
         if dossier.release_status != "approved":
             raise ValueError(
                 "VedicDust consultation dossier did not pass its release gate: "
@@ -2251,81 +3216,48 @@ User request:
 
 Workspace contains chart_record.json generated by the VedicDust calculation engine.
 
-Follow the original vedic-reader workflow exactly, but because this is a web adapter:
+Follow the active VedicDust reader contract, adapted for the web runtime:
 - {self._language_instruction(locale)}
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
 - Treat chart_record.json as the authoritative deterministic record.
 - Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
-- If sensitivity_scan.reportReadiness.mode is rectification_required, make each anchor support one explicit candidate ID from chart_rectification_state.json and focus on unstableFields / changedFields. Do not imply the full report can proceed until feedback passes the backend gate.
-- Use chart_rectification_state.rectificationPlan as the backend-owned next-round plan: targetCandidateIds, discriminatingFields, focusAxes, timeWindow, placeWindow, lifeEventFocus, eventCollectionRequired, and requiredAnchorCount are hard constraints.
-- When rectificationPlan.lifeEventFocus is non-empty, build validation anchors from those dated events first. Each such anchor must include a machine-readable > Event: line using an eventId or category from chart_rectification_state.lifeEventLedger.
-- When rectificationPlan.eventCollectionRequired is true and lifeEventFocus is empty, still produce candidate-bound anchors using available chart differences, but keep them low-confidence and do not claim complete birth-time rectification.
-- If chart_rectification_state.status is needs_more_feedback or needs_candidate_bound_checks, generate a new rectification round from rectificationPlan. Use prior feedbackAnchors, roundHistory, and candidate scores to ask narrower candidate-discriminating anchors; do not repeat anchors that already failed to separate candidates.
+- Proceed only when chart_rectification_state.status is not_required. The bounded scan must be stable; do not use unstable fields as claims.
+- Birth-time candidate ranking, holdout evaluation, and chart recalculation are backend-owned. This skill cannot change them.
+- Use concrete, past, user-answerable facts as reading-quality checks. Generic personality, appearance, or preference questions remain weak testimony.
+- Never restate submitted life events as if the user's confirmation were new independent evidence.
 - Stop analysis as soon as you have the required number of concrete, non-duplicative questions that satisfy the format contract. Do not keep expanding the visible reading after sufficient evidence exists.
-- Do not invent candidate IDs, event IDs, times, coordinates, or fields outside chart_rectification_state.rectificationPlan.
+- Do not emit candidate IDs, event IDs, candidate scores, rectification mappings, times, or coordinates.
 - Execute Calc mode Stage 2 and Stage 3 only: signal pre-scan, Yoga scan, and pre-validation reading.
 - Write the user-facing pre-validation output to reader_prevalidation.md.
 {self._reader_prevalidation_format_instruction(locale)}
 - Treat pre-validation as a scoring gate, not as performance writing: do not show the internal SOP, do not add full candidate tables, and do not reframe misses as hits.
 - Do not generate core report, career report, love report, daily note, or app-specific claims.
-- The backend will deterministically create prevalidation_result.json and update chart_rectification_state.json from reader_prevalidation.md and user feedback; do not hand-write those artifacts.
+- The backend will deterministically create prevalidation_result.json from reader_prevalidation.md and user feedback; do not hand-write it. Reader feedback cannot select a birth time or recalculate chart_record.json.
 
 User message:
 {user_message or self._reader_default_user_message(locale)}"""
 
-    def _career_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run the VedicDust career consultation skill.
-
-Workspace contains chart_record.json, claim_graph.json, consultation_dossier.json,
-agent_context.json, and consultation_report.md.
-
-Rules:
-- {self._language_instruction(locale)}
-- Use agent_context.json as the released consultation context and chart_record.json only to
-  verify cited fact IDs. Do not introduce a chart judgement absent from claim_graph.json.
-- Write career_report.md with conclusions, evidence, counter-evidence, timing limits,
-  decision support, and follow-up questions.
-- Chat response should only report progress/completion and file paths.
-
-User message:
-{user_message or "分析事业"}"""
-
-    def _love_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run the VedicDust relationship consultation skill.
-
-Workspace contains chart_record.json, claim_graph.json, consultation_dossier.json,
-agent_context.json, and consultation_report.md.
-
-Rules:
-- {self._language_instruction(locale)}
-- Use agent_context.json as the released consultation context and chart_record.json only to
-  verify cited fact IDs. Do not introduce a chart judgement absent from claim_graph.json.
-- Write love_report.md with conclusions, evidence, counter-evidence, timing limits,
-  decision support, and follow-up questions.
-- Chat response should only report progress/completion and file paths.
-- Do not output app cards, claims, daily notes, or JSON.
-
-User message:
-{user_message or "分析感情"}"""
-
     def _rectifier_prompt(self, user_message: str, locale: str) -> str:
-        return f"""Run vedic-rectifier exactly as the original skill.
+        return f"""Render the backend-owned VedicDust rectification audit.
 
-Workspace contains chart_record.json, chart_rectification_state.json,
-rectification_question_set.json, prevalidation_result.json, and user_context.md when feedback exists.
+Workspace contains chart_record.json and chart_rectification_state.json.
 
 Rules:
 - {self._language_instruction(locale)}
-- This skill is interactive.
-- Use chart_record.json and its RectificationRecord as the deterministic boundary.
+- Treat chart_record.json and chart_rectification_state.json as immutable source records.
+- Report only the persisted candidate interval, decision, evidence counts, holdout result,
+  confidence, residual uncertainty, and permitted next step.
+- Never rank candidates, reinterpret Reader feedback, propose a new time, or ask the user
+  to confirm a model-selected time. Candidate selection and recalculation are backend-owned.
 - Write rectification_report.md.
-- If the birth time should be changed, clearly state the candidate time and what needs confirmation.
-- Do not run shell commands. If recalculation is needed, request recalculation as the next backend step.
+- If the state is underdetermined or equivalent, preserve that result exactly and explain what
+  additional user evidence the persisted report gate requests.
+- Do not run shell commands or request an unrecorded recalculation.
 - Do not output app cards, claims, daily notes, or JSON.
 
 User message:
-{user_message or "校准时间"}"""
+{user_message or "解释生时校正结果"}"""
 
     def _synastry_prompt(self, user_message: str, locale: str) -> str:
         return f"""Run the VedicDust relationship consultation skill.
@@ -2411,11 +3343,8 @@ User message:
             # vedic-core batches still need several tool turns to load skill
             # resources, inspect prior artifacts, and write the target report.
             "vedic-core": 40,
-            "vedic-career": 8,
-            "vedic-love": 8,
             "vedic-rectifier": 6,
             "vedic-synastry": 8,
-            "vedicdust-judgement": 12,
             "vedicdust-consultation": 12,
             "bazi-calculator": 6,
             "bazi-classics-core": 12,
@@ -2425,8 +3354,6 @@ User message:
         return {
             "vedic-reader": "reader_validation",
             "vedic-core": "core_complete",
-            "vedic-career": "career_complete",
-            "vedic-love": "love_complete",
             "vedic-rectifier": "rectifier_complete",
             "vedic-synastry": "synastry_complete",
             "bazi-calculator": "bazi_ready",
@@ -2447,8 +3374,6 @@ User message:
         return {
             "vedic-reader": "reader_prevalidation.md",
             "vedic-core": "reader_prevalidation.md",
-            "vedic-career": "career_report.md",
-            "vedic-love": "love_report.md",
             "vedic-rectifier": "rectification_report.md",
             "vedic-synastry": "reports/relationship_consultation.md",
             "bazi-calculator": "bazi_chart_foundation.md",

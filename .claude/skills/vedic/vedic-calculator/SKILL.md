@@ -20,22 +20,34 @@ This skill documents the deterministic calculation interface. The model never ha
 
 The backend writes:
 
-- `chart_record.json` (`vedicdust-chart-record/1.0.0`)
+- `chart_record.json` (`vedicdust-chart-record/1.3.0`)
 - `chart_audit.json`
 - `birth_input_context.json`
 - `sensitivity_scan.json`
 - `chart_rectification_state.json`
 - `reading_session.json`
 
-`chart_record.json` is the sole astrological fact owner. It contains the canonical moment, method profile, astronomy snapshot, D1 and supported vargas, typed facts, Vimshottari periods, quality checks, sensitivity boundaries, and rectification state.
+`chart_record.json` is the sole astrological fact owner. It contains the canonical moment, method profile, astronomy snapshot, D1 and supported vargas, typed facts, Vimshottari periods, quality checks, input-sensitivity assessment, sensitivity boundaries, and rectification state.
 
 ## Calculation policy
 
 - Swiss Ephemeris owns precise D1 astronomical longitudes.
 - PyJHora supplies supported vargas and classical strength/timing calculations.
 - The method profile fixes Lahiri sidereal zodiac, mean nodes, whole-sign Rashi houses, Parashari varga scheme, and Vimshottari Dasha.
-- Every fact carries provenance, method profile, evidence class, confidence, and source IDs.
+- Every fact carries provenance, method profile, evidence class, calculation confidence,
+  input stability, sensitivity dependencies, and source IDs. The backend derives fact
+  stability from the exact changed fields in the completed scan; the Agent must not
+  replace that grade with whole-chart intuition. Effective judgement confidence is the
+  lower of the calculation and input-stability axes.
 - D1 may be primary evidence after audit. Vargas are eligible only when their sensitivity policy allows it. D60 is final-confirmation-only.
+- Named Yoga facts are emitted only when every condition declared by the pinned
+  rule is present. The current Gaja-Kesari implementation is structure-only and
+  cannot be expanded by the Agent into fame, wealth, status, or timing claims.
+- Vimshottari periods carry their own input stability plus start/end boundary
+  envelopes recalculated at the declared birth-window endpoints. Timing claims
+  must use the lower of Dasha calculation provenance and birth-window stability,
+  and must expose endpoint-sampling limitations instead of presenting one
+  provider date as exact.
 - Any failed quality check blocks judgement.
 
 ## Prohibitions

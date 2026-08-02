@@ -8,6 +8,7 @@ from typing import Any
 
 from app.schemas import SkillRunInput, SkillSessionResponse
 from app.services.core_job_runtime import CoreJobRuntime
+from app.services.skill_runtime import SkillRuntime
 
 
 class FakeWorkspace:
@@ -162,14 +163,42 @@ def wait_for_job(runtime: CoreJobRuntime, job_id: str):
     return _wait()
 
 
+def test_production_core_graph_has_stable_topology_and_output_contract(tmp_path: Path) -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    batches = runtime.core_batches("事业", "zh")
+    ids = [str(item.get("id") or "") for item in batches]
+
+    assert ids == ["vedicdust_consultation"]
+    assert len(ids) == len(set(ids))
+    assert [str(path) for path in batches[0]["files"]] == ["consultation_dossier.json"]
+    assert batches[0]["dependencies"] == []
+    assert batches[0]["skills"] == ["vedicdust-consultation"]
+
+    workspace = FakeWorkspace(tmp_path)
+    workspace.require_session_dir("graph-session")
+    fake_runtime = FakeSkillRuntime(workspace, batches)
+    job = CoreJobRuntime(fake_runtime)._create_job(  # type: ignore[arg-type]
+        SkillRunInput(
+            sessionId="graph-session",
+            skill="vedic-core",
+            userMessage="事业",
+            locale="zh",
+        )
+    )
+
+    assert [(node.id, node.wave, node.dependencies) for node in job.nodes] == [
+        ("vedicdust_consultation", 1, [])
+    ]
+
+
 def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path) -> None:
     async def run() -> None:
         session_id = "resume-session"
         workspace = FakeWorkspace(tmp_path)
         runtime_dir = workspace.require_session_dir(session_id)
-        workspace.write_artifact(session_id, "claim_graph.json", '{"claims":[]}\n')
+        workspace.write_artifact(session_id, "completed.json", "{}\n")
         workspace.mark_artifact_checkpoint(
-            session_id, "claim_graph.json", producer="vedic-core:vedicdust_judgement"
+            session_id, "completed.json", producer="vedic-core:completed_step"
         )
         workspace.write_artifact(session_id, "consultation_dossier.json", '{"sections":[]}\n')
         (runtime_dir / "run_metrics.json").write_text(
@@ -177,9 +206,9 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
                 {
                     "nodes": [
                         {
-                            "id": "vedicdust_judgement",
+                            "id": "completed_step",
                             "status": "completed",
-                            "files": ["claim_graph.json"],
+                            "files": ["completed.json"],
                         },
                         {
                             "id": "vedicdust_consultation",
@@ -196,11 +225,11 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
         skill_runtime = FakeSkillRuntime(
             workspace,
             [
-                batch("vedicdust_judgement", "claim_graph.json"),
+                batch("completed_step", "completed.json"),
                 batch(
                     "vedicdust_consultation",
                     "consultation_dossier.json",
-                    ["vedicdust_judgement"],
+                    ["completed_step"],
                 ),
             ],
         )
@@ -213,7 +242,7 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
         assert finished.status == "completed"
         assert skill_runtime.calls == [("vedicdust_consultation", True)]
         nodes = {node.id: node for node in finished.nodes}
-        assert nodes["vedicdust_judgement"].status == "skipped"
+        assert nodes["completed_step"].status == "skipped"
         assert nodes["vedicdust_consultation"].status == "completed"
         assert (runtime_dir / "consultation_dossier.json").read_text(
             encoding="utf-8"
@@ -227,15 +256,15 @@ def test_resume_reruns_completed_file_without_session_checkpoint(tmp_path: Path)
         session_id = "untrusted-session"
         workspace = FakeWorkspace(tmp_path)
         runtime_dir = workspace.require_session_dir(session_id)
-        workspace.write_artifact(session_id, "claim_graph.json", '{"claims":[]}\n')
+        workspace.write_artifact(session_id, "untrusted.json", "{}\n")
         (runtime_dir / "run_metrics.json").write_text(
             json.dumps(
                 {
                     "nodes": [
                         {
-                            "id": "vedicdust_judgement",
+                            "id": "untrusted_step",
                             "status": "completed",
-                            "files": ["claim_graph.json"],
+                            "files": ["untrusted.json"],
                         },
                     ]
                 }
@@ -243,9 +272,7 @@ def test_resume_reruns_completed_file_without_session_checkpoint(tmp_path: Path)
             encoding="utf-8",
         )
 
-        skill_runtime = FakeSkillRuntime(
-            workspace, [batch("vedicdust_judgement", "claim_graph.json")]
-        )
+        skill_runtime = FakeSkillRuntime(workspace, [batch("untrusted_step", "untrusted.json")])
         runtime = CoreJobRuntime(skill_runtime)  # type: ignore[arg-type]
         started = await runtime.start(
             SkillRunInput(sessionId=session_id, skill="vedic-core", userMessage="")
@@ -253,12 +280,10 @@ def test_resume_reruns_completed_file_without_session_checkpoint(tmp_path: Path)
         finished = await wait_for_job(runtime, started.job_id)
 
         assert finished.status == "completed"
-        assert skill_runtime.calls == [("vedicdust_judgement", True)]
+        assert skill_runtime.calls == [("untrusted_step", True)]
         nodes = {node.id: node for node in finished.nodes}
-        assert nodes["vedicdust_judgement"].status == "completed"
-        assert (runtime_dir / "claim_graph.json").read_text(
-            encoding="utf-8"
-        ) == "# vedicdust_judgement\n"
+        assert nodes["untrusted_step"].status == "completed"
+        assert (runtime_dir / "untrusted.json").read_text(encoding="utf-8") == "# untrusted_step\n"
 
     asyncio.run(run())
 
@@ -307,6 +332,8 @@ def test_failed_parallel_wave_waits_for_siblings_before_checkpoint(tmp_path: Pat
 
         assert finished.status == "failed"
         assert finished.message == CoreJobRuntime.USER_INTERRUPTED_MESSAGE
+        assert finished.session is not None
+        assert finished.session.stage == "error"
         assert "fast_fail" not in finished.message
         assert "API Error" not in finished.message
         nodes = {node.id: node for node in finished.nodes}

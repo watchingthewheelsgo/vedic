@@ -30,7 +30,6 @@ class StartupConfigPreflightReport:
 
 REQUIRED_IMPORTS: tuple[tuple[str, str], ...] = (
     ("swisseph", "pysweph>=2.10.3.5"),
-    ("dashaflow", "dashaflow>=0.3 installed with --no-deps"),
     ("jhora", "PyJHora==4.8.6"),
     ("pytz", "pytz>=2024.1"),
     ("numpy", "numpy"),
@@ -158,14 +157,16 @@ def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:
         raise RuntimeError(
             "Calculation runtime version drift:\n"
             + "\n".join(f"- {item}" for item in version_drift)
-            + "\nRun `npm run backend:setup` to restore backend/astrology-runtime.lock."
+            + "\nRun `npm run backend:calculator-sync` to restore "
+            "backend/astrology-runtime.lock."
         )
 
     swisseph_version = versions.get("swisseph", "")
     if swisseph_version == "0.0.0":
         raise RuntimeError(
-            "swisseph resolved to an empty stub package. Run `npm run backend:setup` "
-            "so the backend installs pysweph and dashaflow in the supported order."
+            "swisseph resolved to an empty stub package. Run "
+            "`npm run backend:calculator-sync` "
+            "so the backend installs the pinned pysweph distribution."
         )
 
     jhora_root = Path(modules["jhora"].__file__).resolve().parent
@@ -173,7 +174,7 @@ def validate_backend_runtime(project_root: Path) -> RuntimePreflightReport:
     if not geonames_path.exists():
         raise RuntimeError(
             f"PyJHora GeoNames data is missing at {geonames_path}. "
-            "Run `npm run backend:setup` from the project root."
+            "Run `npm run backend:calculator-sync` from the project root."
         )
 
     ephemeris_files = ensure_jhora_ephemeris(project_root=project_root, jhora_root=jhora_root)

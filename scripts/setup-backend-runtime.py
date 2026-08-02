@@ -45,7 +45,7 @@ def load_required_packages() -> tuple[tuple[str, str, list[str]], ...]:
             (
                 package,
                 f"=={package_version}",
-                ["--no-deps"] if package == "dashaflow" else [],
+                [],
             )
         )
     return tuple(packages)
@@ -227,7 +227,7 @@ def main() -> int:
 
     if args.check_only:
         log(
-            "Run `npm run backend:setup` to install missing backend dependencies.",
+            "Run `npm run backend:calculator-sync` to restore the pinned calculator runtime.",
             "ERR",
         )
         return 1

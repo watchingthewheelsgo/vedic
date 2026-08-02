@@ -140,7 +140,7 @@ export function Account() {
             <ArrowLeft size={17} />
           </Button>
           <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-            Veda<span>Light</span>
+            Vedic<span>Dust</span>
           </button>
           <div className="flex-1" />
           <LanguageSwitcher />

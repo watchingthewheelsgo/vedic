@@ -58,9 +58,38 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
     rectification_status = (
         record.rectification.decision.status if record.rectification else "not_required"
     )
-    if rectification_status in {
+    if rectification_status == "input_resolution_required":
+        findings.append(
+            AuditFinding(
+                finding_id="rectification.input-resolution-required",
+                severity="blocking",
+                category="civil_time",
+                field_refs=["rectification.decision"],
+                message=(
+                    "The reported search window contains a civil-time or place value that "
+                    "could not be resolved deterministically."
+                ),
+                required_action="Resolve the civil time or place before rectification.",
+            )
+        )
+    elif rectification_status == "calculation_failed":
+        findings.append(
+            AuditFinding(
+                finding_id="rectification.calculation-failed",
+                severity="blocking",
+                category="calculation",
+                field_refs=["rectification.decision"],
+                message=(
+                    "Deterministic event scoring did not complete for every birth-time "
+                    "candidate. Candidate comparison is unsafe."
+                ),
+                required_action="Retry deterministic calculation before rectification.",
+            )
+        )
+    elif rectification_status in {
         "collecting_evidence",
         "comparing_candidates",
+        "multiple_equivalent",
         "underdetermined",
     }:
         findings.append(
@@ -81,6 +110,7 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
     elif rectification_status in {
         "collecting_evidence",
         "comparing_candidates",
+        "multiple_equivalent",
         "underdetermined",
     }:
         status = "passed_with_limits"

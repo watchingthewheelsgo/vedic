@@ -18,8 +18,6 @@ export const localeTags: Record<LocaleCode, string> = {
 
 export const reportTitleKeys: Record<string, string> = {
   "consultation_report.md": "report.title.consultation",
-  "career_phase4a.md": "report.title.career",
-  "love_report.md": "report.title.love",
   "rectification_report.md": "report.title.rectification"
 };
 
@@ -284,6 +282,11 @@ export const messages: Record<LocaleCode, Dict> = {
     "intake.error.timeSource": "Select where this exact time came from.",
     "intake.error.place": "Choose a city or enter valid coordinates.",
     "intake.error.start": "Could not start the report.",
+    "intake.ambiguousTime.title": "This clock time happened twice",
+    "intake.ambiguousTime.body":
+      "Daylight-saving time changed that night. Choose the occurrence that matches the birth record.",
+    "intake.ambiguousTime.first": "Earlier occurrence",
+    "intake.ambiguousTime.second": "Later occurrence",
     "bazi.title": "BaZi Workshop",
     "bazi.subtitle":
       "Prepare the four pillars and luck-cycle workspace first, then run the classical report from the workshop page.",
@@ -507,12 +510,24 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.accepted": "Base chart accepted",
     "session.rectification.moreChecks": "More checks needed",
     "session.rectification.waiting": "Waiting for feedback",
+    "session.rectification.equivalent": "Equivalent time ranges remain",
+    "session.rectification.underdetermined": "Time remains unresolved",
+    "session.rectification.inputResolution": "Birth input needs clarification",
+    "session.rectification.calculationFailed": "Chart comparison needs a retry",
     "session.rectification.body.ready":
       "Your replies are enough to continue into the full interpretation.",
     "session.rectification.body.more":
       "The system will use the next question card to reduce chart uncertainty before the report proceeds.",
+    "session.rectification.body.equivalent":
+      "{count} time ranges produce the same decision-relevant chart. The system will preserve them instead of inventing one exact birth time.",
+    "session.rectification.body.underdetermined":
+      "The available evidence cannot narrow the reported time enough. A better source time or additional dated events are needed.",
+    "session.rectification.body.inputResolution":
+      "Part of the reported time or place cannot be mapped unambiguously. Clarify the input before chart calibration continues.",
+    "session.rectification.body.calculationFailed":
+      "One or more candidate charts could not be calculated consistently. No birth time was selected; retry the chart calculation before continuing.",
     "session.rectification.reviewMeta": "{risk} review · revision {revision}",
-    "session.rectification.anchors": "Question anchors",
+    "session.rectification.anchors": "Calibration events",
     "session.rectification.nextStep": "Next step",
     "session.rectification.continue": "Continue when ready",
     "session.rectification.preparingNext": "Preparing next card...",
@@ -527,7 +542,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.reader.preparingNextRound": "Preparing the next check",
     "session.reader.preparingNextRoundBody":
       "Your replies were saved. The system is comparing the remaining chart candidates and choosing the most useful next question.",
-    "session.reader.roundTitle": "Time check · round {round}",
+    "session.reader.roundTitle": "Chart consistency check",
     "session.reader.roundBody":
       "Answer from memory. A correction is more useful than agreeing with a statement that does not fit.",
     "session.reader.cardOf": "Card {current} of {total}",
@@ -539,6 +554,31 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.reader.why": "Why question {number} appears",
     "session.reader.answered": "{answered}/{total} answered",
     "session.reader.optionalNote": "Optional note",
+    "session.events.title": "Dated life anchors",
+    "session.events.body":
+      "Add three major events you can place in time. One is reserved as a blind check; these facts are used before any birth-time candidate can be selected.",
+    "session.events.item": "Event {number}",
+    "session.events.when": "When",
+    "session.events.type": "Type",
+    "session.events.chooseType": "Choose a type",
+    "session.events.what": "What happened",
+    "session.events.placeholder": "One concrete, verifiable change or milestone",
+    "session.events.add": "Add another event",
+    "session.events.remove": "Remove event",
+    "session.events.continue": "Compare chart candidates",
+    "session.events.saving": "Recalculating...",
+    "session.events.category.education": "Education",
+    "session.events.category.career": "Career",
+    "session.events.category.relationship": "Relationship",
+    "session.events.category.relocation": "Relocation",
+    "session.events.category.child": "Childbirth / child",
+    "session.events.category.health": "Health / surgery",
+    "session.events.category.family": "Family",
+    "session.events.category.finance": "Finance",
+    "session.events.category.property": "Property",
+    "session.events.category.legal": "Legal",
+    "session.events.category.loss": "Bereavement",
+    "session.events.category.spiritual": "Spiritual practice",
     "session.reader.notePlaceholder": "Add a correction or example if useful.",
     "session.reader.previous": "Previous",
     "session.reader.next": "Next",
@@ -701,8 +741,6 @@ export const messages: Record<LocaleCode, Dict> = {
     "stage.failed.fallback":
       "This part did not finish. Resume will keep completed sections and retry the unfinished work.",
     "report.title.consultation": "VedicDust Consultation",
-    "report.title.career": "Career Guidance",
-    "report.title.love": "Relationship Guidance",
     "report.title.rectification": "Birth Time Review"
   },
   zh: {
@@ -952,6 +990,10 @@ const zhOverrides: Dict = {
   "intake.error.timeSource": "请选择这个精确时间的来源。",
   "intake.error.place": "请选择城市，或输入合法经纬度。",
   "intake.error.start": "无法开始报告。",
+  "intake.ambiguousTime.title": "这个钟表时间当天出现了两次",
+  "intake.ambiguousTime.body": "当晚发生了夏令时切换，请选择与出生记录相符的那一次。",
+  "intake.ambiguousTime.first": "较早的一次",
+  "intake.ambiguousTime.second": "较晚的一次",
   "bazi.title": "八字工作台",
   "bazi.subtitle": "先生成四柱与大运工作区，再在工作台中运行经典八字报告。",
   "bazi.hiddenBadge": "隐藏八字入口",
@@ -1167,10 +1209,22 @@ const zhOverrides: Dict = {
   "session.rectification.accepted": "基础盘已确认",
   "session.rectification.moreChecks": "需要继续校验",
   "session.rectification.waiting": "等待反馈",
+  "session.rectification.equivalent": "保留多个等价时间范围",
+  "session.rectification.underdetermined": "出生时间仍未收敛",
+  "session.rectification.inputResolution": "出生信息需要先确认",
+  "session.rectification.calculationFailed": "候选盘计算需要重试",
   "session.rectification.body.ready": "你的回复已经足够支撑后续完整解读。",
   "session.rectification.body.more": "系统会用下一张问题卡继续降低盘面不确定性，然后再进入报告。",
+  "session.rectification.body.equivalent":
+    "目前有 {count} 个时间范围会产生相同的关键盘面。系统会保留这些范围，不会虚构一个精确出生时刻。",
+  "session.rectification.body.underdetermined":
+    "现有证据不足以继续缩小出生时间，请提供更可靠的时间来源或更多有明确日期的人生事件。",
+  "session.rectification.body.inputResolution":
+    "输入的时间或地点中有一部分无法唯一映射，请先缩小范围或确认时区分支，再继续生时校验。",
+  "session.rectification.body.calculationFailed":
+    "部分候选盘未能完成一致的确定性计算，系统没有选择出生时间。请先重试盘面计算，再继续生时校验。",
   "session.rectification.reviewMeta": "{risk} 置信度复核 · 第 {revision} 版",
-  "session.rectification.anchors": "问题锚点",
+  "session.rectification.anchors": "校准事件",
   "session.rectification.nextStep": "下一步",
   "session.rectification.continue": "准备好后继续",
   "session.rectification.preparingNext": "正在准备下一张卡片...",
@@ -1184,7 +1238,7 @@ const zhOverrides: Dict = {
   "session.reader.preparingNextRound": "正在准备下一轮校验",
   "session.reader.preparingNextRoundBody":
     "你的回复已经保存。系统正在比较剩余候选盘，并选择最有区分度的下一个问题。",
-  "session.reader.roundTitle": "生时校验 · 第 {round} 轮",
+  "session.reader.roundTitle": "盘面一致性确认",
   "session.reader.roundBody": "请按真实记忆回答。不符合时直接指出，比顺着问题回答更有价值。",
   "session.reader.cardOf": "第 {current} 张，共 {total} 张",
   "session.reader.required": "需要你的输入",
@@ -1195,6 +1249,31 @@ const zhOverrides: Dict = {
   "session.reader.why": "为什么会出现第 {number} 题",
   "session.reader.answered": "已回答 {answered}/{total}",
   "session.reader.optionalNote": "补充说明（可选）",
+  "session.events.title": "带日期的人生锚点",
+  "session.events.body":
+    "请填写三件能够大致确定年月的重要经历。其中一件会保留作盲测；在这些事实进入计算前，系统不会选择出生时间候选。",
+  "session.events.item": "事件 {number}",
+  "session.events.when": "发生时间",
+  "session.events.type": "事件类型",
+  "session.events.chooseType": "请选择类型",
+  "session.events.what": "具体发生了什么",
+  "session.events.placeholder": "填写一件具体、可核对的变化或里程碑",
+  "session.events.add": "再添加一件",
+  "session.events.remove": "移除事件",
+  "session.events.continue": "开始比较候选盘",
+  "session.events.saving": "正在重新计算…",
+  "session.events.category.education": "教育 / 考试",
+  "session.events.category.career": "事业 / 工作",
+  "session.events.category.relationship": "关系 / 婚姻",
+  "session.events.category.relocation": "搬迁 / 移居",
+  "session.events.category.child": "生育 / 子女",
+  "session.events.category.health": "健康 / 手术",
+  "session.events.category.family": "家庭",
+  "session.events.category.finance": "财务",
+  "session.events.category.property": "房产",
+  "session.events.category.legal": "法律纠纷",
+  "session.events.category.loss": "亲友离世",
+  "session.events.category.spiritual": "修行 / 信仰",
   "session.reader.notePlaceholder": "如果有帮助，可以补充修正或例子。",
   "session.reader.previous": "上一题",
   "session.reader.next": "下一题",
@@ -1318,8 +1397,6 @@ const zhOverrides: Dict = {
   "stage.result.showFull": "查看全文",
   "stage.result.more": "完整结果中还有 {count} 个章节。",
   "report.title.consultation": "VedicDust 专业咨询档案",
-  "report.title.career": "事业指引",
-  "report.title.love": "关系指引",
   "report.title.rectification": "出生时间校验"
 };
 
@@ -1531,6 +1608,11 @@ const jaOverrides: Dict = {
   "intake.submit.busy": "準備中...",
   "intake.submit": "リーディングへ進む",
   "intake.error.place": "都市を選ぶか、有効な座標を入力してください。",
+  "intake.ambiguousTime.title": "この時刻は同じ日に2回ありました",
+  "intake.ambiguousTime.body":
+    "その夜に夏時間が切り替わりました。出生記録に合う方を選んでください。",
+  "intake.ambiguousTime.first": "早い方",
+  "intake.ambiguousTime.second": "遅い方",
   "bazi.title": "八字ワークショップ",
   "bazi.subtitle": "まず四柱と大運の作業データを準備し、その後クラシック八字レポートを実行します。",
   "bazi.hiddenBadge": "非公開 BaZi 入口",
@@ -1752,10 +1834,22 @@ const jaOverrides: Dict = {
   "session.rectification.accepted": "基礎チャート承認済み",
   "session.rectification.moreChecks": "追加確認が必要",
   "session.rectification.waiting": "回答待ち",
+  "session.rectification.equivalent": "同等の時刻範囲を保持",
+  "session.rectification.underdetermined": "出生時刻は未確定",
+  "session.rectification.inputResolution": "出生情報の確認が必要",
+  "session.rectification.calculationFailed": "候補チャートの再計算が必要",
   "session.rectification.body.ready": "回答は完全な解釈へ進むのに十分です。",
   "session.rectification.body.more": "次の質問カードで不確実性を下げてからレポートへ進みます。",
+  "session.rectification.body.equivalent":
+    "{count} 個の時刻範囲が同じ重要チャートを示します。正確な一時刻を作らず、範囲として保持します。",
+  "session.rectification.body.underdetermined":
+    "現在の証拠では出生時刻を十分に絞れません。より確かな時刻情報または日付付きの出来事が必要です。",
+  "session.rectification.body.inputResolution":
+    "入力した時刻または場所の一部を一意に解決できません。範囲やタイムゾーンを確認してから補正を続けます。",
+  "session.rectification.body.calculationFailed":
+    "一部の候補チャートを一貫して計算できませんでした。出生時刻は選択せず、再計算後に補正を続けます。",
   "session.rectification.reviewMeta": "{risk} 信頼度レビュー · 第 {revision} 版",
-  "session.rectification.anchors": "質問アンカー",
+  "session.rectification.anchors": "校正イベント",
   "session.rectification.nextStep": "次のステップ",
   "session.rectification.continue": "準備できたら続行",
   "session.rectification.preparingNext": "次のカードを準備中...",
@@ -1769,7 +1863,7 @@ const jaOverrides: Dict = {
   "session.reader.preparingNextRound": "次の確認を準備中",
   "session.reader.preparingNextRoundBody":
     "回答を保存しました。残る候補チャートを比較し、最も区別しやすい次の質問を選んでいます。",
-  "session.reader.roundTitle": "出生時刻確認 · 第 {round} ラウンド",
+  "session.reader.roundTitle": "チャート整合性の確認",
   "session.reader.roundBody": "記憶どおりに回答してください。合わない場合の訂正が最も役立ちます。",
   "session.reader.cardOf": "{total} 枚中 {current} 枚目",
   "session.reader.required": "入力が必要です",
@@ -1780,6 +1874,31 @@ const jaOverrides: Dict = {
   "session.reader.why": "なぜ質問 {number} が表示されるか",
   "session.reader.answered": "{answered}/{total} 回答済み",
   "session.reader.optionalNote": "任意メモ",
+  "session.events.title": "日付のある人生イベント",
+  "session.events.body":
+    "時期を特定できる重要な出来事を3件入力してください。1件はブラインド確認用に保留され、候補時刻の選択前に使用されます。",
+  "session.events.item": "イベント {number}",
+  "session.events.when": "時期",
+  "session.events.type": "種類",
+  "session.events.chooseType": "種類を選択",
+  "session.events.what": "起きたこと",
+  "session.events.placeholder": "確認可能な具体的変化や節目",
+  "session.events.add": "イベントを追加",
+  "session.events.remove": "イベントを削除",
+  "session.events.continue": "候補チャートを比較",
+  "session.events.saving": "再計算中…",
+  "session.events.category.education": "教育",
+  "session.events.category.career": "仕事",
+  "session.events.category.relationship": "関係 / 結婚",
+  "session.events.category.relocation": "転居",
+  "session.events.category.child": "出産 / 子ども",
+  "session.events.category.health": "健康 / 手術",
+  "session.events.category.family": "家族",
+  "session.events.category.finance": "財務",
+  "session.events.category.property": "不動産",
+  "session.events.category.legal": "法的問題",
+  "session.events.category.loss": "死別",
+  "session.events.category.spiritual": "精神的実践",
   "session.reader.notePlaceholder": "必要なら修正や例を追加してください。",
   "session.reader.previous": "前へ",
   "session.reader.next": "次へ",
@@ -1914,8 +2033,6 @@ const jaOverrides: Dict = {
   "stage.result.showFull": "全文を見る",
   "stage.result.more": "完全な結果にはさらに {count} セクションがあります。",
   "report.title.consultation": "VedicDust コンサルテーション記録",
-  "report.title.career": "キャリアガイダンス",
-  "report.title.love": "関係性ガイダンス",
   "report.title.rectification": "出生時刻レビュー"
 };
 

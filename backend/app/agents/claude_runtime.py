@@ -25,6 +25,8 @@ class AgentRunResult:
     session_id: str | None = None
     duration_ms: int | None = None
     total_cost_usd: float | None = None
+    stop_reason: str | None = None
+    model: str | None = None
 
 
 class ClaudeRuntime:
@@ -84,7 +86,12 @@ class ClaudeRuntime:
                 "in this workspace and the selected skill instructions."
             ),
         )
-        return await self._run_query(task_name, prompt, options)
+        return await self._run_query(
+            task_name,
+            prompt,
+            options,
+            model_name=self.settings.anthropic_model,
+        )
 
     async def run_skill_prompt_task(
         self,
@@ -93,19 +100,22 @@ class ClaudeRuntime:
         *,
         skills: list[str],
         max_turns: int | None = None,
+        allow_file_tools: bool = True,
     ) -> AgentRunResult:
         if not self.is_configured():
             raise RuntimeError("Claude Agent SDK runtime is not configured")
 
         from claude_agent_sdk import ClaudeAgentOptions
 
-        # Read/Glob/Grep stay enabled so the selected skill can load its own
-        # resources/*.md framework files (e.g. the original SKILL.md instructs
-        # "view_file resources/chart_reading_rules.md"). Write/Edit remain
-        # disabled: the backend still persists artifacts from the JSON wrapper.
+        # File tools are optional because workflows handling blind validation
+        # evidence receive a backend-sanitized prompt and must not inspect the
+        # project or persisted session workspaces. Other skills may still read
+        # their own resources/*.md framework files. Write/Edit remain disabled:
+        # the backend persists artifacts from the JSON wrapper.
+        file_tools = ["Read", "Glob", "Grep"] if allow_file_tools else []
         options = ClaudeAgentOptions(
-            tools=["Read", "Glob", "Grep"],
-            allowed_tools=["Read", "Glob", "Grep", *self._backend_tool_names()],
+            tools=file_tools,
+            allowed_tools=[*file_tools, *self._backend_tool_names()],
             disallowed_tools=["Bash", "Write", "Edit", "WebFetch", "WebSearch"],
             permission_mode="dontAsk",
             setting_sources=["project"],
@@ -125,7 +135,12 @@ class ClaudeRuntime:
                 "checkout flows, or extra summaries."
             ),
         )
-        return await self._run_query(task_name, prompt, options)
+        return await self._run_query(
+            task_name,
+            prompt,
+            options,
+            model_name=self.settings.anthropic_model,
+        )
 
     async def run_place_lookup_task(
         self,
@@ -166,6 +181,7 @@ class ClaudeRuntime:
                 tool_state=tool_state,
             )
 
+        model_name = self.settings.anthropic_default_haiku_model or self.settings.anthropic_model
         options = ClaudeAgentOptions(
             tools=["WebSearch", "WebFetch"],
             allowed_tools=["WebSearch", "WebFetch"],
@@ -182,7 +198,7 @@ class ClaudeRuntime:
             cwd=Path.cwd(),
             add_dirs=[Path.cwd()],
             env=self._agent_env(),
-            model=self.settings.anthropic_default_haiku_model or self.settings.anthropic_model,
+            model=model_name,
             max_turns=8,
             effort="low",
             hooks={
@@ -272,6 +288,7 @@ Schema:
                 prompt.strip(),
                 options,
                 trace_label="place_lookup",
+                model_name=model_name,
             )
         except Exception:
             fallback_json = self._place_lookup_json_from_tool_observations(
@@ -292,7 +309,7 @@ Schema:
                     "raw_text": fallback_json,
                 },
             )
-            return AgentRunResult(mode="claude", raw_text=fallback_json)
+            return AgentRunResult(mode="claude", raw_text=fallback_json, model=model_name)
         self._log_place_trace(
             "final",
             {
@@ -320,6 +337,8 @@ Schema:
                 session_id=result.session_id,
                 duration_ms=result.duration_ms,
                 total_cost_usd=result.total_cost_usd,
+                stop_reason=result.stop_reason,
+                model=result.model,
             )
         return result
 
@@ -861,7 +880,6 @@ Schema:
 
     def _backend_tool_names(self) -> list[str]:
         return [
-            "mcp__vedic_backend_tools__vedic_rectifier_time_scan",
             "mcp__vedic_backend_tools__bazi_calculate_chart",
         ]
 
@@ -877,6 +895,7 @@ Schema:
         prompt: str,
         options: object,
         trace_label: str | None = None,
+        model_name: str | None = None,
     ) -> AgentRunResult:
         from claude_agent_sdk import AssistantMessage, HookEventMessage, ResultMessage, query
 
@@ -885,6 +904,7 @@ Schema:
         session_id = None
         duration_ms = None
         total_cost_usd = None
+        stop_reason = None
 
         async with asyncio.timeout(self.settings.agent_timeout_ms / 1000):
             async for message in query(prompt=prompt, options=options):
@@ -905,6 +925,7 @@ Schema:
                     session_id = getattr(message, "session_id", None)
                     duration_ms = getattr(message, "duration_ms", None)
                     total_cost_usd = getattr(message, "total_cost_usd", None)
+                    stop_reason = getattr(message, "stop_reason", None)
                     if getattr(message, "is_error", False):
                         raise RuntimeError(
                             getattr(message, "result", None)
@@ -924,6 +945,8 @@ Schema:
             session_id=session_id,
             duration_ms=duration_ms,
             total_cost_usd=total_cost_usd,
+            stop_reason=str(stop_reason) if stop_reason is not None else None,
+            model=model_name,
         )
 
     def _trace_message_blocks(self, trace_label: str, message: object) -> None:

@@ -8,8 +8,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.db.engine import close_db, database_diagnostic_context, init_db, normalize_database_url
-from app.schemas import SkillSessionResponse
+from app.schemas import CoreJobResponse, SkillSessionResponse
 from app.services.admin_sessions import AdminSessionsService
+from app.services.core_job_runtime import CoreJobRuntime
 from app.services.metadata_store import MetadataStore
 from app.services.skill_workspace import SkillWorkspace
 from app.settings import Settings
@@ -73,14 +74,9 @@ def test_admin_sessions_lists_database_metadata_and_local_paths(tmp_path: Path) 
                         "durationSeconds": 12.5,
                         "nodes": [
                             {
-                                "id": "vedicdust_judgement",
-                                "label": "Judgement",
-                                "status": "completed",
-                            },
-                            {
                                 "id": "vedicdust_consultation",
                                 "label": "Consultation",
-                                "status": "skipped",
+                                "status": "completed",
                             },
                         ],
                     }
@@ -227,6 +223,114 @@ def test_metadata_store_claims_anonymous_session_for_clerk_user(tmp_path: Path) 
                     from_owner_user_id="anonym_other123",
                     to_owner_user_id="user_other123",
                 )
+        finally:
+            await close_db()
+
+    asyncio.run(run())
+
+
+def test_core_job_restart_snapshot_is_durable_visible_and_retryable(tmp_path: Path) -> None:
+    async def run() -> None:
+        await init_db(
+            SimpleNamespace(
+                database_url=f"sqlite+aiosqlite:///{tmp_path / 'vedic.db'}",
+                database_echo=False,
+            )
+        )
+        try:
+            workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+            session_id = workspace.create_session()
+            workspace.write_artifact(session_id, "chart_record.json", '{"subject":{}}\n')
+            workspace.write_artifact(
+                session_id,
+                "run_metrics.json",
+                json.dumps(
+                    {
+                        "jobId": "job-restart",
+                        "status": "running",
+                        "calculator": {"durationSeconds": 1.5},
+                        "nodes": [
+                            {"id": "done", "status": "completed"},
+                            {"id": "active", "status": "running"},
+                        ],
+                    }
+                ),
+            )
+            store = MetadataStore(workspace)
+            await store.sync_session_from_files(
+                session_id,
+                owner_user_id="user-a",
+                status="running",
+            )
+            await store.upsert_core_job(
+                CoreJobResponse.model_validate(
+                    {
+                        "jobId": "job-restart",
+                        "sessionId": session_id,
+                        "status": "running",
+                        "message": "running",
+                        "startedAt": "2026-08-01T00:00:00+00:00",
+                        "progress": {
+                            "total": 2,
+                            "completed": 1,
+                            "running": 1,
+                            "failed": 0,
+                            "percent": 50,
+                        },
+                        "nodes": [
+                            {
+                                "id": "done",
+                                "label": "Done",
+                                "files": ["done.json"],
+                                "wave": 1,
+                                "status": "completed",
+                            },
+                            {
+                                "id": "active",
+                                "label": "Active",
+                                "files": ["active.json"],
+                                "dependencies": ["done"],
+                                "wave": 2,
+                                "status": "running",
+                                "startedAt": "2026-08-01T00:01:00+00:00",
+                            },
+                        ],
+                    }
+                ),
+                owner_user_id="user-a",
+                user_message="full report",
+            )
+
+            skill_runtime = FakeSkillRuntime(workspace)
+            skill_runtime.metadata_store = store  # type: ignore[attr-defined]
+            runtime = CoreJobRuntime(skill_runtime)  # type: ignore[arg-type]
+            await runtime.restore_persisted_jobs()
+
+            restored = await runtime.get("job-restart", owner_user_id="user-a")
+            assert restored.status == "failed"
+            assert restored.progress.completed == 1
+            assert restored.progress.running == 0
+            assert restored.progress.failed == 1
+            assert restored.nodes[0].status == "completed"
+            assert restored.nodes[1].status == "failed"
+            assert "backend process restarted" in (restored.nodes[1].error or "").lower()
+            assert restored.session is not None
+            assert restored.session.stage == "error"
+            with pytest.raises(LookupError):
+                await runtime.get("job-restart", owner_user_id="user-b")
+
+            metrics = json.loads(
+                (workspace.session_dir(session_id) / "run_metrics.json").read_text(encoding="utf-8")
+            )
+            assert metrics["calculator"] == {"durationSeconds": 1.5}
+            assert metrics["status"] == "failed"
+            assert metrics["nodes"][1]["status"] == "failed"
+
+            await store.backfill_all_sessions()
+            summary = await store.get_session_summary(session_id, owner_user_id="user-a")
+            assert summary.status == "failed"
+            assert summary.progress.running == 0
+            assert summary.progress.failed == 1
         finally:
             await close_db()
 

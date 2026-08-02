@@ -95,6 +95,12 @@
           "title": "Status",
           "type": "string"
         },
+        "judgementUse": {
+          "default": "context_only",
+          "enum": ["context_only", "directional"],
+          "title": "Judgementuse",
+          "type": "string"
+        },
         "validationFixtureIds": {
           "items": {
             "type": "string"

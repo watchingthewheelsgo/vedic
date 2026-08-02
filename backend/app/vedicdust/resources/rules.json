@@ -1,13 +1,13 @@
 {
   "schemaVersion": "vedicdust-rule-catalog/1.0.0",
-  "catalogVersion": "1.2.0",
+  "catalogVersion": "1.35.0",
   "rules": [
     {
       "ruleId": "derive.astronomy.sidereal-position",
       "ruleVersion": "1.0.0",
       "title": "Derive sidereal positions from Swiss Ephemeris",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "astronomy",
       "requiredEvidenceLayers": [],
       "allOf": [],
@@ -24,18 +24,21 @@
     },
     {
       "ruleId": "derive.rashi.whole-sign-house",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Assign whole-sign houses and house lords",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "rashi",
       "requiredEvidenceLayers": ["natal_promise"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "emit_whole_sign_house_facts",
-      "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "validated",
       "validationFixtureIds": ["contract.rashi.whole-sign-house"],
       "limitations": [
@@ -43,11 +46,11 @@
       ]
     },
     {
-      "ruleId": "derive.varga.parashara-method-1",
-      "ruleVersion": "1.0.0",
-      "title": "Derive divisional charts using Parashara method 1",
+      "ruleId": "derive.varga.profile-pinned",
+      "ruleVersion": "1.2.0",
+      "title": "Derive divisional charts using the profile-pinned traditional Parashara methods",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "varga",
       "requiredEvidenceLayers": ["varga_confirmation"],
       "allOf": [],
@@ -59,35 +62,90 @@
       "status": "validated",
       "validationFixtureIds": ["vedic-reference.pyjhora-vargas"],
       "limitations": [
-        "Compatibility is asserted only for PyJHora chart_method=1 and the factors declared by the profile."
+        "Compatibility is asserted only for the per-varga PyJHora methods declared by the profile.",
+        "D2 uses Traditional Parashara Hora (PyJHora method 2); the remaining supported PyJHora vargas use their factor-specific method 1.",
+        "Calculation assurance and birth-input stability are independent axes; non-D1 varga calculation confidence remains corroborated until an independent external snapshot matches the active chart exactly."
+      ]
+    },
+    {
+      "ruleId": "derive.role.house-ownership",
+      "ruleVersion": "1.0.0",
+      "title": "Derive functional house-ownership roles without benefic labels",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_house_ownership_roles",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "validated",
+      "validationFixtureIds": ["contract.rashi.house-ownership"],
+      "limitations": [
+        "The fact records ownership classes; lineage-specific benefic or malefic labels remain judgement rules."
+      ]
+    },
+    {
+      "ruleId": "derive.relationship.dispositor-chain",
+      "ruleVersion": "1.0.0",
+      "title": "Trace each graha through sign dispositors to a terminal or mutual loop",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_dispositor_chains",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "validated",
+      "validationFixtureIds": ["contract.rashi.dispositor-chain"],
+      "limitations": [
+        "The chain is structural evidence and does not by itself assign a life outcome."
       ]
     },
     {
       "ruleId": "derive.strength.dignity",
-      "ruleVersion": "1.0.0",
-      "title": "Derive sign dignity and compound relationship",
+      "ruleVersion": "1.2.0",
+      "title": "Derive sign dignity and Panchadha Maitri relationship",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
       "requiredEvidenceLayers": ["capacity"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "emit_dignity_facts",
-      "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
-      "status": "provisional",
-      "validationFixtureIds": [],
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "validated",
+      "validationFixtureIds": [
+        "calculator.parashari-dignity-and-panchadha",
+        "calculator.parashari-node-source-exclusion"
+      ],
       "limitations": [
-        "Classical edition locators and a full boundary fixture set are not yet pinned."
+        "The baseline emits dignity only for the seven classical grahas; Rahu and Ketu are excluded.",
+        "Special sign status and Panchadha Maitri are preserved as separate evidence; effective is the explicit precedence view used by downstream presentation.",
+        "Degree-sensitive Moolatrikona boundaries are not emitted until an edition-pinned boundary table and independent fixtures are available.",
+        "The mathematical sign and Panchadha derivation is source-pinned and boundary-tested, but its automatic supportive or challenging use remains withheld pending professional judgement fixtures.",
+        "Panchadha relationship is capacity evidence and does not independently determine an outcome."
       ]
     },
     {
       "ruleId": "derive.strength.shadbala-pyjhora",
-      "ruleVersion": "1.0.0",
-      "title": "Derive Shadbala through the pinned PyJHora adapter",
+      "ruleVersion": "1.1.0",
+      "title": "Derive Shadbala through the VedicDust PyJHora compatibility adapter",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
       "requiredEvidenceLayers": ["capacity"],
       "allOf": [],
@@ -95,11 +153,12 @@
       "noneOf": [],
       "outputCode": "emit_shadbala_facts",
       "evidenceClass": "software_reference",
-      "sourceIds": ["software.pyjhora.compatibility"],
-      "status": "validated",
+      "sourceIds": ["software.pyjhora.compatibility", "product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
       "validationFixtureIds": ["vedic-reference.pyjhora-shadbala"],
       "limitations": [
-        "The adapter includes documented compatibility patches that must remain regression tested."
+        "The adapter includes product-owned compatibility patches and same-provider regression fixtures.",
+        "Independent JHora desktop golden fixtures are required before promoting this rule to validated."
       ]
     },
     {
@@ -107,7 +166,7 @@
       "ruleVersion": "1.0.0",
       "title": "Derive Bhinnashtakavarga and Sarvashtakavarga through PyJHora",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
       "requiredEvidenceLayers": ["capacity"],
       "allOf": [],
@@ -117,6 +176,7 @@
       "evidenceClass": "software_reference",
       "sourceIds": ["software.pyjhora.compatibility"],
       "status": "validated",
+      "judgementUse": "context_only",
       "validationFixtureIds": ["vedic-reference.pyjhora-ashtakavarga", "invariant.sav-total-337"],
       "limitations": [
         "Interpretive thresholds are separate judgement rules and are not defined here."
@@ -124,110 +184,397 @@
     },
     {
       "ruleId": "derive.aspect.parashari-graha-drishti",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.3.0",
       "title": "Derive Parashari graha drishti contacts",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "rashi",
       "requiredEvidenceLayers": ["natal_promise"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "emit_parashari_graha_drishti_facts",
-      "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
-      "status": "provisional",
-      "validationFixtureIds": [],
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "validated",
+      "validationFixtureIds": [
+        "calculator.parashari-graha-drishti-matrix",
+        "calculator.parashari-node-source-exclusion"
+      ],
       "limitations": [
-        "Node aspects are excluded from the baseline and degree gaps grade only an already valid sign aspect."
+        "Node aspects are excluded from the baseline; degree separation is recorded numerically without an automatic strength grade."
       ]
     },
     {
       "ruleId": "derive.relationship.same-sign-conjunction",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Derive same-sign graha conjunction contacts",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "rashi",
       "requiredEvidenceLayers": ["natal_promise"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "emit_same_sign_conjunction_facts",
-      "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
-      "status": "provisional",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "validated",
       "validationFixtureIds": ["contract.rashi.same-sign-contact"],
       "limitations": [
-        "The baseline records same-sign contact and degree separation without importing Western orb doctrine."
+        "The baseline records same-sign contact and numerical degree separation without importing Western orb doctrine or assigning a directional judgement."
       ]
     },
     {
-      "ruleId": "derive.capacity.baseline",
+      "ruleId": "derive.yoga.kendra-trikona-association",
       "ruleVersion": "1.0.0",
-      "title": "Derive baseline capacity states and product-owned points",
+      "title": "Derive same-sign kendra-trikona lord associations",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_same_sign_kendra_trikona_yoga_facts",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "validated",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["calculator.kendra-trikona-same-sign-association"],
+      "limitations": [
+        "This rule records only a same-sign association between declared kendra and trikona lords.",
+        "It does not grade cancellation, affliction, strength, exact fruition, or timing."
+      ]
+    },
+    {
+      "ruleId": "derive.relationship.parivartana",
+      "ruleVersion": "1.0.0",
+      "title": "Derive exact D1 house-lord exchanges",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_d1_parivartana_structure_facts",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-integrated-approach-2000-2010"],
+      "status": "validated",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["calculator.parivartana-house-exchange"],
+      "limitations": [
+        "This rule records only the exact mutual placement of two D1 house lords in each other's houses.",
+        "It does not classify the exchange as favorable or unfavorable, grade participating grahas, or infer timing."
+      ]
+    },
+    {
+      "ruleId": "derive.yoga.gaja-kesari-structure",
+      "ruleVersion": "1.0.0",
+      "title": "Derive the complete Gaja-Kesari structural conditions",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rashi",
+      "requiredEvidenceLayers": ["natal_promise", "capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_gaja_kesari_structure_fact",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-integrated-approach-2000-2010"],
+      "status": "validated",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["calculator.gaja-kesari-structural-conditions"],
+      "limitations": [
+        "The fact is emitted only when all three published structural conditions are present: Jupiter is in a quadrant from Moon, a qualified natural benefic conjoins or aspects Jupiter, and Jupiter is neither debilitated, combust, nor in a natural enemy's sign.",
+        "The published natural-benefic list is applied literally; Saturn is not counted on either side of Mercury's companion majority because the cited passage does not classify Saturn there.",
+        "This rule recognizes structure only. It does not assert fame, wealth, character, magnitude, cancellation, fruition, or timing."
+      ]
+    },
+    {
+      "ruleId": "derive.capacity.combustion-threshold",
+      "ruleVersion": "1.0.0",
+      "title": "Classify combustion under explicit profile thresholds",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
       "requiredEvidenceLayers": ["capacity"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
-      "outputCode": "emit_combustion_digbala_karaka_arudha_and_vargottama_facts",
+      "outputCode": "emit_combustion_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": [
+        "calculator.combustion-boundaries",
+        "calculator.combustion-status-provenance"
+      ],
+      "limitations": [
+        "Combustion uses explicit direct and retrograde angular thresholds declared by the VedicDust profile.",
+        "Automatic supportive or challenging interpretation remains withheld until the threshold table and judgement use have edition-pinned sources and professional fixtures."
+      ]
+    },
+    {
+      "ruleId": "derive.capacity.directional-strength-house",
+      "ruleVersion": "1.0.0",
+      "title": "Record occupancy of each graha's full directional-strength house",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_directional_strength_house_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": ["calculator.directional-strength-houses"],
+      "limitations": [
+        "This is a boolean full-strength-house marker, not a complete Digbala calculation in shashtiamsas."
+      ]
+    },
+    {
+      "ruleId": "derive.varga.d1-d9-vargottama",
+      "ruleVersion": "1.1.0",
+      "title": "Derive D1-D9 same-sign Vargottama state",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity", "varga_confirmation"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_d1_d9_vargottama_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "validated",
+      "validationFixtureIds": ["calculator.d1-d9-vargottama-equality"],
+      "limitations": [
+        "The rule records exact D1-D9 sign equality for Lagna and the nine grahas only; any strength interpretation requires a separate judgement rule."
+      ]
+    },
+    {
+      "ruleId": "derive.role.chara-karaka-7k",
+      "ruleVersion": "1.1.0",
+      "title": "Rank seven classical grahas into the declared 7K Chara Karaka scheme",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_chara_karaka_7k_facts",
       "evidenceClass": "product_hypothesis",
       "sourceIds": ["product.vedicdust-consultation-standard-1"],
       "status": "provisional",
       "validationFixtureIds": [],
       "limitations": [
-        "These deterministic values remain corroborating evidence until edition-pinned interpretation rules are validated."
+        "The profile uses the seven-graha scheme; roles whose degrees are indistinguishable at the six-decimal evidence precision are withheld rather than resolved by input order.",
+        "Cross-lineage alternatives require explicit fixtures before promotion."
       ]
     },
     {
-      "ruleId": "derive.capacity.pyjhora-extras",
+      "ruleId": "derive.point.arudha-al-ul",
       "ruleVersion": "1.0.0",
-      "title": "Derive supplemental capacity measures through PyJHora",
+      "title": "Derive Arudha Lagna and Upapada Lagna points",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "capacity",
       "requiredEvidenceLayers": ["capacity"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
-      "outputCode": "emit_bhava_bala_special_lagna_and_vargeeya_bala_facts",
+      "outputCode": "emit_arudha_al_ul_facts",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Co-lord and lineage-specific exception settings are not represented by the baseline implementation."
+      ]
+    },
+    {
+      "ruleId": "derive.state.lunar-phase-hemicycle",
+      "ruleVersion": "1.0.0",
+      "title": "Derive waxing or waning lunar hemicycle from Sun-Moon separation",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_lunar_phase_hemicycle_fact",
+      "evidenceClass": "astronomical_authority",
+      "sourceIds": [
+        "astro.swisseph.programmer-manual",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "validated",
+      "validationFixtureIds": ["calculator.lunar-phase-hemicycle-boundary"],
+      "limitations": [
+        "This is a geometric waxing/waning classification, not a complete Tithi or Paksha interpretation."
+      ]
+    },
+    {
+      "ruleId": "derive.strength.bhava-bala-pyjhora",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Bhava Bala through the PyJHora compatibility adapter",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_bhava_bala_facts",
       "evidenceClass": "software_reference",
       "sourceIds": ["software.pyjhora.compatibility"],
       "status": "provisional",
       "validationFixtureIds": [],
       "limitations": [
-        "Supplemental measures require independent golden-reference fixtures before promotion to validated."
+        "Bhava Bala requires independent JHora golden-reference fixtures before promotion to validated."
       ]
     },
     {
-      "ruleId": "derive.timing.transit-swisseph",
+      "ruleId": "derive.point.special-lagna-pyjhora",
       "ruleVersion": "1.0.0",
-      "title": "Derive reproducible sidereal transit snapshots",
+      "title": "Derive declared special Lagnas through the PyJHora compatibility adapter",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_special_lagna_facts",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Each special Lagna algorithm and provider coordinate convention requires independent golden-reference fixtures before promotion."
+      ]
+    },
+    {
+      "ruleId": "derive.strength.vargeeya-bala-pyjhora",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Pancha and Dwadasha Vargeeya Bala through the PyJHora compatibility adapter",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_vargeeya_bala_facts",
+      "evidenceClass": "software_reference",
+      "sourceIds": ["software.pyjhora.compatibility"],
+      "status": "provisional",
+      "validationFixtureIds": [],
+      "limitations": [
+        "Vargeeya Bala requires independent JHora golden-reference fixtures before promotion to validated."
+      ]
+    },
+    {
+      "ruleId": "derive.timing.transit-position-swisseph",
+      "ruleVersion": "1.0.0",
+      "title": "Derive reproducible sidereal transit positions",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "timing",
       "requiredEvidenceLayers": ["timing"],
       "allOf": [],
       "anyOf": [],
       "noneOf": [],
-      "outputCode": "emit_transit_positions_sade_sati_and_double_transit",
+      "outputCode": "emit_transit_positions",
       "evidenceClass": "astronomical_authority",
       "sourceIds": ["astro.swisseph.programmer-manual"],
-      "status": "provisional",
-      "validationFixtureIds": [],
+      "status": "validated",
+      "validationFixtureIds": ["calculator.transit-position-explicit-utc"],
       "limitations": [
-        "Transit interpretation remains separate from the verified astronomical snapshot."
+        "This rule emits only absolute sidereal position, speed, and retrograde state at the explicit UTC instant; natal-house placement and interpretation are separate rules."
+      ]
+    },
+    {
+      "ruleId": "derive.timing.transit-whole-sign-house",
+      "ruleVersion": "1.0.0",
+      "title": "Map a sidereal transit position into the natal whole-sign house frame",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "timing",
+      "requiredEvidenceLayers": ["timing", "natal_promise"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_transit_whole_sign_house_facts",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "validated",
+      "validationFixtureIds": ["contract.transit.whole-sign-house"],
+      "limitations": [
+        "The emitted house is relative to the natal whole-sign Lagna and must be withheld whenever that Lagna is unstable; it does not itself assign an event meaning."
+      ]
+    },
+    {
+      "ruleId": "derive.timing.sade-sati-phase",
+      "ruleVersion": "1.0.0",
+      "title": "Classify Saturn transit relative to the natal Moon sign",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "timing",
+      "requiredEvidenceLayers": ["timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_sade_sati_phase",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": ["calculator.sade-sati-sign-phase"],
+      "limitations": [
+        "The phase label is a sign-level classification only; it does not predict an event or assign severity."
+      ]
+    },
+    {
+      "ruleId": "derive.timing.saturn-jupiter-double-transit",
+      "ruleVersion": "1.0.0",
+      "title": "Derive Saturn-Jupiter whole-sign transit intersections",
+      "ruleKind": "derivation",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "timing",
+      "requiredEvidenceLayers": ["timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "emit_saturn_jupiter_double_transit_houses",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": ["calculator.double-transit-house-intersection"],
+      "limitations": [
+        "The rule records shared whole-sign occupancy or graha-drishti targets; activation and event interpretation require separate judgement rules."
       ]
     },
     {
       "ruleId": "derive.timing.vimshottari-pyjhora",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Derive Vimshottari periods through PyJHora",
       "ruleKind": "derivation",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "timing",
       "requiredEvidenceLayers": ["timing"],
       "allOf": [],
@@ -237,9 +584,398 @@
       "evidenceClass": "software_reference",
       "sourceIds": ["software.pyjhora.compatibility"],
       "status": "validated",
-      "validationFixtureIds": ["vedic-reference.pyjhora-vimshottari"],
+      "validationFixtureIds": [
+        "vedic-reference.pyjhora-vimshottari",
+        "calculator.vimshottari-exact-boundaries"
+      ],
       "limitations": [
+        "Exact local civil-time boundaries preserve PyJHora output with the fixed UTC offset used by the calculation; they still require an independent JHora desktop corpus before cross-software equivalence is claimed.",
         "Period interpretation requires separate promise, capacity, and activation rules."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.lagna-sun-moon-reference-points",
+      "ruleVersion": "1.0.0",
+      "title": "Describe Lagna, Sun, and Moon as the D1 reference-point triad",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [
+        { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" },
+        { "factType": "rashi.graha.position", "subjectSelector": "D1.Sun", "operator": "exists" },
+        { "factType": "rashi.graha.position", "subjectSelector": "D1.Moon", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_lagna_sun_moon_reference_points",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "The rule exposes the three reference points as inspectable chart structure; it does not assign personality traits or event direction.",
+        "Lagna, Sun, and Moon must remain separately traceable to their D1 position facts."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.house-lord-placement",
+      "ruleVersion": "1.0.0",
+      "title": "Describe an anchor-house lord and its placement as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [
+        { "factType": "rashi.house.lord", "subjectSelector": "D1.H*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_house_lord_placement",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "This rule records the lord-placement method separately; it does not assign an automatic supportive or challenging result.",
+        "Domain synthesis and directional interpretation still require independent professional fixtures."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.house-occupancy",
+      "ruleVersion": "1.0.0",
+      "title": "Describe anchor-house occupants as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [
+        {
+          "factType": "rashi.house.occupant",
+          "subjectSelector": "D1.H*.occupant.*",
+          "operator": "exists"
+        }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_house_occupancy",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "Occupancy is preserved as one structural method and cannot determine a domain outcome by itself."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.graha-drishti",
+      "ruleVersion": "1.0.0",
+      "title": "Describe declared Parashari graha drishti as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [
+        { "factType": "aspect.graha_drishti", "subjectSelector": "D1.*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_graha_drishti",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "The rule records declared sign-based graha drishti without importing an undeclared degree-orb policy.",
+        "An aspect remains context-only until a separately validated interpretation rule permits direction."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.varga-confirmation",
+      "ruleVersion": "1.0.0",
+      "title": "Describe an eligible domain varga as a distinct confirming method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "varga",
+      "requiredEvidenceLayers": ["varga_confirmation"],
+      "allOf": [
+        { "factType": "varga.house.lord", "subjectSelector": "D*.H*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_eligible_varga_confirmation",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-integrated-approach-2000-2010"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "A varga may confirm only the domain declared by the active varga policy and only when birth-time sensitivity permits it.",
+        "This rule cannot create a promise absent from D1 or release direction by itself."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.same-sign-association",
+      "ruleVersion": "1.0.0",
+      "title": "Describe same-sign and kendra-trikona associations as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [],
+      "anyOf": [
+        { "factType": "relationship.same_sign", "subjectSelector": "D1.*", "operator": "exists" },
+        { "factType": "yoga.raja.kendra_trikona", "subjectSelector": "D1.*", "operator": "exists" }
+      ],
+      "noneOf": [],
+      "outputCode": "describe_same_sign_association",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "The engine records the structural association but does not turn one combination into an automatic Raja Yoga result or life prediction."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.parivartana",
+      "ruleVersion": "1.0.0",
+      "title": "Describe an exact D1 house-lord exchange as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [
+        {
+          "factType": "relationship.parivartana",
+          "subjectSelector": "D1.*",
+          "operator": "exists"
+        }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_parivartana_structure",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-integrated-approach-2000-2010"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "The exchange is descriptive context until a narrower domain rule evaluates the involved houses, grahas, dignity, affliction, and timing with independent professional review."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.natural-karaka",
+      "ruleVersion": "1.0.0",
+      "title": "Describe a topic's natural significators as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise", "capacity"],
+      "allOf": [
+        { "factType": "rashi.graha.position", "subjectSelector": "D1.*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_natural_karaka_condition",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-integrated-approach-2000-2010"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "The rule identifies the declared natural significators used for a topic and records their available condition evidence.",
+        "A natural significator cannot replace the topic house, create a promise, or assign a supportive or challenging result by itself."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.gaja-kesari",
+      "ruleVersion": "1.0.0",
+      "title": "Describe a complete Gaja-Kesari structure without promising outcomes",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise", "capacity"],
+      "allOf": [
+        {
+          "factType": "yoga.gaja_kesari.structure",
+          "subjectSelector": "D1.Moon~Jupiter",
+          "operator": "exists"
+        }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_gaja_kesari_structure",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-integrated-approach-2000-2010"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.gaja-kesari-context-only"],
+      "limitations": [
+        "A detected Yoga is one chart structure, not an independent life verdict.",
+        "No fame, wealth, moral, social-status, magnitude, or timing statement is permitted without broader chart synthesis and professional validation."
+      ]
+    },
+    {
+      "ruleId": "judge.structure.dispositor-path",
+      "ruleVersion": "1.0.0",
+      "title": "Describe an anchor lord's dispositor path as a distinct method",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "foundation",
+      "requiredEvidenceLayers": ["natal_promise"],
+      "allOf": [
+        {
+          "factType": "relationship.dispositor_chain",
+          "subjectSelector": "D1.*",
+          "operator": "exists"
+        }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_dispositor_path",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.structural-method-separation"],
+      "limitations": [
+        "The path records which dispositors condition an anchor lord; it does not transfer every dispositor result to the topic automatically.",
+        "Loops, terminal ownership, and Dasha influence remain structural context until a narrower source-pinned synthesis rule is professionally reviewed."
+      ]
+    },
+    {
+      "ruleId": "judge.capacity.sav-structural-band",
+      "ruleVersion": "1.0.0",
+      "title": "Describe Sarvashtakavarga structural bands without automatic direction",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_sav_structural_band",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.capacity-rule-separation"],
+      "limitations": [
+        "The 30-or-more and 26-or-fewer bands are versioned product thresholds, not a universal classical rule.",
+        "This rule may describe relative capacity but cannot assign a supportive or challenging verdict until edition-pinned sources and professional fixtures validate the interpretation."
+      ]
+    },
+    {
+      "ruleId": "judge.capacity.dignity-condition",
+      "ruleVersion": "1.0.0",
+      "title": "Describe D1 house-lord dignity without automatic direction",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [
+        { "factType": "strength.dignity", "subjectSelector": "D1.*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_house_lord_dignity_condition",
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": ["lineage.pvr-lessons-volume-1-2005"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.capacity-rule-separation"],
+      "limitations": [
+        "The cited source supports sign dignity and Panchadha Maitri as structural condition; this rule preserves that condition without converting it into a domain verdict.",
+        "Supportive or challenging synthesis requires a separately reviewed directional rule and cannot be inferred from the label alone."
+      ]
+    },
+    {
+      "ruleId": "judge.capacity.shadbala-band",
+      "ruleVersion": "1.0.0",
+      "title": "Describe Shadbala percentage bands without automatic direction",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [
+        { "factType": "strength.shadbala", "subjectSelector": "D1.*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_shadbala_structural_band",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.capacity-rule-separation"],
+      "limitations": [
+        "The 120 percent and 90 percent bands are versioned product thresholds and remain descriptive until independently validated."
+      ]
+    },
+    {
+      "ruleId": "judge.capacity.combustion-condition",
+      "ruleVersion": "1.0.0",
+      "title": "Describe combustion state without automatic domain direction",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "capacity",
+      "requiredEvidenceLayers": ["capacity"],
+      "allOf": [
+        { "factType": "strength.combustion", "subjectSelector": "D1.*", "operator": "exists" }
+      ],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "describe_combustion_condition",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "judgementUse": "context_only",
+      "validationFixtureIds": ["contract.judgement.capacity-rule-separation"],
+      "limitations": [
+        "Combustion state alone cannot establish a domain outcome; interpretation remains descriptive pending edition-pinned validation."
+      ]
+    },
+    {
+      "ruleId": "rectify.event-evidence-ranking",
+      "ruleVersion": "1.6.0",
+      "title": "Rank birth-time candidates against dated life-event evidence",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rectification",
+      "requiredEvidenceLayers": ["natal_promise", "varga_confirmation", "timing", "user_testimony"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "rank_candidate_intervals_against_dated_events",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "provisional",
+      "validationFixtureIds": [
+        "contract.rectification.event-evidence-ranking",
+        "calculator.rectification-dasha-graha-drishti",
+        "calculator.rectification-varga-domain-activation"
+      ],
+      "limitations": [
+        "Varga domain selection follows the edition-pinned source; event-house and karaka mappings plus component weights remain explicit product hypotheses, not a universal classical formula.",
+        "A stable period lord may activate a mapped D1 house by ownership, occupancy, declared Parashari graha drishti, or natural-karaka role; correlated dimensions still contribute only one level weight.",
+        "A relevant varga contributes once only when a dated event's period lord owns or occupies one of that varga's mapped domain houses.",
+        "The score ranks candidate intervals and cannot prove a birth time or prove that astrology caused an event.",
+        "Year-only and month-only events remain uncertainty intervals. Only Dasha levels stable across the sampled start, midpoint, and end may contribute; no sampled instant is treated as the event time.",
+        "Year-only events cannot contribute double-transit support. Month- and day-level events contribute only when the mapped activation remains present at every interval sample.",
+        "Every event sample must resolve a complete MD/AD/PD hierarchy; a partial provider result fails candidate scoring instead of silently weakening one candidate.",
+        "Candidate ranking uses calibration events only. One score-blind reserved event tests the selected candidate or equivalence class; Agent-authored testimony cannot change candidate rank.",
+        "Automatic selection requires at least two calibration events from at least two distinct mapped life domains. Repeated events from one domain may remain context but cannot manufacture independent breadth."
       ]
     },
     {
@@ -247,7 +983,7 @@
       "ruleVersion": "1.0.0",
       "title": "A varga confirms rather than creates natal promise",
       "ruleKind": "workflow_gate",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "evidence_order",
       "requiredEvidenceLayers": ["natal_promise", "varga_confirmation"],
       "allOf": [
@@ -266,20 +1002,15 @@
     },
     {
       "ruleId": "sop.promise-capacity-before-timing",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Timing requires natal promise and capacity",
       "ruleKind": "workflow_gate",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "timing",
       "requiredEvidenceLayers": ["natal_promise", "capacity", "timing"],
       "allOf": [
         { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" },
-        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" },
-        {
-          "factType": "timing.transit.position",
-          "subjectSelector": "Transit.*",
-          "operator": "exists"
-        }
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" }
       ],
       "anyOf": [],
       "noneOf": [],
@@ -288,14 +1019,17 @@
       "sourceIds": ["product.vedicdust-consultation-standard-1"],
       "status": "validated",
       "validationFixtureIds": ["contract.workflow.promise-capacity-before-timing"],
-      "limitations": ["This controls report certainty; it does not assert event causation."]
+      "limitations": [
+        "The runtime must separately require an exact eligible Vimshottari period before enabling timing.",
+        "This controls report certainty; it does not assert event causation."
+      ]
     },
     {
       "ruleId": "sop.d60-eligibility-gate",
       "ruleVersion": "1.0.0",
       "title": "D60 requires a stable high-confidence birth interval",
       "ruleKind": "workflow_gate",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "rectification",
       "requiredEvidenceLayers": ["natal_promise", "varga_confirmation"],
       "allOf": [
@@ -305,17 +1039,22 @@
       "noneOf": [],
       "outputCode": "withhold_d60_when_interval_is_unstable",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "validated",
       "validationFixtureIds": ["contract.workflow.d60-eligibility"],
-      "limitations": ["The exact eligibility threshold requires empirical calibration."]
+      "limitations": [
+        "The source establishes D60 sensitivity and fine-rectification use; the exact eligibility threshold is a VedicDust product gate that requires empirical calibration."
+      ]
     },
     {
       "ruleId": "judge.foundation.integrated",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Integrate Lagna, luminaries, first-house governance, and capacity",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "foundation",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -326,17 +1065,22 @@
       "noneOf": [],
       "outputCode": "synthesize_chart_foundation",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
-      "limitations": ["This is an integration policy; it is not a single classical aphorism."]
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
+      "limitations": [
+        "D1's foundational scope is source-pinned; the integration policy and capacity thresholds remain product hypotheses, not a single classical aphorism."
+      ]
     },
     {
       "ruleId": "judge.identity.integrated",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize identity and agency from D1 promise and capacity",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "identity",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -347,17 +1091,23 @@
       "noneOf": [],
       "outputCode": "synthesize_identity_and_agency",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
-      "limitations": ["D9 may confirm maturation but cannot create a D1 identity promise."]
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
+      "limitations": [
+        "D1 and D9 domain selection is source-pinned; anchor-house synthesis remains a product hypothesis.",
+        "D9 may confirm maturation but cannot create a D1 identity promise."
+      ]
     },
     {
       "ruleId": "judge.career.d1-d10",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize career promise with eligible D10 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "career",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -368,19 +1118,23 @@
       "noneOf": [],
       "outputCode": "synthesize_career_d1_capacity_d10",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
       "limitations": [
+        "D10's career scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
         "D10 is confirmation-only and must be withheld when birth-time confidence makes it ineligible."
       ]
     },
     {
       "ruleId": "judge.finance.d1-d2-d4",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize resources from D1 with eligible D2 and D4 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "finance",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -391,19 +1145,23 @@
       "noneOf": [],
       "outputCode": "synthesize_finance_d1_capacity_d2_d4",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
       "limitations": [
+        "D2 and D4 domain selection is source-pinned; anchor-house synthesis remains a product hypothesis.",
         "This rule supports tendencies and conditions, not promised financial outcomes."
       ]
     },
     {
       "ruleId": "judge.relationship.d1-d9",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize partnership promise with eligible D9 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "relationship",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -414,19 +1172,23 @@
       "noneOf": [],
       "outputCode": "synthesize_relationship_d1_capacity_d9",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
       "limitations": [
+        "D9's marriage and interaction scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
         "D9 confirms relationship maturation; it does not independently promise marriage."
       ]
     },
     {
       "ruleId": "judge.home.d1-d4",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize home and rootedness with eligible D4 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "home",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -437,19 +1199,23 @@
       "noneOf": [],
       "outputCode": "synthesize_home_d1_capacity_d4",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
       "limitations": [
+        "D4's residence and property scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
         "Property outcomes require non-astrological financial and legal due diligence."
       ]
     },
     {
-      "ruleId": "judge.learning.d1-d5-d24",
+      "ruleId": "judge.learning.d1-d24",
       "ruleVersion": "1.0.0",
-      "title": "Synthesize learning and mastery with eligible D5 and D24 confirmation",
+      "title": "Synthesize learning and mastery with eligible D24 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "learning",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -458,19 +1224,25 @@
       ],
       "anyOf": [],
       "noneOf": [],
-      "outputCode": "synthesize_learning_d1_capacity_d5_d24",
+      "outputCode": "synthesize_learning_d1_capacity_d24",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
-      "limitations": ["D24 is highly time-sensitive and may only corroborate when eligible."]
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
+      "limitations": [
+        "D24's education scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
+        "D24 is highly time-sensitive and may only corroborate when eligible."
+      ]
     },
     {
       "ruleId": "judge.children.d1-d7",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize children and stewardship with eligible D7 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "children",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -481,17 +1253,23 @@
       "noneOf": [],
       "outputCode": "synthesize_children_d1_capacity_d7",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
-      "limitations": ["This rule cannot diagnose fertility or guarantee childbirth."]
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
+      "limitations": [
+        "D7's children scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
+        "This rule cannot diagnose fertility or guarantee childbirth."
+      ]
     },
     {
       "ruleId": "judge.health.d1-d30",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize vitality and strain patterns with eligible D30 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "health",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -502,19 +1280,23 @@
       "noneOf": [],
       "outputCode": "synthesize_vitality_d1_capacity_d30",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
       "limitations": [
+        "D30's adversity and selected health-trouble scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
         "Only general wellbeing patterns are permitted; medical diagnosis and treatment advice are prohibited."
       ]
     },
     {
       "ruleId": "judge.dharma.d1-d9-d20",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize meaning and practice with eligible D9 and D20 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "dharma",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -525,17 +1307,23 @@
       "noneOf": [],
       "outputCode": "synthesize_dharma_d1_capacity_d9_d20",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
-      "limitations": ["D20 is confirmation-only and cannot establish spiritual attainment."]
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
+      "limitations": [
+        "D9 and D20 domain selection is source-pinned; anchor-house synthesis remains a product hypothesis.",
+        "D20 is confirmation-only and cannot establish spiritual attainment."
+      ]
     },
     {
       "ruleId": "judge.family.d1-d12",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.1.0",
       "title": "Synthesize family and lineage with eligible D12 confirmation",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "family",
       "requiredEvidenceLayers": ["natal_promise", "capacity"],
       "allOf": [
@@ -546,38 +1334,45 @@
       "noneOf": [],
       "outputCode": "synthesize_family_d1_capacity_d12",
       "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
       "limitations": [
+        "D12's parental and family-lineage scope is source-pinned; anchor-house synthesis remains a product hypothesis.",
         "Family members' motives or diagnoses cannot be inferred from the subject's chart."
       ]
     },
     {
       "ruleId": "judge.timing.vimshottari-activation",
-      "ruleVersion": "1.0.0",
+      "ruleVersion": "1.4.0",
       "title": "Activate an established promise through exact Vimshottari periods",
       "ruleKind": "judgement",
-      "methodProfileIds": ["parashari-lahiri-1.0.0"],
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
       "topic": "timing",
       "requiredEvidenceLayers": ["natal_promise", "capacity", "timing"],
       "allOf": [
         { "factType": "rashi.lagna.position", "subjectSelector": "D1.Lagna", "operator": "exists" },
-        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" },
-        {
-          "factType": "timing.transit.position",
-          "subjectSelector": "Transit.*",
-          "operator": "exists"
-        }
+        { "factType": "ashtakavarga.sav.house", "subjectSelector": "D1.H1", "operator": "exists" }
       ],
       "anyOf": [],
       "noneOf": [],
       "outputCode": "synthesize_bounded_vimshottari_window",
-      "evidenceClass": "product_hypothesis",
-      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "evidenceClass": "lineage_commentary",
+      "sourceIds": [
+        "lineage.pvr-lessons-volume-1-2005",
+        "product.vedicdust-consultation-standard-1"
+      ],
       "status": "provisional",
-      "validationFixtureIds": [],
-      "limitations": ["Timing describes activation conditions and ranges, never guaranteed events."]
+      "validationFixtureIds": ["contract.judgement.integrated-topic-and-timing-projection"],
+      "limitations": [
+        "The runtime binds the conclusion to one exact Antardasha whose Antardasha lord owns, occupies, or aspects a topic anchor house.",
+        "The cited lesson supports house-lord, occupancy, and graha-drishti relationships during a planet's dasha; VedicDust's exact eligibility and ranking remain a versioned product policy.",
+        "P.V.R. Narasimha Rao's separate D60 transit principle is research under a different ayanamsa and node profile, so it is not enabled by this rule.",
+        "Timing describes activation conditions and ranges, never guaranteed events."
+      ]
     }
   ]
 }

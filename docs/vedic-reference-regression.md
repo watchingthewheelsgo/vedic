@@ -11,7 +11,13 @@ whether the computed chart data still matches the declared calculation profile.
 - Nodes: mean Rahu/Ketu
 - Rashi house mapping: whole sign from Lagna sign
 - Ephemeris: Swiss Ephemeris through `pysweph`
-- Varga, Ashtakavarga and Vimsottari reference: PyJHora, `chart_method=1`
+- Planet position model: geocentric apparent positions with
+  `FLG_SWIEPH | FLG_SIDEREAL | FLG_SPEED`; the same flags are installed into
+  every PyJHora adapter before calculation
+- Varga reference: PyJHora with the per-varga methods recorded in the
+  Calculation Profile (`D2 chart_method=2`; the other supported PyJHora
+  vargas use their factor-specific `chart_method=1`)
+- Ashtakavarga and Vimshottari reference: pinned PyJHora adapters
 - Runtime: exact distribution versions pinned by `backend/astrology-runtime.lock`;
   every Chart Record stores provider versions, IANA/tzdb version, and a SHA-256
   fingerprint of the active ephemeris files
@@ -27,6 +33,9 @@ whether the computed chart data still matches the declared calculation profile.
    - Compares D1, D2, D3, D4, D5, D7, D9, D10, D12, D16, D20, D24, D27,
      D30, and D60 signs and degrees, SAV, and the first three Vimshottari
      Mahadashas against direct PyJHora calls.
+   - Requires canonical Swiss and PyJHora D1 longitudes to agree within 0.5
+     arcseconds for every pinned reference case, preventing a silent mix of
+     apparent and true/geometric coordinates.
 3. Product snapshot fixture
    - Locks selected high-signal output fields from the current backend profile
      so unexpected drift is caught in CI.

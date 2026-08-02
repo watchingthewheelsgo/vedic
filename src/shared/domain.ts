@@ -122,11 +122,39 @@ export type BirthInput = {
   gender: string;
   relationship: string;
   timeSource: string;
+  readingFocus?: string;
   lifeEvents?: string;
+  readerRelationship?: "self" | "parent" | "partner" | "family" | "professional";
+  utcOffsetSeconds?: number | null;
   locale?: AppLocale;
 };
 
 export type SkillBirthInput = BirthInput;
+
+export type RectificationLifeEventCategory =
+  | "education"
+  | "career"
+  | "relationship"
+  | "relocation"
+  | "child"
+  | "health"
+  | "family"
+  | "finance"
+  | "property"
+  | "legal"
+  | "loss"
+  | "spiritual";
+
+export type RectificationLifeEventInput = {
+  date: string;
+  category: RectificationLifeEventCategory;
+  description: string;
+};
+
+export type RectificationLifeEventsInput = {
+  sessionId: string;
+  events: RectificationLifeEventInput[];
+};
 
 export type BaziCalendarType = "solar" | "lunar";
 
@@ -140,8 +168,6 @@ export type BaziSessionInput = BirthInput & {
 export type SkillName =
   | "vedic-reader"
   | "vedic-core"
-  | "vedic-career"
-  | "vedic-love"
   | "vedic-rectifier"
   | "vedic-synastry"
   | "bazi-calculator"
@@ -160,8 +186,6 @@ export type SkillSessionStage =
   | "reader_validation"
   | "core_in_progress"
   | "core_complete"
-  | "career_complete"
-  | "love_complete"
   | "rectifier_complete"
   | "synastry_ready"
   | "synastry_complete"

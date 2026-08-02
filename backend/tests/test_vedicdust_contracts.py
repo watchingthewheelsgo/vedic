@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
 
 from app.services.skill_runtime import SkillRuntime
+from app.schemas import BirthInput, RectificationLifeEventsInput, SkillRunInput
 from app.vedicdust.models import (
     AstronomySnapshot,
     AuditFinding,
@@ -15,7 +20,6 @@ from app.vedicdust.models import (
     CandidateInterval,
     ChartAudit,
     ChartRecord,
-    Claim,
     ClaimGraph,
     ConfidenceGrade,
     ConsultationConfidence,
@@ -24,34 +28,401 @@ from app.vedicdust.models import (
     EvidenceClass,
     EvidenceItem,
     GrahaPosition,
+    InputSensitivityAssessment,
     JyotishFact,
     JudgementContext,
+    JudgementFinding,
     ReportSection,
+    RectificationDecision,
+    RectificationRecord,
+    ReadingSession,
     RuleProvenance,
+    SourceReference,
     SubjectContext,
     TimeRange,
+    ValidationFixtureReference,
     ZodiacPosition,
 )
 from app.vedicdust.profiles import parashari_lahiri_profile
-from app.vedicdust.judgement import build_judgement_context
-from app.vedicdust.reporting import build_agent_context, render_consultation_report
+from app.vedicdust.professional_review import validate_professional_review_fixture
+from app.vedicdust.chart_record_builder import _rectification
+from app.vedicdust.claims import build_claim_graph
+from app.vedicdust.judgement import TOPICS, _normalize_requested_topics, build_judgement_context
+from app.vedicdust.orchestrator import audit_chart_record
+from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_RULES
+from app.vedicdust.reporting import (
+    _rectification_validation_limitation,
+    _residual_uncertainties,
+    build_agent_context,
+    materialize_consultation_dossier,
+    render_consultation_report,
+)
 from app.vedicdust.source_registry import (
     load_rule_catalog,
     load_source_registry,
+    load_validation_fixture_registry,
     validate_profile_source_ids,
     validate_rule_catalog_sources,
 )
+from app.vedicdust.sensitivity import (
+    build_input_sensitivity_assessment,
+    expected_fact_input_stability,
+    expected_timing_input_stability,
+    fact_sensitivity_dependencies,
+)
+
+
+def test_requested_topic_matching_prefers_specific_phrases_without_losing_real_multi_topic_input() -> (
+    None
+):
+    assert _normalize_requested_topics(["原生家庭"]) == {"family"}
+    assert _normalize_requested_topics(["原生家庭与房产"]) == {"family", "home"}
+    assert _normalize_requested_topics(["事业与婚姻"]) == {"career", "relationship"}
+    assert _normalize_requested_topics(["career and finance"]) == {"career", "finance"}
+    assert _normalize_requested_topics(["homework"]) == set()
+
+
 from app.vedicdust.validation import (
+    _contains_assertive_phrase,
     validate_agent_context,
     validate_chart_record_provenance,
     validate_claim_graph,
     validate_consultation_dossier,
     validate_judgement_context,
 )
+from app.vedicdust.varga_policy import SUPPORTED_VARGA_FACTORS, VARGA_DOMAIN_POLICIES
 
 
 UTC = timezone.utc
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_fact_sensitivity_preserves_stable_d1_graha_when_only_lagna_changes() -> None:
+    assessment = InputSensitivityAssessment(
+        scanStatus="complete",
+        changedFields=["lagnaSign"],
+    )
+    charts = cast(
+        Any,
+        [SimpleNamespace(varga_id="D1", input_stability=ConfidenceGrade.PROVISIONAL)],
+    )
+    lagna_fact = cast(
+        Any,
+        SimpleNamespace(fact_type="rashi.lagna.position", subject_ref="D1.Lagna"),
+    )
+    sun_fact = cast(
+        Any,
+        SimpleNamespace(fact_type="rashi.graha.position", subject_ref="D1.Sun"),
+    )
+
+    assert fact_sensitivity_dependencies(
+        lagna_fact.fact_type,
+        lagna_fact.subject_ref,
+    ) == ["lagnaSign"]
+    assert fact_sensitivity_dependencies(
+        sun_fact.fact_type,
+        sun_fact.subject_ref,
+    ) == ["d1Structure"]
+    assert (
+        expected_fact_input_stability(lagna_fact, charts, assessment) == ConfidenceGrade.PROVISIONAL
+    )
+    assert (
+        expected_fact_input_stability(sun_fact, charts, assessment) == ConfidenceGrade.CORROBORATED
+    )
+
+
+def test_fact_sensitivity_fails_closed_when_scan_is_incomplete() -> None:
+    assessment = build_input_sensitivity_assessment(
+        {
+            "summary": {
+                "changedFields": [],
+                "scanErrors": [{"candidate": "08:31"}],
+            }
+        }
+    )
+    fact = cast(
+        Any,
+        SimpleNamespace(fact_type="rashi.graha.position", subject_ref="D1.Sun"),
+    )
+    charts = cast(
+        Any,
+        [SimpleNamespace(varga_id="D1", input_stability=ConfidenceGrade.VERIFIED)],
+    )
+
+    assert assessment.scan_status == "partial"
+    assert assessment.scan_error_count == 1
+    assert expected_fact_input_stability(fact, charts, assessment) == ConfidenceGrade.PROVISIONAL
+
+
+def test_timing_input_stability_tracks_moon_and_dasha_boundaries() -> None:
+    stable = InputSensitivityAssessment(
+        scanStatus="complete",
+        changedFields=[],
+        timingBoundaryScanStatus="complete",
+        timingBoundarySampleCount=3,
+    )
+    changed = InputSensitivityAssessment(
+        scanStatus="complete",
+        changedFields=["moonPada"],
+        timingBoundaryScanStatus="complete",
+        timingBoundarySampleCount=3,
+    )
+
+    assert (
+        expected_timing_input_stability(stable, ConfidenceGrade.CORROBORATED)
+        == ConfidenceGrade.CORROBORATED
+    )
+    assert (
+        expected_timing_input_stability(changed, ConfidenceGrade.CORROBORATED)
+        == ConfidenceGrade.PROVISIONAL
+    )
+    not_sampled = InputSensitivityAssessment(scanStatus="complete", changedFields=[])
+    assert (
+        expected_timing_input_stability(not_sampled, ConfidenceGrade.CORROBORATED)
+        == ConfidenceGrade.PROVISIONAL
+    )
+
+
+def test_rectification_life_event_submission_builds_a_parseable_ledger() -> None:
+    submission = RectificationLifeEventsInput(
+        sessionId="session-1",
+        events=[
+            {"date": "2012-06", "category": "education", "description": "Graduated"},
+            {"date": "2018-03", "category": "career", "description": "Changed employer"},
+            {
+                "date": "2021-10",
+                "category": "relationship",
+                "description": "Registered marriage",
+            },
+        ],
+    )
+
+    from app.services.life_event_rectification import parse_life_event_ledger
+
+    ledger = parse_life_event_ledger(submission.ledger_text())
+    assert ledger["eligibleEventCount"] == 3
+    assert [event["role"] for event in ledger["events"]] == [
+        "calibration",
+        "calibration",
+        "holdout",
+    ]
+
+
+def test_reading_focus_is_not_rectification_evidence() -> None:
+    input_data = BirthInput(
+        birthDate="1990-01-01",
+        birthTime="08:30",
+        birthPlace="Shanghai, China",
+        birthTimePrecision="approximate",
+        gender="not provided",
+        relationship="not provided",
+        timeSource="family memory",
+        readingFocus="Career direction and relationship timing",
+        lifeEvents="",
+        readerRelationship="parent",
+    )
+
+    assert input_data.reading_focus == "Career direction and relationship timing"
+    assert input_data.life_events == ""
+    assert input_data.reader_relationship == "parent"
+
+
+def test_rectification_decision_requires_reproducible_bounded_result() -> None:
+    with pytest.raises(ValidationError, match="requires a resulting interval"):
+        RectificationDecision(
+            status="bounded_interval",
+            selectedCandidateIds=["candidate-1"],
+            confidence=ConfidenceGrade.CORROBORATED,
+        )
+
+    interval = TimeRange(
+        start=datetime(1990, 1, 1, 8, 30, tzinfo=UTC),
+        end=datetime(1990, 1, 1, 8, 31, tzinfo=UTC),
+    )
+    decision = RectificationDecision(
+        status="bounded_interval",
+        selectedCandidateIds=["candidate-1"],
+        resultingInterval=interval,
+        confidence=ConfidenceGrade.CORROBORATED,
+        holdoutResult="passed",
+    )
+    assert decision.resulting_interval == interval
+
+    with pytest.raises(ValidationError, match="requires a passed holdout"):
+        RectificationDecision(
+            status="bounded_interval",
+            selectedCandidateIds=["candidate-1"],
+            resultingInterval=interval,
+            confidence=ConfidenceGrade.CORROBORATED,
+        )
+
+
+def test_rectification_record_caps_internal_method_assurance() -> None:
+    interval = TimeRange(
+        start=datetime(1990, 1, 1, 8, 30, tzinfo=UTC),
+        end=datetime(1990, 1, 1, 8, 31, tzinfo=UTC),
+    )
+    decision = RectificationDecision(
+        status="bounded_interval",
+        selectedCandidateIds=["candidate-1"],
+        resultingInterval=interval,
+        confidence=ConfidenceGrade.CORROBORATED,
+        holdoutResult="passed",
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="internally validated rectification cannot exceed provisional confidence",
+    ):
+        RectificationRecord(decision=decision)
+
+    with pytest.raises(
+        ValidationError,
+        match="professional rectification maturity requires independent professional review",
+    ):
+        RectificationRecord(
+            methodMaturity="professionally_validated",
+            decision=decision,
+        )
+
+    reviewed = RectificationRecord(
+        methodMaturity="professionally_validated",
+        validationStatus="independent_professional_review",
+        professionalReviewFixtureIds=["professional-review.fixture"],
+        decision=decision,
+    )
+    assert reviewed.decision.confidence == ConfidenceGrade.CORROBORATED
+
+    with pytest.raises(
+        ValidationError,
+        match="requires a professional review fixture",
+    ):
+        RectificationRecord(
+            methodMaturity="professionally_validated",
+            validationStatus="independent_professional_review",
+            decision=decision,
+        )
+
+
+def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
+    source = SimpleNamespace(
+        input_context={
+            "time": {
+                "window": {
+                    "start": "2021-11-07 01:00",
+                    "end": "2021-11-07 02:00",
+                }
+            }
+        },
+        timezone_id="America/New_York",
+        sensitivity_scan={
+            "reportReadiness": {
+                "mode": "rectification_required",
+                "blockingFactors": ["scan_incomplete:resolve_civil_time_or_place_input"],
+            },
+            "candidateGroups": [],
+        },
+    )
+    rectification = _rectification(source, ConfidenceGrade.PROVISIONAL)
+
+    assert rectification is not None
+    assert rectification.decision.status == "input_resolution_required"
+    assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
+    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.6.0"
+    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.2.0"
+    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.0.0"
+    assert rectification.method_maturity == "product_hypothesis"
+    assert rectification.validation_status == "internal_regression_only"
+    assert rectification.source_ids == [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1",
+    ]
+    assert "独立专业盲审" in _rectification_validation_limitation("zh")
+
+    record = SimpleNamespace(
+        chart_record_id="chart-input-resolution",
+        quality_checks=[],
+        canonical_moment=SimpleNamespace(place=SimpleNamespace(precision="coordinate")),
+        rectification=rectification,
+    )
+    audit = audit_chart_record(record)
+
+    assert audit.status == "blocked"
+    assert audit.permitted_next_steps == ["collect_input"]
+    assert any(
+        finding.finding_id == "rectification.input-resolution-required"
+        and finding.severity == "blocking"
+        for finding in audit.findings
+    )
+
+
+def test_report_discloses_method_maturity_only_after_rectification_selection() -> None:
+    def record(status: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            quality_checks=[],
+            subject=SimpleNamespace(locale="zh"),
+            rectification=SimpleNamespace(
+                validation_status="internal_regression_only",
+                decision=SimpleNamespace(status=status, unresolved_questions=[]),
+            ),
+        )
+
+    assert _residual_uncertainties(record("not_required")) == []
+    assert _residual_uncertainties(record("bounded_interval")) == [
+        "生时校正方法目前仅通过内部回归测试，尚未完成独立专业盲审。"
+    ]
+
+
+def test_candidate_scoring_failure_is_a_blocking_runtime_state() -> None:
+    source = SimpleNamespace(
+        input_context={
+            "time": {
+                "window": {
+                    "start": "1990-01-01 08:15",
+                    "end": "1990-01-01 08:45",
+                }
+            }
+        },
+        timezone_id="Asia/Shanghai",
+        sensitivity_scan={
+            "reportReadiness": {
+                "mode": "rectification_required",
+                "blockingFactors": ["candidate_scoring_incomplete:retry_deterministic_calculation"],
+            },
+            "candidateGroups": [],
+        },
+    )
+    rectification = _rectification(source, ConfidenceGrade.PROVISIONAL)
+
+    assert rectification is not None
+    assert rectification.decision.status == "calculation_failed"
+    assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
+
+    reading = ReadingSession(
+        readingSessionId="reading-failed",
+        subjectId="subject-failed",
+        chartRecordId="chart-failed",
+        activeChartRevision=1,
+        createdAt=datetime.now(UTC),
+        updatedAt=datetime.now(UTC),
+        stage="blocked",
+        rectificationStatus="calculation_failed",
+        reportStatus="blocked",
+    )
+    assert reading.rectification_status == "calculation_failed"
+
+    record = SimpleNamespace(
+        chart_record_id="chart-failed",
+        quality_checks=[],
+        canonical_moment=SimpleNamespace(place=SimpleNamespace(precision="coordinate")),
+        rectification=rectification,
+    )
+    audit = audit_chart_record(record)
+    assert audit.status == "blocked"
+    assert any(
+        finding.finding_id == "rectification.calculation-failed" and finding.severity == "blocking"
+        for finding in audit.findings
+    )
 
 
 def _position(longitude: float = 10.0) -> ZodiacPosition:
@@ -87,15 +458,94 @@ def test_agent_workspace_boundary_restores_authoritative_inputs(tmp_path: Path) 
 
 
 def test_product_profile_has_no_unregistered_sources() -> None:
+    from app.services.vedic_calculator import CALCULATION_VERSION
+
     profile = parashari_lahiri_profile()
     validate_profile_source_ids(profile.source_ids)
 
-    assert profile.profile_id == "parashari-lahiri-1.0.0"
+    assert profile.profile_id == "parashari-lahiri-1.1.0"
+    assert CALCULATION_VERSION == f"vedicdust-{profile.profile_id}"
+    assert profile.planet_position_model == "geocentric_apparent"
+    assert profile.ephemeris_flags == ["FLG_SWIEPH", "FLG_SIDEREAL", "FLG_SPEED"]
     assert profile.ayanamsa.model == "lahiri"
     assert profile.node_model == "mean"
     assert profile.rashi_house_model == "whole_sign"
     assert profile.dasha_year_days == pytest.approx(365.256364)
-    assert set(profile.supported_vargas) == {1, 2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30, 60}
+    assert tuple(profile.supported_vargas) == SUPPORTED_VARGA_FACTORS
+    methods = {setting.factor: setting for setting in profile.varga_methods}
+    assert methods[1].provider_method is None
+    assert methods[2].algorithm_id == "traditional-parashara-hora-leo-cancer"
+    assert methods[2].provider_method == 2
+    assert {setting.provider_method for factor, setting in methods.items() if factor > 2} == {1}
+
+
+def test_directional_convergence_requires_permitted_same_polarity_methods() -> None:
+    from app.vedicdust.judgement_kernel import _require_directional_method_convergence
+
+    first = JudgementFinding(
+        findingId="finding.test.first",
+        findingCode="test.first",
+        ruleId="judge.capacity.dignity-condition",
+        polarity="supportive",
+        weight=0.8,
+        factIds=["fact.D1.H10.lord", "fact.D1.Saturn.dignity"],
+        technicalStatement="One dignity interpretation with two dependent facts.",
+    )
+    same_method = first.model_copy(
+        update={
+            "finding_id": "finding.test.second",
+            "finding_code": "test.second",
+            "fact_ids": ["fact.D1.H1.lord", "fact.D1.Mars.dignity"],
+        }
+    )
+    context_only = _require_directional_method_convergence(
+        [first, same_method],
+        directional_judgement_rule_ids=set(),
+    )
+    assert {finding.polarity for finding in context_only} == {"context"}
+    assert {finding.parameters["directionWithheldReason"] for finding in context_only} == {
+        "interpretation_rule_not_directional"
+    }
+
+    withheld = _require_directional_method_convergence(
+        [first, same_method],
+        directional_judgement_rule_ids={"judge.capacity.dignity-condition"},
+    )
+    assert {finding.polarity for finding in withheld} == {"context"}
+    assert withheld[0].parameters["directionalJudgementRuleIds"] == [
+        "judge.capacity.dignity-condition"
+    ]
+
+    independent_method = same_method.model_copy(
+        update={"rule_id": "judge.capacity.sav-structural-band"}
+    )
+    allowed_methods = {
+        "judge.capacity.dignity-condition",
+        "judge.capacity.sav-structural-band",
+    }
+    released = _require_directional_method_convergence(
+        [first, independent_method],
+        directional_judgement_rule_ids=allowed_methods,
+    )
+    assert [finding.polarity for finding in released] == ["supportive", "supportive"]
+
+    opposing_method = independent_method.model_copy(update={"polarity": "challenging"})
+    opposing = _require_directional_method_convergence(
+        [first, opposing_method],
+        directional_judgement_rule_ids=allowed_methods,
+    )
+    assert {finding.polarity for finding in opposing} == {"context"}
+    assert {finding.parameters["directionWithheldReason"] for finding in opposing} == {
+        "insufficient_directional_method_convergence"
+    }
+
+
+def test_public_vedic_skill_api_has_one_report_pipeline() -> None:
+    skill_schema = SkillRunInput.model_json_schema()["properties"]["skill"]
+    public_skills = set(skill_schema["enum"])
+
+    assert {"vedic-reader", "vedic-core", "vedic-rectifier", "vedic-synastry"} <= public_skills
+    assert {"vedic-career", "vedic-love"}.isdisjoint(public_skills)
 
 
 def test_source_registry_distinguishes_authority_from_pending_classics() -> None:
@@ -103,14 +553,167 @@ def test_source_registry_distinguishes_authority_from_pending_classics() -> None
 
     assert registry["astro.swisseph.programmer-manual"].citation_status == "pinned"
     assert registry["classic.bphs.pending-edition"].citation_status == "pending-edition-pin"
+    assert registry["lineage.pvr-integrated-approach-2000-2010"].citation_status == "pinned"
     assert registry["software.pyjhora.compatibility"].citation_status == "informational"
+
+
+def test_validation_fixture_registry_points_to_real_pytest_nodes() -> None:
+    registry = load_validation_fixture_registry()
+
+    assert registry
+    for fixture in registry.values():
+        for node in fixture.test_nodes:
+            relative_path, test_name = node.split("::", maxsplit=1)
+            test_path = ROOT / relative_path
+            assert test_path.is_file(), f"missing fixture test file: {node}"
+            module = ast.parse(test_path.read_text(encoding="utf-8"), filename=str(test_path))
+            test_functions = {
+                item.name
+                for item in module.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            assert test_name in test_functions, f"missing fixture test function: {node}"
+
+
+def test_professional_review_fixture_requires_auditable_evidence() -> None:
+    with pytest.raises(ValidationError, match="evidence artifact path and SHA-256"):
+        ValidationFixtureReference(
+            fixtureId="professional.example",
+            fixtureKind="professional_review",
+            testNodes=[
+                "backend/tests/test_vedicdust_contracts.py::"
+                "test_professional_review_fixture_requires_auditable_evidence"
+            ],
+            description="A label alone must not certify a directional judgement rule.",
+        )
+
+    with pytest.raises(ValidationError, match="protocol, reviewer, timestamp"):
+        ValidationFixtureReference(
+            fixtureId="professional.example",
+            fixtureKind="professional_review",
+            testNodes=[
+                "backend/tests/test_vedicdust_contracts.py::"
+                "test_professional_review_fixture_requires_auditable_evidence"
+            ],
+            description="Evidence without a recorded review is still not professional review.",
+            evidenceArtifactPath="reviews/example.json",
+            evidenceArtifactSha256="sha256:" + "0" * 64,
+        )
+
+
+def test_professional_review_fixture_validates_blind_case_evidence(tmp_path: Path) -> None:
+    retained: dict[str, dict[str, str]] = {}
+    for name in ("chart-record", "claim-graph", "consultation-dossier"):
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps({"artifact": name}) + "\n", encoding="utf-8")
+        retained[name] = {
+            "path": path.name,
+            "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    review_payload = {
+        "schemaVersion": "vedicdust-professional-review/1.0.0",
+        "protocolId": "blind-output-review/1.0.0",
+        "reviewerId": "external-jyotishi-01",
+        "reviewerCredentials": ["Recorded lineage and practice credential"],
+        "reviewedAt": "2026-08-02T00:00:00Z",
+        "blindedToSubjectIdentity": True,
+        "blindedToSystemAuthorship": True,
+        "reviewerIndependentOfImplementation": True,
+        "cases": [
+            {
+                "caseId": "review-case-001",
+                "chartRecord": retained["chart-record"],
+                "claimGraph": retained["claim-graph"],
+                "consultationDossier": retained["consultation-dossier"],
+                "expectedDisposition": "withhold",
+                "observedDisposition": "withhold",
+                "decision": "accepted_with_reservations",
+                "assessment": {
+                    "methodFidelity": "reservation",
+                    "evidenceTraceability": "accepted",
+                    "uncertaintyCalibration": "accepted",
+                    "readerComprehensibility": "accepted",
+                },
+                "disagreements": ["Varga emphasis should remain withheld."],
+                "rationale": "The system withheld direction when the available methods diverged.",
+            }
+        ],
+    }
+    review_path = tmp_path / "professional-review.json"
+    review_path.write_text(json.dumps(review_payload) + "\n", encoding="utf-8")
+    fixture = ValidationFixtureReference(
+        fixtureId="professional.example",
+        fixtureKind="professional_review",
+        testNodes=[
+            "backend/tests/test_vedicdust_contracts.py::"
+            "test_professional_review_fixture_validates_blind_case_evidence"
+        ],
+        description="Retains a blind review of complete consultation artifacts.",
+        evidenceArtifactPath=review_path.name,
+        evidenceArtifactSha256=("sha256:" + hashlib.sha256(review_path.read_bytes()).hexdigest()),
+        reviewProtocolId="blind-output-review/1.0.0",
+        reviewedBy="external-jyotishi-01",
+        reviewedAt="2026-08-02T00:00:00Z",
+        reviewedCaseIds=["review-case-001"],
+    )
+
+    artifact = validate_professional_review_fixture(fixture, review_path)
+    assert artifact.cases[0].decision == "accepted_with_reservations"
+
+    registry_path = tmp_path / "validation-fixtures.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "vedicdust-validation-fixtures/1.0.0",
+                "fixtures": [fixture.model_dump(by_alias=True, mode="json")],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert load_validation_fixture_registry(registry_path)[fixture.fixture_id] == fixture
+
+    review_payload["cases"][0]["observedDisposition"] = "publish"
+    review_path.write_text(json.dumps(review_payload) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="disposition mismatch"):
+        validate_professional_review_fixture(fixture, review_path)
+
+
+def test_pinned_source_contract_requires_locator_url_and_textual_edition() -> None:
+    with pytest.raises(ValidationError, match="reproducible locator"):
+        SourceReference(
+            sourceId="lineage.test",
+            evidenceClass="lineage_commentary",
+            title="Test lineage source",
+            edition="First edition",
+            url="https://example.com/source.pdf",
+            citationStatus="pinned",
+        )
+    with pytest.raises(ValidationError, match="retrievable URL"):
+        SourceReference(
+            sourceId="lineage.test",
+            evidenceClass="lineage_commentary",
+            title="Test lineage source",
+            locator="PDF p. 10",
+            edition="First edition",
+            citationStatus="pinned",
+        )
+    with pytest.raises(ValidationError, match="requires an edition"):
+        SourceReference(
+            sourceId="lineage.test",
+            evidenceClass="lineage_commentary",
+            title="Test lineage source",
+            locator="PDF p. 10",
+            url="https://example.com/source.pdf",
+            citationStatus="pinned",
+        )
 
 
 def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
     catalog = load_rule_catalog()
     validate_rule_catalog_sources(catalog)
 
-    assert catalog.catalog_version == "1.2.0"
+    assert catalog.catalog_version == "1.35.0"
     rule_ids = {rule.rule_id for rule in catalog.rules}
     assert {
         "sop.promise-before-varga",
@@ -124,25 +727,205 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
         "judge.finance.d1-d2-d4",
         "judge.relationship.d1-d9",
         "judge.home.d1-d4",
-        "judge.learning.d1-d5-d24",
+        "judge.learning.d1-d24",
         "judge.children.d1-d7",
         "judge.health.d1-d30",
         "judge.dharma.d1-d9-d20",
         "judge.family.d1-d12",
         "judge.timing.vimshottari-activation",
+        "judge.capacity.sav-structural-band",
+        "judge.capacity.dignity-condition",
+        "judge.capacity.shadbala-band",
+        "judge.capacity.combustion-condition",
+        "judge.structure.lagna-sun-moon-reference-points",
+        "judge.structure.house-lord-placement",
+        "judge.structure.house-occupancy",
+        "judge.structure.graha-drishti",
+        "judge.structure.varga-confirmation",
+        "judge.structure.same-sign-association",
+        "judge.structure.natural-karaka",
+        "judge.structure.dispositor-path",
     } <= rule_ids
     assert {
         "derive.astronomy.sidereal-position",
         "derive.rashi.whole-sign-house",
-        "derive.varga.parashara-method-1",
+        "derive.varga.profile-pinned",
         "derive.strength.dignity",
         "derive.strength.shadbala-pyjhora",
         "derive.ashtakavarga.pyjhora",
         "derive.aspect.parashari-graha-drishti",
+        "derive.yoga.kendra-trikona-association",
+        "derive.capacity.combustion-threshold",
+        "derive.capacity.directional-strength-house",
+        "derive.varga.d1-d9-vargottama",
+        "derive.role.chara-karaka-7k",
+        "derive.point.arudha-al-ul",
+        "derive.state.lunar-phase-hemicycle",
+        "derive.strength.bhava-bala-pyjhora",
+        "derive.point.special-lagna-pyjhora",
+        "derive.strength.vargeeya-bala-pyjhora",
+        "derive.timing.transit-position-swisseph",
+        "derive.timing.transit-whole-sign-house",
+        "derive.timing.sade-sati-phase",
+        "derive.timing.saturn-jupiter-double-transit",
         "derive.timing.vimshottari-pyjhora",
+        "rectify.event-evidence-ranking",
     } <= rule_ids
     workflow_rules = [rule for rule in catalog.rules if rule.rule_id.startswith("sop.")]
     assert all(rule.evidence_class == EvidenceClass.PRODUCT_HYPOTHESIS for rule in workflow_rules)
+    rules_by_id = {rule.rule_id: rule for rule in catalog.rules}
+    assert rules_by_id["derive.strength.dignity"].status == "validated"
+    assert rules_by_id["derive.strength.dignity"].judgement_use == "context_only"
+    assert rules_by_id["derive.ashtakavarga.pyjhora"].judgement_use == "context_only"
+    assert all(
+        rules_by_id[rule_id].status == "provisional"
+        and rules_by_id[rule_id].judgement_use == "context_only"
+        for rule_id in {
+            "judge.capacity.sav-structural-band",
+            "judge.capacity.dignity-condition",
+            "judge.capacity.shadbala-band",
+            "judge.capacity.combustion-condition",
+            "judge.structure.lagna-sun-moon-reference-points",
+            "judge.structure.house-lord-placement",
+            "judge.structure.house-occupancy",
+            "judge.structure.graha-drishti",
+            "judge.structure.varga-confirmation",
+            "judge.structure.same-sign-association",
+            "judge.structure.natural-karaka",
+            "judge.structure.dispositor-path",
+        }
+    )
+    assert rules_by_id["judge.capacity.dignity-condition"].evidence_class == (
+        EvidenceClass.LINEAGE_COMMENTARY
+    )
+    assert rules_by_id["judge.capacity.dignity-condition"].source_ids == [
+        "lineage.pvr-lessons-volume-1-2005"
+    ]
+    expected_rectification_sources = {
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1",
+    }
+    assert set(rules_by_id["rectify.event-evidence-ranking"].source_ids) == (
+        expected_rectification_sources
+    )
+    assert set(rules_by_id["sop.d60-eligibility-gate"].source_ids) == (
+        expected_rectification_sources
+    )
+    varga_domain_rules = {
+        "judge.foundation.integrated",
+        "judge.identity.integrated",
+        "judge.career.d1-d10",
+        "judge.finance.d1-d2-d4",
+        "judge.relationship.d1-d9",
+        "judge.home.d1-d4",
+        "judge.learning.d1-d24",
+        "judge.children.d1-d7",
+        "judge.health.d1-d30",
+        "judge.dharma.d1-d9-d20",
+        "judge.family.d1-d12",
+    }
+    assert all(
+        "lineage.pvr-integrated-approach-2000-2010" in rules_by_id[rule_id].source_ids
+        for rule_id in varga_domain_rules
+    )
+    assert all(
+        rule.validation_fixture_ids
+        for rule in catalog.rules
+        if rule.rule_kind == "judgement" and rule.status != "draft"
+    )
+
+
+def test_rule_source_gate_rejects_pending_mismatched_and_unreviewed_directional_rules() -> None:
+    catalog = load_rule_catalog()
+
+    pending = catalog.model_copy(deep=True)
+    pending_rule = next(
+        rule for rule in pending.rules if rule.rule_id == "derive.rashi.whole-sign-house"
+    )
+    pending_rule.source_ids = ["classic.bphs.pending-edition"]
+    with pytest.raises(ValueError, match="pending-edition source"):
+        validate_rule_catalog_sources(pending)
+
+    mismatched = catalog.model_copy(deep=True)
+    mismatched_rule = next(
+        rule for rule in mismatched.rules if rule.rule_id == "derive.role.house-ownership"
+    )
+    mismatched_rule.source_ids = ["product.vedicdust-consultation-standard-1"]
+    with pytest.raises(ValueError, match="no source matching evidence class lineage_commentary"):
+        validate_rule_catalog_sources(mismatched)
+
+    directional = catalog.model_copy(deep=True)
+    directional_rule = next(
+        rule for rule in directional.rules if rule.rule_id == "judge.foundation.integrated"
+    )
+    directional_rule.judgement_use = "directional"
+    with pytest.raises(ValueError, match="must be validated"):
+        validate_rule_catalog_sources(directional)
+
+    untested_judgement = catalog.model_copy(deep=True)
+    untested_rule = next(
+        rule for rule in untested_judgement.rules if rule.rule_id == "judge.foundation.integrated"
+    )
+    untested_rule.validation_fixture_ids = []
+    with pytest.raises(ValueError, match="requires an executable contract fixture"):
+        validate_rule_catalog_sources(untested_judgement)
+
+    wrong_fixture_kind = catalog.model_copy(deep=True)
+    wrong_fixture_rule = next(
+        rule for rule in wrong_fixture_kind.rules if rule.rule_id == "judge.foundation.integrated"
+    )
+    wrong_fixture_rule.validation_fixture_ids = ["invariant.sav-total-337"]
+    with pytest.raises(ValueError, match="requires an executable contract fixture"):
+        validate_rule_catalog_sources(wrong_fixture_kind)
+
+    fixtureless = catalog.model_copy(deep=True)
+    fixtureless_rule = next(
+        rule for rule in fixtureless.rules if rule.rule_id == "derive.rashi.whole-sign-house"
+    )
+    fixtureless_rule.validation_fixture_ids = []
+    with pytest.raises(ValueError, match="validated rule .* requires validation fixtures"):
+        validate_rule_catalog_sources(fixtureless)
+
+    unknown_fixture = catalog.model_copy(deep=True)
+    unknown_fixture_rule = next(
+        rule for rule in unknown_fixture.rules if rule.rule_id == "derive.rashi.whole-sign-house"
+    )
+    unknown_fixture_rule.validation_fixture_ids = ["contract.this-does-not-exist"]
+    with pytest.raises(ValueError, match="unknown validation fixture id"):
+        validate_rule_catalog_sources(unknown_fixture)
+
+    unreviewed_direction = catalog.model_copy(deep=True)
+    unreviewed_direction_rule = next(
+        rule for rule in unreviewed_direction.rules if rule.rule_id == "judge.foundation.integrated"
+    )
+    unreviewed_direction_rule.status = "validated"
+    unreviewed_direction_rule.judgement_use = "directional"
+    unreviewed_direction_rule.validation_fixture_ids = [
+        "contract.judgement.capacity-rule-separation"
+    ]
+    with pytest.raises(ValueError, match="requires a professional review fixture"):
+        validate_rule_catalog_sources(unreviewed_direction)
+
+
+def test_rectification_event_vargas_follow_the_declared_domain_policy() -> None:
+    supported_vargas = {f"D{factor}" for factor in VARGA_DOMAIN_POLICIES}
+    for event_rule in RECTIFICATION_EVENT_RULES.values():
+        assert set(event_rule["vargas"]) <= supported_vargas
+        assert "D60" not in event_rule["vargas"]
+        declared_varga_fields = {
+            field.removesuffix("Lagna").removesuffix("Structure").upper()
+            for field in event_rule["fields"]
+            if field.startswith("d") and (field.endswith("Lagna") or field.endswith("Structure"))
+        }
+        assert declared_varga_fields <= set(event_rule["vargas"])
+
+    assert RECTIFICATION_EVENT_RULES["education"]["vargas"] == ["D24"]
+    assert "d5Lagna" not in RECTIFICATION_EVENT_RULES["education"]["fields"]
+    assert "d5Structure" not in RECTIFICATION_EVENT_RULES["education"]["fields"]
+
+    learning = next(topic for topic in TOPICS if topic.topic_id == "learning")
+    assert learning.vargas == ("D24",)
+    assert learning.rule_id == "judge.learning.d1-d24"
 
 
 def test_time_range_rejects_empty_or_reversed_interval() -> None:
@@ -248,6 +1031,13 @@ def test_schema_uses_canonical_camel_case_language() -> None:
     assert "permitted_next_steps" not in schema["properties"]
 
 
+def test_certainty_language_guard_allows_explicit_negation_only() -> None:
+    assert not _contains_assertive_phrase("不等同于事件必然发生", "必然发生")
+    assert _contains_assertive_phrase("这件事必然发生", "必然发生")
+    assert not _contains_assertive_phrase("This is not a guaranteed event.", "guaranteed event")
+    assert _contains_assertive_phrase("This is a guaranteed event.", "guaranteed event")
+
+
 def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     profile = parashari_lahiri_profile()
     testimony = EvidenceItem(
@@ -313,32 +1103,30 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
         catalog,
         now=datetime(2026, 7, 31, tzinfo=UTC),
     )
+    assert judgement_context.presentation_policy.policy_id == (
+        "vedicdust-presentation-selection/1.0.0"
+    )
+    assert judgement_context.presentation_policy.score_semantics == (
+        "presentation_salience_not_astrological_strength"
+    )
+    foundation_topic = next(
+        topic for topic in judgement_context.topics if topic.topic_id == "foundation"
+    )
+    assert foundation_topic.priority_score == sum(
+        reason.applied_points for reason in foundation_topic.priority_reasons
+    )
+    assert [reason.reason_code for reason in foundation_topic.priority_reasons] == ["baseline"]
     validate_judgement_context(record, judgement_context, catalog)
-    foundation_unit = next(
-        unit for unit in judgement_context.units if unit.topic_id == "foundation"
-    )
-    graph = ClaimGraph(
-        chart_record_id=record.chart_record_id,
-        method_profile_id=profile.profile_id,
-        rule_pack_version="vedicdust-rules-1.2.0",
-        generated_at=datetime.now(UTC),
-        claims=[
-            Claim(
-                claim_id=f"claim-{index}",
-                topic="foundation",
-                judgement_unit_id=foundation_unit.unit_id,
-                judgement_code="synthesize_chart_foundation",
-                plain_statement=f"Foundation synthesis {index} remains provisional.",
-                technical_statement="D1 foundation and capacity evidence are present.",
-                supporting_fact_ids=[fact.fact_id, capacity_fact.fact_id],
-                rule_ids=["judge.foundation.integrated"],
-                certainty="low",
-                scope="natal_promise",
-                limitations=foundation_unit.limitations,
-            )
-            for index in range(1, 6)
-        ],
-    )
+    presentation_policy_drift = judgement_context.model_copy(deep=True)
+    presentation_policy_drift.presentation_policy.structural_topic_limit = 7  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="presentation policy does not match"):
+        validate_judgement_context(record, presentation_policy_drift, catalog)
+    directional_drift = judgement_context.model_copy(deep=True)
+    directional_drift.units[0].findings[0].polarity = "supportive"
+    with pytest.raises(ValueError, match="releases direction from non-directional rule"):
+        validate_judgement_context(record, directional_drift, catalog)
+    record.status = "ready_for_judgement"
+    graph = build_claim_graph(record, judgement_context, generated_at=datetime.now(UTC))
 
     foundation_context = next(
         topic for topic in judgement_context.topics if topic.topic_id == "foundation"
@@ -358,23 +1146,43 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     assert career_rule.failed_predicates
 
     validate_claim_graph(record, graph, catalog, judgement_context)
+    unready_record = record.model_copy(deep=True)
+    unready_record.status = "intake"
+    with pytest.raises(ValueError, match="status intake cannot publish claims"):
+        validate_claim_graph(unready_record, graph, catalog, judgement_context)
+    selection_drift = graph.model_copy(deep=True)
+    selection_drift.claims[0].claim_id = "claim-arbitrary"
+    with pytest.raises(ValueError, match="selection or ordering drifted"):
+        validate_claim_graph(record, selection_drift, catalog, judgement_context)
+    inflated_evidence = graph.model_copy(deep=True)
+    inflated_evidence.claims[0].evidence_confidence = ConfidenceGrade.VERIFIED
+    with pytest.raises(ValueError, match="evidence confidence does not match"):
+        validate_claim_graph(record, inflated_evidence, catalog, judgement_context)
+    inflated_certainty = graph.model_copy(deep=True)
+    inflated_certainty.claims[0].certainty = "moderate"
+    inflated_certainty.claims[0].status = "supported"
+    with pytest.raises(ValueError, match="certainty does not match"):
+        validate_claim_graph(record, inflated_certainty, catalog, judgement_context)
+    duplicate_payload = graph.model_dump(by_alias=True)
+    duplicate_claim = dict(duplicate_payload["claims"][0])
+    duplicate_claim["claimId"] = "claim-duplicate"
+    duplicate_payload["claims"].append(duplicate_claim)
+    with pytest.raises(ValueError, match="cannot publish one conclusion more than once"):
+        ClaimGraph.model_validate(duplicate_payload)
+    rewritten = graph.model_copy(deep=True)
+    rewritten.claims[0].technical_statement = "The model invented a stronger conclusion."
+    with pytest.raises(ValueError, match="rewrites backend conclusion fields"):
+        validate_claim_graph(record, rewritten, catalog, judgement_context)
     validate_chart_record_provenance(record, catalog)
 
+    primary_claim_id = graph.claims[0].claim_id
     sections = [
         ReportSection(
             section_id=kind,
             section_kind=kind,
             title=kind.replace("_", " ").title(),
             purpose=f"Render {kind}",
-            claim_ids=(
-                ["claim-1", "claim-2", "claim-3"]
-                if kind == "executive_synthesis"
-                else ["claim-4"]
-                if kind == "chart_foundation"
-                else ["claim-5"]
-                if kind == "decision_support"
-                else []
-            ),
+            claim_ids=[primary_claim_id] if kind == "executive_synthesis" else [],
             priority=index,
         )
         for index, kind in enumerate(
@@ -409,31 +1217,45 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
             judgement_confidence="low",
             rationale=["The birth time remains approximate."],
         ),
-        executive_claim_ids=["claim-1", "claim-2", "claim-3"],
+        executive_claim_ids=[primary_claim_id],
         sections=sections,
         unresolved_questions=["What additional evidence would strengthen this claim?"],
-        release_status="approved",
+        release_status="draft",
     )
-    validate_consultation_dossier(record, graph, dossier)
-    context = build_agent_context(record, graph, dossier)
-    validate_agent_context(record, graph, dossier, context)
-    report = render_consultation_report(record, graph, dossier)
-    assert "# VedicDust Consultation" in report
-    assert "Foundation synthesis 1 remains provisional." in report
-    assert context.topic_index == {
-        "foundation": [
-            "claim-1",
-            "claim-2",
-            "claim-3",
-            "claim-4",
-            "claim-5",
-        ]
+    dossier = materialize_consultation_dossier(record, graph, judgement_context, dossier)
+    assert dossier.release_status == "blocked"
+    assert {check.check_id: check.status for check in dossier.quality_checks} == {
+        "consultation.release-prerequisites": "passed",
+        "consultation.claim-accounting": "passed",
+        "consultation.report-structure": "failed",
     }
+    validate_consultation_dossier(record, graph, dossier, judgement_context)
+    confidence_drift = dossier.model_copy(deep=True)
+    confidence_drift.confidence.overall = "high"
+    with pytest.raises(ValueError, match="backend-owned confidence"):
+        validate_consultation_dossier(record, graph, confidence_drift, judgement_context)
+    release_drift = dossier.model_copy(deep=True)
+    release_drift.release_status = "approved"
+    with pytest.raises(ValueError, match="release status drifted"):
+        validate_consultation_dossier(record, graph, release_drift, judgement_context)
+    quality_drift = dossier.model_copy(deep=True)
+    quality_drift.quality_checks = []
+    with pytest.raises(ValueError, match="quality checks drifted"):
+        validate_consultation_dossier(record, graph, quality_drift, judgement_context)
+    with pytest.raises(ValueError, match="unapproved consultation dossier"):
+        build_agent_context(record, graph, dossier)
+    with pytest.raises(ValueError, match="unapproved consultation dossier"):
+        render_consultation_report(record, graph, dossier)
 
     invalid = graph.model_copy(deep=True)
     invalid.claims[0].supporting_fact_ids = ["fact.missing"]
     with pytest.raises(ValueError, match="unknown fact"):
         validate_claim_graph(record, invalid, load_rule_catalog())
+
+    context_drift = graph.model_copy(deep=True)
+    context_drift.claims[0].context_fact_ids = []
+    with pytest.raises(ValueError, match="rewrites backend conclusion fields: context facts"):
+        validate_claim_graph(record, context_drift, catalog, judgement_context)
 
     invalid_semantics = graph.model_copy(deep=True)
     invalid_semantics.claims[0].judgement_code = "synthesize_relationship_d1_capacity_d9"
@@ -445,6 +1267,41 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     with pytest.raises(ValueError, match="source drift"):
         validate_chart_record_provenance(invalid_record, load_rule_catalog())
 
+    overclaimed_record = record.model_copy(deep=True)
+    overclaimed_record.facts[1].provenance = RuleProvenance(
+        rule_id="derive.strength.shadbala-pyjhora",
+        rule_version="1.1.0",
+        method_profile_id=profile.profile_id,
+        evidence_class="software_reference",
+        source_ids=[
+            "software.pyjhora.compatibility",
+            "product.vedicdust-consultation-standard-1",
+        ],
+        confidence=ConfidenceGrade.CORROBORATED,
+    )
+    with pytest.raises(ValueError, match="overstates evidence confidence"):
+        validate_chart_record_provenance(overclaimed_record, catalog)
+
+    false_professional_review = record.model_copy(deep=True)
+    review_interval = TimeRange(
+        start=datetime(1990, 1, 1, 7, 55, tzinfo=UTC),
+        end=datetime(1990, 1, 1, 8, 5, tzinfo=UTC),
+    )
+    false_professional_review.rectification = RectificationRecord(
+        methodMaturity="professionally_validated",
+        validationStatus="independent_professional_review",
+        professionalReviewFixtureIds=["contract.rashi.whole-sign-house"],
+        decision=RectificationDecision(
+            status="bounded_interval",
+            selectedCandidateIds=["candidate-1"],
+            resultingInterval=review_interval,
+            confidence=ConfidenceGrade.CORROBORATED,
+            holdoutResult="passed",
+        ),
+    )
+    with pytest.raises(ValueError, match="is not a professional review fixture"):
+        validate_chart_record_provenance(false_professional_review, catalog)
+
 
 def test_generated_json_schemas_are_current() -> None:
     from app.vedicdust.models import (
@@ -452,8 +1309,6 @@ def test_generated_json_schemas_are_current() -> None:
         ConsultationReportManifest,
         ConsultationDossier,
         ReadingSession,
-        RectificationAnswerBatch,
-        RectificationQuestionSet,
         RuleCatalog,
         SynastryContext,
     )
@@ -462,8 +1317,6 @@ def test_generated_json_schemas_are_current() -> None:
         "vedicdust-chart-record.schema.json": ChartRecord,
         "vedicdust-reading-session.schema.json": ReadingSession,
         "vedicdust-chart-audit.schema.json": ChartAudit,
-        "vedicdust-question-set.schema.json": RectificationQuestionSet,
-        "vedicdust-answer-batch.schema.json": RectificationAnswerBatch,
         "vedicdust-claim-graph.schema.json": ClaimGraph,
         "vedicdust-judgement-context.schema.json": JudgementContext,
         "vedicdust-consultation-dossier.schema.json": ConsultationDossier,

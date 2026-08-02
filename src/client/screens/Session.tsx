@@ -17,8 +17,10 @@ import {
   ListChecks,
   LoaderCircle,
   MapPinned,
+  Plus,
   RefreshCw,
   Target,
+  Trash2,
   Workflow
 } from "lucide-react";
 import { api } from "../api";
@@ -53,6 +55,8 @@ import { useI18n } from "../i18n/provider";
 import type {
   BirthInput,
   CoreJobResponse,
+  RectificationLifeEventCategory,
+  RectificationLifeEventInput,
   SkillArtifact,
   SkillSessionResponse
 } from "../../shared/domain";
@@ -105,15 +109,18 @@ type ResultPreviewSection = {
 };
 
 type RectificationState = {
-  rectificationRound?: number;
   status?: string;
   riskLevel?: string;
   reportReadinessMode?: string;
   activeCandidateId?: string | null;
   selectedCandidateId?: string | null;
+  equivalentCandidateIds?: string[];
   selectionConfidence?: string;
-  candidateBoundAnchorCount?: number;
-  feedbackAnchorCount?: number;
+  selectionEvidence?: {
+    calibrationEventCount?: number;
+    calibrationCategoryCount?: number;
+    holdoutEventCount?: number;
+  };
   candidates?: Array<{
     candidateId?: string;
     isBase?: boolean;
@@ -126,6 +133,10 @@ type RectificationState = {
     fullReportAllowed?: boolean;
     reason?: string;
     nextStep?: string;
+  };
+  rectificationPlan?: {
+    action?: string;
+    eventCollectionRequired?: boolean;
   };
   activeChartRevision?: {
     revision?: number;
@@ -226,7 +237,7 @@ const STAGE_ARTIFACT_CANDIDATES: Record<string, string[]> = {
     "chart_rectification_state.json",
     "user_context.md"
   ],
-  judgement: ["reader_prevalidation.md", "prevalidation_result.json"],
+  judgement: ["claim_graph.json", "judgement_context.json"],
   consultation: ["consultation_report.md"],
   bazi_chart: ["bazi_chart_foundation.md", "bazi_report_context.md", "bazi_chart_record.json"],
   bazi_report: [
@@ -318,6 +329,29 @@ const VALIDATION_CHOICES: Array<{
   }
 ];
 
+const LIFE_EVENT_CATEGORIES: RectificationLifeEventCategory[] = [
+  "education",
+  "career",
+  "relationship",
+  "relocation",
+  "child",
+  "health",
+  "family",
+  "finance",
+  "property",
+  "legal",
+  "loss",
+  "spiritual"
+];
+
+type LifeEventDraft = Omit<RectificationLifeEventInput, "category"> & {
+  category: RectificationLifeEventCategory | "";
+};
+
+function emptyLifeEvent(): LifeEventDraft {
+  return { date: "", category: "", description: "" };
+}
+
 function statusBadgeVariant(status: StageStatus): ComponentProps<typeof Badge>["variant"] {
   if (status === "done") return "done";
   if (status === "running" || status === "waiting") return "gold";
@@ -360,6 +394,7 @@ export function Session() {
   const [readerStartedAt, setReaderStartedAt] = useState<number | null>(null);
   const [validationFeedback, setValidationFeedback] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [submittingLifeEvents, setSubmittingLifeEvents] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [baziRunning, setBaziRunning] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -548,12 +583,18 @@ export function Session() {
         const hasFeedback = hasCurrentValidationFeedback(loadedReader, loadedFeedback);
         const hasReader = Boolean(loadedReader);
         if (hasFeedback) {
-          if (canStartFullReading(loaded)) void startCoreReport();
-          else void startReaderValidation({ force: true });
+          const nextStep = readingContinuationAction(loaded);
+          if (nextStep === "full_report") void startCoreReport();
+          else if (nextStep === "reader") void startReaderValidation({ force: true });
+          else if (nextStep === "collect_events") setSelectedStageId("reader");
+          else setSelectedStageId("chart");
         } else if (hasReader) {
           setSelectedStageId("reader");
         } else {
-          void startReaderValidation();
+          const nextStep = readingContinuationAction(loaded);
+          if (nextStep === "reader") void startReaderValidation();
+          else if (nextStep === "collect_events") setSelectedStageId("reader");
+          else setSelectedStageId("chart");
         }
       } catch (caught) {
         if (!cancelled) setError(userFacingError(caught, "Could not load this reading."));
@@ -649,8 +690,11 @@ export function Session() {
         feedbackMarkdown
       });
       setSession(updated);
-      if (canStartFullReading(updated)) await startCoreReport();
-      else await startReaderValidation({ force: true });
+      const nextStep = readingContinuationAction(updated);
+      if (nextStep === "full_report") await startCoreReport();
+      else if (nextStep === "reader") await startReaderValidation({ force: true });
+      else if (nextStep === "collect_events") setSelectedStageId("reader");
+      else setSelectedStageId("chart");
     } catch (caught) {
       setError(userFacingError(caught, "Could not save your replies. Please try again."));
     } finally {
@@ -658,11 +702,34 @@ export function Session() {
     }
   }
 
+  async function onSubmitLifeEvents(events: RectificationLifeEventInput[]) {
+    if (!authLoaded || !isSignedIn) {
+      setError("Sign in to save dated life events and continue rectification.");
+      return;
+    }
+    setError("");
+    setSubmittingLifeEvents(true);
+    try {
+      const updated = await api.recordRectificationLifeEvents({ sessionId: id, events });
+      setSession(updated);
+      readerStartedRef.current = false;
+      const nextStep = readingContinuationAction(updated);
+      if (nextStep === "full_report") await startCoreReport();
+      else if (nextStep === "reader") await startReaderValidation({ force: true });
+      else if (nextStep === "collect_events") setSelectedStageId("reader");
+      else setSelectedStageId("chart");
+    } catch (caught) {
+      setError(userFacingError(caught, "Could not save these life events. Please try again."));
+    } finally {
+      setSubmittingLifeEvents(false);
+    }
+  }
+
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden bg-cream-2">
       <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-5 py-3 backdrop-blur-lg sm:px-8">
         <button className="brand-logo mr-3 border-0 bg-transparent" onClick={() => navigate("/")}>
-          Veda<span>Light</span>
+          Vedic<span>Dust</span>
         </button>
         <Button
           variant="tab"
@@ -716,10 +783,11 @@ export function Session() {
             now={now}
             validationFeedback={validationFeedback}
             submittingFeedback={submittingFeedback}
+            submittingLifeEvents={submittingLifeEvents}
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
+            onSubmitLifeEvents={onSubmitLifeEvents}
             onResumeCoreReport={resumeCoreReport}
-            onStartReaderValidation={() => startReaderValidation({ force: true })}
             onStartBaziReport={startBaziReport}
             coreInterrupted={coreInterrupted}
             baziRunning={baziRunning}
@@ -1337,10 +1405,11 @@ function WorkshopDetailPanel({
   now,
   validationFeedback,
   submittingFeedback,
+  submittingLifeEvents,
   onValidationFeedbackChange,
   onSubmitFeedback,
+  onSubmitLifeEvents,
   onResumeCoreReport,
-  onStartReaderValidation,
   onStartBaziReport,
   coreInterrupted,
   baziRunning,
@@ -1359,10 +1428,11 @@ function WorkshopDetailPanel({
   now: number;
   validationFeedback: string;
   submittingFeedback: boolean;
+  submittingLifeEvents: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
+  onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
   onResumeCoreReport: () => Promise<void>;
-  onStartReaderValidation: () => Promise<void>;
   onStartBaziReport: () => Promise<void>;
   coreInterrupted: boolean;
   baziRunning: boolean;
@@ -1403,13 +1473,7 @@ function WorkshopDetailPanel({
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
       ) : stage.id === "chart" ? (
-        <ChartFactsDetail
-          session={session}
-          status={status}
-          birthInfo={birthInfo}
-          readerRunning={readerRunning}
-          onStartReaderValidation={onStartReaderValidation}
-        />
+        <ChartFactsDetail session={session} status={status} birthInfo={birthInfo} />
       ) : baziMode ? (
         <BaziStageDetail
           stageId={stage.id}
@@ -1429,8 +1493,10 @@ function WorkshopDetailPanel({
           now={now}
           validationFeedback={validationFeedback}
           submittingFeedback={submittingFeedback}
+          submittingLifeEvents={submittingLifeEvents}
           onValidationFeedbackChange={onValidationFeedbackChange}
           onSubmitFeedback={onSubmitFeedback}
+          onSubmitLifeEvents={onSubmitLifeEvents}
           authLoaded={authLoaded}
           isSignedIn={isSignedIn}
         />
@@ -1610,15 +1676,11 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
 function ChartFactsDetail({
   session,
   status,
-  birthInfo,
-  readerRunning,
-  onStartReaderValidation
+  birthInfo
 }: {
   session: SkillSessionResponse | null;
   status: StageStatus;
   birthInfo: BirthInfo;
-  readerRunning: boolean;
-  onStartReaderValidation: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const copy = localizedStageCopy("chart", t);
@@ -1674,13 +1736,7 @@ function ChartFactsDetail({
         </div>
       </details>
 
-      {rectificationState && (
-        <ChartRectificationSummary
-          state={rectificationState}
-          readerRunning={readerRunning}
-          onStartReaderValidation={onStartReaderValidation}
-        />
-      )}
+      {rectificationState && <ChartRectificationSummary state={rectificationState} />}
 
       {sections.length > 0 ? (
         <section className="my-5 border-t border-gold/25 pt-4">
@@ -1798,41 +1854,48 @@ function ChartConfirmationRow({
   );
 }
 
-function ChartRectificationSummary({
-  state,
-  readerRunning,
-  onStartReaderValidation
-}: {
-  state: RectificationState;
-  readerRunning: boolean;
-  onStartReaderValidation: () => Promise<void>;
-}) {
+function ChartRectificationSummary({ state }: { state: RectificationState }) {
   const candidates = state.candidates ?? [];
   const revision = state.activeChartRevision?.revision ?? 0;
   const gateAllowed = state.reportGate?.fullReportAllowed === true;
-  const canGenerateNextRound =
-    !gateAllowed &&
-    ["needs_more_feedback", "needs_candidate_bound_checks"].includes(state.status ?? "");
+  const hasEquivalentCandidates = state.status === "multiple_equivalent";
+  const isUnderdetermined = state.status === "underdetermined";
+  const needsInputResolution = state.status === "input_resolution_required";
+  const calculationFailed = state.status === "calculation_failed";
   const { t } = useI18n();
   const confidenceLabel = gateAllowed
     ? state.status === "corrected_chart_ready"
       ? t("session.rectification.corrected")
       : t("session.rectification.accepted")
-    : canGenerateNextRound
-      ? t("session.rectification.moreChecks")
-      : t("session.rectification.waiting");
+    : calculationFailed
+      ? t("session.rectification.calculationFailed")
+      : needsInputResolution
+        ? t("session.rectification.inputResolution")
+        : hasEquivalentCandidates
+          ? t("session.rectification.equivalent")
+          : isUnderdetermined
+            ? t("session.rectification.underdetermined")
+            : t("session.rectification.waiting");
   const confidenceBody = gateAllowed
     ? t("session.rectification.body.ready")
-    : t("session.rectification.body.more");
+    : calculationFailed
+      ? t("session.rectification.body.calculationFailed")
+      : needsInputResolution
+        ? t("session.rectification.body.inputResolution")
+        : hasEquivalentCandidates
+          ? t("session.rectification.body.equivalent", {
+              count: state.equivalentCandidateIds?.length ?? 0
+            })
+          : isUnderdetermined
+            ? t("session.rectification.body.underdetermined")
+            : t("session.rectification.body.more");
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
       <DetailSubtitle>{t("session.rectification.title")}</DetailSubtitle>
       <div className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Badge variant={gateAllowed ? "done" : canGenerateNextRound ? "gold" : "neutral"}>
-            {confidenceLabel}
-          </Badge>
+          <Badge variant={gateAllowed ? "done" : "neutral"}>{confidenceLabel}</Badge>
           <span className="text-[12px] text-muted">
             {t("session.rectification.reviewMeta", {
               risk: state.riskLevel || "standard",
@@ -1845,7 +1908,7 @@ function ChartRectificationSummary({
         <div className="mt-3 grid gap-2 text-[12.5px] leading-[1.6] text-body">
           <InfoRow
             label={t("session.rectification.anchors")}
-            value={String(state.feedbackAnchorCount ?? state.candidateBoundAnchorCount ?? 0)}
+            value={String(state.selectionEvidence?.calibrationEventCount ?? 0)}
           />
           <InfoRow
             label={t("session.rectification.nextStep")}
@@ -1858,25 +1921,6 @@ function ChartRectificationSummary({
             {state.reportGate.reason}
           </p>
         )}
-        {canGenerateNextRound && (
-          <Button
-            className="mt-3 w-full"
-            disabled={readerRunning}
-            onClick={() => void onStartReaderValidation()}
-          >
-            {readerRunning ? (
-              <>
-                <LoaderCircle className="size-4 animate-spin" />{" "}
-                {t("session.rectification.preparingNext")}
-              </>
-            ) : (
-              <>
-                <CheckCircle2 size={15} /> {t("session.rectification.continueCheck")}
-              </>
-            )}
-          </Button>
-        )}
-
         {candidates.length > 0 && (
           <details className="mt-3 rounded-lg border border-gold/18 bg-cream/60 px-3 py-2">
             <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[1.2px] text-muted outline-none">
@@ -1914,6 +1958,140 @@ function ChartRectificationSummary({
   );
 }
 
+function LifeEventCollector({
+  submitting,
+  onSubmit,
+  authLoaded,
+  isSignedIn
+}: {
+  submitting: boolean;
+  onSubmit: (events: RectificationLifeEventInput[]) => Promise<void>;
+  authLoaded: boolean;
+  isSignedIn: boolean;
+}) {
+  const { t } = useI18n();
+  const [events, setEvents] = useState<LifeEventDraft[]>(() => [
+    emptyLifeEvent(),
+    emptyLifeEvent(),
+    emptyLifeEvent()
+  ]);
+  const complete = events.every(
+    (event) => event.date && event.category && event.description.trim().length >= 3
+  );
+
+  function updateEvent(index: number, update: Partial<LifeEventDraft>) {
+    setEvents((current) =>
+      current.map((event, eventIndex) => (eventIndex === index ? { ...event, ...update } : event))
+    );
+  }
+
+  return (
+    <form
+      className="mt-4 grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (complete) {
+          void onSubmit(
+            events.map((lifeEvent) => ({
+              ...lifeEvent,
+              category: lifeEvent.category as RectificationLifeEventCategory
+            }))
+          );
+        }
+      }}
+    >
+      <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3">
+        <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
+          <Target className="size-4" />
+          {t("session.events.title")}
+        </div>
+        <p className="m-0 text-[13px] leading-[1.65] text-body">{t("session.events.body")}</p>
+      </div>
+
+      <div className="grid gap-3">
+        {events.map((lifeEvent, index) => (
+          <fieldset key={index} className="rounded-xl border border-gold/25 bg-cream-2 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <legend className="text-sm font-semibold text-ink">
+                {t("session.events.item", { number: index + 1 })}
+              </legend>
+              {events.length > 3 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  title={t("session.events.remove")}
+                  onClick={() => setEvents((current) => current.filter((_, i) => i !== index))}
+                >
+                  <Trash2 size={15} />
+                </Button>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
+              <label className="grid gap-1.5 text-[11px] uppercase tracking-[1.2px] text-muted">
+                {t("session.events.when")}
+                <input
+                  required
+                  type="month"
+                  value={lifeEvent.date}
+                  className="h-10 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
+                  onChange={(event) => updateEvent(index, { date: event.target.value })}
+                />
+              </label>
+              <label className="grid gap-1.5 text-[11px] uppercase tracking-[1.2px] text-muted">
+                {t("session.events.type")}
+                <select
+                  value={lifeEvent.category}
+                  className="h-10 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
+                  onChange={(event) =>
+                    updateEvent(index, {
+                      category: event.target.value as RectificationLifeEventCategory
+                    })
+                  }
+                >
+                  <option value="" disabled>
+                    {t("session.events.chooseType")}
+                  </option>
+                  {LIFE_EVENT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {t(`session.events.category.${category}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="mt-3 grid gap-1.5 text-[11px] uppercase tracking-[1.2px] text-muted">
+              {t("session.events.what")}
+              <Textarea
+                required
+                rows={2}
+                value={lifeEvent.description}
+                placeholder={t("session.events.placeholder")}
+                onChange={(event) => updateEvent(index, { description: event.target.value })}
+              />
+            </label>
+          </fieldset>
+        ))}
+      </div>
+
+      {events.length < 5 && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setEvents((current) => [...current, emptyLifeEvent()])}
+        >
+          <Plus size={15} /> {t("session.events.add")}
+        </Button>
+      )}
+      <Button disabled={!complete || submitting || !authLoaded || !isSignedIn}>
+        {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 size={15} />}
+        {submitting ? t("session.events.saving") : t("session.events.continue")}
+      </Button>
+      {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
+    </form>
+  );
+}
+
 function ReaderDetail({
   session,
   readerRunning,
@@ -1921,8 +2099,10 @@ function ReaderDetail({
   now,
   validationFeedback,
   submittingFeedback,
+  submittingLifeEvents,
   onValidationFeedbackChange,
   onSubmitFeedback,
+  onSubmitLifeEvents,
   authLoaded,
   isSignedIn
 }: {
@@ -1932,8 +2112,10 @@ function ReaderDetail({
   now: number;
   validationFeedback: string;
   submittingFeedback: boolean;
+  submittingLifeEvents: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
+  onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
@@ -1954,7 +2136,7 @@ function ReaderDetail({
       ),
     [session]
   );
-  const roundNumber = Math.max(1, (rectificationState?.rectificationRound ?? 0) + 1);
+  const collectingLifeEvents = rectificationState?.status === "collecting_evidence";
   const [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
   const [anchorFeedback, setAnchorFeedback] = useState<
     Record<number, { answer?: ValidationAnswer; note: string }>
@@ -2003,6 +2185,16 @@ function ReaderDetail({
   }
 
   if (!prevalidation) {
+    if (collectingLifeEvents) {
+      return (
+        <LifeEventCollector
+          submitting={submittingLifeEvents}
+          onSubmit={onSubmitLifeEvents}
+          authLoaded={authLoaded}
+          isSignedIn={isSignedIn}
+        />
+      );
+    }
     return (
       <>
         <div className="my-4">
@@ -2048,7 +2240,7 @@ function ReaderDetail({
           <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 shadow-[0_12px_30px_rgba(201,169,110,0.10)]">
             <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
               <Target className="size-4" />
-              {t("session.reader.roundTitle", { round: roundNumber })}
+              {t("session.reader.roundTitle")}
             </div>
             <p className="m-0 text-[13px] leading-[1.65] text-body">
               {t("session.reader.roundBody")}
@@ -3196,6 +3388,36 @@ function canStartFullReading(session: SkillSessionResponse | null): boolean {
   const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
   const decision = objectValue(prevalidationResult, "decision");
   return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
+}
+
+type ReadingContinuationAction = "full_report" | "reader" | "collect_events" | "stop";
+
+const READER_CONTINUATION_STATUSES = new Set(["not_required"]);
+
+function readingContinuationAction(
+  session: SkillSessionResponse | null
+): ReadingContinuationAction {
+  if (canStartFullReading(session)) return "full_report";
+
+  const state = parseJsonArtifact(session, "chart_rectification_state.json");
+  if (!state) return "reader";
+
+  const status = String(state.status ?? "").trim();
+  const plan = objectValue(state, "rectificationPlan");
+  const action = String(plan?.action ?? "").trim();
+  const gate = objectValue(state, "reportGate");
+  if (
+    status === "corrected_chart_ready" &&
+    state.holdoutResult === "passed" &&
+    gate?.fullReportAllowed === true
+  ) {
+    return "full_report";
+  }
+  if (status === "collecting_evidence" || action === "collect_dated_life_events") {
+    return "collect_events";
+  }
+  if (READER_CONTINUATION_STATUSES.has(status)) return "reader";
+  return "stop";
 }
 
 function parseRectificationState(content: string): RectificationState | null {
