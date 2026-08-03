@@ -15,6 +15,9 @@ from app.calculator.civil_time import resolve_civil_time
 from app.schemas import (
     BaziSessionInput,
     BirthInput,
+    ConsultationAnswerResponse,
+    ConsultationQuestionInput,
+    RectificationInterviewInput,
     RectificationLifeEventsInput,
     SkillBirthInput,
     SkillRunInput,
@@ -23,6 +26,10 @@ from app.schemas import (
 )
 from app.services.chart_rectification import ChartRectificationService
 from app.services.metadata_store import MetadataStore
+from app.services.rectification_interview import (
+    build_rectification_interview,
+    validate_agent_question_wording,
+)
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
 from app.tools.registry import BackendToolRunner
@@ -65,6 +72,7 @@ CONSULTATION_REPORT_MANIFEST_JSON = "consultation_report_manifest.json"
 AGENT_CONTEXT_JSON = "agent_context.json"
 CONSULTATION_REPORT_MD = "consultation_report.md"
 ACTIVE_CHART_SENSITIVITY_JSON = "active_chart_sensitivity.json"
+RECTIFICATION_INTERVIEW_JSON = "rectification_interview.json"
 CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
 PREVALIDATION_DEPENDENCY_PATHS = [
@@ -164,6 +172,12 @@ class SkillRuntime:
             session_id,
             path,
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            path,
+            producer="vedicdust-consultation-qa",
+            dependency_paths=[AGENT_CONTEXT_JSON],
         )
 
     @staticmethod
@@ -314,7 +328,10 @@ class SkillRuntime:
             raise ValueError("session is missing the chart inputs required to add life events")
         plan = state.get("rectificationPlan")
         plan = plan if isinstance(plan, dict) else {}
-        if plan.get("eventCollectionRequired") is not True:
+        if (
+            plan.get("eventCollectionRequired") is not True
+            and state.get("status") != "underdetermined"
+        ):
             raise ValueError("this rectification session does not require more life events")
 
         current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
@@ -342,6 +359,7 @@ class SkillRuntime:
             "user_context.md",
             "rectification_question_set.json",
             "rectification_answer_batch.json",
+            RECTIFICATION_INTERVIEW_JSON,
             ACTIVE_CHART_SENSITIVITY_JSON,
         ]:
             (session_dir / stale_path).unlink(missing_ok=True)
@@ -420,6 +438,156 @@ class SkillRuntime:
             ),
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="chart_rectification_state.json",
+        )
+
+    async def prepare_rectification_interview(
+        self,
+        input_data: RectificationInterviewInput,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SkillSessionResponse:
+        session_id = input_data.session_id
+        state_text = self.workspace.read_artifact_text(session_id, "chart_rectification_state.json")
+        if not state_text:
+            raise ValueError("session is missing chart rectification state")
+        state = self._json_dict(state_text)
+        if state.get("status") not in {"collecting_evidence", "underdetermined"}:
+            raise ValueError("this session does not require a rectification interview")
+
+        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        life_stage = None
+        if chart_record_text:
+            life_stage = ChartRecord.model_validate_json(chart_record_text).subject.life_stage
+        interview = build_rectification_interview(
+            state,
+            session_id=session_id,
+            locale=input_data.locale,
+            life_stage=life_stage,
+        )
+        if interview.get("questions") and self.agent_runtime.is_configured():
+            try:
+                prompt = self._rectification_interview_prompt(interview, input_data.locale)
+                result = await self.agent_runtime.run_skill_prompt_task(
+                    "vedicdust-rectification-interview",
+                    prompt,
+                    skills=["vedicdust-rectification-interview"],
+                    max_turns=3,
+                    allow_file_tools=False,
+                )
+                wording = self._parse_json_object(result.raw_text)
+                interview = validate_agent_question_wording(interview, wording)
+            except Exception as exc:
+                interview["source"] = "deterministic_fallback"
+                interview["agentFallbackReason"] = self._safe_agent_failure_reason(exc)
+
+        self.workspace.write_artifact(
+            session_id,
+            RECTIFICATION_INTERVIEW_JSON,
+            json.dumps(interview, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            RECTIFICATION_INTERVIEW_JSON,
+            producer="vedicdust-rectification-interview",
+            dependency_paths=["chart_rectification_state.json"],
+        )
+        await self._sync_metadata(
+            session_id,
+            stage="reader_ready",
+            status="draft",
+            owner_user_id=owner_user_id,
+        )
+        return SkillSessionResponse(
+            session_id=session_id,
+            stage="reader_ready",
+            chat_message=(
+                "The next birth-time verification questions are ready."
+                if input_data.locale != "zh"
+                else "下一组生时校正问题已准备好。"
+            ),
+            artifacts=self.workspace.read_artifacts(session_id),
+            active_artifact=RECTIFICATION_INTERVIEW_JSON,
+        )
+
+    async def answer_consultation_question(
+        self,
+        input_data: ConsultationQuestionInput,
+    ) -> ConsultationAnswerResponse:
+        session_id = input_data.session_id
+        context_text = self.workspace.read_artifact_text(session_id, AGENT_CONTEXT_JSON)
+        dossier_text = self.workspace.read_artifact_text(session_id, CONSULTATION_DOSSIER_JSON)
+        if not context_text or not dossier_text:
+            raise ValueError(
+                "the approved consultation must be completed before follow-up questions"
+            )
+        dossier = ConsultationDossier.model_validate_json(dossier_text)
+        if dossier.release_status != "approved":
+            raise ValueError("follow-up questions require an approved consultation")
+        if not self.agent_runtime.is_configured():
+            raise ValueError("the consultation assistant is not configured")
+
+        context = self._parse_json_object(context_text)
+        prompt = self._consultation_question_prompt(
+            context,
+            input_data.question,
+            dossier.locale,
+        )
+        result = await self.agent_runtime.run_skill_prompt_task(
+            "vedicdust-consultation-qa",
+            prompt,
+            skills=["vedicdust-consultation"],
+            max_turns=4,
+            allow_file_tools=False,
+        )
+        payload = self._parse_json_object(result.raw_text)
+        response = self._validate_consultation_answer_payload(payload, context)
+        self._append_consultation_exchange(session_id, input_data.question, response)
+        return response
+
+    @classmethod
+    def _validate_consultation_answer_payload(
+        cls,
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> ConsultationAnswerResponse:
+        answer = str(payload.get("answer") or "").strip()
+        if len(answer) < 20 or len(answer) > 4000:
+            raise ValueError("consultation answer has invalid length")
+        claim_ids = payload.get("supportingClaimIds")
+        if not isinstance(claim_ids, list):
+            raise ValueError("consultation answer must provide a claim reference list")
+        answerability = str(payload.get("answerability") or "")
+        if answerability not in {"answered", "insufficient_evidence"}:
+            raise ValueError("consultation answer has an invalid answerability status")
+        if answerability == "answered" and not claim_ids:
+            raise ValueError("an answered consultation question must cite approved claims")
+        if answerability == "insufficient_evidence" and claim_ids:
+            raise ValueError("an insufficient-evidence answer cannot imply claim support")
+        known_claim_ids = {
+            str(item.get("claimId"))
+            for item in context.get("approvedClaims", [])
+            if isinstance(item, dict) and item.get("claimId")
+        }
+        normalized_claim_ids = [str(value) for value in claim_ids]
+        unknown_claim_ids = sorted(set(normalized_claim_ids) - known_claim_ids)
+        if unknown_claim_ids:
+            raise ValueError(
+                "consultation answer cites unknown claims: " + ", ".join(unknown_claim_ids)
+            )
+        limitations = cls._bounded_string_list(payload.get("limitations"), limit=5, max_length=400)
+        if answerability == "insufficient_evidence" and not limitations:
+            raise ValueError("an insufficient-evidence answer must explain the missing evidence")
+        follow_ups = cls._bounded_string_list(
+            payload.get("followUpQuestions"),
+            limit=3,
+            max_length=240,
+        )
+        return ConsultationAnswerResponse(
+            answerability=answerability,
+            answer=answer,
+            supportingClaimIds=normalized_claim_ids,
+            limitations=limitations,
+            followUpQuestions=follow_ups,
         )
 
     async def create_bazi_session(
@@ -928,6 +1096,24 @@ class SkillRuntime:
         expected = set(self.core_batch_files(batch))
         if not expected.issubset(self._session_paths(session_dir)):
             return False
+        if str(batch.get("id") or "") == "vedicdust_consultation":
+            dossier_text = self.workspace.read_artifact_text(session_id, CONSULTATION_DOSSIER_JSON)
+            if not dossier_text:
+                return False
+            try:
+                dossier = ConsultationDossier.model_validate_json(dossier_text)
+            except ValueError:
+                return False
+            executive = next(
+                (
+                    section
+                    for section in dossier.sections
+                    if section.section_kind == "executive_synthesis"
+                ),
+                None,
+            )
+            if executive is None or not executive.narratives:
+                return False
         producer = self._batch_producer(batch)
         dependency_paths = self._core_batch_dependency_paths(str(batch.get("id") or ""))
         return all(
@@ -1467,6 +1653,118 @@ class SkillRuntime:
         return (
             "Output language: English. Keep Jyotish/Sanskrit technical terms such as Lagna, "
             "Dasha, Navamsha, Mahadasha, and Antardasha consistent."
+        )
+
+    def _rectification_interview_prompt(
+        self,
+        brief: dict[str, Any],
+        locale: str,
+    ) -> str:
+        return f"""Rewrite the supplied birth-time verification question briefs for a calm,
+clear consumer product.
+
+{self._language_instruction(locale)}
+
+The backend has already selected every question identity and event category. You may only
+improve title, prompt, whyWeAsk, and detailsPlaceholder. Do not mention candidate charts,
+scores, houses, planets, vargas, D1-D60, or imply that an answer is expected. Keep every
+question factual and non-leading. Never add personality or physical-trait questions.
+
+BACKEND QUESTION BRIEF
+{json.dumps({"questions": brief.get("questions", [])}, ensure_ascii=False, indent=2)}
+
+Return JSON only:
+{{
+  "questions": [
+    {{
+      "questionId": "unchanged backend questionId",
+      "category": "unchanged backend category",
+      "title": "short readable title",
+      "prompt": "concrete examples of qualifying events",
+      "whyWeAsk": "one plain-language sentence",
+      "detailsPlaceholder": "one short factual placeholder"
+    }}
+  ]
+}}"""
+
+    def _consultation_question_prompt(
+        self,
+        context: dict[str, Any],
+        question: str,
+        locale: str,
+    ) -> str:
+        return f"""Answer one follow-up question about an approved VedicDust consultation.
+
+{self._language_instruction(locale)}
+
+Use only approvedClaims, timingWindows, stableFacts, subject framing, and uncertainties in
+the supplied Agent Context. Every substantive sentence must be supported by the returned
+supportingClaimIds. If the context cannot answer the question, say so directly and explain
+what evidence is missing; set answerability to insufficient_evidence and supportingClaimIds
+to an empty list. Otherwise set answerability to answered. Do not calculate a new chart,
+invent a placement, promote
+certainty, diagnose health, promise outcomes, or prescribe an irreversible decision.
+Prefer a direct answer, then practical interpretation, then limits. Avoid raw internal IDs
+in the prose.
+
+USER QUESTION
+{question}
+
+APPROVED AGENT CONTEXT
+{json.dumps(context, ensure_ascii=False, indent=2)}
+
+Return JSON only:
+{{
+  "answerability": "answered or insufficient_evidence",
+  "answer": "clear answer in the requested language",
+  "supportingClaimIds": ["exact approved claim IDs; empty only for insufficient_evidence"],
+  "limitations": ["important boundary or uncertainty"],
+  "followUpQuestions": ["up to three useful next questions"]
+}}"""
+
+    @staticmethod
+    def _safe_agent_failure_reason(exc: Exception) -> str:
+        message = re.sub(r"\s+", " ", str(exc)).strip()
+        return message[:180] or type(exc).__name__
+
+    @staticmethod
+    def _bounded_string_list(value: Any, *, limit: int, max_length: int) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("Agent response list field has an invalid shape")
+        result = [str(item).strip() for item in value[:limit] if str(item).strip()]
+        if any(len(item) > max_length for item in result):
+            raise ValueError("Agent response list item is too long")
+        return result
+
+    def _append_consultation_exchange(
+        self,
+        session_id: str,
+        question: str,
+        response: ConsultationAnswerResponse,
+    ) -> None:
+        path = "consultation_conversation.json"
+        existing_text = self.workspace.read_artifact_text(session_id, path)
+        existing = self._json_dict(existing_text or "")
+        raw_exchanges = existing.get("exchanges")
+        exchanges: list[Any] = list(raw_exchanges) if isinstance(raw_exchanges, list) else []
+        exchanges.append(
+            {
+                "askedAt": datetime.now(timezone.utc).isoformat(),
+                "question": question,
+                **response.model_dump(by_alias=True),
+            }
+        )
+        payload = {
+            "schemaVersion": "vedicdust-consultation-conversation/1.0.0",
+            "sessionId": session_id,
+            "exchanges": exchanges[-20:],
+        }
+        self.workspace.write_artifact(
+            session_id,
+            path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         )
 
     def _write_initial_rectification_state(
@@ -2856,6 +3154,8 @@ Read:
 - prevalidation_result.json and chart_rectification_state.json.
 
 Use only the listed typed contracts. Do not add a new astrological judgement.
+Your primary value is synthesis: turn approved Claims into concise, humane prose
+without changing their meaning.
 
 {language_instruction}
 
@@ -2872,6 +3172,14 @@ Hard contract:
   core_architecture when useful and at most five priority_domain sections.
 - Assign every released Claim to exactly one section, or record its omission in
   omittedClaimIds. Executive Claims belong to executive_synthesis.
+- For executive_synthesis, chart_foundation, core_architecture, priority_domain,
+  timing_outlook, and decision_support, write one or two `narratives`. Every
+  narrative must have a unique narrativeId, kind, readable text, and 1-4 claimIds.
+  The claimIds must be assigned to that same section. Each sentence must be a
+  faithful synthesis of those Claims; do not introduce a new event, prediction,
+  diagnosis, remedy, or degree of certainty. Keep technical terms out of narrative
+  prose unless immediately explained.
+- Leave narratives empty in scope, follow_up, and technical_evidence.
 - chart_foundation and decision_support each require their own assigned Claim.
   technical_evidence must keep claimIds empty.
 - Assign timing Claims only to timing_outlook. Return timingWindows as an empty list;
@@ -2881,6 +3189,7 @@ Hard contract:
 - The backend replaces dossier ID, scope, confidence, timing windows, locale,
   audience, section titles/order/purpose, omission reasons, unresolved questions,
   visual references, and confidence-disclosure flags from authoritative contracts.
+  It preserves narratives only after their Claim references pass validation.
   Do not try to reinterpret those release fields.
 - Preserve child/adult life-stage and reader-relationship framing from the Chart Record.
 - releaseStatus may be approved only when chart_audit permits judgement, all
@@ -3413,4 +3722,22 @@ User message:
                 or not artifact.get("content")
             ):
                 raise ValueError("Artifact response contains an invalid artifact")
+        return payload
+
+    @staticmethod
+    def _parse_json_object(raw_text: str) -> dict[str, Any]:
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            fenced = list(re.finditer(r"```(?:json)?\s*([\s\S]*?)```", raw_text, re.IGNORECASE))
+            if fenced:
+                payload = json.loads(fenced[-1].group(1))
+            else:
+                start = raw_text.find("{")
+                end = raw_text.rfind("}")
+                if start == -1 or end <= start:
+                    raise ValueError("Agent did not return a JSON object")
+                payload = json.loads(raw_text[start : end + 1])
+        if not isinstance(payload, dict):
+            raise ValueError("Agent response must be a JSON object")
         return payload

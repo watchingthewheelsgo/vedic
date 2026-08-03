@@ -7,10 +7,13 @@ import type {
   BillingCheckoutResponse,
   BillingPortalResponse,
   BaziSessionInput,
+  ConsultationAnswerResponse,
+  ConsultationQuestionInput,
   CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
   PrecisePlaceSearchResponse,
+  RectificationInterviewInput,
   RectificationLifeEventsInput,
   SkillBirthInput,
   SkillFeedbackInput,
@@ -198,6 +201,20 @@ export const api = {
   recordRectificationLifeEvents(input: RectificationLifeEventsInput) {
     return postJson<SkillSessionResponse, RectificationLifeEventsInput>(
       "/api/rectification-life-events",
+      input,
+      { requireAuth: true }
+    );
+  },
+  prepareRectificationInterview(input: RectificationInterviewInput) {
+    return postJson<SkillSessionResponse, RectificationInterviewInput>(
+      "/api/rectification-interview",
+      input,
+      { requireAuth: true }
+    );
+  },
+  answerConsultationQuestion(input: ConsultationQuestionInput) {
+    return postJson<ConsultationAnswerResponse, ConsultationQuestionInput>(
+      "/api/consultation-questions",
       input,
       { requireAuth: true }
     );

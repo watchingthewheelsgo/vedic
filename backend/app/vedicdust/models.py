@@ -1523,6 +1523,19 @@ class ConsultationConfidence(ContractModel):
     rationale: list[str] = Field(min_length=1)
 
 
+class GroundedNarrative(ContractModel):
+    narrative_id: str
+    kind: Literal["synthesis", "integration", "reflection"]
+    text: str = Field(min_length=20, max_length=900)
+    claim_ids: list[str] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_claim_references(self) -> GroundedNarrative:
+        if len(self.claim_ids) != len(set(self.claim_ids)):
+            raise ValueError("grounded narrative claim ids must be unique")
+        return self
+
+
 class ReportSection(ContractModel):
     section_id: str
     section_kind: Literal[
@@ -1541,6 +1554,7 @@ class ReportSection(ContractModel):
     claim_ids: list[str] = Field(default_factory=list)
     timing_window_ids: list[str] = Field(default_factory=list)
     visual_refs: list[str] = Field(default_factory=list)
+    narratives: list[GroundedNarrative] = Field(default_factory=list, max_length=2)
     priority: int = Field(default=100, ge=0)
     confidence_disclosure_required: bool = False
 

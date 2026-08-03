@@ -197,10 +197,24 @@ function readerPipelineNode(
     (artifact) => artifact.path === "prevalidation_result.json"
   );
   const feedback = artifacts.find((artifact) => artifact.path === "user_context.md");
+  const rectification = artifacts.find(
+    (artifact) => artifact.path === "chart_rectification_state.json"
+  );
+  const rectificationStatus = parseArtifactStatus(rectification?.content);
   let status = "pending";
   if (feedback) status = "completed";
   else if (prevalidation) status = "waiting";
   else if (readerRunning) status = "running";
+  else if (rectificationStatus === "corrected_chart_ready") status = "completed";
+  else if (rectificationStatus === "calculation_failed") status = "failed";
+  else if (
+    rectificationStatus === "collecting_evidence" ||
+    rectificationStatus === "underdetermined" ||
+    rectificationStatus === "input_resolution_required" ||
+    rectificationStatus === "multiple_equivalent"
+  ) {
+    status = "waiting";
+  }
 
   return {
     id: "reader_prevalidation",
@@ -220,6 +234,16 @@ function readerPipelineNode(
     durationSeconds: null,
     error: null
   };
+}
+
+function parseArtifactStatus(content?: string): string {
+  if (!content) return "";
+  try {
+    const payload = JSON.parse(content) as { status?: unknown };
+    return typeof payload.status === "string" ? payload.status : "";
+  } catch {
+    return "";
+  }
 }
 
 function judgementPipelineNode(session: SkillSessionResponse | null): PipelineNode | null {

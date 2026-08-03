@@ -800,6 +800,7 @@ def validate_consultation_dossier(
     timing_periods_by_id = {period.period_id: period for period in record.timing_periods}
     assigned_claim_ids: list[str] = []
     assigned_timing_window_ids: list[str] = []
+    narrative_ids: list[str] = []
     timing_windows_by_id = {window.timing_window_id: window for window in dossier.timing_windows}
 
     for claim_id in dossier.executive_claim_ids:
@@ -811,6 +812,19 @@ def validate_consultation_dossier(
     for section in dossier.sections:
         assigned_claim_ids.extend(section.claim_ids)
         assigned_timing_window_ids.extend(section.timing_window_ids)
+        narrative_ids.extend(narrative.narrative_id for narrative in section.narratives)
+        if (
+            section.section_kind in {"scope", "follow_up", "technical_evidence"}
+            and section.narratives
+        ):
+            errors.append(f"section {section.section_id} cannot contain model-authored narrative")
+        for narrative in section.narratives:
+            unknown_narrative_claims = sorted(set(narrative.claim_ids) - set(section.claim_ids))
+            if unknown_narrative_claims:
+                errors.append(
+                    f"narrative {narrative.narrative_id} references claims outside its section: "
+                    + ", ".join(unknown_narrative_claims)
+                )
         for claim_id in section.claim_ids:
             if claim_id not in claims_by_id:
                 errors.append(f"section {section.section_id} references unknown claim {claim_id}")
@@ -862,6 +876,11 @@ def validate_consultation_dossier(
         errors.append(
             "claims must belong to one report section: " + ", ".join(duplicate_assignments)
         )
+    duplicate_narratives = sorted(
+        {narrative_id for narrative_id in narrative_ids if narrative_ids.count(narrative_id) > 1}
+    )
+    if duplicate_narratives:
+        errors.append("narrative ids must be unique: " + ", ".join(duplicate_narratives))
     duplicate_window_assignments = sorted(
         {
             window_id

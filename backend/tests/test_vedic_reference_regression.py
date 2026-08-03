@@ -70,6 +70,7 @@ from app.vedicdust.models import (
     ConsultationConfidence,
     ConsultationDossier,
     ConsultationScope,
+    GroundedNarrative,
     ReportSection,
     VargaChart,
 )
@@ -1746,6 +1747,14 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
             priority=50,
         ),
     ]
+    sections[1].narratives = [
+        GroundedNarrative(
+            narrativeId="narrative.executive.1",
+            kind="synthesis",
+            text="These approved patterns are most useful when read together rather than as isolated placements.",
+            claimIds=[claim.claim_id for claim in executive_claims],
+        )
+    ]
     dossier = ConsultationDossier(
         dossierId=f"dossier.{case['id']}",
         chartRecordId=localized.chart_record_id,
@@ -1793,6 +1802,8 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     assert "12岁 · 儿童 · 由父母阅读" in report
     assert "这对当事人可能意味着什么" in report
     assert foundation_claim.plain_statement in report
+    assert "most useful when read together" in report
+    assert localized.calculation_profile.profile_id not in report.split("##", 1)[0]
     claim_drift = agent_context.model_copy(deep=True)
     claim_drift.approved_claims[0].statement = "A stronger claim invented after release."
     with pytest.raises(ValueError, match="agent context claim drift"):

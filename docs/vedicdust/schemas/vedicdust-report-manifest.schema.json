@@ -1,5 +1,37 @@
 {
   "$defs": {
+    "GroundedNarrative": {
+      "additionalProperties": false,
+      "properties": {
+        "narrativeId": {
+          "title": "Narrativeid",
+          "type": "string"
+        },
+        "kind": {
+          "enum": ["synthesis", "integration", "reflection"],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 900,
+          "minLength": 20,
+          "title": "Text",
+          "type": "string"
+        },
+        "claimIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Claimids",
+          "type": "array"
+        }
+      },
+      "required": ["narrativeId", "kind", "text", "claimIds"],
+      "title": "GroundedNarrative",
+      "type": "object"
+    },
     "ReportSection": {
       "additionalProperties": false,
       "properties": {
@@ -49,6 +81,14 @@
             "type": "string"
           },
           "title": "Visualrefs",
+          "type": "array"
+        },
+        "narratives": {
+          "items": {
+            "$ref": "#/$defs/GroundedNarrative"
+          },
+          "maxItems": 2,
+          "title": "Narratives",
           "type": "array"
         },
         "priority": {

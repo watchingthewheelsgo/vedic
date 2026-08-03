@@ -156,6 +156,24 @@ export type RectificationLifeEventsInput = {
   events: RectificationLifeEventInput[];
 };
 
+export type RectificationInterviewInput = {
+  sessionId: string;
+  locale: AppLocale;
+};
+
+export type ConsultationQuestionInput = {
+  sessionId: string;
+  question: string;
+};
+
+export type ConsultationAnswerResponse = {
+  answerability: "answered" | "insufficient_evidence";
+  answer: string;
+  supportingClaimIds: string[];
+  limitations: string[];
+  followUpQuestions: string[];
+};
+
 export type BaziCalendarType = "solar" | "lunar";
 
 export type BaziSessionInput = BirthInput & {

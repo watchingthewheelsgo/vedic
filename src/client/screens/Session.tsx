@@ -17,10 +17,8 @@ import {
   ListChecks,
   LoaderCircle,
   MapPinned,
-  Plus,
   RefreshCw,
   Target,
-  Trash2,
   Workflow
 } from "lucide-react";
 import { api } from "../api";
@@ -54,6 +52,7 @@ import { cn } from "../lib/cn";
 import { useI18n } from "../i18n/provider";
 import type {
   BirthInput,
+  ConsultationAnswerResponse,
   CoreJobResponse,
   RectificationLifeEventCategory,
   RectificationLifeEventInput,
@@ -138,6 +137,13 @@ type RectificationState = {
     action?: string;
     eventCollectionRequired?: boolean;
   };
+  lifeEventLedger?: {
+    events?: Array<{
+      date?: string;
+      category?: RectificationLifeEventCategory;
+      description?: string;
+    }>;
+  };
   activeChartRevision?: {
     revision?: number;
     source?: string;
@@ -164,14 +170,14 @@ const STAGE_COPY: Record<string, StageCopy> = {
   chart: {
     purpose: "Calculates and saves the chart facts before any LLM interpretation begins.",
     userResult: "You can inspect the exact structured-data sections used by later stages.",
-    userAction: "Review the chart facts. First Check uses these facts as its source.",
+    userAction: "Review the chart facts. Birth-time verification uses these facts as its source.",
     expected: "Generated immediately after the birth details are accepted."
   },
   reader: {
     purpose: "Checks a few lived-experience signals before the full reading begins.",
     userResult: "You get 3-5 short checks to mark as accurate, partly accurate, or inaccurate.",
     userAction: "Answer one check at a time. The full reading starts after your replies are saved.",
-    expected: "Usually a few minutes while the system prepares your first checks."
+    expected: "Usually a few minutes while the system prepares your birth-time questions."
   },
   judgement: {
     purpose: "Turns qualified chart facts into a small set of traceable conclusions.",
@@ -329,28 +335,30 @@ const VALIDATION_CHOICES: Array<{
   }
 ];
 
-const LIFE_EVENT_CATEGORIES: RectificationLifeEventCategory[] = [
-  "education",
-  "career",
-  "relationship",
-  "relocation",
-  "child",
-  "health",
-  "family",
-  "finance",
-  "property",
-  "legal",
-  "loss",
-  "spiritual"
-];
-
 type LifeEventDraft = Omit<RectificationLifeEventInput, "category"> & {
   category: RectificationLifeEventCategory | "";
 };
 
-function emptyLifeEvent(): LifeEventDraft {
-  return { date: "", category: "", description: "" };
-}
+type RectificationInterviewQuestion = {
+  questionId: string;
+  category: RectificationLifeEventCategory;
+  title: string;
+  prompt: string;
+  whyWeAsk: string;
+  dateLabel: string;
+  detailsLabel: string;
+  detailsPlaceholder: string;
+};
+
+type RectificationInterview = {
+  schemaVersion: "vedicdust-rectification-interview/1.0.0";
+  title: string;
+  intro: string;
+  source: string;
+  progress: { answered: number; target: number; maximumAccepted: number; label: string };
+  questions: RectificationInterviewQuestion[];
+  stopReason?: string | null;
+};
 
 function statusBadgeVariant(status: StageStatus): ComponentProps<typeof Badge>["variant"] {
   if (status === "done") return "done";
@@ -395,6 +403,7 @@ export function Session() {
   const [validationFeedback, setValidationFeedback] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [submittingLifeEvents, setSubmittingLifeEvents] = useState(false);
+  const [preparingRectificationInterview, setPreparingRectificationInterview] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [baziRunning, setBaziRunning] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -725,6 +734,20 @@ export function Session() {
     }
   }
 
+  const prepareRectificationInterview = useCallback(async () => {
+    if (!authLoaded || !isSignedIn || preparingRectificationInterview) return;
+    setError("");
+    setPreparingRectificationInterview(true);
+    try {
+      const updated = await api.prepareRectificationInterview({ sessionId: id, locale });
+      setSession(updated);
+    } catch (caught) {
+      setError(userFacingError(caught, "Could not prepare the next verification question."));
+    } finally {
+      setPreparingRectificationInterview(false);
+    }
+  }, [authLoaded, id, isSignedIn, locale, preparingRectificationInterview]);
+
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden bg-cream-2">
       <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-5 py-3 backdrop-blur-lg sm:px-8">
@@ -784,9 +807,11 @@ export function Session() {
             validationFeedback={validationFeedback}
             submittingFeedback={submittingFeedback}
             submittingLifeEvents={submittingLifeEvents}
+            preparingRectificationInterview={preparingRectificationInterview}
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
             onSubmitLifeEvents={onSubmitLifeEvents}
+            onPrepareRectificationInterview={prepareRectificationInterview}
             onResumeCoreReport={resumeCoreReport}
             onStartBaziReport={startBaziReport}
             coreInterrupted={coreInterrupted}
@@ -837,6 +862,9 @@ export function Session() {
                 <MarkdownReport content={artifact.content} />
               </section>
             ))}
+            {!baziMode && (
+              <ConsultationQuestionPanel sessionId={id} isSignedIn={Boolean(isSignedIn)} />
+            )}
           </main>
           <nav className="report-toc hidden overflow-y-auto border-l border-gold/25 bg-cream-2 px-4 py-6 lg:block">
             <h4 className="mb-3.5 text-[11px] uppercase tracking-[2px] text-muted">
@@ -1406,9 +1434,11 @@ function WorkshopDetailPanel({
   validationFeedback,
   submittingFeedback,
   submittingLifeEvents,
+  preparingRectificationInterview,
   onValidationFeedbackChange,
   onSubmitFeedback,
   onSubmitLifeEvents,
+  onPrepareRectificationInterview,
   onResumeCoreReport,
   onStartBaziReport,
   coreInterrupted,
@@ -1429,9 +1459,11 @@ function WorkshopDetailPanel({
   validationFeedback: string;
   submittingFeedback: boolean;
   submittingLifeEvents: boolean;
+  preparingRectificationInterview: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onPrepareRectificationInterview: () => Promise<void>;
   onResumeCoreReport: () => Promise<void>;
   onStartBaziReport: () => Promise<void>;
   coreInterrupted: boolean;
@@ -1494,9 +1526,11 @@ function WorkshopDetailPanel({
           validationFeedback={validationFeedback}
           submittingFeedback={submittingFeedback}
           submittingLifeEvents={submittingLifeEvents}
+          preparingRectificationInterview={preparingRectificationInterview}
           onValidationFeedbackChange={onValidationFeedbackChange}
           onSubmitFeedback={onSubmitFeedback}
           onSubmitLifeEvents={onSubmitLifeEvents}
+          onPrepareRectificationInterview={onPrepareRectificationInterview}
           authLoaded={authLoaded}
           isSignedIn={isSignedIn}
         />
@@ -1959,136 +1993,342 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
 }
 
 function LifeEventCollector({
+  state,
+  interviewContent,
+  preparing,
+  onPrepare,
   submitting,
   onSubmit,
   authLoaded,
   isSignedIn
 }: {
+  state: RectificationState;
+  interviewContent: string;
+  preparing: boolean;
+  onPrepare: () => Promise<void>;
   submitting: boolean;
   onSubmit: (events: RectificationLifeEventInput[]) => Promise<void>;
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
-  const { t } = useI18n();
-  const [events, setEvents] = useState<LifeEventDraft[]>(() => [
-    emptyLifeEvent(),
-    emptyLifeEvent(),
-    emptyLifeEvent()
-  ]);
-  const complete = events.every(
-    (event) => event.date && event.category && event.description.trim().length >= 3
+  const { locale } = useI18n();
+  const ui =
+    locale === "zh"
+      ? {
+          preparing: "正在根据盘面边界准备下一题…",
+          notReady: "下一道校正问题尚未准备好。",
+          prepare: "准备问题",
+          exhausted: "现有证据无法进一步缩小时间范围",
+          exhaustedBody: "系统会保留剩余时间范围，而不是给出虚假的精确时间。",
+          back: "上一题",
+          next: "下一题",
+          compare: "开始比较候选时间"
+        }
+      : locale === "ja"
+        ? {
+            preparing: "チャートの境界から次の質問を準備しています…",
+            notReady: "次の確認質問はまだ準備できていません。",
+            prepare: "質問を準備",
+            exhausted: "現在の証拠では時間帯をこれ以上絞れません",
+            exhaustedBody: "誤った精密さを示さず、残る時間範囲を保持します。",
+            back: "前へ",
+            next: "次の質問",
+            compare: "出生時刻候補を比較"
+          }
+        : {
+            preparing: "Preparing the next question from the chart boundaries...",
+            notReady: "The next verification question is not ready yet.",
+            prepare: "Prepare question",
+            exhausted: "We cannot narrow the time further from the available evidence",
+            exhaustedBody:
+              "The chart will keep the remaining time range instead of claiming false precision.",
+            back: "Back",
+            next: "Next question",
+            compare: "Compare birth-time candidates"
+          };
+  const interview = useMemo(
+    () => parseRectificationInterview(interviewContent),
+    [interviewContent]
   );
+  const existingEvents = useMemo(
+    () =>
+      (state.lifeEventLedger?.events ?? [])
+        .filter(
+          (
+            event
+          ): event is Required<
+            Pick<RectificationLifeEventInput, "date" | "category" | "description">
+          > => Boolean(event.date && event.category && event.description)
+        )
+        .map((event) => ({
+          date: event.date,
+          category: event.category,
+          description: cleanStoredEventDescription(event.description)
+        })),
+    [state.lifeEventLedger?.events]
+  );
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, LifeEventDraft>>({});
+  const question = interview?.questions[activeIndex];
+  const answer = question
+    ? (answers[question.questionId] ?? { date: "", category: question.category, description: "" })
+    : null;
+  const answerComplete = Boolean(answer?.date && answer.description.trim().length >= 3);
+  const isLast = Boolean(interview && activeIndex === interview.questions.length - 1);
 
-  function updateEvent(index: number, update: Partial<LifeEventDraft>) {
-    setEvents((current) =>
-      current.map((event, eventIndex) => (eventIndex === index ? { ...event, ...update } : event))
+  useEffect(() => {
+    setActiveIndex(0);
+    setAnswers({});
+  }, [interviewContent]);
+
+  function updateAnswer(update: Partial<LifeEventDraft>) {
+    if (!question || !answer) return;
+    setAnswers((current) => ({
+      ...current,
+      [question.questionId]: { ...answer, ...update, category: question.category }
+    }));
+  }
+
+  if (preparing) {
+    return (
+      <div className="mt-6 flex min-h-52 flex-col items-center justify-center gap-3 rounded-xl border border-gold/25 bg-cream-2 px-6 text-center">
+        <LoaderCircle className="size-5 animate-spin text-gold" />
+        <p className="m-0 text-sm text-body">{ui.preparing}</p>
+      </div>
+    );
+  }
+
+  if (!interview) {
+    return (
+      <div className="mt-6 flex min-h-52 flex-col items-center justify-center gap-4 rounded-xl border border-gold/25 bg-cream-2 px-6 text-center">
+        <CircleHelp className="size-5 text-gold" />
+        <p className="m-0 text-sm text-body">{ui.notReady}</p>
+        <Button type="button" variant="outline" onClick={() => void onPrepare()}>
+          <RefreshCw size={15} /> {ui.prepare}
+        </Button>
+      </div>
+    );
+  }
+
+  if (!question) {
+    return (
+      <div className="mt-6 rounded-xl border border-gold/25 bg-cream-2 px-5 py-5">
+        <DetailSubtitle>{ui.exhausted}</DetailSubtitle>
+        <p className="m-0 text-[13px] leading-7 text-body">
+          {interview.stopReason ?? ui.exhaustedBody}
+        </p>
+      </div>
     );
   }
 
   return (
     <form
-      className="mt-4 grid gap-4"
+      className="mt-5 grid gap-5"
       onSubmit={(event) => {
         event.preventDefault();
-        if (complete) {
-          void onSubmit(
-            events.map((lifeEvent) => ({
-              ...lifeEvent,
-              category: lifeEvent.category as RectificationLifeEventCategory
-            }))
-          );
+        if (!answerComplete || !answer) return;
+        const currentAnswers = {
+          ...answers,
+          [question.questionId]: { ...answer, category: question.category }
+        };
+        setAnswers(currentAnswers);
+        if (!isLast) {
+          setActiveIndex((value) => value + 1);
+          return;
         }
+        const newEvents = interview.questions
+          .map((item) => currentAnswers[item.questionId])
+          .filter((item): item is LifeEventDraft =>
+            Boolean(item?.date && item.category && item.description.trim().length >= 3)
+          )
+          .map((item) => ({ ...item, category: item.category as RectificationLifeEventCategory }));
+        void onSubmit(
+          [...existingEvents, ...newEvents].slice(0, interview.progress.maximumAccepted)
+        );
       }}
     >
-      <div className="rounded-xl border border-gold/35 bg-gold/10 px-4 py-3">
-        <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
-          <Target className="size-4" />
-          {t("session.events.title")}
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[1.4px] text-gold-dim">
+          <span>{interview.progress.label}</span>
+          <span>
+            {activeIndex + 1}/{interview.questions.length}
+          </span>
         </div>
-        <p className="m-0 text-[13px] leading-[1.65] text-body">{t("session.events.body")}</p>
+        <div className="h-1 overflow-hidden rounded-full bg-gold/15">
+          <div
+            className="h-full rounded-full bg-gold transition-[width] duration-500"
+            style={{ width: `${((activeIndex + 1) / interview.questions.length) * 100}%` }}
+          />
+        </div>
       </div>
 
-      <div className="grid gap-3">
-        {events.map((lifeEvent, index) => (
-          <fieldset key={index} className="rounded-xl border border-gold/25 bg-cream-2 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <legend className="text-sm font-semibold text-ink">
-                {t("session.events.item", { number: index + 1 })}
-              </legend>
-              {events.length > 3 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  title={t("session.events.remove")}
-                  onClick={() => setEvents((current) => current.filter((_, i) => i !== index))}
-                >
-                  <Trash2 size={15} />
-                </Button>
-              )}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
-              <label className="grid gap-1.5 text-[11px] uppercase tracking-[1.2px] text-muted">
-                {t("session.events.when")}
-                <input
-                  required
-                  type="month"
-                  value={lifeEvent.date}
-                  className="h-10 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
-                  onChange={(event) => updateEvent(index, { date: event.target.value })}
-                />
-              </label>
-              <label className="grid gap-1.5 text-[11px] uppercase tracking-[1.2px] text-muted">
-                {t("session.events.type")}
-                <select
-                  value={lifeEvent.category}
-                  className="h-10 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
-                  onChange={(event) =>
-                    updateEvent(index, {
-                      category: event.target.value as RectificationLifeEventCategory
-                    })
-                  }
-                >
-                  <option value="" disabled>
-                    {t("session.events.chooseType")}
-                  </option>
-                  {LIFE_EVENT_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {t(`session.events.category.${category}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label className="mt-3 grid gap-1.5 text-[11px] uppercase tracking-[1.2px] text-muted">
-              {t("session.events.what")}
-              <Textarea
-                required
-                rows={2}
-                value={lifeEvent.description}
-                placeholder={t("session.events.placeholder")}
-                onChange={(event) => updateEvent(index, { description: event.target.value })}
-              />
-            </label>
-          </fieldset>
-        ))}
+      <div className="rounded-2xl border border-gold/30 bg-cream-2 p-5 shadow-[0_18px_50px_rgba(31,25,17,0.07)] sm:p-6">
+        <div className="mb-4 flex size-9 items-center justify-center rounded-full border border-gold/35 text-gold-dim">
+          <Target size={17} />
+        </div>
+        <h4 className="mb-2 text-xl font-medium tracking-normal text-ink">{question.title}</h4>
+        <p className="mb-5 text-[13px] leading-7 text-body">{question.prompt}</p>
+        <div className="grid gap-4 sm:grid-cols-[170px_1fr]">
+          <label className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
+            {question.dateLabel}
+            <input
+              required
+              type="month"
+              value={answer?.date ?? ""}
+              className="h-11 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
+              onChange={(event) => updateAnswer({ date: event.target.value })}
+            />
+          </label>
+          <label className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
+            {question.detailsLabel}
+            <Textarea
+              required
+              rows={2}
+              value={answer?.description ?? ""}
+              placeholder={question.detailsPlaceholder}
+              onChange={(event) => updateAnswer({ description: event.target.value })}
+            />
+          </label>
+        </div>
+        <div className="mt-4 flex items-start gap-2 text-[12px] leading-6 text-muted">
+          <Info className="mt-1 size-3.5 shrink-0" />
+          <span>{question.whyWeAsk}</span>
+        </div>
       </div>
 
-      {events.length < 5 && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setEvents((current) => [...current, emptyLifeEvent()])}
-        >
-          <Plus size={15} /> {t("session.events.add")}
+      <div className="flex items-center justify-between gap-3">
+        {activeIndex > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setActiveIndex((value) => value - 1)}
+          >
+            <ChevronLeft size={15} /> {ui.back}
+          </Button>
+        ) : (
+          <span />
+        )}
+        <Button disabled={!answerComplete || submitting || !authLoaded || !isSignedIn}>
+          {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
+          {isLast ? ui.compare : ui.next}
+          {!isLast && <ChevronRight size={15} />}
         </Button>
-      )}
-      <Button disabled={!complete || submitting || !authLoaded || !isSignedIn}>
-        {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 size={15} />}
-        {submitting ? t("session.events.saving") : t("session.events.continue")}
-      </Button>
+      </div>
       {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
     </form>
+  );
+}
+
+function ConsultationQuestionPanel({
+  sessionId,
+  isSignedIn
+}: {
+  sessionId: string;
+  isSignedIn: boolean;
+}) {
+  const { locale } = useI18n();
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<ConsultationAnswerResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const copy =
+    locale === "zh"
+      ? {
+          eyebrow: "继续咨询",
+          title: "问一个与你有关的问题",
+          body: "回答只会使用这份报告中已经通过证据门槛的判断；资料不足时会明确告诉你。",
+          placeholder: "例如：未来一年里，我在职业选择上更值得关注什么？",
+          ask: "询问报告",
+          basis: "本回答依据",
+          limits: "需要保留的边界",
+          claimUnit: "条已批准判断",
+          insufficient: "当前报告证据不足"
+        }
+      : locale === "ja"
+        ? {
+            eyebrow: "相談を続ける",
+            title: "このリーディングについて質問する",
+            body: "回答は証拠基準を通過した判断のみを使用し、判断できない場合は明確に伝えます。",
+            placeholder: "例：今年の仕事上の選択で何に注意すべきですか？",
+            ask: "リーディングに質問",
+            basis: "根拠",
+            limits: "重要な限界",
+            claimUnit: "件の承認済み判断",
+            insufficient: "現在のレポートでは根拠が不足しています"
+          }
+        : {
+            eyebrow: "Continue the consultation",
+            title: "Ask a question about your reading",
+            body: "The answer uses only claims that passed this report's evidence gate and will say when the chart cannot determine something.",
+            placeholder:
+              "For example: What should I pay attention to in career decisions this year?",
+            ask: "Ask the reading",
+            basis: "Grounded in",
+            limits: "Important limits",
+            claimUnit: "approved claim",
+            insufficient: "The current report does not contain enough evidence"
+          };
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!question.trim() || loading || !isSignedIn) return;
+    setLoading(true);
+    setError("");
+    try {
+      setAnswer(await api.answerConsultationQuestion({ sessionId, question: question.trim() }));
+    } catch (caught) {
+      setError(userFacingError(caught, "Could not answer this question. Please try again."));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="mt-14 border-t border-gold/25 pt-10">
+      <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">{copy.eyebrow}</div>
+      <h2 className="mb-2 text-2xl font-medium tracking-normal text-ink">{copy.title}</h2>
+      <p className="mb-5 max-w-2xl text-[13px] leading-7 text-body">{copy.body}</p>
+      <form className="grid max-w-3xl gap-3" onSubmit={submit}>
+        <Textarea
+          rows={3}
+          value={question}
+          placeholder={copy.placeholder}
+          onChange={(event) => setQuestion(event.target.value)}
+        />
+        <div className="flex justify-end">
+          <Button disabled={!question.trim() || loading || !isSignedIn}>
+            {loading ? <LoaderCircle className="size-4 animate-spin" /> : <CircleHelp size={15} />}
+            {copy.ask}
+          </Button>
+        </div>
+      </form>
+      {!isSignedIn && <AnonymousCheckpointGate />}
+      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+      {answer && (
+        <div className="mt-6 max-w-3xl rounded-xl border border-gold/25 bg-cream-2 p-5">
+          <p className="m-0 whitespace-pre-wrap text-[14px] leading-8 text-ink">{answer.answer}</p>
+          <div className="mt-5 border-t border-gold/20 pt-4 text-[12px] leading-6 text-muted">
+            <div>
+              {answer.answerability === "answered" ? (
+                <>
+                  <strong className="font-semibold text-body">{copy.basis}:</strong>{" "}
+                  {answer.supportingClaimIds.length} {copy.claimUnit}
+                  {locale === "en" && answer.supportingClaimIds.length !== 1 ? "s" : ""}
+                </>
+              ) : (
+                <strong className="font-semibold text-body">{copy.insufficient}</strong>
+              )}
+            </div>
+            {answer.limitations.length > 0 && (
+              <div className="mt-2">
+                <strong className="font-semibold text-body">{copy.limits}:</strong>{" "}
+                {answer.limitations.join(" · ")}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2100,9 +2340,11 @@ function ReaderDetail({
   validationFeedback,
   submittingFeedback,
   submittingLifeEvents,
+  preparingRectificationInterview,
   onValidationFeedbackChange,
   onSubmitFeedback,
   onSubmitLifeEvents,
+  onPrepareRectificationInterview,
   authLoaded,
   isSignedIn
 }: {
@@ -2113,9 +2355,11 @@ function ReaderDetail({
   validationFeedback: string;
   submittingFeedback: boolean;
   submittingLifeEvents: boolean;
+  preparingRectificationInterview: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onPrepareRectificationInterview: () => Promise<void>;
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
@@ -2137,10 +2381,13 @@ function ReaderDetail({
     [session]
   );
   const collectingLifeEvents = rectificationState?.status === "collecting_evidence";
+  const continuingLifeEvents = rectificationState?.status === "underdetermined";
+  const interviewArtifact = findArtifact(session, "rectification_interview.json");
   const [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
   const [anchorFeedback, setAnchorFeedback] = useState<
     Record<number, { answer?: ValidationAnswer; note: string }>
   >({});
+  const interviewRequestedRef = useRef(false);
   const activeAnchor = anchors[activeAnchorIndex];
   const answeredCount = anchors.filter((anchor) => anchorFeedback[anchor.index]?.answer).length;
   const allAnswered = anchors.length > 0 && answeredCount === anchors.length;
@@ -2158,6 +2405,32 @@ function ReaderDetail({
   useEffect(() => {
     if (activeAnchorIndex >= anchors.length) setActiveAnchorIndex(Math.max(0, anchors.length - 1));
   }, [activeAnchorIndex, anchors.length]);
+
+  useEffect(() => {
+    if (interviewArtifact) interviewRequestedRef.current = false;
+  }, [interviewArtifact]);
+
+  useEffect(() => {
+    if (
+      (collectingLifeEvents || continuingLifeEvents) &&
+      !interviewArtifact &&
+      authLoaded &&
+      isSignedIn &&
+      !preparingRectificationInterview &&
+      !interviewRequestedRef.current
+    ) {
+      interviewRequestedRef.current = true;
+      void onPrepareRectificationInterview();
+    }
+  }, [
+    authLoaded,
+    collectingLifeEvents,
+    continuingLifeEvents,
+    interviewArtifact,
+    isSignedIn,
+    onPrepareRectificationInterview,
+    preparingRectificationInterview
+  ]);
 
   function updateAnchorFeedback(
     anchor: ValidationAnchor,
@@ -2185,9 +2458,13 @@ function ReaderDetail({
   }
 
   if (!prevalidation) {
-    if (collectingLifeEvents) {
+    if (collectingLifeEvents || continuingLifeEvents) {
       return (
         <LifeEventCollector
+          state={rectificationState}
+          interviewContent={interviewArtifact?.content ?? ""}
+          preparing={preparingRectificationInterview}
+          onPrepare={onPrepareRectificationInterview}
           submitting={submittingLifeEvents}
           onSubmit={onSubmitLifeEvents}
           authLoaded={authLoaded}
@@ -3384,6 +3661,27 @@ function parseJsonArtifact(
   }
 }
 
+function parseRectificationInterview(content: string): RectificationInterview | null {
+  if (!content.trim()) return null;
+  try {
+    const parsed = JSON.parse(content) as RectificationInterview;
+    if (
+      parsed.schemaVersion !== "vedicdust-rectification-interview/1.0.0" ||
+      !Array.isArray(parsed.questions) ||
+      !parsed.progress
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function cleanStoredEventDescription(value: string) {
+  return value.replace(/^\s*(?:19|20)\d{2}(?:-\d{2}(?:-\d{2})?)?\s+[a-z_]+\s*:\s*/i, "").trim();
+}
+
 function canStartFullReading(session: SkillSessionResponse | null): boolean {
   const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
   const decision = objectValue(prevalidationResult, "decision");
@@ -3406,6 +3704,8 @@ function readingContinuationAction(
   const plan = objectValue(state, "rectificationPlan");
   const action = String(plan?.action ?? "").trim();
   const gate = objectValue(state, "reportGate");
+  const ledger = objectValue(state, "lifeEventLedger");
+  const eventCount = Array.isArray(ledger?.events) ? ledger.events.length : 0;
   if (
     status === "corrected_chart_ready" &&
     state.holdoutResult === "passed" &&
@@ -3413,7 +3713,11 @@ function readingContinuationAction(
   ) {
     return "full_report";
   }
-  if (status === "collecting_evidence" || action === "collect_dated_life_events") {
+  if (
+    status === "collecting_evidence" ||
+    action === "collect_dated_life_events" ||
+    (status === "underdetermined" && eventCount < 5)
+  ) {
     return "collect_events";
   }
   if (READER_CONTINUATION_STATUSES.has(status)) return "reader";

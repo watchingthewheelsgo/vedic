@@ -1,0 +1,4 @@
+interface:
+  display_name: "VedicDust Rectification Interview"
+  short_description: "Phrase neutral, evidence-safe birth-time questions"
+  default_prompt: "Use $vedicdust-rectification-interview to phrase the supplied evidence questions."

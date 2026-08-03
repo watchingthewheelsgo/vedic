@@ -140,6 +140,8 @@ def test_api_endpoint_auth_dependency_matrix() -> None:
         "/api/bazi-sessions": ["resolve_session_user"],
         "/api/skill-sessions/{session_id}": ["resolve_session_user"],
         "/api/rectification-life-events": ["require_user"],
+        "/api/rectification-interview": ["require_user"],
+        "/api/consultation-questions": ["require_user"],
         "/api/skill-sessions/{session_id}/report.pdf": ["require_user"],
         "/api/skill-synastry-subject": ["require_user"],
         "/api/skill-runs": ["resolve_session_user"],

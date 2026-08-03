@@ -42,6 +42,7 @@ def test_active_vedic_skill_bundles_have_matching_metadata() -> None:
         "vedic-synastry",
         "vedicdust-chart-audit",
         "vedicdust-consultation",
+        "vedicdust-rectification-interview",
     }
 
     assert {

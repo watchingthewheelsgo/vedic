@@ -28,6 +28,7 @@ COPY = {
         "scope": "Reading scope",
         "reported_birth": "Reported birth details",
         "calculation_basis": "Chart calculation basis",
+        "calculation_assurance": "Calculation assurance",
         "method": "Method",
         "confidence": "Confidence",
         "requested_topics": "Requested topics",
@@ -58,12 +59,17 @@ COPY = {
         "rules": "Rules",
         "counter_facts": "Counter-evidence",
         "certainty": "Certainty",
+        "assurance_note": (
+            "Stable findings are presented first. Method details and traceable evidence are kept "
+            "in the professional appendix."
+        ),
     },
     "zh": {
         "report_title": "VedicDust 专业咨询档案",
         "scope": "本次解读范围",
         "reported_birth": "用户报告的出生信息",
         "calculation_basis": "本次盘面采用的计算依据",
+        "calculation_assurance": "计算验证范围",
         "method": "计算与解读方法",
         "confidence": "整体可信度",
         "requested_topics": "本次关注",
@@ -94,12 +100,14 @@ COPY = {
         "rules": "方法规则",
         "counter_facts": "相反证据",
         "certainty": "可信度",
+        "assurance_note": "正文优先呈现稳定且与你有关的结论；计算方法和可追溯依据集中放在专业附录。",
     },
     "ja": {
         "report_title": "VedicDust コンサルテーション記録",
         "scope": "今回のリーディング範囲",
         "reported_birth": "申告された出生情報",
         "calculation_basis": "今回のチャート計算基準",
+        "calculation_assurance": "計算検証の範囲",
         "method": "計算と判断方法",
         "confidence": "総合的な確度",
         "requested_topics": "相談テーマ",
@@ -130,6 +138,7 @@ COPY = {
         "rules": "判断ルール",
         "counter_facts": "反証",
         "certainty": "確度",
+        "assurance_note": "本文では安定した要点を優先し、計算方法と追跡可能な根拠は専門付録にまとめます。",
     },
 }
 
@@ -378,6 +387,9 @@ def _dossier_release_checks(
     structure_failures = [
         f"missing-section:{kind}" for kind in sorted(required_kinds - set(sections_by_kind))
     ]
+    executive_section = sections_by_kind.get("executive_synthesis")
+    if executive_section is not None and not executive_section.narratives:
+        structure_failures.append("missing-grounded-executive-narrative")
     executive_claim_ids = set(dossier.executive_claim_ids)
     executive_section = sections_by_kind.get("executive_synthesis")
     executive_section_ids = set(executive_section.claim_ids if executive_section else [])
@@ -674,14 +686,14 @@ def render_consultation_report(
         f"# {copy['report_title']}",
         "",
         f"> {copy['confidence']}: **{_grade(dossier.confidence.overall, dossier.locale)}**",
-        f"> {copy['method']}: `{dossier.method_profile_id}`",
-        f"> {copy['rule_pack']}: `{graph.rule_pack_version}`",
-        f"> {copy['chart_revision']}: `{dossier.chart_revision}`",
+        f"> {copy['assurance_note']}",
         "",
     ]
 
     for section in sorted(dossier.sections, key=lambda item: (item.priority, item.section_id)):
         lines.extend([f"## {section.title}", ""])
+        for narrative in section.narratives:
+            lines.extend([narrative.text, ""])
         if section.section_kind == "scope":
             lines.extend(_render_scope(record, dossier, copy))
         elif section.section_kind == "timing_outlook":
@@ -726,7 +738,7 @@ def _render_scope(
     reported_time = assertion.reported_local_time or "unknown"
     reported_birth = (
         f"{assertion.local_date} {reported_time} · {assertion.reported_place} · "
-        f"certainty={assertion.time_certainty}"
+        f"{_time_certainty_label(assertion.time_certainty, dossier.locale)}"
     )
     canonical = record.canonical_moment
     calculation_basis = "unresolved"
@@ -738,15 +750,16 @@ def _render_scope(
         decision = record.rectification.decision if record.rectification else None
         if decision and decision.resulting_interval is not None:
             calculation_basis += (
-                " · selected interval "
+                f" · {_selected_interval_label(dossier.locale)} "
                 f"{decision.resulting_interval.start.isoformat()} to "
                 f"{decision.resulting_interval.end.isoformat()}"
             )
     lines = [
         f"- **{copy['reported_birth']}**: {reported_birth}",
         f"- **{copy['calculation_basis']}**: {calculation_basis}",
+        f"- **{copy['calculation_assurance']}**: {_calculation_assurance_label(record, dossier.locale)}",
         f"- **{copy['confidence']}**: {_grade(dossier.confidence.overall, dossier.locale)}",
-        f"- **{copy['report_depth']}**: {dossier.scope.report_depth}",
+        f"- **{copy['report_depth']}**: {_report_depth_label(dossier.scope.report_depth, dossier.locale)}",
         f"- **{copy['reading_frame']}**: {_reading_frame(record)}",
     ]
     if dossier.scope.requested_topics:
@@ -803,7 +816,7 @@ def _render_claim(claim: Claim, copy: dict[str, str], locale: str) -> list[str]:
                 f"{claim.time_scope.end.date().isoformat()}",
             ]
         )
-    lines.extend(["", f"_{copy['technical_basis']}: {claim.technical_statement}_", ""])
+    lines.append("")
     return lines
 
 
@@ -850,23 +863,89 @@ def _render_evidence(
         for claim in graph.claims
         if claim.status != "withheld" and (not allowed or claim.claim_id in allowed)
     ]
-    lines = [
-        f"### {copy['evidence']}",
-        "",
-        f"| {copy['claim']} | {copy['certainty']} | {copy['facts']} | "
-        f"{copy['context_facts']} | {copy['counter_facts']} | {copy['rules']} |",
-        "|---|---|---|---|---|---|",
-    ]
+    lines = [f"### {copy['evidence']}", ""]
     for claim in claims:
         title = claim.title or claim.topic
         supporting_ids = claim.supporting_fact_ids + claim.timing_fact_ids + claim.timing_period_ids
-        lines.append(
-            f"| {title} | {claim.certainty} | {', '.join(supporting_ids)} | "
-            f"{', '.join(claim.context_fact_ids) or '-'} | "
-            f"{', '.join(claim.counter_fact_ids) or '-'} | {', '.join(claim.rule_ids)} |"
+        lines.extend(
+            [
+                f"#### {title}",
+                "",
+                claim.technical_statement,
+                "",
+                f"- **{copy['certainty']}**: {claim.certainty}",
+                f"- **{copy['facts']}**: {', '.join(supporting_ids)}",
+                f"- **{copy['context_facts']}**: {', '.join(claim.context_fact_ids) or '-'}",
+                f"- **{copy['counter_facts']}**: {', '.join(claim.counter_fact_ids) or '-'}",
+                f"- **{copy['rules']}**: {', '.join(claim.rule_ids)}",
+                "",
+            ]
         )
-    lines.append("")
     return lines
+
+
+def _time_certainty_label(value: str, locale: str) -> str:
+    labels = {
+        "en": {
+            "exact_minute": "recorded to the minute",
+            "bounded_window": "reported as an approximate time",
+            "part_of_day": "only the part of day is known",
+            "unknown": "birth time is uncertain",
+        },
+        "zh": {
+            "exact_minute": "时间记录到分钟",
+            "bounded_window": "时间为大致范围",
+            "part_of_day": "仅知道大致时段",
+            "unknown": "出生时间不确定",
+        },
+        "ja": {
+            "exact_minute": "分単位の記録あり",
+            "bounded_window": "おおよその時間帯",
+            "part_of_day": "時間帯のみ判明",
+            "unknown": "出生時刻は不明確",
+        },
+    }
+    return labels.get(locale, labels["en"]).get(value, value.replace("_", " "))
+
+
+def _report_depth_label(value: str, locale: str) -> str:
+    labels = {
+        "en": {"standard": "focused consultation", "professional": "professional consultation"},
+        "zh": {"standard": "重点咨询版", "professional": "专业完整解读"},
+        "ja": {"standard": "重点相談版", "professional": "専門的な完全版"},
+    }
+    return labels.get(locale, labels["en"]).get(value, value)
+
+
+def _calculation_assurance_label(record: ChartRecord, locale: str) -> str:
+    non_d1 = [chart for chart in record.charts if chart.factor != 1]
+    independently_matched = bool(non_d1) and all(
+        chart.calculation_assurance == "independent_external_match" for chart in non_d1
+    )
+    labels = {
+        "en": (
+            "D1 uses Swiss Ephemeris; divisional charts match an independent external reference set."
+            if independently_matched
+            else "D1 uses Swiss Ephemeris; divisional charts have internal provider regression coverage, not a complete independent desktop-software match."
+        ),
+        "zh": (
+            "D1 采用 Swiss Ephemeris；分盘已通过独立外部参考样本核对。"
+            if independently_matched
+            else "D1 采用 Swiss Ephemeris；分盘已通过内部提供方回归，但尚不等同于完整的独立桌面软件交叉验证。"
+        ),
+        "ja": (
+            "D1 は Swiss Ephemeris を使用し、分割図は独立した外部参照と照合済みです。"
+            if independently_matched
+            else "D1 は Swiss Ephemeris を使用し、分割図は内部プロバイダー回帰済みですが、独立したデスクトップソフトとの完全照合ではありません。"
+        ),
+    }
+    return labels.get(locale, labels["en"])
+
+
+def _selected_interval_label(locale: str) -> str:
+    return {"zh": "校正后采用范围", "ja": "補正後の採用範囲"}.get(
+        locale, "rectified working interval"
+    )
 
 
 def _audience_copy(

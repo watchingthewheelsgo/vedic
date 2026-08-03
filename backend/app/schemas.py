@@ -90,6 +90,28 @@ class RectificationLifeEventsInput(ApiModel):
         )
 
 
+class RectificationInterviewInput(ApiModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    locale: AppLocale = "en"
+
+
+class ConsultationQuestionInput(ApiModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    question: str = Field(min_length=3, max_length=1200)
+
+
+class ConsultationAnswerResponse(ApiModel):
+    answerability: Literal["answered", "insufficient_evidence"]
+    answer: str
+    supporting_claim_ids: list[str] = Field(alias="supportingClaimIds", max_length=8)
+    limitations: list[str] = Field(default_factory=list, max_length=5)
+    follow_up_questions: list[str] = Field(
+        default_factory=list,
+        alias="followUpQuestions",
+        max_length=3,
+    )
+
+
 BaziCalendarType = Literal["solar", "lunar"]
 
 

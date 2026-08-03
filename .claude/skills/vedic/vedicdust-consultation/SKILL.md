@@ -48,14 +48,19 @@ English technical terms in the appendix. Define a technical term on first use.
 3. Assign every included Claim to exactly one section; record omitted Claims
    and why. Leave `technical_evidence.claimIds` empty because the deterministic
    renderer supplies the evidence table.
-4. Assign timing Claims only to `timing_outlook`. Leave `timingWindows` empty;
+4. Add one or two grounded `narratives` to each interpretive section. Every
+   narrative must cite only Claim IDs assigned to that same section. Synthesize
+   those Claims into plain language; do not add an unstated prediction, event,
+   remedy, or certainty. Leave narratives empty in scope, follow-up, and the
+   technical appendix.
+5. Assign timing Claims only to `timing_outlook`. Leave `timingWindows` empty;
    the backend derives exact windows and confidence from approved Claims.
-5. Leave `unresolvedQuestions` empty. The backend projects unresolved
+6. Leave `unresolvedQuestions` empty. The backend projects unresolved
    rectification questions from authoritative evidence and replaces section
    titles, order, purposes, omission language, and presentation metadata.
-6. Let the backend derive `consultation_report_manifest.json`,
+7. Let the backend derive `consultation_report_manifest.json`,
    `consultation_report.md`, and `agent_context.json`. Do not hand-write them.
-7. Treat the Claim Graph as the complete judgement input. Dossier identity,
+8. Treat the Claim Graph as the complete judgement input. Dossier identity,
    scope, confidence, locale, audience, timing-window semantics, section
    presentation, omission reasons, and unresolved questions are backend-owned.
    Preserve each Claim's `evidenceConfidence`; never rewrite or promote

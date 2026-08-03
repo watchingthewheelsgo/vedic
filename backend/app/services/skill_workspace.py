@@ -21,6 +21,7 @@ class SkillWorkspace:
         "reading_session.json",
         "chart_audit.json",
         "chart_rectification_state.json",
+        "rectification_interview.json",
         "reader_prevalidation.md",
         "prevalidation_result.json",
         "user_context.md",
@@ -30,6 +31,7 @@ class SkillWorkspace:
         "consultation_report_manifest.json",
         "agent_context.json",
         "consultation_report.md",
+        "consultation_conversation.json",
         "rectification_report.md",
         "run_metrics.json",
     }
@@ -55,6 +57,7 @@ class SkillWorkspace:
         "consultation_report_manifest.json",
         "agent_context.json",
         "active_chart_sensitivity.json",
+        "consultation_conversation.json",
     }
 
     def __init__(self, settings: Settings) -> None:

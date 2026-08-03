@@ -25,14 +25,12 @@ export const WORKSHOP_STAGES: StageDef[] = [
     id: "chart",
     label: "Chart Facts",
     sub: "calculator",
-    seed: true,
     match: (id) => id === "chart_facts"
   },
   {
     id: "reader",
     label: "Birth Time Check",
     sub: "lived evidence",
-    seed: true,
     match: (id) => id === "reader_prevalidation"
   },
   {

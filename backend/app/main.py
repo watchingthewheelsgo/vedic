@@ -22,10 +22,13 @@ from app.schemas import (
     BillingCheckoutResponse,
     BillingPortalResponse,
     BaziSessionInput,
+    ConsultationAnswerResponse,
+    ConsultationQuestionInput,
     CoreJobResponse,
     CreemWebhookResponse,
     PrecisePlaceSearchResponse,
     PlaceSearchResponse,
+    RectificationInterviewInput,
     RectificationLifeEventsInput,
     SkillBirthInput,
     SkillFeedbackInput,
@@ -353,6 +356,50 @@ async def record_rectification_life_events(
             input_data,
             owner_user_id=account_user.owner_user_id,
         )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/rectification-interview", response_model=SkillSessionResponse)
+async def prepare_rectification_interview(
+    input_data: RectificationInterviewInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> SkillSessionResponse:
+    try:
+        container = get_container()
+        account_user = await _sync_account_user(container, current_user)
+        await _claim_or_assert_session_access(container, input_data.session_id, account_user)
+        return await container.skill_runtime.prepare_rectification_interview(
+            input_data,
+            owner_user_id=account_user.owner_user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/consultation-questions", response_model=ConsultationAnswerResponse)
+async def answer_consultation_question(
+    input_data: ConsultationQuestionInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> ConsultationAnswerResponse:
+    try:
+        container = get_container()
+        account_user = await _sync_account_user(container, current_user)
+        await _claim_or_assert_session_access(container, input_data.session_id, account_user)
+        await container.billing.assert_paid_access(account_user)
+        return await container.skill_runtime.answer_consultation_question(input_data)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
