@@ -404,7 +404,22 @@ class VedicCalculator:
         time_window = self._time_window(payload, intake.birth_time_precision, intake.time_source)
         place_radius = round(float(place.radius_km), 3)
         place_rectification_allowed = self._place_rectification_allowed(place)
-        life_event_ledger = parse_life_event_ledger(str(payload.get("life_events") or ""))
+        raw_semantic_evidence = str(payload.get("life_event_facts") or "").strip()
+        try:
+            parsed_semantic_evidence = (
+                json.loads(raw_semantic_evidence) if raw_semantic_evidence else []
+            )
+        except json.JSONDecodeError:
+            parsed_semantic_evidence = []
+        semantic_evidence = (
+            [item for item in parsed_semantic_evidence if isinstance(item, dict)]
+            if isinstance(parsed_semantic_evidence, list)
+            else []
+        )
+        life_event_ledger = parse_life_event_ledger(
+            str(payload.get("life_events") or ""),
+            semantic_evidence=semantic_evidence,
+        )
         return {
             "schemaVersion": "birth-input-context/v1",
             "time": {
@@ -442,6 +457,7 @@ class VedicCalculator:
                 ),
             },
             "lifeEvents": life_event_ledger,
+            "lifeEventSemantics": semantic_evidence,
             "constraints": {
                 "timeSearchMustStayWithinReportedWindow": True,
                 "placeSearchMustStayWithinRadiusKm": place_radius,
@@ -2618,6 +2634,7 @@ class VedicCalculator:
             "time_source": intake.time_source,
             "reading_focus": intake.reading_focus,
             "life_events": intake.life_events,
+            "life_event_facts": intake.life_event_facts,
             "effective_precision": (
                 "±分钟级" if intake.birth_time_precision == "exact" else "按出生时间精度降级解释"
             ),

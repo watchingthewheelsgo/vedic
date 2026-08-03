@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from contextlib import asynccontextmanager
 import hashlib
 import json
 import re
@@ -9,6 +10,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows deployments use the in-process lock.
+    fcntl = None  # type: ignore[assignment]
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.calculator.civil_time import resolve_civil_time
@@ -89,6 +95,42 @@ PREVALIDATION_DEPENDENCY_PATHS = [
     "user_context.md",
 ]
 
+
+def _rectification_event_fingerprint(event: dict[str, Any]) -> str:
+    date_value = " ".join(str(event.get("date") or "").split())
+    category = str(event.get("category") or "").strip().casefold()
+    description = " ".join(str(event.get("description") or "").split())
+    prefix = f"{date_value} {category}:"
+    if description.casefold().startswith(prefix):
+        description = description[len(prefix) :].strip()
+    payload = json.dumps(
+        [date_value, category, description.casefold()],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _merge_rectification_semantics(
+    previous: Any,
+    additions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for item in previous if isinstance(previous, list) else []:
+        if not isinstance(item, dict):
+            continue
+        key = _rectification_event_fingerprint(item)
+        if key:
+            merged[key] = dict(item)
+    for item in additions:
+        if not isinstance(item, dict):
+            continue
+        key = _rectification_event_fingerprint(item)
+        if key:
+            merged[key] = dict(item)
+    return list(merged.values())
+
+
 READER_AGENT_INPUT_ARTIFACTS = frozenset(
     {
         CHART_RECORD_JSON,
@@ -124,6 +166,43 @@ class SkillRuntime:
         self.metadata_store = metadata_store
         self.tools = BackendToolRunner(workspace.settings)
         self.rectification = ChartRectificationService()
+        self._rectification_lock_guard = asyncio.Lock()
+        self._rectification_locks: dict[str, asyncio.Lock] = {}
+
+    async def _rectification_lock_for(self, session_id: str) -> asyncio.Lock:
+        async with self._rectification_lock_guard:
+            lock = self._rectification_locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._rectification_locks[session_id] = lock
+            return lock
+
+    @asynccontextmanager
+    async def _rectification_transaction_lock(self, session_id: str):
+        """Serialize rectification writes in-process and across workers on Unix."""
+
+        lock = await self._rectification_lock_for(session_id)
+        async with lock:
+            lock_handle = None
+            try:
+                lock_path = (
+                    self.workspace.require_session_dir(session_id) / ".runtime/rectification.lock"
+                )
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                lock_handle = lock_path.open("a+")
+                if fcntl is not None:
+                    while True:
+                        try:
+                            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            await asyncio.sleep(0.05)
+                yield
+            finally:
+                if lock_handle is not None:
+                    if fcntl is not None:
+                        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                    lock_handle.close()
 
     def _write_agent_prompt_trace(
         self,
@@ -323,6 +402,18 @@ class SkillRuntime:
         *,
         owner_user_id: str | None = None,
     ) -> SkillSessionResponse:
+        async with self._rectification_transaction_lock(input_data.session_id):
+            return await self._record_rectification_life_events(
+                input_data,
+                owner_user_id=owner_user_id,
+            )
+
+    async def _record_rectification_life_events(
+        self,
+        input_data: RectificationLifeEventsInput,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SkillSessionResponse:
         session_id = input_data.session_id
         artifacts = {
             artifact.path: artifact.content
@@ -333,6 +424,62 @@ class SkillRuntime:
         state = self._json_dict(artifacts.get("chart_rectification_state.json", ""))
         if not context or not record_payload or not state:
             raise ValueError("session is missing the chart inputs required to add life events")
+        current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
+        submitted_events = [event.model_dump(by_alias=True) for event in input_data.events]
+        mutation_key = (
+            input_data.idempotency_key
+            or hashlib.sha256(
+                json.dumps(
+                    sorted(_rectification_event_fingerprint(event) for event in submitted_events),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        )
+        mutation_ledger = state.get("rectificationMutations")
+        existing_mutation = (
+            next(
+                (
+                    item
+                    for item in mutation_ledger
+                    if isinstance(item, dict) and item.get("key") == mutation_key
+                ),
+                None,
+            )
+            if isinstance(mutation_ledger, list)
+            else None
+        )
+        submitted_fingerprints = {
+            _rectification_event_fingerprint(event) for event in submitted_events
+        }
+        if isinstance(existing_mutation, dict):
+            stored_fingerprints = {
+                str(value)
+                for value in existing_mutation.get("eventFingerprints") or []
+                if str(value).strip()
+            }
+            if stored_fingerprints == submitted_fingerprints:
+                return self.load_session(session_id)
+            raise ValueError("idempotency key was already used for different life events")
+        life_event_context = context.get("lifeEvents")
+        life_event_context = life_event_context if isinstance(life_event_context, dict) else {}
+        existing_event_fingerprints = {
+            _rectification_event_fingerprint(item)
+            for item in life_event_context.get("events", [])
+            if isinstance(item, dict)
+        }
+        if all(
+            _rectification_event_fingerprint(event) in existing_event_fingerprints
+            for event in submitted_events
+        ):
+            return self.load_session(session_id)
+        if (
+            input_data.expected_chart_revision is not None
+            and input_data.expected_chart_revision != current_record.revision
+        ):
+            raise ValueError(
+                "This verification question is outdated. Refresh the session before answering."
+            )
+
         plan = state.get("rectificationPlan")
         plan = plan if isinstance(plan, dict) else {}
         if (
@@ -341,7 +488,6 @@ class SkillRuntime:
         ):
             raise ValueError("this rectification session does not require more life events")
 
-        submitted_events = [event.model_dump(by_alias=True) for event in input_data.events]
         raw_time_context = context.get("time")
         time_context = (
             cast(dict[str, Any], raw_time_context) if isinstance(raw_time_context, dict) else {}
@@ -359,6 +505,14 @@ class SkillRuntime:
             interview=interview,
         )
         evidence_validation = await self._validate_rectification_event_evidence(new_events)
+        latest_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        latest_record = (
+            ChartRecord.model_validate_json(latest_record_text) if latest_record_text else None
+        )
+        if latest_record is None or latest_record.revision != current_record.revision:
+            raise ValueError(
+                "The chart changed while this answer was being verified. Refresh and answer the current question."
+            )
         self.workspace.write_artifact(
             session_id,
             LIFE_EVENT_EVIDENCE_VALIDATION_JSON,
@@ -371,22 +525,37 @@ class SkillRuntime:
             dependency_paths=[RECTIFICATION_INTERVIEW_JSON],
         )
 
-        current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
         revision = current_record.revision + 1
+        previous_life_events = context.get("lifeEvents")
+        previous_life_events = (
+            previous_life_events if isinstance(previous_life_events, dict) else {}
+        )
+        previous_raw_events = str(previous_life_events.get("raw") or "").strip()
+        submitted_raw_events = input_data.ledger_text().strip()
+        combined_life_events = "\n".join(
+            value for value in (previous_raw_events, submitted_raw_events) if value
+        )
+        semantic_evidence = _merge_rectification_semantics(
+            context.get("lifeEventSemantics"),
+            evidence_validation.get("results")
+            if isinstance(evidence_validation.get("results"), list)
+            else [],
+        )
         birth_input = self.rectification.birth_input_with_life_events(
             context,
             record_payload,
-            input_data.ledger_text(),
+            combined_life_events,
         )
+        birth_input.life_event_facts = json.dumps(semantic_evidence, ensure_ascii=False)
         identity = self._chart_record_identity(session_id, revision=revision)
         calculation = self.calculator.calculate(birth_input, identity=identity)
         updated_context = self._json_dict(calculation.birth_input_context_json)
         event_ledger = updated_context.get("lifeEvents")
         if (
             not isinstance(event_ledger, dict)
-            or int(event_ledger.get("eligibleEventCount") or 0) < 3
+            or int(event_ledger.get("eligibleEventCount") or 0) < 1
         ):
-            raise ValueError("at least three dated, recognized life events are required")
+            raise ValueError("at least one dated, recognized life event is required")
 
         self._archive_current_chart_artifacts(session_id, current_record.revision, artifacts)
         session_dir = self.workspace.require_session_dir(session_id)
@@ -413,6 +582,27 @@ class SkillRuntime:
             calculation.birth_input_context_json,
             calculation.sensitivity_scan_json,
         )
+        skipped_categories = state.get("skippedRectificationCategories")
+        if isinstance(skipped_categories, list):
+            updated_state["skippedRectificationCategories"] = [
+                str(category) for category in skipped_categories if str(category).strip()
+            ]
+        prior_mutations = state.get("rectificationMutations")
+        prior_mutations = prior_mutations if isinstance(prior_mutations, list) else []
+        updated_state["rectificationMutations"] = [
+            *[
+                item
+                for item in prior_mutations[-19:]
+                if isinstance(item, dict) and str(item.get("key") or "").strip()
+            ],
+            {
+                "key": mutation_key,
+                "chartRevision": revision,
+                "eventFingerprints": [
+                    _rectification_event_fingerprint(event) for event in submitted_events
+                ],
+            },
+        ]
         current_artifacts = {
             artifact.path: artifact.content
             for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
@@ -484,6 +674,20 @@ class SkillRuntime:
         owner_user_id: str | None = None,
         use_agent: bool = True,
     ) -> SkillSessionResponse:
+        async with self._rectification_transaction_lock(input_data.session_id):
+            return await self._prepare_rectification_interview(
+                input_data,
+                owner_user_id=owner_user_id,
+                use_agent=use_agent,
+            )
+
+    async def _prepare_rectification_interview(
+        self,
+        input_data: RectificationInterviewInput,
+        *,
+        owner_user_id: str | None = None,
+        use_agent: bool = True,
+    ) -> SkillSessionResponse:
         session_id = input_data.session_id
         state_text = self.workspace.read_artifact_text(session_id, "chart_rectification_state.json")
         if not state_text:
@@ -491,6 +695,47 @@ class SkillRuntime:
         state = self._json_dict(state_text)
         if state.get("status") not in {"collecting_evidence", "underdetermined"}:
             raise ValueError("this session does not require a rectification interview")
+
+        skipped_categories = {
+            str(category)
+            for category in (state.get("skippedRectificationCategories") or [])
+            if str(category).strip()
+        }
+        current_interview = self._json_dict(
+            self.workspace.read_artifact_text(session_id, RECTIFICATION_INTERVIEW_JSON) or ""
+        )
+        if input_data.reset_skipped:
+            skipped_categories.clear()
+        elif input_data.skipped_category:
+            if not input_data.current_question_id:
+                raise ValueError("skipping a question requires its current question id")
+            current_question = next(
+                (
+                    item
+                    for item in current_interview.get("questions", [])
+                    if isinstance(item, dict)
+                    and item.get("questionId") == input_data.current_question_id
+                ),
+                None,
+            )
+            if not isinstance(current_question, dict):
+                raise ValueError("the question to skip is missing or expired")
+            if current_question.get("category") != input_data.skipped_category:
+                raise ValueError("skipped category does not match the current question")
+            skipped_categories.add(input_data.skipped_category)
+        if input_data.reset_skipped or input_data.skipped_category:
+            state["skippedRectificationCategories"] = sorted(skipped_categories)
+            state["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            self.workspace.write_artifact(
+                session_id,
+                "chart_rectification_state.json",
+                json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+            )
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                "chart_rectification_state.json",
+                producer="vedicdust-rectification-interview",
+            )
 
         chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         life_stage = None
@@ -501,6 +746,7 @@ class SkillRuntime:
             session_id=session_id,
             locale=input_data.locale,
             life_stage=life_stage,
+            skipped_categories=skipped_categories,
         )
         if (
             interview.get("questions")
@@ -1787,8 +2033,16 @@ Return JSON only:
                     {
                         "questionId": event["questionId"],
                         "category": event["category"],
+                        "date": event.get("date", ""),
+                        "description": event.get("description", ""),
                         "accepted": True,
                         "reason": "Backend-issued question and category binding validated.",
+                        "eventFacts": {
+                            "occurrence": "occurred",
+                            "agency": "unknown",
+                            "impact": "unknown",
+                            "dateConfidence": "unknown",
+                        },
                     }
                     for event in events
                 ],
@@ -1808,10 +2062,16 @@ Return JSON only:
   "results": [
     {{
       "questionId": "exact submitted questionId",
-      "category": "exact submitted category",
-      "accepted": true,
-      "reason": "short user-facing reason"
-    }}
+	      "category": "exact submitted category",
+	      "accepted": true,
+	      "reason": "short user-facing reason",
+	      "eventFacts": {
+            "occurrence": "occurred|ongoing|uncertain",
+	        "agency": "active|passive|mixed|unknown",
+	        "impact": "major|moderate|minor|unknown",
+	        "dateConfidence": "year|month|day|unknown"
+	      }
+	    }}
   ]
 }}"""
         last_error: Exception | None = None
@@ -3346,12 +3606,17 @@ Return JSON only:
                 "eventCollectionRequired",
                 "recommendedMinimumEvents",
                 "recommendedRectificationUse",
+                "semanticEvidence",
             }
             return {
                 key: cls._without_holdout_evidence(item)
                 for key, item in value.items()
                 if "holdout" not in key.lower()
                 and not (is_life_event_ledger and key in hidden_ledger_fields)
+                and not (
+                    value.get("schemaVersion") == "birth-input-context/v1"
+                    and key == "lifeEventSemantics"
+                )
             }
         if isinstance(value, str) and "holdout" in value.lower():
             return "Reserved validation evidence is hidden from the Agent."

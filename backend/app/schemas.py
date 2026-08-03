@@ -47,6 +47,7 @@ class BirthInput(ApiModel):
     time_source: str = Field(default="未追问", alias="timeSource", max_length=120)
     reading_focus: str = Field(default="", alias="readingFocus", max_length=1000)
     life_events: str = Field(default="", alias="lifeEvents", max_length=4000)
+    life_event_facts: str = Field(default="", alias="lifeEventFacts", max_length=16000)
     reader_relationship: ReaderRelationship = Field(
         default="self",
         alias="readerRelationship",
@@ -79,7 +80,20 @@ class RectificationLifeEventInput(ApiModel):
 
 class RectificationLifeEventsInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
-    events: list[RectificationLifeEventInput] = Field(min_length=3, max_length=5)
+    expected_chart_revision: int | None = Field(
+        default=None,
+        alias="expectedChartRevision",
+        ge=1,
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        alias="idempotencyKey",
+        min_length=8,
+        max_length=160,
+    )
+    # Evidence is recalculated after every accepted answer. The release gate still
+    # requires the configured calibration set before a chart can be published.
+    events: list[RectificationLifeEventInput] = Field(min_length=1, max_length=5)
 
     @model_validator(mode="after")
     def validate_independent_events(self) -> RectificationLifeEventsInput:
@@ -100,6 +114,13 @@ class RectificationLifeEventsInput(ApiModel):
 class RectificationInterviewInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
     locale: AppLocale = "en"
+    current_question_id: str | None = Field(
+        default=None,
+        alias="currentQuestionId",
+        pattern=r"^rectify\.r\d+\.q\d+\.[a-z]+$",
+    )
+    skipped_category: LifeEventCategory | None = Field(default=None, alias="skippedCategory")
+    reset_skipped: bool = Field(default=False, alias="resetSkipped")
 
 
 class ConsultationQuestionInput(ApiModel):

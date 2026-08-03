@@ -701,8 +701,17 @@ class RectificationEvidenceObservation(ContractModel):
         return self
 
 
+class RectificationEventSemanticFacts(ContractModel):
+    occurrence: Literal["occurred", "ongoing", "uncertain"] = "occurred"
+    agency: Literal["active", "passive", "mixed", "unknown"] = "unknown"
+    impact: Literal["major", "moderate", "minor", "unknown"] = "unknown"
+    date_confidence: Literal["year", "month", "day", "unknown"] = "unknown"
+
+
 class CandidateEvidenceScore(ContractModel):
     event_id: str
+    event_fingerprint: str | None = None
+    semantic_facts: RectificationEventSemanticFacts | None = None
     role: Literal["calibration", "holdout"]
     score: float = Field(ge=-1, le=1)
     support_score: float = Field(ge=0, le=1)

@@ -340,6 +340,12 @@ type LifeEventDraft = RectificationLifeEventInput & {
   datePrecision: "year" | "month";
 };
 
+type RectificationInterviewAction = {
+  currentQuestionId?: string;
+  skippedCategory?: RectificationLifeEventCategory;
+  resetSkipped?: boolean;
+};
+
 type RectificationInterviewQuestion = {
   questionId: string;
   category: RectificationLifeEventCategory;
@@ -352,7 +358,10 @@ type RectificationInterviewQuestion = {
 };
 
 type RectificationInterview = {
-  schemaVersion: "vedicdust-rectification-interview/1.0.0";
+  schemaVersion:
+    | "vedicdust-rectification-interview/1.0.0"
+    | "vedicdust-rectification-interview/1.1.0"
+    | "vedicdust-rectification-interview/1.2.0";
   title: string;
   intro: string;
   source: string;
@@ -720,7 +729,13 @@ export function Session() {
     setError("");
     setSubmittingLifeEvents(true);
     try {
-      const updated = await api.recordRectificationLifeEvents({ sessionId: id, events });
+      const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
+      const expectedChartRevision = numberLike(chartRecord?.revision);
+      const updated = await api.recordRectificationLifeEvents({
+        sessionId: id,
+        events,
+        ...(expectedChartRevision != null ? { expectedChartRevision } : {})
+      });
       setSession(updated);
       readerStartedRef.current = false;
       const nextStep = readingContinuationAction(updated);
@@ -735,19 +750,26 @@ export function Session() {
     }
   }
 
-  const prepareRectificationInterview = useCallback(async () => {
-    if (!authLoaded || preparingRectificationInterview) return;
-    setError("");
-    setPreparingRectificationInterview(true);
-    try {
-      const updated = await api.prepareRectificationInterview({ sessionId: id, locale });
-      setSession(updated);
-    } catch (caught) {
-      setError(userFacingError(caught, "Could not prepare the next verification question."));
-    } finally {
-      setPreparingRectificationInterview(false);
-    }
-  }, [authLoaded, id, locale, preparingRectificationInterview]);
+  const prepareRectificationInterview = useCallback(
+    async (action: RectificationInterviewAction = {}) => {
+      if (!authLoaded || preparingRectificationInterview) return;
+      setError("");
+      setPreparingRectificationInterview(true);
+      try {
+        const updated = await api.prepareRectificationInterview({
+          sessionId: id,
+          locale,
+          ...action
+        });
+        setSession(updated);
+      } catch (caught) {
+        setError(userFacingError(caught, "Could not prepare the next verification question."));
+      } finally {
+        setPreparingRectificationInterview(false);
+      }
+    },
+    [authLoaded, id, locale, preparingRectificationInterview]
+  );
 
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden bg-cream-2">
@@ -848,6 +870,12 @@ export function Session() {
                 {exportingPdf ? t("session.report.pdfPreparing") : t("session.report.downloadPdf")}
               </Button>
             </div>
+            <ReportOverview
+              session={session}
+              reportSections={reportSections}
+              baziMode={baziMode}
+              onJump={scrollToSection}
+            />
             {reportSections.map((artifact, index) => (
               <section
                 className="report-section mb-12 scroll-mt-20 border-b border-gold/25 pb-12 last:border-0"
@@ -956,6 +984,108 @@ export function Session() {
         </div>
       )}
     </div>
+  );
+}
+
+function ReportOverview({
+  session,
+  reportSections,
+  baziMode,
+  onJump
+}: {
+  session: SkillSessionResponse | null;
+  reportSections: SkillArtifact[];
+  baziMode: boolean;
+  onJump: (index: number) => void;
+}) {
+  const { locale, t } = useI18n();
+  const milestones = baziMode
+    ? [
+        {
+          label: t("session.report.journey.chart"),
+          done: Boolean(findArtifact(session, "bazi_chart_foundation.md"))
+        },
+        { label: t("session.report.journey.report"), done: reportSections.length > 0 }
+      ]
+    : [
+        {
+          label: t("session.report.journey.chart"),
+          done: Boolean(findArtifact(session, CHART_RECORD_JSON))
+        },
+        {
+          label: t("session.report.journey.calibration"),
+          done: Boolean(findArtifact(session, "chart_rectification_state.json"))
+        },
+        {
+          label: t("session.report.journey.synthesis"),
+          done: Boolean(findArtifact(session, "consultation_dossier.json"))
+        },
+        { label: t("session.report.journey.report"), done: reportSections.length > 0 }
+      ];
+  const updatedAt = reportSections.reduce<string | null>(
+    (latest, artifact) => (!latest || artifact.updatedAt > latest ? artifact.updatedAt : latest),
+    null
+  );
+
+  return (
+    <section className="mb-10 border-b border-gold/25 pb-7" aria-labelledby="report-overview-title">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-2xl">
+          <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
+            {t("session.report.kicker")}
+          </div>
+          <h2 id="report-overview-title" className="mb-2 text-xl font-medium text-ink">
+            {t("session.report.overviewTitle")}
+          </h2>
+          <p className="m-0 text-[13px] leading-7 text-body">{t("session.report.overviewBody")}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 text-[11px] text-muted">
+          <span className="rounded-full border border-gold/25 px-3 py-1.5">
+            {t("session.report.sectionCount", { count: String(reportSections.length) })}
+          </span>
+          {updatedAt ? (
+            <span className="rounded-full border border-gold/25 px-3 py-1.5">
+              {t("session.report.updated", {
+                time: new Date(updatedAt).toLocaleDateString(locale)
+              })}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <div className="mb-3 text-[10px] uppercase tracking-[2px] text-muted">
+          {t("session.report.journey")}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+          {milestones.map((milestone, index) => (
+            <div key={milestone.label} className="flex items-center gap-2 text-[12px] text-body">
+              <CheckCircle2
+                className={cn("size-4", milestone.done ? "text-gold" : "text-muted/40")}
+              />
+              <span>{milestone.label}</span>
+              {index < milestones.length - 1 ? <span className="text-muted/50">/</span> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1" aria-label={t("session.report.contents")}>
+        {reportSections.map((artifact, index) => (
+          <button
+            key={artifact.path}
+            type="button"
+            className="shrink-0 rounded-md border border-gold/25 px-3 py-2 text-left text-[12px] text-body transition hover:border-gold hover:text-ink"
+            onClick={() => onJump(index)}
+          >
+            <span className="mr-2 text-[10px] font-bold text-gold">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            {titleForArtifact(artifact, locale)}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1464,7 +1594,7 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
-  onPrepareRectificationInterview: () => Promise<void>;
+  onPrepareRectificationInterview: (action?: RectificationInterviewAction) => Promise<void>;
   onResumeCoreReport: () => Promise<void>;
   onStartBaziReport: () => Promise<void>;
   coreInterrupted: boolean;
@@ -2006,7 +2136,7 @@ function LifeEventCollector({
   state: RectificationState;
   interviewContent: string;
   preparing: boolean;
-  onPrepare: () => Promise<void>;
+  onPrepare: (action?: RectificationInterviewAction) => Promise<void>;
   submitting: boolean;
   onSubmit: (events: RectificationLifeEventInput[]) => Promise<void>;
   authLoaded: boolean;
@@ -2021,10 +2151,10 @@ function LifeEventCollector({
           prepare: "准备问题",
           exhausted: "现有证据无法进一步缩小时间范围",
           exhaustedBody: "系统会保留剩余时间范围，而不是给出虚假的精确时间。",
-          back: "上一题",
           next: "下一题",
           compare: "开始比较候选时间",
           skip: "不适用，跳过",
+          reset: "重新选择问题",
           monthKnown: "记得月份",
           yearOnly: "只记得年份"
         }
@@ -2035,10 +2165,10 @@ function LifeEventCollector({
             prepare: "質問を準備",
             exhausted: "現在の証拠では時間帯をこれ以上絞れません",
             exhaustedBody: "誤った精密さを示さず、残る時間範囲を保持します。",
-            back: "前へ",
             next: "次の質問",
             compare: "出生時刻候補を比較",
             skip: "該当しないためスキップ",
+            reset: "質問を選び直す",
             monthKnown: "月まで分かる",
             yearOnly: "年のみ"
           }
@@ -2049,10 +2179,10 @@ function LifeEventCollector({
             exhausted: "We cannot narrow the time further from the available evidence",
             exhaustedBody:
               "The chart will keep the remaining time range instead of claiming false precision.",
-            back: "Back",
             next: "Next question",
             compare: "Compare birth-time candidates",
             skip: "Doesn't apply, skip",
+            reset: "Choose another question",
             monthKnown: "I know the month",
             yearOnly: "Year only"
           };
@@ -2077,12 +2207,10 @@ function LifeEventCollector({
         })),
     [state.lifeEventLedger?.events]
   );
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, LifeEventDraft>>({});
-  const [skipped, setSkipped] = useState<Set<string>>(new Set());
-  const question = interview?.questions[activeIndex];
+  const [draft, setDraft] = useState<LifeEventDraft | null>(null);
+  const question = interview?.questions[0];
   const answer = question
-    ? (answers[question.questionId] ?? {
+    ? (draft ?? {
         questionId: question.questionId,
         date: "",
         category: question.category,
@@ -2091,74 +2219,42 @@ function LifeEventCollector({
       })
     : null;
   const answerComplete = Boolean(answer?.date && answer.description.trim().length >= 3);
-  const completedNewEvents = interview
-    ? interview.questions
-        .map((item) => answers[item.questionId])
-        .filter((item): item is LifeEventDraft =>
-          Boolean(item?.date && item.category && item.description.trim().length >= 3)
-        )
-    : [];
-  const projectedQuestionIds = new Set(completedNewEvents.map((item) => item.questionId));
-  if (answerComplete && question) projectedQuestionIds.add(question.questionId);
   const reachesTarget = Boolean(
-    interview && existingEvents.length + projectedQuestionIds.size >= interview.progress.target
+    interview && existingEvents.length + 1 >= interview.progress.target
   );
 
   useEffect(() => {
-    setActiveIndex(0);
-    setAnswers({});
-    setSkipped(new Set());
+    setDraft(null);
   }, [interviewContent]);
 
   function updateAnswer(update: Partial<LifeEventDraft>) {
     if (!question || !answer) return;
-    setAnswers((current) => ({
-      ...current,
-      [question.questionId]: {
-        ...answer,
-        ...update,
-        questionId: question.questionId,
-        category: question.category
-      }
+    setDraft((current) => ({
+      ...(current ?? answer),
+      ...update,
+      questionId: question.questionId,
+      category: question.category
     }));
   }
 
-  function advanceOrFinish(currentAnswers: Record<string, LifeEventDraft>) {
-    if (!interview) return;
-    const newEvents = interview.questions
-      .map((item) => currentAnswers[item.questionId])
-      .filter((item): item is LifeEventDraft =>
-        Boolean(item?.date && item.category && item.description.trim().length >= 3)
-      )
-      .map((item) => ({
-        questionId: item.questionId,
-        date: item.date,
-        description: item.description,
-        category: item.category as RectificationLifeEventCategory
-      }));
-    if (existingEvents.length + newEvents.length >= interview.progress.target) {
-      void onSubmit([...existingEvents, ...newEvents].slice(0, interview.progress.maximumAccepted));
-      return;
-    }
-    const nextIndex = interview.questions.findIndex(
-      (item, index) => index > activeIndex && !skipped.has(item.questionId)
-    );
-    setActiveIndex(nextIndex >= 0 ? nextIndex : interview.questions.length);
+  function submitCurrent(currentAnswer: LifeEventDraft) {
+    if (!interview || !question) return;
+    void onSubmit([
+      {
+        questionId: currentAnswer.questionId,
+        date: currentAnswer.date,
+        description: currentAnswer.description,
+        category: currentAnswer.category as RectificationLifeEventCategory
+      }
+    ]);
   }
 
   function skipQuestion() {
     if (!question || !interview) return;
-    const nextSkipped = new Set(skipped).add(question.questionId);
-    setSkipped(nextSkipped);
-    setAnswers((current) => {
-      const next = { ...current };
-      delete next[question.questionId];
-      return next;
+    void onPrepare({
+      currentQuestionId: question.questionId,
+      skippedCategory: question.category
     });
-    const nextIndex = interview.questions.findIndex(
-      (item, index) => index > activeIndex && !nextSkipped.has(item.questionId)
-    );
-    setActiveIndex(nextIndex >= 0 ? nextIndex : interview.questions.length);
   }
 
   if (preparing) {
@@ -2189,6 +2285,14 @@ function LifeEventCollector({
         <p className="m-0 text-[13px] leading-7 text-body">
           {interview.stopReason ?? ui.exhaustedBody}
         </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="mt-4"
+          onClick={() => void onPrepare({ resetSkipped: true })}
+        >
+          <RefreshCw size={15} /> {ui.reset}
+        </Button>
       </div>
     );
   }
@@ -2199,26 +2303,14 @@ function LifeEventCollector({
       onSubmit={(event) => {
         event.preventDefault();
         if (!answerComplete || !answer) return;
-        const currentAnswers = {
-          ...answers,
-          [question.questionId]: { ...answer, category: question.category }
-        };
-        setAnswers(currentAnswers);
-        advanceOrFinish(currentAnswers);
+        const currentAnswer = { ...answer, category: question.category };
+        setDraft(currentAnswer);
+        submitCurrent(currentAnswer);
       }}
     >
       <div>
-        <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[1.4px] text-gold-dim">
+        <div className="mb-2 text-[11px] uppercase tracking-[1.4px] text-gold-dim">
           <span>{interview.progress.label}</span>
-          <span>
-            {activeIndex + 1}/{interview.questions.length}
-          </span>
-        </div>
-        <div className="h-1 overflow-hidden rounded-full bg-gold/15">
-          <div
-            className="h-full rounded-full bg-gold transition-[width] duration-500"
-            style={{ width: `${((activeIndex + 1) / interview.questions.length) * 100}%` }}
-          />
         </div>
       </div>
 
@@ -2285,17 +2377,6 @@ function LifeEventCollector({
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          {activeIndex > 0 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setActiveIndex((value) => value - 1)}
-            >
-              <ChevronLeft size={15} /> {ui.back}
-            </Button>
-          ) : (
-            <span />
-          )}
           <Button type="button" variant="ghost" onClick={skipQuestion}>
             {ui.skip}
           </Button>
@@ -2513,7 +2594,7 @@ function ReaderDetail({
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
-  onPrepareRectificationInterview: () => Promise<void>;
+  onPrepareRectificationInterview: (action?: RectificationInterviewAction) => Promise<void>;
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
@@ -3818,7 +3899,11 @@ function parseRectificationInterview(content: string): RectificationInterview | 
   try {
     const parsed = JSON.parse(content) as RectificationInterview;
     if (
-      parsed.schemaVersion !== "vedicdust-rectification-interview/1.0.0" ||
+      !(
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.0.0" ||
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.1.0" ||
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.2.0"
+      ) ||
       !Array.isArray(parsed.questions) ||
       !parsed.progress
     ) {

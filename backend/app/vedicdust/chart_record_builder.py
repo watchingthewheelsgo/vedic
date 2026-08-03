@@ -2264,6 +2264,16 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                 evidence_scores=[
                     CandidateEvidenceScore(
                         event_id=str(score.get("eventId")),
+                        event_fingerprint=(
+                            str(score["eventFingerprint"])
+                            if score.get("eventFingerprint")
+                            else None
+                        ),
+                        semantic_facts=(
+                            score.get("semanticFacts")
+                            if isinstance(score.get("semanticFacts"), Mapping)
+                            else None
+                        ),
                         role=str(score.get("role") or "calibration"),
                         score=float(score.get("score") or 0.0),
                         support_score=float(score.get("supportScore") or 0.0),

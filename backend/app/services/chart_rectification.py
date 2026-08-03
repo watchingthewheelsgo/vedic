@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -606,6 +607,10 @@ class ChartRectificationService:
             timeSource=self._rectified_time_source(time_context.get("source")),
             readingFocus=str(birth_input_context.get("readingFocus") or ""),
             lifeEvents=str(life_event_context.get("raw") or ""),
+            lifeEventFacts=json.dumps(
+                birth_input_context.get("lifeEventSemantics") or [],
+                ensure_ascii=False,
+            ),
             utcOffsetSeconds=(
                 int(candidate["utcOffsetSeconds"])
                 if candidate.get("civilTimeFold") and candidate.get("utcOffsetSeconds") is not None
@@ -655,6 +660,10 @@ class ChartRectificationService:
             timeSource=str(time_context.get("source") or "未追问"),
             readingFocus=str(birth_input_context.get("readingFocus") or ""),
             lifeEvents=life_events,
+            lifeEventFacts=json.dumps(
+                birth_input_context.get("lifeEventSemantics") or [],
+                ensure_ascii=False,
+            ),
             utcOffsetSeconds=int(utc_offset) if utc_offset is not None else None,
             locale=locale,
         )
@@ -1046,8 +1055,9 @@ class ChartRectificationService:
         elif status == "collecting_evidence":
             action = "collect_dated_life_events"
             directive = (
-                "Collect 3 to 5 dated, user-supplied life events before generating any "
-                "candidate-scoring question."
+                "Collect one new, dated user-supplied life event at a time. Recalculate the "
+                "bounded candidates after each accepted event, but do not publish or select a "
+                "chart until the minimum calibration set and holdout policy pass."
             )
         elif status == "comparing_candidates":
             action = "evaluate_calibration_events"

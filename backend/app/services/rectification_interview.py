@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.schemas import AppLocale
 from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_RULES
 
 
-INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.0.0"
+INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.2.0"
 MAX_RECTIFICATION_EVENTS = 5
 
 
@@ -165,6 +165,7 @@ def build_rectification_interview(
     session_id: str,
     locale: AppLocale,
     life_stage: str | None = None,
+    skipped_categories: set[str] | None = None,
 ) -> dict[str, Any]:
     plan = (
         state.get("rectificationPlan") if isinstance(state.get("rectificationPlan"), dict) else {}
@@ -177,11 +178,17 @@ def build_rectification_interview(
         plan.get("discriminatingFields"),
         existing_categories,
         life_stage=life_stage,
+        candidate_summaries=(
+            plan.get("candidateSummaries")
+            if isinstance(plan.get("candidateSummaries"), list)
+            else []
+        ),
     )
-    # Offer every remaining independent category. The evidence target remains
-    # bounded separately, so a skipped or inapplicable question does not trap
-    # the user before the minimum evidence set is reached.
-    question_count = remaining
+    skipped = skipped_categories or set()
+    categories = [category for category in categories if category not in skipped]
+    # One question is a complete interaction round. The answer is recalculated
+    # before the next question is selected from the updated candidate state.
+    question_count = min(1, remaining)
     selected_categories = categories[:question_count]
     copy = _COPY.get(locale, _COPY["en"])
     target = min(MAX_RECTIFICATION_EVENTS, max(3, len(existing) + 1))
@@ -211,10 +218,23 @@ def build_rectification_interview(
         )
 
     status = "collecting" if questions else "exhausted"
+    if questions:
+        stop_reason = None
+    elif remaining <= 0:
+        stop_reason = (
+            "The maximum evidence set has been reached. Preserve an underdetermined result."
+        )
+    else:
+        stop_reason = (
+            "No unused event category remains in this round. Ask for a different dated event "
+            "or continue with the bounded candidates."
+        )
     return {
         "schemaVersion": INTERVIEW_SCHEMA_VERSION,
         "sessionId": session_id,
-        "generatedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generatedAt": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
         "round": max(1, len(existing) + 1),
         "status": status,
         "title": copy["title"],
@@ -228,11 +248,7 @@ def build_rectification_interview(
         },
         "questions": questions,
         "source": "deterministic_brief",
-        "stopReason": (
-            "The maximum evidence set has been reached. Preserve an underdetermined result."
-            if not questions
-            else None
-        ),
+        "stopReason": stop_reason,
     }
 
 
@@ -311,39 +327,24 @@ def validate_rectification_event_bindings(
 ) -> list[dict[str, Any]]:
     """Return newly answered events after enforcing backend-issued question identity."""
 
-    ledger = state.get("lifeEventLedger") if isinstance(state.get("lifeEventLedger"), dict) else {}
-    existing = {
-        (str(item.get("date") or ""), str(item.get("category") or ""))
-        for item in ledger.get("events", [])
-        if isinstance(item, dict)
-    }
     questions = {
         str(item.get("questionId")): str(item.get("category"))
         for item in interview.get("questions", [])
         if isinstance(item, dict) and item.get("questionId") and item.get("category")
     }
-    used_question_ids: set[str] = set()
-    new_events: list[dict[str, Any]] = []
-    for event in events:
-        question_id = str(event.get("questionId") or "")
-        category = str(event.get("category") or "")
-        date_value = str(event.get("date") or "")
-        if not question_id:
-            if (date_value, category) not in existing:
-                raise ValueError("new life events must answer a current verification question")
-            continue
-        if question_id in used_question_ids:
-            raise ValueError("a verification question can only provide one life event")
-        expected_category = questions.get(question_id)
-        if expected_category is None:
-            raise ValueError("life event references an expired verification question")
-        if category != expected_category:
-            raise ValueError("life event category does not match its verification question")
-        used_question_ids.add(question_id)
-        new_events.append(event)
-    if not new_events:
-        raise ValueError("at least one current verification question must be answered")
-    return new_events
+    if len(events) != 1:
+        raise ValueError("answer exactly one current verification question at a time")
+    event = events[0]
+    question_id = str(event.get("questionId") or "")
+    category = str(event.get("category") or "")
+    if not question_id:
+        raise ValueError("new life events must answer a current verification question")
+    expected_category = questions.get(question_id)
+    if expected_category is None:
+        raise ValueError("life event references an expired verification question")
+    if category != expected_category:
+        raise ValueError("life event category does not match its verification question")
+    return [event]
 
 
 def validate_agent_event_evidence(
@@ -355,7 +356,10 @@ def validate_agent_event_evidence(
     raw_results = payload.get("results")
     if not isinstance(raw_results, list):
         raise ValueError("life event evidence audit must contain results")
-    expected = {str(item.get("questionId")): str(item.get("category")) for item in expected_events}
+    expected_by_question = {str(item.get("questionId")): item for item in expected_events}
+    expected = {
+        question_id: str(item.get("category")) for question_id, item in expected_by_question.items()
+    }
     observed: dict[str, dict[str, Any]] = {}
     for item in raw_results:
         if not isinstance(item, dict):
@@ -375,7 +379,47 @@ def validate_agent_event_evidence(
     ]
     if rejected:
         raise ValueError("Please revise the life event: " + "; ".join(rejected[:2]))
-    return list(observed.values())
+    normalized: list[dict[str, Any]] = []
+    for question_id, item in observed.items():
+        expected_event = expected_by_question[question_id]
+        normalized.append(
+            {
+                "questionId": question_id,
+                "category": expected[question_id],
+                "date": str(expected_event.get("date") or ""),
+                "description": str(expected_event.get("description") or ""),
+                "accepted": True,
+                "reason": str(item.get("reason") or "Concrete dated life event."),
+                "eventFacts": _normalize_event_facts(item.get("eventFacts")),
+            }
+        )
+    return normalized
+
+
+def _normalize_event_facts(value: Any) -> dict[str, str]:
+    """Keep Agent semantics bounded before they enter deterministic evidence context."""
+
+    raw = value if isinstance(value, dict) else {}
+    allowed = {
+        "occurrence": {"occurred", "ongoing", "uncertain"},
+        "agency": {"active", "passive", "mixed", "unknown"},
+        "impact": {"major", "moderate", "minor", "unknown"},
+        "dateConfidence": {"year", "month", "day", "unknown"},
+    }
+    defaults = {
+        "occurrence": "occurred",
+        "agency": "unknown",
+        "impact": "unknown",
+        "dateConfidence": "unknown",
+    }
+    return {
+        field: (
+            str(raw.get(field) or defaults[field])
+            if str(raw.get(field) or defaults[field]) in values
+            else defaults[field]
+        )
+        for field, values in allowed.items()
+    }
 
 
 def _rank_categories(
@@ -383,6 +427,7 @@ def _rank_categories(
     excluded: set[str],
     *,
     life_stage: str | None,
+    candidate_summaries: list[dict[str, Any]],
 ) -> list[str]:
     fields = [str(value).casefold() for value in raw_fields or []]
     ranked: list[str] = []
@@ -407,7 +452,36 @@ def _rank_categories(
         if category in excluded or category in result or category not in RECTIFICATION_EVENT_RULES:
             continue
         result.append(category)
-    return result
+    priority = {category: index for index, category in enumerate(result)}
+    return sorted(
+        result,
+        key=lambda category: (
+            -_category_information_score(category, fields, candidate_summaries),
+            priority[category],
+        ),
+    )
+
+
+def _category_information_score(
+    category: str,
+    discriminating_fields: list[str],
+    candidate_summaries: list[dict[str, Any]],
+) -> int:
+    rules = RECTIFICATION_EVENT_RULES.get(category, RECTIFICATION_EVENT_RULES["unknown"])
+    preferred = {str(value).casefold() for value in rules.get("fields") or []}
+    matched = [field for field in discriminating_fields if field.casefold() in preferred]
+    score = len(matched) * 100
+    if not candidate_summaries:
+        return score
+    for field in matched:
+        changed_count = sum(
+            field in {str(value).casefold() for value in candidate.get("changedFromBase") or []}
+            for candidate in candidate_summaries
+            if isinstance(candidate, dict)
+        )
+        if 0 < changed_count < len(candidate_summaries):
+            score += 20 + min(changed_count, len(candidate_summaries) - changed_count)
+    return score
 
 
 def _category_discriminating_fields(

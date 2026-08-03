@@ -7,7 +7,7 @@ type MarkdownBlock =
   | { type: "paragraph"; text: string }
   | { type: "quote"; text: string }
   | { type: "list"; items: string[] }
-  | { type: "table"; lines: string[] }
+  | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "code"; text: string };
 
 export function MarkdownReport({ content }: { content: string }) {
@@ -53,9 +53,38 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   }
   if (block.type === "table") {
     return (
-      <pre className="my-3.5 overflow-x-auto whitespace-pre rounded-md border border-gold/25 bg-cream-2 p-3 font-mono text-[12.5px] text-body">
-        {block.lines.join("\n")}
-      </pre>
+      <div
+        className="my-4 overflow-x-auto rounded-md border border-gold/25 bg-cream-2"
+        role="region"
+        tabIndex={0}
+        aria-label="Report table"
+      >
+        <table className="min-w-full border-collapse text-left text-[12.5px] text-body">
+          <thead className="bg-gold/10 text-[11px] uppercase tracking-[0.08em] text-gold-dim">
+            <tr>
+              {block.headers.map((cell, index) => (
+                <th key={index} className="border-b border-gold/20 px-3 py-2.5 font-semibold">
+                  {renderInline(cell)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="even:bg-cream/60">
+                {block.headers.map((_, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    className="border-b border-gold/15 px-3 py-2.5 align-top last:border-0"
+                  >
+                    {renderInline(row[cellIndex] ?? "")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     );
   }
   if (block.type === "code") {
@@ -116,7 +145,12 @@ function parseMarkdown(content: string): MarkdownBlock[] {
         table.push(lines[index]);
         index += 1;
       }
-      blocks.push({ type: "table", lines: table });
+      const parsedTable = parseTable(table);
+      if (parsedTable) {
+        blocks.push(parsedTable);
+      } else {
+        blocks.push({ type: "paragraph", text: table.join(" ") });
+      }
       continue;
     }
 
@@ -151,6 +185,45 @@ function parseMarkdown(content: string): MarkdownBlock[] {
 
 function isTableLine(line: string) {
   return line.includes("|") && line.split("|").length >= 3;
+}
+
+function parseTable(lines: string[]): Extract<MarkdownBlock, { type: "table" }> | null {
+  if (lines.length < 2) return null;
+  const rows = lines.map(parseTableCells);
+  const separatorIndex = rows.findIndex((row) => row.length > 0 && row.every(isTableSeparator));
+  if (separatorIndex !== 1 || rows[0].length === 0) return null;
+  const width = rows[0].length;
+  return {
+    type: "table",
+    headers: rows[0],
+    rows: rows
+      .slice(2)
+      .map((row) => [...row, ...Array(Math.max(0, width - row.length)).fill("")].slice(0, width))
+  };
+}
+
+function parseTableCells(line: string) {
+  const source = line.replace(/^\s*\|/, "").replace(/\|\s*$/, "");
+  const cells: string[] = [];
+  let cell = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "\\" && source[index + 1] === "|") {
+      cell += "|";
+      index += 1;
+    } else if (character === "|") {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += character;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function isTableSeparator(cell: string) {
+  return /^:?-{3,}:?$/.test(cell);
 }
 
 function renderInline(text: string): ReactNode[] {

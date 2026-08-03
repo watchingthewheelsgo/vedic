@@ -321,6 +321,29 @@
           "title": "Eventid",
           "type": "string"
         },
+        "eventFingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventfingerprint"
+        },
+        "semanticFacts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RectificationEventSemanticFacts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "role": {
           "enum": ["calibration", "holdout"],
           "title": "Role",
@@ -1069,6 +1092,37 @@
       },
       "required": ["status", "confidence"],
       "title": "RectificationDecision",
+      "type": "object"
+    },
+    "RectificationEventSemanticFacts": {
+      "additionalProperties": false,
+      "properties": {
+        "occurrence": {
+          "default": "occurred",
+          "enum": ["occurred", "ongoing", "uncertain"],
+          "title": "Occurrence",
+          "type": "string"
+        },
+        "agency": {
+          "default": "unknown",
+          "enum": ["active", "passive", "mixed", "unknown"],
+          "title": "Agency",
+          "type": "string"
+        },
+        "impact": {
+          "default": "unknown",
+          "enum": ["major", "moderate", "minor", "unknown"],
+          "title": "Impact",
+          "type": "string"
+        },
+        "dateConfidence": {
+          "default": "unknown",
+          "enum": ["year", "month", "day", "unknown"],
+          "title": "Dateconfidence",
+          "type": "string"
+        }
+      },
+      "title": "RectificationEventSemanticFacts",
       "type": "object"
     },
     "RectificationEvidenceObservation": {

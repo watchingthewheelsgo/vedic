@@ -154,12 +154,17 @@ export type RectificationLifeEventInput = {
 
 export type RectificationLifeEventsInput = {
   sessionId: string;
+  expectedChartRevision?: number;
+  idempotencyKey?: string;
   events: RectificationLifeEventInput[];
 };
 
 export type RectificationInterviewInput = {
   sessionId: string;
   locale: AppLocale;
+  currentQuestionId?: string;
+  skippedCategory?: RectificationLifeEventCategory;
+  resetSkipped?: boolean;
 };
 
 export type ConsultationQuestionInput = {

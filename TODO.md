@@ -209,7 +209,9 @@ poll until complete -> verify public files`. It requires explicit fixture
       but Agent feedback cannot move or recreate the search space.
 - [x] Add dated life-event input and backend event ledger. The initial consultation
       focus is stored separately as `readingFocus`; only the dedicated
-      rectification stage can submit 3-5 dated events. The calculator writes those
+      rectification stage can submit 3-5 dated events, one answer at a time. Each
+      accepted answer is merged into the ledger and recalculates the bounded
+      candidates before the next question is selected. The calculator writes those
       events into `birth_input_context.json.lifeEvents`, and
       `chart_rectification_state.json` exposes `lifeEventLedger` / `lifeEventFocus`
       for professional rectification anchors.
@@ -255,6 +257,19 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
 - [x] Add regression tests for deterministic rectification gates: incomplete candidate
       calculations, calibration ties and margins, holdout failure, selected-interval
       recalculation, unmaterializable selections, and `reportAllowed` transitions.
+- [x] Make the rectification interview adaptive at the interaction boundary: the
+      backend emits one deterministic question, recalculates after the answer, and
+      derives the next question from the updated candidate discriminators. Agent
+      output may only rewrite approved wording; it cannot choose, score, or stop
+      the candidate set.
+- [x] Make one-answer rectification mutations concurrency-safe. Each session now
+      uses an in-process and Unix file lock, checks the client-observed chart
+      revision, records an idempotency fingerprint, and returns the saved session
+      on a safe retry instead of recalculating twice.
+- [x] Bind skip actions to the currently issued question and provide a reset path
+      when skipped categories exhaust the interview. Accepted Agent evidence is
+      normalized into bounded event facts and carried into the typed candidate
+      evidence record without changing deterministic score weights.
 
 ## P0: judgement and report quality
 
@@ -369,7 +384,10 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
 
 - Replace raw skill names in primary controls with ordinary-user copy while
   preserving the exact skill workflow underneath.
-- Render markdown as formatted report pages instead of only `<pre>` blocks.
+- [x] Render markdown as formatted report pages with semantic headings, lists, quotes,
+      code blocks, and tables instead of only `<pre>` blocks.
+- [x] Add a report overview with the reading path, section count, update date, and
+      in-page section shortcuts before the long-form report.
 - Add a dedicated report timeline:
   calculator, rectification, judgement, consultation dossier, final report, and
   optional synastry.

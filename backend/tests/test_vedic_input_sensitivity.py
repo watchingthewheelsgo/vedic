@@ -1757,17 +1757,6 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
         )
         assert state["status"] == "collecting_evidence"
 
-        await runtime.prepare_rectification_interview(
-            RectificationInterviewInput(sessionId=created.session_id, locale="en"),
-            use_agent=False,
-        )
-        interview = json.loads(
-            workspace.read_artifact_text(created.session_id, "rectification_interview.json") or "{}"
-        )
-        question_ids = {
-            question["category"]: question["questionId"] for question in interview["questions"]
-        }
-
         for stale_path in [
             "reader_prevalidation.md",
             "prevalidation_result.json",
@@ -1777,31 +1766,52 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
         ]:
             workspace.write_artifact(created.session_id, stale_path, "stale\n")
 
-        updated = await runtime.record_rectification_life_events(
-            RectificationLifeEventsInput(
+        updated = None
+        for index, description in enumerate(
+            ["Graduated from university", "Changed employer and role", "Registered marriage"],
+            start=1,
+        ):
+            await runtime.prepare_rectification_interview(
+                RectificationInterviewInput(sessionId=created.session_id, locale="en"),
+                use_agent=False,
+            )
+            interview = json.loads(
+                workspace.read_artifact_text(created.session_id, "rectification_interview.json")
+                or "{}"
+            )
+            question = interview["questions"][0]
+            if index == 1:
+                with pytest.raises(ValueError, match="does not match"):
+                    await runtime.prepare_rectification_interview(
+                        RectificationInterviewInput(
+                            sessionId=created.session_id,
+                            locale="en",
+                            currentQuestionId=question["questionId"],
+                            skippedCategory="health",
+                        ),
+                        use_agent=False,
+                    )
+            submission = RectificationLifeEventsInput(
                 sessionId=created.session_id,
                 events=[
                     {
-                        "questionId": question_ids["education"],
-                        "date": "2012-06",
-                        "category": "education",
-                        "description": "Graduated from university",
-                    },
-                    {
-                        "questionId": question_ids["career"],
-                        "date": "2018-03",
-                        "category": "career",
-                        "description": "Changed employer and role",
-                    },
-                    {
-                        "questionId": question_ids["relationship"],
-                        "date": "2021-10",
-                        "category": "relationship",
-                        "description": "Registered marriage",
-                    },
+                        "questionId": question["questionId"],
+                        "date": f"{2011 + index}-06",
+                        "category": question["category"],
+                        "description": description,
+                    }
                 ],
             )
-        )
+            updated = await runtime.record_rectification_life_events(submission)
+            if index == 1:
+                replayed = await runtime.record_rectification_life_events(submission)
+                replayed_record = json.loads(
+                    workspace.read_artifact_text(created.session_id, "chart_record.json") or "{}"
+                )
+                assert replayed.stage == "reader_ready"
+                assert replayed_record["revision"] == 2
+
+        assert updated is not None
 
         context = json.loads(
             workspace.read_artifact_text(created.session_id, "birth_input_context.json") or "{}"
@@ -1819,7 +1829,14 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
         assert updated.stage == "reader_ready"
         assert context["readingFocus"] == "Career direction"
         assert context["lifeEvents"]["eligibleEventCount"] == 3
-        assert record["revision"] == 2
+        assert len(context["lifeEventSemantics"]) == 3
+        assert all("eventFacts" in item for item in context["lifeEventSemantics"])
+        assert all(
+            "semanticFacts" in item
+            for item in context["lifeEvents"]["events"]
+            if item["category"] != "unknown"
+        )
+        assert record["revision"] == 4
         assert record["subject"]["readerRelationship"] == "parent"
         assert record["subject"]["consultationTopics"] == ["Career direction"]
         assert next_state["status"] != "collecting_evidence"

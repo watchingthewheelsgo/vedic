@@ -16,6 +16,7 @@ from app.services.rectification_interview import (
     validate_rectification_event_dates,
 )
 from app.services.skill_runtime import SkillRuntime
+from app.services.life_event_rectification import parse_life_event_ledger
 
 
 def _state(
@@ -51,12 +52,8 @@ def test_question_categories_follow_candidate_discriminators() -> None:
         locale="zh",
     )
 
-    assert [question["category"] for question in interview["questions"]][:3] == [
-        "career",
-        "relocation",
-        "property",
-    ]
-    assert len(interview["questions"]) == 5
+    assert [question["category"] for question in interview["questions"]] == ["career"]
+    assert len(interview["questions"]) == 1
     assert interview["progress"]["target"] == 3
     assert interview["source"] == "deterministic_brief"
     assert interview["questions"][0]["questionValue"]["tier"] == "discriminating"
@@ -75,7 +72,7 @@ def test_undertermined_round_offers_remaining_domains_but_targets_one_more_event
         locale="en",
     )
 
-    assert len(interview["questions"]) == 2
+    assert len(interview["questions"]) == 1
     assert {question["category"] for question in interview["questions"]}.isdisjoint(
         {
             "career",
@@ -86,6 +83,17 @@ def test_undertermined_round_offers_remaining_domains_but_targets_one_more_event
     assert interview["progress"]["answered"] == 3
     assert interview["progress"]["target"] == 4
     assert interview["progress"]["maximumAccepted"] == 5
+
+
+def test_skipped_category_is_not_reissued() -> None:
+    interview = build_rectification_interview(
+        _state(fields=["d10Lagna", "d4Structure"]),
+        session_id="session-test",
+        locale="en",
+        skipped_categories={"career"},
+    )
+
+    assert interview["questions"][0]["category"] != "career"
 
 
 def test_interview_stops_after_five_events() -> None:
@@ -290,6 +298,20 @@ def test_rectification_event_must_match_backend_question_category() -> None:
             interview=interview,
         )
 
+    with pytest.raises(ValueError, match="exactly one"):
+        validate_rectification_event_bindings(
+            [event, event],
+            state=state,
+            interview=interview,
+        )
+
+    with pytest.raises(ValueError, match="current verification question"):
+        validate_rectification_event_bindings(
+            [{**event, "questionId": None}],
+            state=state,
+            interview=interview,
+        )
+
 
 def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:
     events = [
@@ -314,6 +336,12 @@ def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:
         },
     )
     assert validated[0]["accepted"] is True
+    assert validated[0]["eventFacts"] == {
+        "occurrence": "occurred",
+        "agency": "unknown",
+        "impact": "unknown",
+        "dateConfidence": "unknown",
+    }
 
     with pytest.raises(ValueError, match="Please revise"):
         validate_agent_event_evidence(
@@ -329,6 +357,45 @@ def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:
                 ]
             },
         )
+
+
+def test_semantic_event_facts_are_attached_to_the_deterministic_ledger() -> None:
+    ledger = parse_life_event_ledger(
+        "2018 career: Changed employer",
+        semantic_evidence=[
+            {
+                "questionId": "rectify.r1.q1.career",
+                "date": "2018",
+                "category": "career",
+                "description": "Changed employer",
+                "eventFacts": {
+                    "occurrence": "occurred",
+                    "agency": "active",
+                    "impact": "major",
+                    "dateConfidence": "year",
+                },
+            }
+        ],
+    )
+
+    event = ledger["events"][0]
+    assert event["eventId"] == f"evt_{event['eventFingerprint'][:16]}"
+    assert event["semanticFacts"]["impact"] == "major"
+
+
+def test_event_ids_do_not_change_when_an_older_event_is_inserted() -> None:
+    before = parse_life_event_ledger(
+        "2018 career: Changed employer\n2020 relationship: Registered marriage"
+    )
+    after = parse_life_event_ledger(
+        "2012 education: Graduated\n2018 career: Changed employer\n"
+        "2020 relationship: Registered marriage"
+    )
+
+    before_ids = {event["date"]: event["eventId"] for event in before["events"]}
+    after_ids = {event["date"]: event["eventId"] for event in after["events"]}
+    assert after_ids["2018"] == before_ids["2018"]
+    assert after_ids["2020"] == before_ids["2020"]
 
 
 def test_consultation_answer_rejects_unsupported_certainty_language() -> None:

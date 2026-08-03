@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from calendar import monthrange
 from collections import Counter
@@ -64,12 +65,31 @@ DATE_PATTERN = re.compile(
 )
 
 
-def parse_life_event_ledger(raw: str) -> dict[str, Any]:
+def parse_life_event_ledger(
+    raw: str,
+    *,
+    semantic_evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     text = (raw or "").strip()
+    semantic_by_fingerprint = {
+        _event_fingerprint(
+            str(item.get("date") or ""),
+            str(item.get("category") or ""),
+            str(item.get("description") or ""),
+        ): item
+        for item in semantic_evidence or []
+        if isinstance(item, dict)
+        and str(item.get("date") or "").strip()
+        and str(item.get("category") or "").strip()
+    }
     events: list[dict[str, Any]] = []
     for index, line in enumerate(_candidate_lines(text), start=1):
         event = _parse_event_line(line, index)
         if event is not None:
+            semantic = semantic_by_fingerprint.get(str(event.get("eventFingerprint") or ""))
+            if semantic:
+                event["questionId"] = str(semantic.get("questionId") or "")
+                event["semanticFacts"] = dict(semantic.get("eventFacts") or {})
             events.append(event)
 
     events.sort(key=lambda event: str(event.get("date") or ""))
@@ -99,6 +119,7 @@ def parse_life_event_ledger(raw: str) -> dict[str, Any]:
             if events
             else "Ask the user for 3-5 dated life events before deep rectification."
         ),
+        "semanticEvidence": [item for item in semantic_evidence or [] if isinstance(item, dict)],
     }
 
 
@@ -192,6 +213,7 @@ def score_candidate_events(
         observations: list[dict[str, Any]] = []
         support_score = 0.0
         contradiction_score = 0.0
+        semantic_facts = event.get("semanticFacts")
         period_entries: list[tuple[str, str]] = []
         unstable_periods: dict[str, list[str]] = {}
         for short_level, level in (
@@ -458,6 +480,8 @@ def score_candidate_events(
         evidence_scores.append(
             {
                 "eventId": event["eventId"],
+                "eventFingerprint": event.get("eventFingerprint"),
+                "semanticFacts": dict(semantic_facts) if isinstance(semantic_facts, dict) else None,
                 "role": event.get("role", "calibration"),
                 "score": score,
                 "supportScore": support_score,
@@ -707,8 +731,10 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
         else f"{year:04d}"
     )
     date_precision = "day" if day is not None else "month" if month is not None else "year"
+    event_fingerprint = _event_fingerprint(date_value, category, line)
     return {
-        "eventId": f"evt_{index}_{date_value.replace('-', '')}_{category}",
+        "eventId": f"evt_{event_fingerprint[:16]}",
+        "eventFingerprint": event_fingerprint,
         "date": date_value,
         "datePrecision": date_precision,
         "category": category,
@@ -723,6 +749,26 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
             "fields": rules["fields"],
         },
     }
+
+
+def _event_fingerprint(date_value: str, category: str, description: str) -> str:
+    normalized_description = _clean_event_description(description, date_value, category)
+    payload = "|".join(
+        (
+            " ".join(str(date_value).split()),
+            str(category).strip().casefold(),
+            normalized_description,
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _clean_event_description(description: str, date_value: str, category: str) -> str:
+    value = " ".join(str(description or "").split())
+    prefix = f"{date_value} {category}:"
+    if value.casefold().startswith(prefix.casefold()):
+        value = value[len(prefix) :].strip()
+    return value.casefold()
 
 
 def _classify_category(line: str) -> str:

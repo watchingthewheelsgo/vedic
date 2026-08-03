@@ -24,7 +24,9 @@ by the user is not independent evidence and cannot change a chart score.
    reported interval. The state is `not_required`; an optional Reader pass may
    ask 1-5 neutral reading-quality questions using only scan-stable facts.
 5. If multiple material candidates remain, stop report synthesis and collect
-   3-5 structured, dated life events. Consultation focus is never evidence.
+   3-5 structured, dated life events. The UI asks for one event per round; after
+   each accepted answer the backend recalculates the bounded candidate state and
+   issues the next deterministic question. Consultation focus is never evidence.
 6. Split eligible events without looking at candidate scores. Calibration keeps
    the broadest available category coverage; one date-precise event is reserved
    as a blind holdout. The Agent never receives holdout content, scores, or
@@ -43,7 +45,14 @@ by the user is not independent evidence and cannot change a chart score.
     interval contains the user's reported time. This canonical calculation does not start a second
     uncertainty search around the representative moment: the original candidate
     scan and refined boundaries remain the selection evidence. The final chart
-    revision, audit, and report gate are then persisted atomically.
+    revision, audit, and report gate are then persisted as one active revision.
+
+Every event mutation is serialized per session, checked against the chart
+revision observed by the client, and recorded with an idempotency fingerprint.
+A retry of an accepted answer returns the existing session instead of running
+the calculator again. A stale answer is rejected and must be refreshed. The
+same lock also protects the current interview while a skip or reset is being
+prepared.
 
 ## Outcomes
 
@@ -77,7 +86,11 @@ still use the ordinary pre-reading quality check.
 - `chart_rectification_state.json`: active selection policy IDs, candidate state,
   hidden-holdout result, report gate, and materialized chart revision.
 - `chart_record.json`: typed auditable chart, event evidence, candidates, and the
-  final bounded decision consumed by judgement/report stages.
+  final bounded decision consumed by judgement/report stages. Accepted event
+  descriptions may also carry bounded semantic facts (`occurrence`, `agency`,
+  `impact`, and `dateConfidence`) extracted by the evidence-intake Agent. These
+  facts are provenance/context for downstream interpretation; they do not
+  override the deterministic astrological score.
 - `reader_prevalidation.md` / `prevalidation_result.json`: stable-chart reading
   quality checks only; they have no candidate-selection authority.
 
@@ -117,6 +130,7 @@ interval rather than an exact second.
   protocol, reviewer independence, and reviewed cases pass the fixture gate.
 - One reserved event is a guard against direct fitting, not statistical proof.
   Sparse or same-domain histories correctly remain underdetermined.
-- The product currently collects one structured event batch. Adaptive follow-up
-  should request genuinely new dated evidence or clarify date precision; it must
-  never restate an existing event to manufacture another vote.
+- The product collects one structured dated event per interaction round. Each accepted
+  answer recalculates the bounded candidates before the next question is selected.
+  Adaptive follow-up should request genuinely new dated evidence or clarify date
+  precision; it must never restate an existing event to manufacture another vote.
