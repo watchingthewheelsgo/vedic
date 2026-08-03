@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
+from datetime import date
+from types import SimpleNamespace
+
 import pytest
 
+from app.schemas import ConsultationAnswerResponse
 from app.services.rectification_interview import (
     build_rectification_interview,
+    validate_agent_event_evidence,
     validate_agent_question_wording,
+    validate_rectification_event_bindings,
+    validate_rectification_event_dates,
 )
 from app.services.skill_runtime import SkillRuntime
 
@@ -42,16 +51,18 @@ def test_question_categories_follow_candidate_discriminators() -> None:
         locale="zh",
     )
 
-    assert [question["category"] for question in interview["questions"]] == [
+    assert [question["category"] for question in interview["questions"]][:3] == [
         "career",
         "relocation",
         "property",
     ]
+    assert len(interview["questions"]) == 5
+    assert interview["progress"]["target"] == 3
     assert interview["source"] == "deterministic_brief"
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
 
 
-def test_undertermined_round_requests_one_new_domain_at_a_time() -> None:
+def test_undertermined_round_offers_remaining_domains_but_targets_one_more_event() -> None:
     interview = build_rectification_interview(
         _state(
             status="underdetermined",
@@ -62,13 +73,16 @@ def test_undertermined_round_requests_one_new_domain_at_a_time() -> None:
         locale="en",
     )
 
-    assert len(interview["questions"]) == 1
-    assert interview["questions"][0]["category"] not in {
-        "career",
-        "relocation",
-        "education",
-    }
+    assert len(interview["questions"]) == 2
+    assert {question["category"] for question in interview["questions"]}.isdisjoint(
+        {
+            "career",
+            "relocation",
+            "education",
+        }
+    )
     assert interview["progress"]["answered"] == 3
+    assert interview["progress"]["target"] == 4
     assert interview["progress"]["maximumAccepted"] == 5
 
 
@@ -192,3 +206,150 @@ def test_consultation_can_decline_when_evidence_is_missing() -> None:
     )
     assert response.answerability == "insufficient_evidence"
     assert response.supporting_claim_ids == []
+
+
+def test_rectification_event_dates_accept_year_precision_and_reject_impossible_ranges() -> None:
+    validate_rectification_event_dates(
+        [{"date": "2018"}, {"date": "2020-02"}, {"date": "2024-02-29"}],
+        birth_date="1990-01-01",
+        today=date(2026, 8, 3),
+    )
+
+    with pytest.raises(ValueError, match="invalid calendar date"):
+        validate_rectification_event_dates(
+            [{"date": "2023-02-31"}],
+            birth_date="1990-01-01",
+            today=date(2026, 8, 3),
+        )
+    with pytest.raises(ValueError, match="before the birth date"):
+        validate_rectification_event_dates(
+            [{"date": "1989"}],
+            birth_date="1990-01-01",
+            today=date(2026, 8, 3),
+        )
+    with pytest.raises(ValueError, match="in the future"):
+        validate_rectification_event_dates(
+            [{"date": "2099"}],
+            birth_date="1990-01-01",
+            today=date(2026, 8, 3),
+        )
+
+
+def test_rectification_event_must_match_backend_question_category() -> None:
+    state = _state(fields=["d10Lagna"])
+    interview = build_rectification_interview(
+        state,
+        session_id="session-test",
+        locale="en",
+    )
+    question = interview["questions"][0]
+    event = {
+        "questionId": question["questionId"],
+        "date": "2018",
+        "category": question["category"],
+        "description": "Changed employer",
+    }
+    assert validate_rectification_event_bindings([event], state=state, interview=interview) == [
+        event
+    ]
+
+    with pytest.raises(ValueError, match="does not match"):
+        validate_rectification_event_bindings(
+            [{**event, "category": "health"}],
+            state=state,
+            interview=interview,
+        )
+
+
+def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:
+    events = [
+        {
+            "questionId": "rectify.r1.q1.career",
+            "category": "career",
+            "date": "2018",
+            "description": "Changed employer",
+        }
+    ]
+    validated = validate_agent_event_evidence(
+        events,
+        {
+            "results": [
+                {
+                    "questionId": "rectify.r1.q1.career",
+                    "category": "career",
+                    "accepted": True,
+                    "reason": "Concrete career event",
+                }
+            ]
+        },
+    )
+    assert validated[0]["accepted"] is True
+
+    with pytest.raises(ValueError, match="Please revise"):
+        validate_agent_event_evidence(
+            events,
+            {
+                "results": [
+                    {
+                        "questionId": "rectify.r1.q1.career",
+                        "category": "career",
+                        "accepted": False,
+                        "reason": "This describes an unrelated purchase.",
+                    }
+                ]
+            },
+        )
+
+
+def test_consultation_answer_rejects_unsupported_certainty_language() -> None:
+    with pytest.raises(ValueError, match="deterministic outcome"):
+        SkillRuntime._validate_consultation_answer_payload(
+            {
+                "answerability": "answered",
+                "answer": "You will certainly win the lottery tomorrow according to this chart.",
+                "supportingClaimIds": ["claim.career"],
+                "limitations": [],
+                "followUpQuestions": [],
+            },
+            {"approvedClaims": [{"claimId": "claim.career"}]},
+        )
+
+
+def test_consultation_grounding_audit_rejects_content_beyond_cited_claims() -> None:
+    class FakeAgentRuntime:
+        async def run_skill_prompt_task(self, *_args: object, **_kwargs: object):
+            return SimpleNamespace(
+                raw_text=json.dumps(
+                    {
+                        "supported": False,
+                        "unsafeCertainty": False,
+                        "unsupportedStatements": ["The answer invents a financial outcome."],
+                    }
+                )
+            )
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    runtime.agent_runtime = FakeAgentRuntime()  # type: ignore[assignment]
+    response = ConsultationAnswerResponse(
+        answerability="answered",
+        answer="The report says this career pattern guarantees a specific financial result.",
+        supportingClaimIds=["claim.career"],
+        limitations=[],
+        followUpQuestions=[],
+    )
+    with pytest.raises(ValueError, match="failed grounding audit"):
+        asyncio.run(
+            runtime._audit_consultation_answer(
+                question="Will this make me rich?",
+                response=response,
+                context={
+                    "approvedClaims": [
+                        {
+                            "claimId": "claim.career",
+                            "plainStatement": "Career decisions benefit from staged review.",
+                        }
+                    ]
+                },
+                locale="en",
+            )
+        )

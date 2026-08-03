@@ -387,9 +387,21 @@ def _dossier_release_checks(
     structure_failures = [
         f"missing-section:{kind}" for kind in sorted(required_kinds - set(sections_by_kind))
     ]
-    executive_section = sections_by_kind.get("executive_synthesis")
-    if executive_section is not None and not executive_section.narratives:
-        structure_failures.append("missing-grounded-executive-narrative")
+    narrative_section_kinds = {
+        "executive_synthesis",
+        "chart_foundation",
+        "core_architecture",
+        "priority_domain",
+        "timing_outlook",
+        "decision_support",
+    }
+    for section in dossier.sections:
+        if (
+            section.section_kind in narrative_section_kinds
+            and section.claim_ids
+            and not section.narratives
+        ):
+            structure_failures.append(f"missing-grounded-narrative:{section.section_kind}")
     executive_claim_ids = set(dossier.executive_claim_ids)
     executive_section = sections_by_kind.get("executive_synthesis")
     executive_section_ids = set(executive_section.claim_ids if executive_section else [])

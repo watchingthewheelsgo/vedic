@@ -8,6 +8,7 @@ import type {
   BillingPortalResponse,
   BaziSessionInput,
   ConsultationAnswerResponse,
+  ConsultationConversationResponse,
   ConsultationQuestionInput,
   CoreJobResponse,
   PlaceSearchLevel,
@@ -208,14 +209,20 @@ export const api = {
   prepareRectificationInterview(input: RectificationInterviewInput) {
     return postJson<SkillSessionResponse, RectificationInterviewInput>(
       "/api/rectification-interview",
-      input,
-      { requireAuth: true }
+      input
     );
   },
   answerConsultationQuestion(input: ConsultationQuestionInput) {
     return postJson<ConsultationAnswerResponse, ConsultationQuestionInput>(
       "/api/consultation-questions",
       input,
+      { requireAuth: true }
+    );
+  },
+  getConsultationConversation(sessionId: string) {
+    return getJson<ConsultationConversationResponse>(
+      `/api/consultation-conversations/${encodeURIComponent(sessionId)}`,
+      undefined,
       { requireAuth: true }
     );
   },

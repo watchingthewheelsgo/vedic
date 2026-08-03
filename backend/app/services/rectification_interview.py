@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from calendar import monthrange
+from datetime import date, datetime
 from typing import Any
 
 from app.schemas import AppLocale
@@ -47,7 +48,7 @@ _COPY: dict[str, dict[str, Any]] = {
             "Answer one card at a time. Choose events you remember independently; "
             "an approximate year or month is enough."
         ),
-        "progress": "Event {current} of {target}",
+        "progress": "Confirmed {answered} of {target}",
         "why": "This event type helps compare the chart areas that change inside your reported time window.",
         "date": "When did this happen?",
         "details": "What changed?",
@@ -106,7 +107,7 @@ _COPY: dict[str, dict[str, Any]] = {
     "zh": {
         "title": "几个真实日期，可以帮助缩小出生时间范围",
         "intro": "每次只回答一张卡片。请选择你能独立确认的真实事件，记得年份或月份就可以。",
-        "progress": "第 {current} 个，共 {target} 个",
+        "progress": "已确认 {answered}/{target}",
         "why": "这类事件可以区分你所报告时间范围内发生变化的盘面部分。",
         "date": "大约发生在什么时候？",
         "details": "当时发生了什么变化？",
@@ -135,7 +136,7 @@ _COPY: dict[str, dict[str, Any]] = {
     "ja": {
         "title": "いくつかの実際の日付から出生時刻の範囲を絞ります",
         "intro": "一度に一枚ずつ答えてください。年または月までの記憶で構いません。",
-        "progress": "{target} 件中 {current} 件目",
+        "progress": "確認済み {answered}/{target}",
         "why": "この種類の出来事は、申告された時間帯で変化するチャート要素の比較に役立ちます。",
         "date": "いつ頃でしたか？",
         "details": "何が変わりましたか？",
@@ -172,18 +173,18 @@ def build_rectification_interview(
     existing = [item for item in ledger.get("events", []) if isinstance(item, dict)]
     existing_categories = {str(item.get("category") or "") for item in existing}
     remaining = max(0, MAX_RECTIFICATION_EVENTS - len(existing))
-    required = max(0, 3 - len(existing))
     categories = _rank_categories(
         plan.get("discriminatingFields"),
         existing_categories,
         life_stage=life_stage,
     )
-    question_count = min(
-        remaining, max(required, 1 if state.get("status") == "underdetermined" else 3)
-    )
+    # Offer every remaining independent category. The evidence target remains
+    # bounded separately, so a skipped or inapplicable question does not trap
+    # the user before the minimum evidence set is reached.
+    question_count = remaining
     selected_categories = categories[:question_count]
     copy = _COPY.get(locale, _COPY["en"])
-    target = min(MAX_RECTIFICATION_EVENTS, len(existing) + question_count)
+    target = min(MAX_RECTIFICATION_EVENTS, max(3, len(existing) + 1))
     questions = []
     for index, category in enumerate(selected_categories, start=1):
         title, prompt = copy["category"][category]
@@ -216,7 +217,7 @@ def build_rectification_interview(
             "minimumRequired": 3,
             "maximumAccepted": MAX_RECTIFICATION_EVENTS,
             "target": target,
-            "label": copy["progress"].format(current=min(len(existing) + 1, target), target=target),
+            "label": copy["progress"].format(answered=len(existing), target=target),
         },
         "questions": questions,
         "source": "deterministic_brief",
@@ -258,6 +259,116 @@ def validate_agent_question_wording(
         questions.append(merged)
     result["questions"] = questions
     return result
+
+
+def validate_rectification_event_dates(
+    events: list[dict[str, Any]],
+    *,
+    birth_date: str,
+    today: date | None = None,
+) -> None:
+    """Validate partial event dates without inventing missing month/day values."""
+
+    try:
+        born = date.fromisoformat(birth_date)
+    except ValueError as exc:
+        raise ValueError("the session has an invalid birth date") from exc
+    current = today or date.today()
+    for event in events:
+        value = str(event.get("date") or "")
+        parts = value.split("-")
+        try:
+            year = int(parts[0])
+            month = int(parts[1]) if len(parts) >= 2 else None
+            day = int(parts[2]) if len(parts) == 3 else None
+            if month is None:
+                start, end = date(year, 1, 1), date(year, 12, 31)
+            elif day is None:
+                start = date(year, month, 1)
+                end = date(year, month, monthrange(year, month)[1])
+            else:
+                start = end = date(year, month, day)
+        except (TypeError, ValueError, IndexError) as exc:
+            raise ValueError(f"life event has an invalid calendar date: {value}") from exc
+        if end < born:
+            raise ValueError(f"life event cannot be before the birth date: {value}")
+        if start > current:
+            raise ValueError(f"life event cannot be in the future: {value}")
+
+
+def validate_rectification_event_bindings(
+    events: list[dict[str, Any]],
+    *,
+    state: dict[str, Any],
+    interview: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return newly answered events after enforcing backend-issued question identity."""
+
+    ledger = state.get("lifeEventLedger") if isinstance(state.get("lifeEventLedger"), dict) else {}
+    existing = {
+        (str(item.get("date") or ""), str(item.get("category") or ""))
+        for item in ledger.get("events", [])
+        if isinstance(item, dict)
+    }
+    questions = {
+        str(item.get("questionId")): str(item.get("category"))
+        for item in interview.get("questions", [])
+        if isinstance(item, dict) and item.get("questionId") and item.get("category")
+    }
+    used_question_ids: set[str] = set()
+    new_events: list[dict[str, Any]] = []
+    for event in events:
+        question_id = str(event.get("questionId") or "")
+        category = str(event.get("category") or "")
+        date_value = str(event.get("date") or "")
+        if not question_id:
+            if (date_value, category) not in existing:
+                raise ValueError("new life events must answer a current verification question")
+            continue
+        if question_id in used_question_ids:
+            raise ValueError("a verification question can only provide one life event")
+        expected_category = questions.get(question_id)
+        if expected_category is None:
+            raise ValueError("life event references an expired verification question")
+        if category != expected_category:
+            raise ValueError("life event category does not match its verification question")
+        used_question_ids.add(question_id)
+        new_events.append(event)
+    if not new_events:
+        raise ValueError("at least one current verification question must be answered")
+    return new_events
+
+
+def validate_agent_event_evidence(
+    expected_events: list[dict[str, Any]],
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Accept an Agent audit only when it accounts for every submitted event exactly once."""
+
+    raw_results = payload.get("results")
+    if not isinstance(raw_results, list):
+        raise ValueError("life event evidence audit must contain results")
+    expected = {str(item.get("questionId")): str(item.get("category")) for item in expected_events}
+    observed: dict[str, dict[str, Any]] = {}
+    for item in raw_results:
+        if not isinstance(item, dict):
+            raise ValueError("life event evidence audit result must be an object")
+        question_id = str(item.get("questionId") or "")
+        if question_id in observed or question_id not in expected:
+            raise ValueError("life event evidence audit changed the submitted question set")
+        if str(item.get("category") or "") != expected[question_id]:
+            raise ValueError("life event evidence audit changed an event category")
+        observed[question_id] = item
+    if set(observed) != set(expected):
+        raise ValueError("life event evidence audit omitted a submitted event")
+    rejected = [
+        str(item.get("reason") or "event description does not match the requested event type")
+        for item in observed.values()
+        if item.get("accepted") is not True
+    ]
+    if rejected:
+        raise ValueError("Please revise the life event: " + "; ".join(rejected[:2]))
+    return list(observed.values())
 
 
 def _rank_categories(

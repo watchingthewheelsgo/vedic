@@ -65,7 +65,14 @@ class SkillBirthInput(BirthInput):
 
 
 class RectificationLifeEventInput(ApiModel):
-    date: str = Field(pattern=r"^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?$")
+    question_id: str | None = Field(
+        default=None,
+        alias="questionId",
+        pattern=r"^rectify\.r\d+\.q\d+\.[a-z]+$",
+    )
+    date: str = Field(
+        pattern=r"^(?:19|20)\d{2}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$"
+    )
     category: LifeEventCategory
     description: str = Field(min_length=3, max_length=240)
 
@@ -110,6 +117,20 @@ class ConsultationAnswerResponse(ApiModel):
         alias="followUpQuestions",
         max_length=3,
     )
+
+
+class ConsultationExchangeResponse(ConsultationAnswerResponse):
+    asked_at: datetime = Field(alias="askedAt")
+    question: str
+
+
+class ConsultationConversationResponse(ApiModel):
+    schema_version: Literal["vedicdust-consultation-conversation/1.0.0"] = Field(
+        default="vedicdust-consultation-conversation/1.0.0",
+        alias="schemaVersion",
+    )
+    session_id: str = Field(alias="sessionId")
+    exchanges: list[ConsultationExchangeResponse] = Field(default_factory=list, max_length=20)
 
 
 BaziCalendarType = Literal["solar", "lunar"]

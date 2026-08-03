@@ -10,7 +10,13 @@ from typing import Any, cast
 
 import pytest
 
-from app.schemas import BirthInput, RectificationLifeEventsInput, SkillArtifact, SkillRunInput
+from app.schemas import (
+    BirthInput,
+    RectificationInterviewInput,
+    RectificationLifeEventsInput,
+    SkillArtifact,
+    SkillRunInput,
+)
 from app.services.place_service import ResolvedPlace
 from app.services.chart_rectification import ChartRectificationService
 from app.services.life_event_rectification import (
@@ -1751,6 +1757,17 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
         )
         assert state["status"] == "collecting_evidence"
 
+        await runtime.prepare_rectification_interview(
+            RectificationInterviewInput(sessionId=created.session_id, locale="en"),
+            use_agent=False,
+        )
+        interview = json.loads(
+            workspace.read_artifact_text(created.session_id, "rectification_interview.json") or "{}"
+        )
+        question_ids = {
+            question["category"]: question["questionId"] for question in interview["questions"]
+        }
+
         for stale_path in [
             "reader_prevalidation.md",
             "prevalidation_result.json",
@@ -1765,16 +1782,19 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
                 sessionId=created.session_id,
                 events=[
                     {
+                        "questionId": question_ids["education"],
                         "date": "2012-06",
                         "category": "education",
                         "description": "Graduated from university",
                     },
                     {
+                        "questionId": question_ids["career"],
                         "date": "2018-03",
                         "category": "career",
                         "description": "Changed employer and role",
                     },
                     {
+                        "questionId": question_ids["relationship"],
                         "date": "2021-10",
                         "category": "relationship",
                         "description": "Registered marriage",

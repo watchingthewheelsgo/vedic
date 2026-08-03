@@ -146,6 +146,7 @@ export type RectificationLifeEventCategory =
   | "spiritual";
 
 export type RectificationLifeEventInput = {
+  questionId?: string;
   date: string;
   category: RectificationLifeEventCategory;
   description: string;
@@ -172,6 +173,17 @@ export type ConsultationAnswerResponse = {
   supportingClaimIds: string[];
   limitations: string[];
   followUpQuestions: string[];
+};
+
+export type ConsultationExchangeResponse = ConsultationAnswerResponse & {
+  askedAt: string;
+  question: string;
+};
+
+export type ConsultationConversationResponse = {
+  schemaVersion: "vedicdust-consultation-conversation/1.0.0";
+  sessionId: string;
+  exchanges: ConsultationExchangeResponse[];
 };
 
 export type BaziCalendarType = "solar" | "lunar";

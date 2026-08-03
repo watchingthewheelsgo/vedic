@@ -52,7 +52,7 @@ import { cn } from "../lib/cn";
 import { useI18n } from "../i18n/provider";
 import type {
   BirthInput,
-  ConsultationAnswerResponse,
+  ConsultationExchangeResponse,
   CoreJobResponse,
   RectificationLifeEventCategory,
   RectificationLifeEventInput,
@@ -335,8 +335,9 @@ const VALIDATION_CHOICES: Array<{
   }
 ];
 
-type LifeEventDraft = Omit<RectificationLifeEventInput, "category"> & {
+type LifeEventDraft = RectificationLifeEventInput & {
   category: RectificationLifeEventCategory | "";
+  datePrecision: "year" | "month";
 };
 
 type RectificationInterviewQuestion = {
@@ -735,7 +736,7 @@ export function Session() {
   }
 
   const prepareRectificationInterview = useCallback(async () => {
-    if (!authLoaded || !isSignedIn || preparingRectificationInterview) return;
+    if (!authLoaded || preparingRectificationInterview) return;
     setError("");
     setPreparingRectificationInterview(true);
     try {
@@ -746,7 +747,7 @@ export function Session() {
     } finally {
       setPreparingRectificationInterview(false);
     }
-  }, [authLoaded, id, isSignedIn, locale, preparingRectificationInterview]);
+  }, [authLoaded, id, locale, preparingRectificationInterview]);
 
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden bg-cream-2">
@@ -2022,7 +2023,10 @@ function LifeEventCollector({
           exhaustedBody: "系统会保留剩余时间范围，而不是给出虚假的精确时间。",
           back: "上一题",
           next: "下一题",
-          compare: "开始比较候选时间"
+          compare: "开始比较候选时间",
+          skip: "不适用，跳过",
+          monthKnown: "记得月份",
+          yearOnly: "只记得年份"
         }
       : locale === "ja"
         ? {
@@ -2033,7 +2037,10 @@ function LifeEventCollector({
             exhaustedBody: "誤った精密さを示さず、残る時間範囲を保持します。",
             back: "前へ",
             next: "次の質問",
-            compare: "出生時刻候補を比較"
+            compare: "出生時刻候補を比較",
+            skip: "該当しないためスキップ",
+            monthKnown: "月まで分かる",
+            yearOnly: "年のみ"
           }
         : {
             preparing: "Preparing the next question from the chart boundaries...",
@@ -2044,7 +2051,10 @@ function LifeEventCollector({
               "The chart will keep the remaining time range instead of claiming false precision.",
             back: "Back",
             next: "Next question",
-            compare: "Compare birth-time candidates"
+            compare: "Compare birth-time candidates",
+            skip: "Doesn't apply, skip",
+            monthKnown: "I know the month",
+            yearOnly: "Year only"
           };
   const interview = useMemo(
     () => parseRectificationInterview(interviewContent),
@@ -2069,24 +2079,86 @@ function LifeEventCollector({
   );
   const [activeIndex, setActiveIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, LifeEventDraft>>({});
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const question = interview?.questions[activeIndex];
   const answer = question
-    ? (answers[question.questionId] ?? { date: "", category: question.category, description: "" })
+    ? (answers[question.questionId] ?? {
+        questionId: question.questionId,
+        date: "",
+        category: question.category,
+        description: "",
+        datePrecision: "month" as const
+      })
     : null;
   const answerComplete = Boolean(answer?.date && answer.description.trim().length >= 3);
-  const isLast = Boolean(interview && activeIndex === interview.questions.length - 1);
+  const completedNewEvents = interview
+    ? interview.questions
+        .map((item) => answers[item.questionId])
+        .filter((item): item is LifeEventDraft =>
+          Boolean(item?.date && item.category && item.description.trim().length >= 3)
+        )
+    : [];
+  const projectedQuestionIds = new Set(completedNewEvents.map((item) => item.questionId));
+  if (answerComplete && question) projectedQuestionIds.add(question.questionId);
+  const reachesTarget = Boolean(
+    interview && existingEvents.length + projectedQuestionIds.size >= interview.progress.target
+  );
 
   useEffect(() => {
     setActiveIndex(0);
     setAnswers({});
+    setSkipped(new Set());
   }, [interviewContent]);
 
   function updateAnswer(update: Partial<LifeEventDraft>) {
     if (!question || !answer) return;
     setAnswers((current) => ({
       ...current,
-      [question.questionId]: { ...answer, ...update, category: question.category }
+      [question.questionId]: {
+        ...answer,
+        ...update,
+        questionId: question.questionId,
+        category: question.category
+      }
     }));
+  }
+
+  function advanceOrFinish(currentAnswers: Record<string, LifeEventDraft>) {
+    if (!interview) return;
+    const newEvents = interview.questions
+      .map((item) => currentAnswers[item.questionId])
+      .filter((item): item is LifeEventDraft =>
+        Boolean(item?.date && item.category && item.description.trim().length >= 3)
+      )
+      .map((item) => ({
+        questionId: item.questionId,
+        date: item.date,
+        description: item.description,
+        category: item.category as RectificationLifeEventCategory
+      }));
+    if (existingEvents.length + newEvents.length >= interview.progress.target) {
+      void onSubmit([...existingEvents, ...newEvents].slice(0, interview.progress.maximumAccepted));
+      return;
+    }
+    const nextIndex = interview.questions.findIndex(
+      (item, index) => index > activeIndex && !skipped.has(item.questionId)
+    );
+    setActiveIndex(nextIndex >= 0 ? nextIndex : interview.questions.length);
+  }
+
+  function skipQuestion() {
+    if (!question || !interview) return;
+    const nextSkipped = new Set(skipped).add(question.questionId);
+    setSkipped(nextSkipped);
+    setAnswers((current) => {
+      const next = { ...current };
+      delete next[question.questionId];
+      return next;
+    });
+    const nextIndex = interview.questions.findIndex(
+      (item, index) => index > activeIndex && !nextSkipped.has(item.questionId)
+    );
+    setActiveIndex(nextIndex >= 0 ? nextIndex : interview.questions.length);
   }
 
   if (preparing) {
@@ -2132,19 +2204,7 @@ function LifeEventCollector({
           [question.questionId]: { ...answer, category: question.category }
         };
         setAnswers(currentAnswers);
-        if (!isLast) {
-          setActiveIndex((value) => value + 1);
-          return;
-        }
-        const newEvents = interview.questions
-          .map((item) => currentAnswers[item.questionId])
-          .filter((item): item is LifeEventDraft =>
-            Boolean(item?.date && item.category && item.description.trim().length >= 3)
-          )
-          .map((item) => ({ ...item, category: item.category as RectificationLifeEventCategory }));
-        void onSubmit(
-          [...existingEvents, ...newEvents].slice(0, interview.progress.maximumAccepted)
-        );
+        advanceOrFinish(currentAnswers);
       }}
     >
       <div>
@@ -2169,16 +2229,43 @@ function LifeEventCollector({
         <h4 className="mb-2 text-xl font-medium tracking-normal text-ink">{question.title}</h4>
         <p className="mb-5 text-[13px] leading-7 text-body">{question.prompt}</p>
         <div className="grid gap-4 sm:grid-cols-[170px_1fr]">
-          <label className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
+          <div className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
             {question.dateLabel}
+            <div className="grid grid-cols-2 rounded-lg border border-gold/20 bg-cream p-1 normal-case tracking-normal">
+              {(["month", "year"] as const).map((precision) => (
+                <button
+                  key={precision}
+                  type="button"
+                  className={`h-8 rounded-md text-[11px] transition-colors ${
+                    answer?.datePrecision === precision
+                      ? "bg-gold text-white"
+                      : "text-muted hover:text-ink"
+                  }`}
+                  onClick={() =>
+                    updateAnswer({
+                      datePrecision: precision,
+                      date: answer?.date.slice(0, precision === "year" ? 4 : 7) ?? ""
+                    })
+                  }
+                >
+                  {precision === "month" ? ui.monthKnown : ui.yearOnly}
+                </button>
+              ))}
+            </div>
             <input
               required
-              type="month"
+              type={answer?.datePrecision === "year" ? "number" : "month"}
+              min={answer?.datePrecision === "year" ? 1900 : "1900-01"}
+              max={
+                answer?.datePrecision === "year"
+                  ? new Date().getFullYear()
+                  : new Date().toISOString().slice(0, 7)
+              }
               value={answer?.date ?? ""}
               className="h-11 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
               onChange={(event) => updateAnswer({ date: event.target.value })}
             />
-          </label>
+          </div>
           <label className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
             {question.detailsLabel}
             <Textarea
@@ -2197,21 +2284,26 @@ function LifeEventCollector({
       </div>
 
       <div className="flex items-center justify-between gap-3">
-        {activeIndex > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setActiveIndex((value) => value - 1)}
-          >
-            <ChevronLeft size={15} /> {ui.back}
+        <div className="flex items-center gap-2">
+          {activeIndex > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setActiveIndex((value) => value - 1)}
+            >
+              <ChevronLeft size={15} /> {ui.back}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button type="button" variant="ghost" onClick={skipQuestion}>
+            {ui.skip}
           </Button>
-        ) : (
-          <span />
-        )}
-        <Button disabled={!answerComplete || submitting || !authLoaded || !isSignedIn}>
+        </div>
+        <Button disabled={!answerComplete || submitting || !authLoaded}>
           {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-          {isLast ? ui.compare : ui.next}
-          {!isLast && <ChevronRight size={15} />}
+          {reachesTarget ? ui.compare : ui.next}
+          {!reachesTarget && <ChevronRight size={15} />}
         </Button>
       </div>
       {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
@@ -2228,7 +2320,7 @@ function ConsultationQuestionPanel({
 }) {
   const { locale } = useI18n();
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<ConsultationAnswerResponse | null>(null);
+  const [exchanges, setExchanges] = useState<ConsultationExchangeResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const copy =
@@ -2242,7 +2334,8 @@ function ConsultationQuestionPanel({
           basis: "本回答依据",
           limits: "需要保留的边界",
           claimUnit: "条已批准判断",
-          insufficient: "当前报告证据不足"
+          insufficient: "当前报告证据不足",
+          suggested: "可以继续问"
         }
       : locale === "ja"
         ? {
@@ -2254,7 +2347,8 @@ function ConsultationQuestionPanel({
             basis: "根拠",
             limits: "重要な限界",
             claimUnit: "件の承認済み判断",
-            insufficient: "現在のレポートでは根拠が不足しています"
+            insufficient: "現在のレポートでは根拠が不足しています",
+            suggested: "次に聞けること"
           }
         : {
             eyebrow: "Continue the consultation",
@@ -2266,8 +2360,30 @@ function ConsultationQuestionPanel({
             basis: "Grounded in",
             limits: "Important limits",
             claimUnit: "approved claim",
-            insufficient: "The current report does not contain enough evidence"
+            insufficient: "The current report does not contain enough evidence",
+            suggested: "Useful next questions"
           };
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setExchanges([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getConsultationConversation(sessionId)
+      .then((conversation) => {
+        if (!cancelled) setExchanges(conversation.exchanges);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(userFacingError(caught, "Could not load the consultation history."));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, sessionId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -2275,7 +2391,16 @@ function ConsultationQuestionPanel({
     setLoading(true);
     setError("");
     try {
-      setAnswer(await api.answerConsultationQuestion({ sessionId, question: question.trim() }));
+      const askedQuestion = question.trim();
+      const response = await api.answerConsultationQuestion({
+        sessionId,
+        question: askedQuestion
+      });
+      setExchanges((current) => [
+        ...current,
+        { ...response, question: askedQuestion, askedAt: new Date().toISOString() }
+      ]);
+      setQuestion("");
     } catch (caught) {
       setError(userFacingError(caught, "Could not answer this question. Please try again."));
     } finally {
@@ -2304,28 +2429,57 @@ function ConsultationQuestionPanel({
       </form>
       {!isSignedIn && <AnonymousCheckpointGate />}
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
-      {answer && (
-        <div className="mt-6 max-w-3xl rounded-xl border border-gold/25 bg-cream-2 p-5">
-          <p className="m-0 whitespace-pre-wrap text-[14px] leading-8 text-ink">{answer.answer}</p>
-          <div className="mt-5 border-t border-gold/20 pt-4 text-[12px] leading-6 text-muted">
-            <div>
-              {answer.answerability === "answered" ? (
-                <>
-                  <strong className="font-semibold text-body">{copy.basis}:</strong>{" "}
-                  {answer.supportingClaimIds.length} {copy.claimUnit}
-                  {locale === "en" && answer.supportingClaimIds.length !== 1 ? "s" : ""}
-                </>
-              ) : (
-                <strong className="font-semibold text-body">{copy.insufficient}</strong>
-              )}
-            </div>
-            {answer.limitations.length > 0 && (
-              <div className="mt-2">
-                <strong className="font-semibold text-body">{copy.limits}:</strong>{" "}
-                {answer.limitations.join(" · ")}
+      {exchanges.length > 0 && (
+        <div className="mt-6 grid max-w-3xl gap-4">
+          {exchanges.map((exchange, index) => (
+            <div key={`${exchange.askedAt}-${index}`} className="grid gap-3">
+              <div className="ml-auto max-w-[85%] rounded-xl bg-ink px-4 py-3 text-[13px] leading-6 text-cream">
+                {exchange.question}
               </div>
-            )}
-          </div>
+              <div className="rounded-xl border border-gold/25 bg-cream-2 p-5">
+                <p className="m-0 whitespace-pre-wrap text-[14px] leading-8 text-ink">
+                  {exchange.answer}
+                </p>
+                <div className="mt-5 border-t border-gold/20 pt-4 text-[12px] leading-6 text-muted">
+                  <div>
+                    {exchange.answerability === "answered" ? (
+                      <>
+                        <strong className="font-semibold text-body">{copy.basis}:</strong>{" "}
+                        {exchange.supportingClaimIds.length} {copy.claimUnit}
+                        {locale === "en" && exchange.supportingClaimIds.length !== 1 ? "s" : ""}
+                      </>
+                    ) : (
+                      <strong className="font-semibold text-body">{copy.insufficient}</strong>
+                    )}
+                  </div>
+                  {exchange.limitations.length > 0 && (
+                    <div className="mt-2">
+                      <strong className="font-semibold text-body">{copy.limits}:</strong>{" "}
+                      {exchange.limitations.join(" · ")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          {exchanges.at(-1)?.followUpQuestions.length ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] uppercase tracking-[1.2px] text-muted">
+                {copy.suggested}
+              </span>
+              {exchanges.at(-1)?.followUpQuestions.map((followUp) => (
+                <Button
+                  key={followUp}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setQuestion(followUp)}
+                >
+                  {followUp}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
     </section>
@@ -2415,7 +2569,6 @@ function ReaderDetail({
       (collectingLifeEvents || continuingLifeEvents) &&
       !interviewArtifact &&
       authLoaded &&
-      isSignedIn &&
       !preparingRectificationInterview &&
       !interviewRequestedRef.current
     ) {
@@ -2427,7 +2580,6 @@ function ReaderDetail({
     collectingLifeEvents,
     continuingLifeEvents,
     interviewArtifact,
-    isSignedIn,
     onPrepareRectificationInterview,
     preparingRectificationInterview
   ]);

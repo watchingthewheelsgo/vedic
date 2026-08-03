@@ -30,6 +30,25 @@ from .sensitivity import (
 )
 
 
+_UNSAFE_CERTAINTY_PATTERNS = (
+    r"\bwill\s+(?:certainly|definitely|inevitably)\b",
+    r"\b(?:is|are)\s+guaranteed\s+to\b",
+    r"\bcannot\s+fail\b",
+    r"(?:一定会|必然会|注定会|肯定会|百分之百|必定会)",
+    r"(?:必ず|絶対に).{0,12}(?:なる|起きる|成功|当たる)",
+)
+
+
+def validate_consumer_astrology_language(text: str, *, label: str) -> None:
+    """Reject deterministic outcome language before it reaches a user-facing surface."""
+
+    import re
+
+    normalized = " ".join(text.split())
+    if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in _UNSAFE_CERTAINTY_PATTERNS):
+        raise ValueError(f"{label} uses unsupported deterministic outcome language")
+
+
 def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) -> None:
     """Reject facts or timing periods whose declared provenance drifted from the catalog."""
 
@@ -819,6 +838,10 @@ def validate_consultation_dossier(
         ):
             errors.append(f"section {section.section_id} cannot contain model-authored narrative")
         for narrative in section.narratives:
+            validate_consumer_astrology_language(
+                narrative.text,
+                label=f"narrative {narrative.narrative_id}",
+            )
             unknown_narrative_claims = sorted(set(narrative.claim_ids) - set(section.claim_ids))
             if unknown_narrative_claims:
                 errors.append(

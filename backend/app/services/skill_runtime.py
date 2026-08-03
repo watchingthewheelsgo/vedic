@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.calculator.civil_time import resolve_civil_time
@@ -16,6 +16,7 @@ from app.schemas import (
     BaziSessionInput,
     BirthInput,
     ConsultationAnswerResponse,
+    ConsultationConversationResponse,
     ConsultationQuestionInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
@@ -28,7 +29,10 @@ from app.services.chart_rectification import ChartRectificationService
 from app.services.metadata_store import MetadataStore
 from app.services.rectification_interview import (
     build_rectification_interview,
+    validate_agent_event_evidence,
     validate_agent_question_wording,
+    validate_rectification_event_bindings,
+    validate_rectification_event_dates,
 )
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
@@ -59,6 +63,7 @@ from app.vedicdust.validation import (
     validate_agent_context,
     validate_claim_graph,
     validate_consultation_dossier,
+    validate_consumer_astrology_language,
     validate_judgement_context,
 )
 
@@ -73,6 +78,8 @@ AGENT_CONTEXT_JSON = "agent_context.json"
 CONSULTATION_REPORT_MD = "consultation_report.md"
 ACTIVE_CHART_SENSITIVITY_JSON = "active_chart_sensitivity.json"
 RECTIFICATION_INTERVIEW_JSON = "rectification_interview.json"
+LIFE_EVENT_EVIDENCE_VALIDATION_JSON = "life_event_evidence_validation.json"
+CONSULTATION_GROUNDING_AUDIT_JSON = "consultation_grounding_audit.json"
 CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
 PREVALIDATION_DEPENDENCY_PATHS = [
@@ -334,6 +341,36 @@ class SkillRuntime:
         ):
             raise ValueError("this rectification session does not require more life events")
 
+        submitted_events = [event.model_dump(by_alias=True) for event in input_data.events]
+        raw_time_context = context.get("time")
+        time_context = (
+            cast(dict[str, Any], raw_time_context) if isinstance(raw_time_context, dict) else {}
+        )
+        validate_rectification_event_dates(
+            submitted_events,
+            birth_date=str(time_context.get("date") or ""),
+        )
+        interview = self._json_dict(artifacts.get(RECTIFICATION_INTERVIEW_JSON, ""))
+        if not interview:
+            raise ValueError("the current rectification interview is missing or expired")
+        new_events = validate_rectification_event_bindings(
+            submitted_events,
+            state=state,
+            interview=interview,
+        )
+        evidence_validation = await self._validate_rectification_event_evidence(new_events)
+        self.workspace.write_artifact(
+            session_id,
+            LIFE_EVENT_EVIDENCE_VALIDATION_JSON,
+            json.dumps(evidence_validation, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            LIFE_EVENT_EVIDENCE_VALIDATION_JSON,
+            producer="vedicdust-rectification-evidence-validator",
+            dependency_paths=[RECTIFICATION_INTERVIEW_JSON],
+        )
+
         current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
         revision = current_record.revision + 1
         birth_input = self.rectification.birth_input_with_life_events(
@@ -445,6 +482,7 @@ class SkillRuntime:
         input_data: RectificationInterviewInput,
         *,
         owner_user_id: str | None = None,
+        use_agent: bool = True,
     ) -> SkillSessionResponse:
         session_id = input_data.session_id
         state_text = self.workspace.read_artifact_text(session_id, "chart_rectification_state.json")
@@ -464,7 +502,12 @@ class SkillRuntime:
             locale=input_data.locale,
             life_stage=life_stage,
         )
-        if interview.get("questions") and self.agent_runtime.is_configured():
+        if (
+            interview.get("questions")
+            and use_agent
+            and self.agent_runtime is not None
+            and self.agent_runtime.is_configured()
+        ):
             try:
                 prompt = self._rectification_interview_prompt(interview, input_data.locale)
                 result = await self.agent_runtime.run_skill_prompt_task(
@@ -523,7 +566,7 @@ class SkillRuntime:
         dossier = ConsultationDossier.model_validate_json(dossier_text)
         if dossier.release_status != "approved":
             raise ValueError("follow-up questions require an approved consultation")
-        if not self.agent_runtime.is_configured():
+        if self.agent_runtime is None or not self.agent_runtime.is_configured():
             raise ValueError("the consultation assistant is not configured")
 
         context = self._parse_json_object(context_text)
@@ -541,8 +584,25 @@ class SkillRuntime:
         )
         payload = self._parse_json_object(result.raw_text)
         response = self._validate_consultation_answer_payload(payload, context)
+        if response.answerability == "answered":
+            await self._audit_consultation_answer(
+                question=input_data.question,
+                response=response,
+                context=context,
+                locale=dossier.locale,
+            )
         self._append_consultation_exchange(session_id, input_data.question, response)
         return response
+
+    def get_consultation_conversation(
+        self,
+        session_id: str,
+    ) -> ConsultationConversationResponse:
+        self.workspace.require_session_dir(session_id)
+        content = self.workspace.read_artifact_text(session_id, "consultation_conversation.json")
+        if not content:
+            return ConsultationConversationResponse(sessionId=session_id, exchanges=[])
+        return ConsultationConversationResponse.model_validate_json(content)
 
     @classmethod
     def _validate_consultation_answer_payload(
@@ -553,6 +613,7 @@ class SkillRuntime:
         answer = str(payload.get("answer") or "").strip()
         if len(answer) < 20 or len(answer) > 4000:
             raise ValueError("consultation answer has invalid length")
+        validate_consumer_astrology_language(answer, label="consultation answer")
         claim_ids = payload.get("supportingClaimIds")
         if not isinstance(claim_ids, list):
             raise ValueError("consultation answer must provide a claim reference list")
@@ -956,7 +1017,7 @@ class SkillRuntime:
             None,
         )
         if batch is None:
-            self._finalize_consultation_artifacts(input_data.session_id)
+            await self._finalize_consultation_artifacts(input_data.session_id)
             if not self._consultation_artifacts_complete(input_data.session_id):
                 raise ValueError(
                     "VedicDust core batches exist, but the released consultation artifacts "
@@ -1104,15 +1165,20 @@ class SkillRuntime:
                 dossier = ConsultationDossier.model_validate_json(dossier_text)
             except ValueError:
                 return False
-            executive = next(
-                (
-                    section
-                    for section in dossier.sections
-                    if section.section_kind == "executive_synthesis"
-                ),
-                None,
-            )
-            if executive is None or not executive.narratives:
+            narrative_kinds = {
+                "executive_synthesis",
+                "chart_foundation",
+                "core_architecture",
+                "priority_domain",
+                "timing_outlook",
+                "decision_support",
+            }
+            if any(
+                section.section_kind in narrative_kinds
+                and section.claim_ids
+                and not section.narratives
+                for section in dossier.sections
+            ):
                 return False
         producer = self._batch_producer(batch)
         dependency_paths = self._core_batch_dependency_paths(str(batch.get("id") or ""))
@@ -1177,7 +1243,7 @@ class SkillRuntime:
         batches = batches or self.core_batches(input_data.user_message, locale)
         expected = set(self.core_batch_files(batch))
         if not force and self.core_batch_resume_valid(input_data.session_id, batch):
-            self._finalize_consultation_artifacts(input_data.session_id)
+            await self._finalize_consultation_artifacts(input_data.session_id)
             await self._sync_metadata(
                 input_data.session_id,
                 stage="core_in_progress",
@@ -1287,7 +1353,7 @@ class SkillRuntime:
                 if missing:
                     raise ValueError("missing expected artifact(s): " + ", ".join(missing))
                 if is_consultation_batch:
-                    self._finalize_consultation_artifacts(input_data.session_id)
+                    await self._finalize_consultation_artifacts(input_data.session_id)
                 attempt_trace["status"] = "accepted"
                 attempt_trace["finishedAt"] = datetime.now(timezone.utc).isoformat()
                 trace_attempts.append(attempt_trace)
@@ -1339,7 +1405,7 @@ class SkillRuntime:
             )
 
         if not is_consultation_batch:
-            self._finalize_consultation_artifacts(input_data.session_id)
+            await self._finalize_consultation_artifacts(input_data.session_id)
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         core_complete = all(
             self.core_batch_resume_valid(input_data.session_id, item) for item in batches
@@ -1687,6 +1753,73 @@ Return JSON only:
   ]
 }}"""
 
+    async def _validate_rectification_event_evidence(
+        self,
+        events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if self.agent_runtime is None or not self.agent_runtime.is_configured():
+            return {
+                "schemaVersion": "vedicdust-life-event-evidence-validation/1.0.0",
+                "source": "question_binding_only",
+                "results": [
+                    {
+                        "questionId": event["questionId"],
+                        "category": event["category"],
+                        "accepted": True,
+                        "reason": "Backend-issued question and category binding validated.",
+                    }
+                    for event in events
+                ],
+            }
+
+        prompt = f"""Validate whether each user statement is a concrete dated life event that
+matches the backend-assigned category. This is evidence intake, not astrology interpretation.
+Do not infer chart meaning, score candidates, rewrite the user's statement, or change a category.
+Accept ordinary wording when it clearly describes a real event; reject personality descriptions,
+hypotheticals, wishes, unrelated trivia, and category mismatches. A year-only date is valid.
+
+SUBMITTED EVENTS
+{json.dumps(events, ensure_ascii=False, indent=2)}
+
+Return JSON only:
+{{
+  "results": [
+    {{
+      "questionId": "exact submitted questionId",
+      "category": "exact submitted category",
+      "accepted": true,
+      "reason": "short user-facing reason"
+    }}
+  ]
+}}"""
+        last_error: Exception | None = None
+        for _attempt in range(2):
+            try:
+                result = await self.agent_runtime.run_skill_prompt_task(
+                    "vedicdust-rectification-evidence-validation",
+                    prompt,
+                    skills=["vedicdust-rectification-interview"],
+                    max_turns=2,
+                    allow_file_tools=False,
+                )
+                payload = self._parse_json_object(result.raw_text)
+                validated = validate_agent_event_evidence(events, payload)
+                return {
+                    "schemaVersion": "vedicdust-life-event-evidence-validation/1.0.0",
+                    "source": "agent_semantic_validation",
+                    "results": validated,
+                }
+            except ValueError as exc:
+                if str(exc).startswith("Please revise the life event:"):
+                    raise
+                last_error = exc
+            except Exception as exc:
+                last_error = exc
+        raise ValueError(
+            "Could not verify these life-event descriptions. Please make each answer a short, "
+            "factual event and try again."
+        ) from last_error
+
     def _consultation_question_prompt(
         self,
         context: dict[str, Any],
@@ -1721,6 +1854,60 @@ Return JSON only:
   "limitations": ["important boundary or uncertainty"],
   "followUpQuestions": ["up to three useful next questions"]
 }}"""
+
+    async def _audit_consultation_answer(
+        self,
+        *,
+        question: str,
+        response: ConsultationAnswerResponse,
+        context: dict[str, Any],
+        locale: str,
+    ) -> None:
+        cited_ids = set(response.supporting_claim_ids)
+        cited_claims = [
+            claim
+            for claim in context.get("approvedClaims", [])
+            if isinstance(claim, dict) and str(claim.get("claimId")) in cited_ids
+        ]
+        prompt = f"""Audit a proposed answer against only the cited approved claims.
+
+{self._language_instruction(locale)}
+
+Mark supported=false if any substantive statement introduces a prediction, event, diagnosis,
+certainty, recommendation, or chart fact that is not entailed by the cited claims. Do not repair
+or rewrite the answer. Mark unsafeCertainty=true for guaranteed or deterministic outcomes.
+
+QUESTION
+{question}
+
+PROPOSED ANSWER
+{response.answer}
+
+CITED APPROVED CLAIMS
+{json.dumps(cited_claims, ensure_ascii=False, indent=2)}
+
+Return JSON only:
+{{
+  "supported": true,
+  "unsafeCertainty": false,
+  "unsupportedStatements": []
+}}"""
+        result = await self.agent_runtime.run_skill_prompt_task(
+            "vedicdust-consultation-grounding-audit",
+            prompt,
+            skills=["vedicdust-consultation"],
+            max_turns=2,
+            allow_file_tools=False,
+        )
+        payload = self._parse_json_object(result.raw_text)
+        unsupported = self._bounded_string_list(
+            payload.get("unsupportedStatements"),
+            limit=4,
+            max_length=500,
+        )
+        if payload.get("supported") is not True or payload.get("unsafeCertainty") is True:
+            detail = unsupported[0] if unsupported else "answer exceeded its cited evidence"
+            raise ValueError(f"consultation answer failed grounding audit: {detail}")
 
     @staticmethod
     def _safe_agent_failure_reason(exc: Exception) -> str:
@@ -3422,7 +3609,7 @@ User request:
                 )
         return restricted, restrict_timing
 
-    def _finalize_consultation_artifacts(self, session_id: str) -> None:
+    async def _finalize_consultation_artifacts(self, session_id: str) -> None:
         chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         judgement_context_json = self.workspace.read_artifact_text(
             session_id, JUDGEMENT_CONTEXT_JSON
@@ -3456,6 +3643,7 @@ User request:
                 "VedicDust consultation dossier did not pass its release gate: "
                 f"{dossier.release_status}"
             )
+        await self._audit_consultation_narratives(session_id, dossier, graph)
 
         manifest = build_report_manifest(dossier)
         agent_context = build_agent_context(record, graph, dossier)
@@ -3481,6 +3669,127 @@ User request:
                     CONSULTATION_DOSSIER_JSON,
                 ],
             )
+
+    async def _audit_consultation_narratives(
+        self,
+        session_id: str,
+        dossier: ConsultationDossier,
+        graph: ClaimGraph,
+    ) -> None:
+        if self.agent_runtime is None or not self.agent_runtime.is_configured():
+            return
+        if self.workspace.artifact_checkpoint_valid(
+            session_id,
+            CONSULTATION_GROUNDING_AUDIT_JSON,
+            producer="vedicdust-consultation-grounding-audit",
+            dependency_paths=[CONSULTATION_DOSSIER_JSON],
+        ):
+            return
+        claims_by_id = {claim.claim_id: claim for claim in graph.claims}
+        units: list[dict[str, Any]] = []
+        for section in dossier.sections:
+            for narrative in section.narratives:
+                units.append(
+                    {
+                        "narrativeId": narrative.narrative_id,
+                        "text": narrative.text,
+                        "claims": [
+                            {
+                                "claimId": claims_by_id[claim_id].claim_id,
+                                "title": claims_by_id[claim_id].title,
+                                "plainStatement": claims_by_id[claim_id].plain_statement,
+                                "realWorldExpressions": claims_by_id[
+                                    claim_id
+                                ].real_world_expressions,
+                                "userRelevance": claims_by_id[claim_id].user_relevance,
+                                "conditions": claims_by_id[claim_id].conditions,
+                                "practicalImplications": claims_by_id[
+                                    claim_id
+                                ].practical_implications,
+                                "limitations": claims_by_id[claim_id].limitations,
+                                "certainty": claims_by_id[claim_id].certainty,
+                                "timeScope": (
+                                    claims_by_id[claim_id].time_scope.model_dump(by_alias=True)
+                                    if claims_by_id[claim_id].time_scope is not None
+                                    else None
+                                ),
+                            }
+                            for claim_id in narrative.claim_ids
+                            if claim_id in claims_by_id
+                        ],
+                    }
+                )
+        if not units:
+            raise ValueError("consultation has no grounded narrative to audit")
+        prompt = f"""Audit each consultation narrative against only its attached approved claims.
+
+{self._language_instruction(dossier.locale)}
+
+Set supported=false if the narrative introduces any event, prediction, diagnosis, remedy,
+placement, recommendation, or degree of certainty that the attached claims do not support.
+Do not rewrite the narrative and do not use outside astrology knowledge.
+
+NARRATIVES AND CITED CLAIMS
+{json.dumps(units, ensure_ascii=False, indent=2)}
+
+Return JSON only:
+{{
+  "results": [
+    {{
+      "narrativeId": "exact narrativeId",
+      "supported": true,
+      "unsafeCertainty": false,
+      "unsupportedStatements": []
+    }}
+  ]
+}}"""
+        result = await self.agent_runtime.run_skill_prompt_task(
+            "vedicdust-consultation-grounding-audit",
+            prompt,
+            skills=["vedicdust-consultation"],
+            max_turns=3,
+            allow_file_tools=False,
+        )
+        payload = self._parse_json_object(result.raw_text)
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, list):
+            raise ValueError("consultation grounding audit must contain results")
+        expected_ids = {unit["narrativeId"] for unit in units}
+        observed: dict[str, dict[str, Any]] = {}
+        for item in raw_results:
+            if not isinstance(item, dict):
+                raise ValueError("consultation grounding audit result must be an object")
+            narrative_id = str(item.get("narrativeId") or "")
+            if narrative_id not in expected_ids or narrative_id in observed:
+                raise ValueError("consultation grounding audit changed the narrative set")
+            observed[narrative_id] = item
+        if set(observed) != expected_ids:
+            raise ValueError("consultation grounding audit omitted a narrative")
+        failed = [
+            narrative_id
+            for narrative_id, item in observed.items()
+            if item.get("supported") is not True or item.get("unsafeCertainty") is True
+        ]
+        if failed:
+            raise ValueError(
+                "consultation narratives exceeded their cited claims: " + ", ".join(failed)
+            )
+        audit_payload = {
+            "schemaVersion": "vedicdust-consultation-grounding-audit/1.0.0",
+            "dossierId": dossier.dossier_id,
+            "results": raw_results,
+        }
+        self.workspace.write_artifact(
+            session_id,
+            CONSULTATION_GROUNDING_AUDIT_JSON,
+            json.dumps(audit_payload, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CONSULTATION_GROUNDING_AUDIT_JSON,
+            producer="vedicdust-consultation-grounding-audit",
+            dependency_paths=[CONSULTATION_DOSSIER_JSON],
+        )
 
     def _active_artifact_for_batch(self, batch: dict[str, object], artifacts: list[object]) -> str:
         paths = {str(getattr(artifact, "path")) for artifact in artifacts}

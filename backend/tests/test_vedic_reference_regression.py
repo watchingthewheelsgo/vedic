@@ -1755,6 +1755,17 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
             claimIds=[claim.claim_id for claim in executive_claims],
         )
     ]
+    for section in sections[2:]:
+        if not section.claim_ids:
+            continue
+        section.narratives = [
+            GroundedNarrative(
+                narrativeId=f"narrative.{section.section_id}.1",
+                kind="integration",
+                text="This section presents the approved patterns together with their stated limits.",
+                claimIds=section.claim_ids[:4],
+            )
+        ]
     dossier = ConsultationDossier(
         dossierId=f"dossier.{case['id']}",
         chartRecordId=localized.chart_record_id,
