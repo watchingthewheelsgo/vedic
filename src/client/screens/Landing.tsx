@@ -76,7 +76,7 @@ export function Landing() {
           </Button>
         </div>
         <div className="mt-14 flex flex-wrap justify-center gap-10 sm:gap-12">
-          <HeroMeta value="41" label={t("landing.meta.pages")} />
+          <HeroMeta value="15" label={t("landing.meta.pages")} />
           <HeroMeta value="9" label={t("landing.meta.planets")} />
           <HeroMeta value="12" label={t("landing.meta.lifeAreas")} />
           <HeroMeta value="D9" label={t("landing.meta.d9")} />

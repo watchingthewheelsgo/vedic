@@ -570,27 +570,46 @@ class SkillRuntime:
             raise ValueError("the consultation assistant is not configured")
 
         context = self._parse_json_object(context_text)
-        prompt = self._consultation_question_prompt(
+        base_prompt = self._consultation_question_prompt(
             context,
             input_data.question,
             dossier.locale,
         )
-        result = await self.agent_runtime.run_skill_prompt_task(
-            "vedicdust-consultation-qa",
-            prompt,
-            skills=["vedicdust-consultation"],
-            max_turns=4,
-            allow_file_tools=False,
-        )
-        payload = self._parse_json_object(result.raw_text)
-        response = self._validate_consultation_answer_payload(payload, context)
-        if response.answerability == "answered":
-            await self._audit_consultation_answer(
-                question=input_data.question,
-                response=response,
-                context=context,
-                locale=dossier.locale,
+        audit_feedback = ""
+        response: ConsultationAnswerResponse | None = None
+        for attempt in range(2):
+            prompt = base_prompt + audit_feedback
+            result = await self.agent_runtime.run_skill_prompt_task(
+                "vedicdust-consultation-qa",
+                prompt,
+                skills=["vedicdust-consultation"],
+                max_turns=4,
+                allow_file_tools=False,
             )
+            payload = self._parse_json_object(result.raw_text)
+            candidate = self._validate_consultation_answer_payload(payload, context)
+            if candidate.answerability != "answered":
+                response = candidate
+                break
+            try:
+                await self._audit_consultation_answer(
+                    question=input_data.question,
+                    response=candidate,
+                    context=context,
+                    locale=dossier.locale,
+                )
+                response = candidate
+                break
+            except ValueError as exc:
+                if attempt == 1:
+                    raise
+                audit_feedback = (
+                    "\n\nThe previous draft failed the evidence audit. Produce a new answer "
+                    "that is narrower and supported only by the cited approved claims. Audit "
+                    f"feedback: {self._safe_agent_failure_reason(exc)}"
+                )
+        if response is None:
+            raise ValueError("consultation assistant did not produce an auditable answer")
         self._append_consultation_exchange(session_id, input_data.question, response)
         return response
 
@@ -1731,8 +1750,11 @@ clear consumer product.
 
 {self._language_instruction(locale)}
 
-The backend has already selected every question identity and event category. You may only
-improve title, prompt, whyWeAsk, and detailsPlaceholder. Do not mention candidate charts,
+The backend has already selected every question identity and event category. You may reorder
+the complete question list so the most independently memorable and highest-value dated event
+is asked first, and improve title, prompt, whyWeAsk, and detailsPlaceholder. Preserve every
+question exactly once. `questionValue` is private ranking context and must never appear in
+visible wording. Do not mention candidate charts,
 scores, houses, planets, vargas, D1-D60, or imply that an answer is expected. Keep every
 question factual and non-leading. Never add personality or physical-trait questions.
 
@@ -1892,14 +1914,25 @@ Return JSON only:
   "unsafeCertainty": false,
   "unsupportedStatements": []
 }}"""
-        result = await self.agent_runtime.run_skill_prompt_task(
-            "vedicdust-consultation-grounding-audit",
-            prompt,
-            skills=["vedicdust-consultation"],
-            max_turns=2,
-            allow_file_tools=False,
-        )
-        payload = self._parse_json_object(result.raw_text)
+        payload: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for _attempt in range(2):
+            try:
+                result = await self.agent_runtime.run_skill_prompt_task(
+                    "vedicdust-consultation-grounding-audit",
+                    prompt,
+                    skills=["vedicdust-consultation"],
+                    max_turns=2,
+                    allow_file_tools=False,
+                )
+                payload = self._parse_json_object(result.raw_text)
+                break
+            except (RuntimeError, ValueError) as exc:
+                last_error = exc
+        if payload is None:
+            raise ValueError(
+                "consultation grounding audit did not return valid JSON"
+            ) from last_error
         unsupported = self._bounded_string_list(
             payload.get("unsupportedStatements"),
             limit=4,
@@ -1992,6 +2025,28 @@ Return JSON only:
             artifacts.get(CHART_RECORD_JSON, ""),
             artifacts.get("sensitivity_scan.json", ""),
         )
+        previous = self._json_dict(artifacts.get("prevalidation_result.json", ""))
+        previous_attempt = int(previous.get("qualityAttempt") or 0)
+        quality_attempt = previous_attempt
+        if result.get("status") == "scored":
+            quality_attempt += 1
+        result["qualityAttempt"] = quality_attempt
+        decision = result.get("decision")
+        if (
+            quality_attempt >= 2
+            and isinstance(decision, dict)
+            and decision.get("reportAllowed") is not True
+        ):
+            decision.update(
+                {
+                    "nextStep": "review_birth_details_or_stop",
+                    "reason": (
+                        "Two independent Reader validation rounds did not meet the publication "
+                        "threshold. Stop regenerating questions and review the recorded birth "
+                        "details or subject identity; these answers must not select another chart."
+                    ),
+                }
+            )
         self.workspace.write_artifact(
             session_id,
             "prevalidation_result.json",
@@ -3023,7 +3078,7 @@ Return JSON only:
         threshold_medium = hit_rate >= 0.6
         meets_readiness_threshold = hit_rate >= min_hit_rate
         reliable_exact = time_reliability == "reliable_exact"
-        if mode == "rectification_required" and not reliable_exact:
+        if mode == "rectification_required":
             return {
                 "nextStep": "complete_deterministic_rectification",
                 "timeConfidence": "low",
@@ -3037,6 +3092,21 @@ Return JSON only:
                 ),
             }
         if reliable_exact:
+            if not meets_readiness_threshold:
+                return {
+                    "nextStep": "regenerate_prevalidation_or_review_subject",
+                    "timeConfidence": "high",
+                    "reportAllowed": False,
+                    "reportScope": scope,
+                    "inputRiskLevel": input_risk_level,
+                    "llmContract": llm_contract,
+                    "reason": (
+                        "The recorded birth time remains the authoritative calculation input, "
+                        "but the Reader validation did not meet the publication threshold. "
+                        "Regenerate neutral validation questions or review subject identity; "
+                        "do not select a different chart from these answers."
+                    ),
+                }
             return {
                 "nextStep": (
                     "report_allowed_with_limits"
@@ -3048,11 +3118,7 @@ Return JSON only:
                 "reportScope": "guarded_full_report" if input_risk_level == "high" else scope,
                 "inputRiskLevel": input_risk_level,
                 "llmContract": llm_contract,
-                "reason": (
-                    "Reliable exact time source. Low prevalidation score is recorded as signal or expression limitation."
-                    if total_score <= 2
-                    else "Reliable exact time source and validation feedback recorded."
-                ),
+                "reason": "Reliable exact time source and validation feedback passed the publication threshold.",
             }
         if core_allowed_without_rectification and meets_readiness_threshold:
             return {
@@ -3366,6 +3432,11 @@ Hard contract:
   faithful synthesis of those Claims; do not introduce a new event, prediction,
   diagnosis, remedy, or degree of certainty. Keep technical terms out of narrative
   prose unless immediately explained.
+- Treat each narrative as an integrated consultation paragraph, not a claim-by-claim
+  paraphrase. Start with the practical thesis, connect the cited Claims into one coherent
+  pattern, include a realistic manifestation or decision implication only when the cited
+  Claims contain it, and state the most important counterweight. Do not repeat titles,
+  confidence labels, or technical evidence that the deterministic renderer already supplies.
 - Leave narratives empty in scope, follow_up, and technical_evidence.
 - chart_foundation and decision_support each require their own assigned Claim.
   technical_evidence must keep claimIds empty.
@@ -3743,28 +3814,45 @@ Return JSON only:
     }}
   ]
 }}"""
-        result = await self.agent_runtime.run_skill_prompt_task(
-            "vedicdust-consultation-grounding-audit",
-            prompt,
-            skills=["vedicdust-consultation"],
-            max_turns=3,
-            allow_file_tools=False,
-        )
-        payload = self._parse_json_object(result.raw_text)
-        raw_results = payload.get("results")
-        if not isinstance(raw_results, list):
-            raise ValueError("consultation grounding audit must contain results")
         expected_ids = {unit["narrativeId"] for unit in units}
+        raw_results: list[Any] | None = None
         observed: dict[str, dict[str, Any]] = {}
-        for item in raw_results:
-            if not isinstance(item, dict):
-                raise ValueError("consultation grounding audit result must be an object")
-            narrative_id = str(item.get("narrativeId") or "")
-            if narrative_id not in expected_ids or narrative_id in observed:
-                raise ValueError("consultation grounding audit changed the narrative set")
-            observed[narrative_id] = item
-        if set(observed) != expected_ids:
-            raise ValueError("consultation grounding audit omitted a narrative")
+        audit_model: str | None = None
+        audit_attempts = 0
+        last_error: Exception | None = None
+        for audit_attempts in range(1, 3):
+            try:
+                result = await self.agent_runtime.run_skill_prompt_task(
+                    "vedicdust-consultation-grounding-audit",
+                    prompt,
+                    skills=["vedicdust-consultation"],
+                    max_turns=3,
+                    allow_file_tools=False,
+                )
+                audit_model = getattr(result, "model", None)
+                payload = self._parse_json_object(result.raw_text)
+                candidate_results = payload.get("results")
+                if not isinstance(candidate_results, list):
+                    raise ValueError("consultation grounding audit must contain results")
+                candidate_observed: dict[str, dict[str, Any]] = {}
+                for item in candidate_results:
+                    if not isinstance(item, dict):
+                        raise ValueError("consultation grounding audit result must be an object")
+                    narrative_id = str(item.get("narrativeId") or "")
+                    if narrative_id not in expected_ids or narrative_id in candidate_observed:
+                        raise ValueError("consultation grounding audit changed the narrative set")
+                    candidate_observed[narrative_id] = item
+                if set(candidate_observed) != expected_ids:
+                    raise ValueError("consultation grounding audit omitted a narrative")
+                raw_results = candidate_results
+                observed = candidate_observed
+                break
+            except (RuntimeError, ValueError) as exc:
+                last_error = exc
+        if raw_results is None:
+            raise ValueError(
+                "consultation grounding audit returned an invalid contract"
+            ) from last_error
         failed = [
             narrative_id
             for narrative_id, item in observed.items()
@@ -3777,6 +3865,8 @@ Return JSON only:
         audit_payload = {
             "schemaVersion": "vedicdust-consultation-grounding-audit/1.0.0",
             "dossierId": dossier.dossier_id,
+            "auditModel": audit_model,
+            "auditAttempts": audit_attempts,
             "results": raw_results,
         }
         self.workspace.write_artifact(

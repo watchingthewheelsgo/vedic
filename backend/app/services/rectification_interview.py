@@ -186,8 +186,10 @@ def build_rectification_interview(
     copy = _COPY.get(locale, _COPY["en"])
     target = min(MAX_RECTIFICATION_EVENTS, max(3, len(existing) + 1))
     questions = []
+    discriminating_fields = [str(value) for value in plan.get("discriminatingFields") or []]
     for index, category in enumerate(selected_categories, start=1):
         title, prompt = copy["category"][category]
+        matched_fields = _category_discriminating_fields(category, discriminating_fields)
         questions.append(
             {
                 "questionId": f"rectify.r{len(existing) + 1}.q{index}.{category}",
@@ -200,6 +202,11 @@ def build_rectification_interview(
                 "detailsPlaceholder": copy["placeholder"],
                 "answerType": "dated_event",
                 "allowSkip": True,
+                "questionValue": {
+                    "tier": "discriminating" if matched_fields else "coverage",
+                    "matchedFieldCount": len(matched_fields),
+                    "matchedFields": matched_fields,
+                },
             }
         )
 
@@ -401,3 +408,12 @@ def _rank_categories(
             continue
         result.append(category)
     return result
+
+
+def _category_discriminating_fields(
+    category: str,
+    discriminating_fields: list[str],
+) -> list[str]:
+    rules = RECTIFICATION_EVENT_RULES.get(category, RECTIFICATION_EVENT_RULES["unknown"])
+    preferred = {str(value).casefold() for value in rules.get("fields") or []}
+    return [field for field in discriminating_fields if field.casefold() in preferred]

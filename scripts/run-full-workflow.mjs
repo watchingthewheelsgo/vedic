@@ -86,9 +86,18 @@ async function completePrevalidation(initialSession) {
           "dated event objects with date, category, and description."
       );
     }
+    const interviewSession = await postJson("/api/rectification-interview", {
+      sessionId: session.sessionId,
+      locale: birthInput.locale ?? "en"
+    });
+    const interview = parseArtifact(interviewSession, "rectification_interview.json");
+    const boundEvents = bindRectificationEvents(rectificationEvents, interview);
+    console.log(
+      `rectification questions=${interview?.questions?.length ?? 0} source=${interview?.source ?? "unknown"}`
+    );
     session = await postJson("/api/rectification-life-events", {
       sessionId: session.sessionId,
-      events: rectificationEvents
+      events: boundEvents
     });
     state = rectificationState(session);
     console.log(`rectification status=${state?.status ?? "unknown"}`);
@@ -124,6 +133,32 @@ async function completePrevalidation(initialSession) {
     throw new Error("Reader prevalidation did not permit a full report.");
   }
   return session;
+}
+
+function bindRectificationEvents(events, interview) {
+  const questions = Array.isArray(interview?.questions) ? interview.questions : [];
+  if (!questions.length) {
+    throw new Error("Rectification interview returned no current verification questions.");
+  }
+  const questionByCategory = new Map(
+    questions
+      .filter((question) => question?.questionId && question?.category)
+      .map((question) => [String(question.category), String(question.questionId)])
+  );
+  const missing = events
+    .map((event) => event.category)
+    .filter((category) => !questionByCategory.has(category));
+  if (missing.length) {
+    throw new Error(
+      `Rectification fixture categories are not available in the current interview: ${[
+        ...new Set(missing)
+      ].join(", ")}. Available categories: ${[...questionByCategory.keys()].join(", ")}.`
+    );
+  }
+  return events.map((event) => ({
+    ...event,
+    questionId: questionByCategory.get(event.category)
+  }));
 }
 
 async function postJson(path, body) {

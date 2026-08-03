@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, Callable
 import re
 from urllib.parse import quote
 
+from clerk_backend_api import Clerk
+from clerk_backend_api.security.types import AuthenticateRequestOptions, RequestState
 import httpx
-import jwt
 from fastapi import Depends, Header, HTTPException
 
 from app.settings import Settings, get_settings
@@ -41,27 +42,41 @@ class AuthenticatedUser:
 
 
 class ClerkTokenVerifier:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        authenticate_request: Callable[[httpx.Request, AuthenticateRequestOptions], RequestState]
+        | None = None,
+    ) -> None:
         self.settings = settings
+        self._authenticate_request = (
+            authenticate_request
+            or Clerk(bearer_auth=settings.clerk_secret_key).authenticate_request
+        )
 
     def verify(self, token: str) -> AuthenticatedUser:
         try:
-            payload = jwt.decode(
-                token,
-                options={
-                    "verify_signature": False,
-                    "verify_exp": True,
-                    "verify_aud": False,
-                    "verify_iss": False,
-                },
+            state = self._authenticate_request(
+                httpx.Request(
+                    "GET",
+                    "https://vedicdust.local/api/auth/session",
+                    headers={"Authorization": f"Bearer {token}"},
+                ),
+                AuthenticateRequestOptions(
+                    secret_key=self.settings.clerk_secret_key,
+                    authorized_parties=self.settings.allowed_origin_list(),
+                    accepts_token=["session_token"],
+                ),
             )
-        except jwt.ExpiredSignatureError as exc:
-            raise HTTPException(status_code=401, detail="Clerk session token has expired") from exc
-        except jwt.PyJWTError as exc:
-            raise HTTPException(status_code=401, detail="Invalid Clerk session token") from exc
-
-        if "exp" not in payload:
-            raise HTTPException(status_code=401, detail="Clerk session token is missing exp")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to verify Clerk session token",
+            ) from exc
+        if not state.is_signed_in or not isinstance(state.payload, dict):
+            raise HTTPException(status_code=401, detail="Invalid or expired Clerk session token")
+        payload = state.payload
 
         try:
             clerk_user = _clerk_user_from_backend(self.settings.clerk_secret_key, payload)
@@ -79,10 +94,8 @@ class ClerkTokenVerifier:
         subject = str(payload.get("sub") or "").strip()
         if not subject:
             raise HTTPException(status_code=401, detail="Clerk session token is missing a subject")
-        email = _email_from_claims(payload) or _email_from_clerk_user(clerk_user)
-        claim_admin = _claims_grant_admin(payload) or self.settings.is_admin_identity(
-            subject, email
-        )
+        email = _email_from_clerk_user(clerk_user)
+        claim_admin = self.settings.is_admin_identity(subject, email)
         return AuthenticatedUser(
             user_id=subject,
             auth_mode="clerk",
@@ -178,14 +191,6 @@ async def require_user(
 CurrentUser = Depends(require_user)
 
 
-def _email_from_claims(payload: dict[str, Any]) -> str | None:
-    for key in ["email", "email_address", "primary_email_address"]:
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip().lower()
-    return None
-
-
 def _clerk_user_from_backend(secret_key: str, payload: dict[str, Any]) -> dict[str, Any]:
     user_id = str(payload.get("sub") or "").strip()
     if not user_id:
@@ -245,33 +250,3 @@ def _email_from_clerk_user(payload: dict[str, Any]) -> str | None:
         if isinstance(email, str) and email.strip():
             return email.strip().lower()
     return None
-
-
-def _claims_grant_admin(payload: dict[str, Any]) -> bool:
-    if _role_is_admin(payload.get("role")) or _role_is_admin(payload.get("org_role")):
-        return True
-    if _roles_include_admin(payload.get("roles")):
-        return True
-    for key in ["public_metadata", "private_metadata", "unsafe_metadata", "metadata"]:
-        metadata = payload.get(key)
-        if not isinstance(metadata, dict):
-            continue
-        if metadata.get("admin") is True or metadata.get("isAdmin") is True:
-            return True
-        if _role_is_admin(metadata.get("role")) or _role_is_admin(metadata.get("userRole")):
-            return True
-        if _roles_include_admin(metadata.get("roles")):
-            return True
-    return False
-
-
-def _role_is_admin(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    return value.strip().lower() in {"admin", "owner", "super_admin", "super-admin"}
-
-
-def _roles_include_admin(value: Any) -> bool:
-    if not isinstance(value, list):
-        return False
-    return any(_role_is_admin(item) for item in value)

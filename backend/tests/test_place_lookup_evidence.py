@@ -15,6 +15,19 @@ def _runtime() -> ClaudeRuntime:
     )
 
 
+def test_grounding_audit_prefers_a_distinct_configured_model() -> None:
+    runtime = ClaudeRuntime(
+        SimpleNamespace(
+            anthropic_model="writer-model",
+            anthropic_default_haiku_model="audit-model",
+            anthropic_default_opus_model="",
+        )
+    )
+
+    assert runtime._prompt_task_model("vedicdust-consultation") == "writer-model"
+    assert runtime._prompt_task_model("vedicdust-consultation-grounding-audit") == "audit-model"
+
+
 def test_place_lookup_tool_evidence_accepts_verified_poi_coordinates() -> None:
     raw_text = """
     根据搜索结果，淄博市市立医院（即临淄区人民医院）的地址为：

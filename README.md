@@ -232,6 +232,7 @@ Required `.env` values:
 VEDIC_AUTH_MODE=clerk
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
 CLERK_SECRET_KEY=sk_test_...
+ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 VEDIC_ADMIN_USER_IDS=
 VEDIC_ADMIN_EMAILS=
 ```
@@ -239,8 +240,9 @@ VEDIC_ADMIN_EMAILS=
 Effect:
 
 - The React app initializes Clerk from `VITE_CLERK_PUBLISHABLE_KEY`.
-- The backend validates decoded Clerk session subjects through Clerk Backend API
-  using `CLERK_SECRET_KEY`.
+- The backend uses Clerk's official backend SDK to verify the session-token signature,
+  expiry, token type, and authorized browser origin, then resolves the user through
+  Clerk Backend API using `CLERK_SECRET_KEY`.
 - Sessions, jobs, exports, and billing records are isolated by Clerk user id.
 
 Human actions:
@@ -393,6 +395,7 @@ Full report-generation smoke test:
 ```bash
 VEDIC_WORKFLOW_AUTH_TOKEN='<clerk-session-token>' \
 VEDIC_WORKFLOW_FEEDBACK='1. 准\\n2. 部分准' \
+VEDIC_WORKFLOW_EVENTS_JSON='[{"date":"2018-06","category":"education","description":"Completed university"},{"date":"2021-03","category":"career","description":"Started first full-time role"},{"date":"2024-09","category":"relocation","description":"Moved to another city"}]' \
 npm run workflow:test
 ```
 
@@ -401,7 +404,8 @@ paywall is enabled. The script follows the production sequence: chart calculatio
 deterministic rectification when required, one scan-stable Reader quality check,
 core-job polling, and public VedicDust artifact verification. A fixture that requires
 rectification must supply `VEDIC_WORKFLOW_EVENTS_JSON` with 3-5 dated event objects;
-the script never invents biography or lets Reader feedback select a candidate. Never
+the script first obtains the backend-issued interview and binds every event to its current
+`questionId`. It never invents biography or lets Reader feedback select a candidate. Never
 disable production auth to make this test pass.
 
 ### Commit Hooks
@@ -451,10 +455,11 @@ named tunnel with your own domain, not a quick `trycloudflare.com` tunnel.
 
 The frontend uses `@clerk/clerk-react`. Set `VITE_CLERK_PUBLISHABLE_KEY` in the
 project `.env`; it is safe for the browser. The backend verifies Clerk session
-tokens without JWKS: it decodes Clerk JWT claims locally, requires a valid
-non-expired `exp`, and confirms the decoded `sub` exists via Clerk Backend API
-using `CLERK_SECRET_KEY`. The Clerk user id is stored as `owner_user_id` on
-session, artifact, export, and job metadata.
+tokens with Clerk's official backend SDK and restricts accepted session tokens to
+`ALLOWED_ORIGINS`. It then confirms the signed `sub` through Clerk Backend API using
+`CLERK_SECRET_KEY`. Admin access comes only from server-side
+`VEDIC_ADMIN_USER_IDS`/`VEDIC_ADMIN_EMAILS`, never token metadata. The Clerk user id
+is stored as `owner_user_id` on session, artifact, export, and job metadata.
 
 For the Clerk CLI project link, run this from the repo root in a normal
 terminal:

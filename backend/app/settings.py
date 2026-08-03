@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     vedic_auth_mode: str = Field(default="auto", alias="VEDIC_AUTH_MODE")
     clerk_publishable_key: str = Field(default="", alias="VITE_CLERK_PUBLISHABLE_KEY")
     clerk_secret_key: str = Field(default="", alias="CLERK_SECRET_KEY")
+    allowed_origins: str = Field(
+        default="http://127.0.0.1:5173,http://localhost:5173",
+        alias="ALLOWED_ORIGINS",
+    )
     vedic_admin_user_ids: str = Field(default="", alias="VEDIC_ADMIN_USER_IDS")
     vedic_admin_emails: str = Field(default="", alias="VEDIC_ADMIN_EMAILS")
 
@@ -261,8 +265,11 @@ class Settings(BaseSettings):
 
     def clerk_verifier_source(self) -> str:
         if self.clerk_secret_key.strip():
-            return "unsigned_jwt_claims_plus_clerk_user_lookup"
+            return "clerk_signed_session_token"
         return "unconfigured"
+
+    def allowed_origin_list(self) -> list[str]:
+        return sorted(_csv_set(self.allowed_origins))
 
     def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
         user_ids = _csv_set(self.vedic_admin_user_ids)

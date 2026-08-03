@@ -59,6 +59,8 @@ def test_question_categories_follow_candidate_discriminators() -> None:
     assert len(interview["questions"]) == 5
     assert interview["progress"]["target"] == 3
     assert interview["source"] == "deterministic_brief"
+    assert interview["questions"][0]["questionValue"]["tier"] == "discriminating"
+    assert interview["questions"][0]["questionValue"]["matchedFields"] == ["d10Lagna"]
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
 
 
@@ -139,6 +141,34 @@ def test_agent_may_rephrase_but_not_change_question_identity() -> None:
 
     proposed["questions"][0]["category"] = "health"
     with pytest.raises(ValueError, match="changed a question category"):
+        validate_agent_question_wording(brief, proposed)
+
+
+def test_agent_may_prioritize_but_cannot_drop_backend_questions() -> None:
+    brief = build_rectification_interview(
+        _state(fields=["d10Lagna", "d4Structure"]),
+        session_id="session-test",
+        locale="en",
+    )
+    proposed = {
+        "questions": [
+            {
+                "questionId": question["questionId"],
+                "category": question["category"],
+                "title": question["title"],
+                "prompt": question["prompt"],
+                "whyWeAsk": question["whyWeAsk"],
+                "detailsPlaceholder": question["detailsPlaceholder"],
+            }
+            for question in reversed(brief["questions"])
+        ]
+    }
+
+    accepted = validate_agent_question_wording(brief, proposed)
+    assert accepted["questions"][0]["questionId"] == brief["questions"][-1]["questionId"]
+
+    proposed["questions"].pop()
+    with pytest.raises(ValueError, match="changed the backend question set"):
         validate_agent_question_wording(brief, proposed)
 
 
@@ -353,3 +383,52 @@ def test_consultation_grounding_audit_rejects_content_beyond_cited_claims() -> N
                 locale="en",
             )
         )
+
+
+def test_consultation_grounding_audit_retries_malformed_contract_once() -> None:
+    class FakeAgentRuntime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_skill_prompt_task(self, *_args: object, **_kwargs: object):
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(raw_text="not json")
+            return SimpleNamespace(
+                raw_text=json.dumps(
+                    {
+                        "supported": True,
+                        "unsafeCertainty": False,
+                        "unsupportedStatements": [],
+                    }
+                )
+            )
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    fake = FakeAgentRuntime()
+    runtime.agent_runtime = fake  # type: ignore[assignment]
+    response = ConsultationAnswerResponse(
+        answerability="answered",
+        answer="The approved career pattern supports reviewing this decision in stages.",
+        supportingClaimIds=["claim.career"],
+        limitations=[],
+        followUpQuestions=[],
+    )
+
+    asyncio.run(
+        runtime._audit_consultation_answer(
+            question="How should I approach this career decision?",
+            response=response,
+            context={
+                "approvedClaims": [
+                    {
+                        "claimId": "claim.career",
+                        "plainStatement": "Career decisions benefit from staged review.",
+                    }
+                ]
+            },
+            locale="en",
+        )
+    )
+
+    assert fake.calls == 2

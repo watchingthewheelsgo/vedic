@@ -216,17 +216,17 @@ def test_clerk_verifier_uses_backend_email_when_token_has_no_email(
     class Settings:
         clerk_secret_key = "sk_test_value"
 
+        def allowed_origin_list(self) -> list[str]:
+            return ["http://127.0.0.1:5173"]
+
         def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
             return email == "admin@example.com"
 
-    verifier = auth_module.ClerkTokenVerifier(Settings())
-    monkeypatch.setattr(
-        auth_module,
-        "jwt",
-        SimpleNamespace(
-            ExpiredSignatureError=auth_module.jwt.ExpiredSignatureError,
-            PyJWTError=auth_module.jwt.PyJWTError,
-            decode=lambda token, **kwargs: {"sub": "user_123", "exp": 9999999999},
+    verifier = auth_module.ClerkTokenVerifier(
+        Settings(),
+        authenticate_request=lambda request, options: SimpleNamespace(
+            is_signed_in=True,
+            payload={"sub": "user_123", "exp": 9999999999},
         ),
     )
     monkeypatch.setattr(
@@ -248,21 +248,21 @@ def test_clerk_verifier_uses_backend_email_when_token_has_no_email(
     assert user.role == "admin"
 
 
-def test_clerk_verifier_rejects_expired_tokens(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_clerk_verifier_rejects_expired_tokens() -> None:
     class Settings:
         clerk_secret_key = "sk_test_value"
+
+        def allowed_origin_list(self) -> list[str]:
+            return ["http://127.0.0.1:5173"]
 
         def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
             return False
 
-    verifier = auth_module.ClerkTokenVerifier(Settings())
-    monkeypatch.setattr(
-        auth_module.jwt,
-        "decode",
-        lambda token, **kwargs: (_ for _ in ()).throw(
-            auth_module.jwt.ExpiredSignatureError("expired")
+    verifier = auth_module.ClerkTokenVerifier(
+        Settings(),
+        authenticate_request=lambda request, options: SimpleNamespace(
+            is_signed_in=False,
+            payload=None,
         ),
     )
 
@@ -270,7 +270,7 @@ def test_clerk_verifier_rejects_expired_tokens(
         verifier.verify("expired-token")
 
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "Clerk session token has expired"
+    assert exc_info.value.detail == "Invalid or expired Clerk session token"
 
 
 def test_clerk_settings_use_backend_user_lookup_when_secret_key_is_configured() -> None:
@@ -281,7 +281,7 @@ def test_clerk_settings_use_backend_user_lookup_when_secret_key_is_configured() 
         CLERK_SECRET_KEY="sk_test_value",
     )
 
-    assert settings.clerk_verifier_source() == "unsigned_jwt_claims_plus_clerk_user_lookup"
+    assert settings.clerk_verifier_source() == "clerk_signed_session_token"
     assert settings.auth_config_summary()["secretKeyConfigured"] is True
 
 
@@ -289,14 +289,18 @@ def test_clerk_verifier_rejects_unknown_backend_user(monkeypatch: pytest.MonkeyP
     class Settings:
         clerk_secret_key = "sk_test_value"
 
+        def allowed_origin_list(self) -> list[str]:
+            return ["http://127.0.0.1:5173"]
+
         def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
             return False
 
-    verifier = auth_module.ClerkTokenVerifier(Settings())
-    monkeypatch.setattr(
-        auth_module.jwt,
-        "decode",
-        lambda token, **kwargs: {"sub": "missing_user", "exp": 9999999999},
+    verifier = auth_module.ClerkTokenVerifier(
+        Settings(),
+        authenticate_request=lambda request, options: SimpleNamespace(
+            is_signed_in=True,
+            payload={"sub": "missing_user", "exp": 9999999999},
+        ),
     )
     monkeypatch.setattr(
         auth_module,
@@ -309,6 +313,43 @@ def test_clerk_verifier_rejects_unknown_backend_user(monkeypatch: pytest.MonkeyP
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Clerk user not found"
+
+
+def test_clerk_verifier_does_not_trust_admin_claims(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Settings:
+        clerk_secret_key = "sk_test_value"
+
+        def allowed_origin_list(self) -> list[str]:
+            return ["http://127.0.0.1:5173"]
+
+        def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
+            return False
+
+    verifier = auth_module.ClerkTokenVerifier(
+        Settings(),
+        authenticate_request=lambda request, options: SimpleNamespace(
+            is_signed_in=True,
+            payload={
+                "sub": "user_123",
+                "exp": 9999999999,
+                "role": "admin",
+                "public_metadata": {"admin": True},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "_cached_clerk_user_from_backend",
+        lambda secret_key, user_id: {
+            "primary_email_address_id": "email_1",
+            "email_addresses": [{"id": "email_1", "email_address": "user@example.com"}],
+        },
+    )
+
+    user = verifier.verify("signed-token")
+
+    assert user.is_admin is False
+    assert user.role == "user"
 
 
 def test_user_store_keeps_database_role_as_authority(tmp_path: Path) -> None:

@@ -3849,6 +3849,10 @@ function readingContinuationAction(
 ): ReadingContinuationAction {
   if (canStartFullReading(session)) return "full_report";
 
+  const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
+  const prevalidationDecision = objectValue(prevalidationResult, "decision");
+  if (prevalidationDecision?.nextStep === "review_birth_details_or_stop") return "stop";
+
   const state = parseJsonArtifact(session, "chart_rectification_state.json");
   if (!state) return "reader";
 

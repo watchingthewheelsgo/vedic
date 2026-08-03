@@ -288,7 +288,6 @@ class PlaceService:
                 options,
                 selected_context=selected_context,
                 city_base=city_base,
-                query=trimmed,
             )
             if not options and trimmed:
                 reason = (
@@ -642,13 +641,10 @@ class PlaceService:
         *,
         selected_context: ResolvedPlace | None,
         city_base: ResolvedPlace,
-        query: str,
     ) -> tuple[list[PrecisePlaceOption], bool]:
         if not options or not selected_context:
             return options, False
         if self._same_context_scope(selected_context, city_base):
-            return options, False
-        if not self._is_broad_precise_query(query):
             return options, False
 
         matching = [
@@ -679,21 +675,6 @@ class PlaceService:
                 city_base.lon,
             )
             < 1.0
-        )
-
-    @staticmethod
-    def _is_broad_precise_query(query: str) -> bool:
-        stripped = query.strip().lower()
-        if not stripped:
-            return False
-        return not bool(
-            re.search(
-                r"\d|东院|西院|南院|北院|院区|分院|校区|门诊|"
-                r"路|街|号|弄|区|县|镇|乡|"
-                r"\b(?:east|west|south|north|campus|branch|district|county|road|street)\b",
-                stripped,
-                re.I,
-            )
         )
 
     def _option_mentions_selected_context(

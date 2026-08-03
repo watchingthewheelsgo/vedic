@@ -328,7 +328,7 @@ def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
     assert rectification is not None
     assert rectification.decision.status == "input_resolution_required"
     assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
-    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.6.0"
+    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.7.0"
     assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.2.0"
     assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.0.0"
     assert rectification.method_maturity == "product_hypothesis"

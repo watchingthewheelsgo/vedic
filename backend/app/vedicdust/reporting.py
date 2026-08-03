@@ -726,9 +726,15 @@ def render_consultation_report(
         elif section.section_kind == "technical_evidence":
             lines.extend(_render_evidence(graph, section, copy))
         else:
-            for claim_id in section.claim_ids:
-                claim = claims_by_id.get(claim_id)
-                if claim and claim.status != "withheld":
+            visible_claims = [
+                claim
+                for claim_id in section.claim_ids
+                if (claim := claims_by_id.get(claim_id)) is not None and claim.status != "withheld"
+            ]
+            if section.narratives:
+                lines.extend(_render_claim_takeaways(visible_claims, copy, dossier.locale))
+            else:
+                for claim in visible_claims:
                     lines.extend(_render_claim(claim, copy, dossier.locale))
 
     return "\n".join(lines).rstrip() + "\n"
@@ -828,6 +834,24 @@ def _render_claim(claim: Claim, copy: dict[str, str], locale: str) -> list[str]:
                 f"{claim.time_scope.end.date().isoformat()}",
             ]
         )
+    lines.append("")
+    return lines
+
+
+def _render_claim_takeaways(claims: list[Claim], copy: dict[str, str], locale: str) -> list[str]:
+    if not claims:
+        return []
+    heading = {
+        "zh": "### 关键观察",
+        "ja": "### 主なポイント",
+        "en": "### Key observations",
+    }.get(locale, "### Key observations")
+    lines = [heading, ""]
+    for claim in claims:
+        title = claim.title or claim.topic
+        lines.append(f"- **{title}** ({_grade(claim.certainty, locale)}): {claim.plain_statement}")
+        if claim.user_relevance:
+            lines.append(f"  - **{copy['meaning']}**: {claim.user_relevance}")
     lines.append("")
     return lines
 

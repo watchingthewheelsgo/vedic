@@ -2064,6 +2064,107 @@ def test_prevalidation_decision_requires_medium_risk_threshold() -> None:
     assert at_threshold["nextStep"] == "report_allowed_with_limits"
 
 
+def test_reliable_exact_time_does_not_bypass_failed_reader_quality_gate() -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+
+    decision = runtime._prevalidation_decision(
+        0,
+        5,
+        status="scored",
+        time_reliability="reliable_exact",
+        input_risk_level="low",
+        report_readiness={
+            "mode": "standard_after_prevalidation",
+            "scope": "full_report",
+            "minimumHitRateForCore": 0.8,
+            "coreAllowedWithoutRectification": True,
+        },
+    )
+
+    assert decision["reportAllowed"] is False
+    assert decision["timeConfidence"] == "high"
+    assert decision["nextStep"] == "regenerate_prevalidation_or_review_subject"
+
+
+def test_reliable_exact_time_does_not_bypass_required_place_rectification() -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+
+    decision = runtime._prevalidation_decision(
+        5,
+        5,
+        status="scored",
+        time_reliability="reliable_exact",
+        input_risk_level="high",
+        report_readiness={
+            "mode": "rectification_required",
+            "scope": "prevalidation_or_d1_only",
+            "minimumHitRateForCore": 0.9,
+            "coreAllowedWithoutRectification": False,
+        },
+    )
+
+    assert decision["reportAllowed"] is False
+    assert decision["nextStep"] == "complete_deterministic_rectification"
+
+
+def test_reader_quality_attempt_stops_after_two_failed_rounds(tmp_path) -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    runtime.workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = "session-quality-attempts"
+    runtime.workspace.create_session(session_id)
+    runtime.workspace.write_artifact(
+        session_id,
+        "chart_record.json",
+        json.dumps(
+            {
+                "chartRecordId": "chart-quality-attempts",
+                "revision": 0,
+                "subject": {"subjectId": "subject-quality-attempts"},
+                "birthAssertion": {
+                    "localDate": "1990-01-01",
+                    "reportedLocalTime": "08:30",
+                    "reportedPlace": "Shanghai",
+                    "timeCertainty": "exact",
+                    "evidence": [{"sourceLabel": "hospital birth record"}],
+                },
+            }
+        ),
+    )
+    runtime.workspace.write_artifact(
+        session_id,
+        "sensitivity_scan.json",
+        json.dumps(
+            {
+                "summary": {"riskLevel": "low"},
+                "reportReadiness": {
+                    "mode": "standard_after_prevalidation",
+                    "scope": "full_report",
+                    "minimumHitRateForCore": 0.8,
+                    "coreAllowedWithoutRectification": True,
+                },
+            }
+        ),
+    )
+    runtime.workspace.write_artifact(
+        session_id,
+        "reader_prevalidation.md",
+        "**1.** Did this happen?\n\n> Derivation: test\n",
+    )
+
+    first = runtime._write_prevalidation_result(session_id, feedback_markdown="1. 不准")
+    assert first is not None
+    assert first["qualityAttempt"] == 1
+    assert cast(dict[str, Any], first["decision"])["nextStep"] == (
+        "regenerate_prevalidation_or_review_subject"
+    )
+
+    runtime._write_prevalidation_result(session_id, feedback_markdown="")
+    second = runtime._write_prevalidation_result(session_id, feedback_markdown="1. 不准")
+    assert second is not None
+    assert second["qualityAttempt"] == 2
+    assert cast(dict[str, Any], second["decision"])["nextStep"] == ("review_birth_details_or_stop")
+
+
 def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
     chart_record_json = json.dumps(
@@ -2839,9 +2940,35 @@ def test_single_stable_candidate_does_not_start_fake_boundary_rectification() ->
         {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
         state,
     )
+    assert decision["reportAllowed"] is False
+    assert decision["reportScope"] == "prevalidation_or_d1_only"
+
+
+def test_stable_interval_preserves_successful_reader_quality_gate() -> None:
+    service = ChartRectificationService()
+    state = {
+        "status": "not_required",
+        "selectedCandidateId": None,
+        "activeCandidateId": "A",
+        "selectionConfidence": "stable_interval",
+        "reportGate": {
+            "fullReportAllowed": True,
+            "reason": "One stable chart fingerprint covers the bounded input window.",
+        },
+    }
+
+    decision = service.apply_prevalidation_decision(
+        {
+            "reportAllowed": True,
+            "reportScope": "guarded_full_report",
+            "timeConfidence": "medium",
+        },
+        state,
+    )
+
     assert decision["reportAllowed"] is True
-    assert decision["reportScope"] == "guarded_full_report"
     assert decision["nextStep"] == "report_allowed_with_stable_interval"
+    assert decision["timeConfidence"] == "medium"
 
 
 def test_tied_dated_events_stop_instead_of_forcing_agent_questions() -> None:

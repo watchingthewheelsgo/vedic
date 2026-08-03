@@ -328,6 +328,14 @@ class ChartRectificationService:
             blockers.append("missing_single_holdout_event")
         if len(candidates) < 2:
             blockers.append("insufficient_candidate_classes")
+        discriminating_events = ChartRectificationService._calibration_event_discrimination(
+            candidates
+        )
+        if not any(
+            item["margin"] >= RECTIFICATION_SCORING_POLICY.event_discrimination_min_margin
+            for item in discriminating_events
+        ):
+            blockers.append("no_discriminating_calibration_event")
         return blockers
 
     @staticmethod
@@ -361,8 +369,46 @@ class ChartRectificationService:
             "holdoutEventCount": sum(
                 1 for event in events if isinstance(event, dict) and event.get("role") == "holdout"
             ),
+            "calibrationEventDiscrimination": (
+                ChartRectificationService._calibration_event_discrimination(
+                    ChartRectificationService._candidate_score_state(state.get("candidates"))
+                )
+            ),
             "blockers": selection_blockers,
         }
+
+    @staticmethod
+    def _calibration_event_discrimination(
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        scores_by_event: dict[str, list[float]] = {}
+        seen_classes: set[str] = set()
+        for candidate in candidates:
+            class_id = str(
+                candidate.get("equivalenceClassId") or candidate.get("candidateId") or ""
+            )
+            if class_id in seen_classes:
+                continue
+            seen_classes.add(class_id)
+            for item in candidate.get("evidenceScores") or []:
+                if not isinstance(item, dict) or item.get("role") != "calibration":
+                    continue
+                event_id = str(item.get("eventId") or "")
+                if event_id and item.get("score") is not None:
+                    scores_by_event.setdefault(event_id, []).append(float(item["score"]))
+        result = []
+        for event_id, scores in sorted(scores_by_event.items()):
+            if len(scores) < 2:
+                continue
+            result.append(
+                {
+                    "eventId": event_id,
+                    "minimumScore": round(min(scores), 3),
+                    "maximumScore": round(max(scores), 3),
+                    "margin": round(max(scores) - min(scores), 3),
+                }
+            )
+        return result
 
     @staticmethod
     def _select_deterministic_event_candidate(
@@ -710,16 +756,26 @@ class ChartRectificationService:
             "plan": state.get("rectificationPlan"),
         }
         if status == "not_required":
-            next_decision.update(
-                {
-                    "nextStep": "report_allowed_with_stable_interval",
-                    "timeConfidence": "low",
-                    "reportAllowed": True,
-                    "reportScope": "guarded_full_report",
-                    "reason": gate.get("reason")
-                    or "No chart-changing candidate exists inside the bounded input window.",
-                }
-            )
+            if bool(next_decision.get("reportAllowed")):
+                next_decision.update(
+                    {
+                        "nextStep": "report_allowed_with_stable_interval",
+                        "reportScope": next_decision.get("reportScope") or "guarded_full_report",
+                        "reason": gate.get("reason")
+                        or "No chart-changing candidate exists inside the bounded input window.",
+                    }
+                )
+            else:
+                next_decision.update(
+                    {
+                        "reportAllowed": False,
+                        "reason": next_decision.get("reason")
+                        or (
+                            "The chart is stable inside the bounded input window, but the "
+                            "Reader validation did not pass its independent quality gate."
+                        ),
+                    }
+                )
         elif status == "corrected_chart_ready":
             next_decision.update(
                 {

@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 
 RECTIFICATION_RULE_ID = "rectify.event-evidence-ranking"
-RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.6.0"
+RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.7.0"
 RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.2.0"
 RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.0.0"
 RECTIFICATION_METHOD_MATURITY = "product_hypothesis"
@@ -25,6 +25,7 @@ class RectificationScoringPolicy:
     double_transit_support_weight: float
     minimum_calibration_events: int
     minimum_calibration_categories: int
+    event_discrimination_min_margin: float
     candidate_selection_min_score: float
     candidate_selection_min_margin: float
     holdout_min_score: float
@@ -38,6 +39,7 @@ RECTIFICATION_SCORING_POLICY = RectificationScoringPolicy(
     double_transit_support_weight=0.22,
     minimum_calibration_events=2,
     minimum_calibration_categories=2,
+    event_discrimination_min_margin=0.05,
     candidate_selection_min_score=0.15,
     candidate_selection_min_margin=0.10,
     holdout_min_score=0.10,

@@ -152,6 +152,55 @@ def test_precise_search_falls_back_when_candidate_conflicts_with_selected_distri
     )
 
 
+def test_precise_search_rejects_explicit_conflicting_campus_in_selected_district(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n"
+        "Pudong,浦东|Pudong,Shanghai,China,31.23995,121.50094,8\n",
+        encoding="utf-8",
+    )
+    service = PlaceService(
+        SimpleNamespace(
+            geonames_path=lambda: geonames,
+            amap_place_fallback_enabled=False,
+            amap_web_service_key="",
+        )
+    )
+    monkeypatch.setattr(service, "_timezone_for", lambda lat, lon, hours: "Asia/Shanghai")
+
+    response = service.search_precise(
+        "上海市第一妇婴保健院西院",
+        city_context="Pudong, Shanghai, China",
+        agent_options=[
+            PrecisePlaceOption(
+                id="agent:west",
+                label="上海市第一妇婴保健院西院",
+                address="上海市静安区长乐路536号",
+                meta="Agent web evidence",
+                source="agent",
+                accuracy="poi",
+                coordinateSystem="WGS84",
+                latitude=31.22217,
+                longitude=121.45168,
+                birthPlace=(
+                    "上海市第一妇婴保健院西院, Shanghai, Shanghai, China | "
+                    "lat=31.22217, lon=121.45168, source=agent, accuracy=poi"
+                ),
+                rawEvidence="上海市第一妇婴保健院西院，静安区长乐路536号。",
+            )
+        ],
+        agent_enabled=True,
+        agent_attempted=True,
+    )
+
+    assert len(response.options) == 1
+    assert response.options[0].verification_status == "city-fallback"
+    assert response.options[0].label == "Shanghai, Shanghai, China"
+
+
 def test_precise_search_city_fallback_uses_parent_city_for_chinese_municipality_district(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

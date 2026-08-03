@@ -113,6 +113,7 @@ class ClaudeRuntime:
         # their own resources/*.md framework files. Write/Edit remain disabled:
         # the backend persists artifacts from the JSON wrapper.
         file_tools = ["Read", "Glob", "Grep"] if allow_file_tools else []
+        model_name = self._prompt_task_model(task_name)
         options = ClaudeAgentOptions(
             tools=file_tools,
             allowed_tools=[*file_tools, *self._backend_tool_names()],
@@ -122,7 +123,7 @@ class ClaudeRuntime:
             cwd=Path.cwd(),
             add_dirs=[Path.cwd()],
             env=self._agent_env(),
-            model=self.settings.anthropic_model,
+            model=model_name,
             max_turns=max_turns or self.settings.agent_max_turns,
             effort=cast(AgentEffort, self._agent_effort()),
             skills=skills,
@@ -139,8 +140,19 @@ class ClaudeRuntime:
             task_name,
             prompt,
             options,
-            model_name=self.settings.anthropic_model,
+            model_name=model_name,
         )
+
+    def _prompt_task_model(self, task_name: str) -> str:
+        if "grounding-audit" not in task_name:
+            return self.settings.anthropic_model
+        for candidate in (
+            self.settings.anthropic_default_haiku_model,
+            self.settings.anthropic_default_opus_model,
+        ):
+            if candidate and candidate != self.settings.anthropic_model:
+                return candidate
+        return self.settings.anthropic_model
 
     async def run_place_lookup_task(
         self,
