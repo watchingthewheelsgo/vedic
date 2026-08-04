@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 
 RECTIFICATION_RULE_ID = "rectify.event-evidence-ranking"
-RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.7.0"
+RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.9.0"
 RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.2.0"
 RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.0.0"
 RECTIFICATION_METHOD_MATURITY = "product_hypothesis"

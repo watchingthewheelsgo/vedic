@@ -8,7 +8,7 @@ from app.schemas import AppLocale
 from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_RULES
 
 
-INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.2.0"
+INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.3.0"
 MAX_RECTIFICATION_EVENTS = 5
 
 
@@ -187,17 +187,18 @@ def build_rectification_interview(
     skipped = skipped_categories or set()
     categories = [category for category in categories if category not in skipped]
     # One question is a complete interaction round. The answer is recalculated
-    # before the next question is selected from the updated candidate state.
-    question_count = min(1, remaining)
-    selected_categories = categories[:question_count]
+    # before the next question is selected from the updated candidate state. The
+    # Agent may choose from this bounded pool, but it cannot invent a category or
+    # inspect the private candidate ranking context.
+    pool_categories = categories[: min(3, remaining)]
     copy = _COPY.get(locale, _COPY["en"])
     target = min(MAX_RECTIFICATION_EVENTS, max(3, len(existing) + 1))
-    questions = []
     discriminating_fields = [str(value) for value in plan.get("discriminatingFields") or []]
-    for index, category in enumerate(selected_categories, start=1):
+    question_pool = []
+    for index, category in enumerate(pool_categories, start=1):
         title, prompt = copy["category"][category]
         matched_fields = _category_discriminating_fields(category, discriminating_fields)
-        questions.append(
+        question_pool.append(
             {
                 "questionId": f"rectify.r{len(existing) + 1}.q{index}.{category}",
                 "category": category,
@@ -216,6 +217,7 @@ def build_rectification_interview(
                 },
             }
         )
+    questions = question_pool[:1]
 
     status = "collecting" if questions else "exhausted"
     if questions:
@@ -247,6 +249,10 @@ def build_rectification_interview(
             "label": copy["progress"].format(answered=len(existing), target=target),
         },
         "questions": questions,
+        "questionPool": question_pool,
+        "lifeEventFocus": [
+            item for item in plan.get("lifeEventFocus", []) if isinstance(item, dict)
+        ],
         "source": "deterministic_brief",
         "stopReason": stop_reason,
     }
@@ -259,16 +265,40 @@ def validate_agent_question_wording(
     proposed = payload.get("questions")
     if not isinstance(proposed, list):
         raise ValueError("rectification interview response must contain questions")
-    expected = {item["questionId"]: item for item in brief["questions"]}
-    if {item.get("questionId") for item in proposed if isinstance(item, dict)} != set(expected):
+    pool = brief.get("questionPool")
+    has_pool = isinstance(pool, list) and bool(pool)
+    raw_expected_items = pool if has_pool else brief.get("questions")
+    expected_items = raw_expected_items if isinstance(raw_expected_items, list) else []
+    expected = {
+        str(item["questionId"]): item
+        for item in expected_items
+        if isinstance(item, dict) and item.get("questionId")
+    }
+    proposed_ids = {
+        str(item.get("questionId"))
+        for item in proposed
+        if isinstance(item, dict) and item.get("questionId")
+    }
+    if has_pool:
+        if len(proposed) != 1 or len(proposed_ids) != 1 or not proposed_ids <= set(expected):
+            raise ValueError("rectification interview must select one approved question pool item")
+    elif proposed_ids != set(expected):
         raise ValueError("rectification interview changed the backend question set")
-    result = {**brief, "source": "agent_wording"}
+    result = {
+        **brief,
+        "source": "agent_selection_and_wording" if has_pool else "agent_wording",
+    }
+    result.pop("questionPool", None)
+    result.pop("lifeEventFocus", None)
     questions = []
     forbidden = ("candidate", "候选盘", "得分", "d1", "d9", "d10", "d60", "星盘显示")
     for item in proposed:
         if not isinstance(item, dict):
             raise ValueError("rectification interview question must be an object")
-        original = expected[str(item["questionId"])]
+        question_id = str(item.get("questionId") or "")
+        if question_id not in expected:
+            raise ValueError("rectification interview selected an unapproved question pool item")
+        original = expected[question_id]
         if item.get("category") != original["category"]:
             raise ValueError("rectification interview changed a question category")
         merged = dict(original)
@@ -279,6 +309,7 @@ def validate_agent_question_wording(
             if any(token in value.casefold() for token in forbidden):
                 raise ValueError("rectification wording leaks candidate or chart-leading language")
             merged[field] = value
+        merged.pop("questionValue", None)
         questions.append(merged)
     result["questions"] = questions
     return result

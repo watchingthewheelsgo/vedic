@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -43,7 +43,7 @@ export function AdminSessions() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  async function load(options: { quiet?: boolean } = {}) {
+  const load = useCallback(async (options: { quiet?: boolean } = {}) => {
     setError("");
     if (options.quiet) setRefreshing(true);
     else setLoading(true);
@@ -55,13 +55,13 @@ export function AdminSessions() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load({ quiet: true }), 5000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [load]);
 
   const filtered = useMemo(() => {
     const sessions = data?.sessions ?? [];

@@ -58,6 +58,8 @@ def test_question_categories_follow_candidate_discriminators() -> None:
     assert interview["source"] == "deterministic_brief"
     assert interview["questions"][0]["questionValue"]["tier"] == "discriminating"
     assert interview["questions"][0]["questionValue"]["matchedFields"] == ["d10Lagna"]
+    assert len(interview["questionPool"]) >= 2
+    assert interview["questions"][0]["questionId"] == interview["questionPool"][0]["questionId"]
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
 
 
@@ -122,6 +124,9 @@ def test_child_interview_excludes_adult_life_domains() -> None:
     assert {question["category"] for question in interview["questions"]}.isdisjoint(
         {"career", "relationship", "child", "finance", "property", "legal"}
     )
+    assert {question["category"] for question in interview["questionPool"]}.isdisjoint(
+        {"career", "relationship", "child", "finance", "property", "legal"}
+    )
 
 
 def test_agent_may_rephrase_but_not_change_question_identity() -> None:
@@ -145,38 +150,40 @@ def test_agent_may_rephrase_but_not_change_question_identity() -> None:
     }
 
     accepted = validate_agent_question_wording(brief, proposed)
-    assert accepted["source"] == "agent_wording"
+    assert accepted["source"] == "agent_selection_and_wording"
+    assert "questionPool" not in accepted
+    assert "questionValue" not in accepted["questions"][0]
 
     proposed["questions"][0]["category"] = "health"
     with pytest.raises(ValueError, match="changed a question category"):
         validate_agent_question_wording(brief, proposed)
 
 
-def test_agent_may_prioritize_but_cannot_drop_backend_questions() -> None:
+def test_agent_may_select_one_approved_question_but_cannot_invent_one() -> None:
     brief = build_rectification_interview(
         _state(fields=["d10Lagna", "d4Structure"]),
         session_id="session-test",
         locale="en",
     )
+    selected = brief["questionPool"][1]
     proposed = {
         "questions": [
             {
-                "questionId": question["questionId"],
-                "category": question["category"],
-                "title": question["title"],
-                "prompt": question["prompt"],
-                "whyWeAsk": question["whyWeAsk"],
-                "detailsPlaceholder": question["detailsPlaceholder"],
+                "questionId": selected["questionId"],
+                "category": selected["category"],
+                "title": selected["title"],
+                "prompt": selected["prompt"],
+                "whyWeAsk": selected["whyWeAsk"],
+                "detailsPlaceholder": selected["detailsPlaceholder"],
             }
-            for question in reversed(brief["questions"])
         ]
     }
 
     accepted = validate_agent_question_wording(brief, proposed)
-    assert accepted["questions"][0]["questionId"] == brief["questions"][-1]["questionId"]
+    assert accepted["questions"][0]["questionId"] == selected["questionId"]
 
-    proposed["questions"].pop()
-    with pytest.raises(ValueError, match="changed the backend question set"):
+    proposed["questions"][0]["questionId"] = "rectify.r1.q99.invented"
+    with pytest.raises(ValueError, match="approved question pool"):
         validate_agent_question_wording(brief, proposed)
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Activity,
@@ -50,30 +50,35 @@ export function AdminSessionDetail() {
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  async function load(options: { quiet?: boolean } = {}) {
-    if (!id) return;
-    setError("");
-    if (options.quiet) setRefreshing(true);
-    else setLoading(true);
-    try {
-      setDetail(await api.getAdminSession(id));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load admin session.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
+  const load = useCallback(
+    async (options: { quiet?: boolean } = {}) => {
+      if (!id) return;
+      setError("");
+      if (options.quiet) setRefreshing(true);
+      else setLoading(true);
+      try {
+        setDetail(await api.getAdminSession(id));
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not load admin session.");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [id]
+  );
 
   useEffect(() => {
     void load();
-  }, [id]);
+  }, [load]);
+
+  const liveStatus = detail?.summary.status;
 
   useEffect(() => {
-    if (!detail || !["queued", "running", "stalled"].includes(detail.summary.status)) return;
+    if (!liveStatus || !["queued", "running", "stalled"].includes(liveStatus)) return;
     const timer = window.setInterval(() => void load({ quiet: true }), 5000);
     return () => window.clearInterval(timer);
-  }, [detail?.summary.status, id]);
+  }, [liveStatus, load]);
 
   const nodes = useMemo(() => resolveNodes(detail), [detail]);
 

@@ -72,6 +72,7 @@ class PrecisePlaceLookupService:
                     result = await self.agent_runtime.run_place_lookup_task(
                         query=query,
                         city_label=city_base.label,
+                        selected_scope_label=city_context,
                         city_lat=city_base.lat,
                         city_lon=city_base.lon,
                         max_distance_km=self.place_service.max_city_distance_km(city_base),
@@ -216,7 +217,7 @@ class PrecisePlaceLookupService:
                 contexts.append(compacted)
 
         add(self._localized_china_context(city_base))
-        if city_context and self._has_cjk(city_context):
+        if city_context:
             add(city_context)
         if city_base.raw_query and self._has_cjk(city_base.raw_query):
             add(city_base.raw_query)
@@ -369,6 +370,10 @@ class PrecisePlaceLookupService:
             or self._string_value(item.get("evidence"))
             or self._string_value(item.get("source"))
         )
+        if not source_url and not raw_evidence:
+            # Coordinates without provenance are indistinguishable from model guesses.
+            # Tool adapters may omit a URL, but they must still provide an evidence summary.
+            return None
         readable = ", ".join(part for part in [label, city_base.label] if part)
         return PrecisePlaceOption(
             id=f"agent:{self.place_service.normalize(label)[:48]}:{lat:.6f}:{lon:.6f}:{index}",

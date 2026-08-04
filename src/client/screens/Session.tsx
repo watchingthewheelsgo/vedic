@@ -361,7 +361,8 @@ type RectificationInterview = {
   schemaVersion:
     | "vedicdust-rectification-interview/1.0.0"
     | "vedicdust-rectification-interview/1.1.0"
-    | "vedicdust-rectification-interview/1.2.0";
+    | "vedicdust-rectification-interview/1.2.0"
+    | "vedicdust-rectification-interview/1.3.0";
   title: string;
   intro: string;
   source: string;
@@ -2616,7 +2617,9 @@ function ReaderDetail({
     [session]
   );
   const collectingLifeEvents = rectificationState?.status === "collecting_evidence";
-  const continuingLifeEvents = rectificationState?.status === "underdetermined";
+  const continuingLifeEvents =
+    rectificationState?.status === "underdetermined" &&
+    rectificationState.rectificationPlan?.eventCollectionRequired === true;
   const interviewArtifact = findArtifact(session, "rectification_interview.json");
   const [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
   const [anchorFeedback, setAnchorFeedback] = useState<
@@ -3902,7 +3905,8 @@ function parseRectificationInterview(content: string): RectificationInterview | 
       !(
         parsed.schemaVersion === "vedicdust-rectification-interview/1.0.0" ||
         parsed.schemaVersion === "vedicdust-rectification-interview/1.1.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.2.0"
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.2.0" ||
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.3.0"
       ) ||
       !Array.isArray(parsed.questions) ||
       !parsed.progress
@@ -3945,8 +3949,6 @@ function readingContinuationAction(
   const plan = objectValue(state, "rectificationPlan");
   const action = String(plan?.action ?? "").trim();
   const gate = objectValue(state, "reportGate");
-  const ledger = objectValue(state, "lifeEventLedger");
-  const eventCount = Array.isArray(ledger?.events) ? ledger.events.length : 0;
   if (
     status === "corrected_chart_ready" &&
     state.holdoutResult === "passed" &&
@@ -3957,7 +3959,7 @@ function readingContinuationAction(
   if (
     status === "collecting_evidence" ||
     action === "collect_dated_life_events" ||
-    (status === "underdetermined" && eventCount < 5)
+    (status === "underdetermined" && plan?.eventCollectionRequired === true)
   ) {
     return "collect_events";
   }

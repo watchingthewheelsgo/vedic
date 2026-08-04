@@ -344,6 +344,17 @@
           ],
           "default": null
         },
+        "semanticAdjustment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RectificationSemanticAdjustment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "role": {
           "enum": ["calibration", "holdout"],
           "title": "Role",
@@ -1260,6 +1271,44 @@
       },
       "required": ["decision"],
       "title": "RectificationRecord",
+      "type": "object"
+    },
+    "RectificationSemanticAdjustment": {
+      "additionalProperties": false,
+      "properties": {
+        "applied": {
+          "default": false,
+          "title": "Applied",
+          "type": "boolean"
+        },
+        "componentMultipliers": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Componentmultipliers",
+          "type": "object"
+        },
+        "usedFields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Usedfields",
+          "type": "array"
+        },
+        "contextOnlyFields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contextonlyfields",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "RectificationSemanticAdjustment",
       "type": "object"
     },
     "RuleProvenance": {

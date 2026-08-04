@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from app.agents.claude_runtime import ClaudeRuntime
+from app.agents.claude_runtime import AgentRunResult, ClaudeRuntime
 
 
 def _runtime() -> ClaudeRuntime:
@@ -91,6 +91,102 @@ def test_place_lookup_tool_evidence_accepts_pinyin_query_with_chinese_poi_eviden
     assert payload["candidates"][0]["longitude"] == 118.3165
 
 
+def test_place_lookup_tool_evidence_reads_sdk_content_blocks() -> None:
+    result = _runtime()._place_lookup_json_from_tool_observations(
+        query="泗县人民医院",
+        city_label="Suzhou, Anhui, China",
+        city_lat=33.63611,
+        city_lon=116.97889,
+        max_distance_km=150.0,
+        max_results=5,
+        observations=[
+            {
+                "tool_name": "WebSearch",
+                "tool_response": {
+                    "results": [
+                        {
+                            "title": "泗县人民医院",
+                            "url": "https://example.test/hospital",
+                        }
+                    ],
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "泗县人民医院位于安徽省宿州市泗县花园路120号。"
+                                "纬度：33.50117，经度：117.88762。"
+                            ),
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    assert result is not None
+    payload = json.loads(result)
+    assert payload["candidates"][0]["latitude"] == 33.50117
+    assert payload["candidates"][0]["longitude"] == 117.88762
+    assert payload["candidates"][0]["sourceUrl"] == "https://example.test/hospital"
+
+
+def test_place_lookup_tool_evidence_reads_structured_coordinate_fields() -> None:
+    result = _runtime()._place_lookup_json_from_tool_observations(
+        query="泗县人民医院",
+        city_label="Suzhou, Anhui, China",
+        city_lat=33.63611,
+        city_lon=116.97889,
+        max_distance_km=150.0,
+        max_results=5,
+        observations=[
+            {
+                "tool_name": "WebFetch",
+                "tool_response": {
+                    "name": "泗县人民医院",
+                    "url": "https://example.test/structured-hospital",
+                    "latitude": 33.50117,
+                    "longitude": 117.88762,
+                    "address": "安徽省宿州市泗县花园路120号",
+                },
+            }
+        ],
+    )
+
+    assert result is not None
+    payload = json.loads(result)
+    assert payload["candidates"][0]["latitude"] == 33.50117
+    assert payload["candidates"][0]["longitude"] == 117.88762
+    assert payload["candidates"][0]["sourceUrl"] == "https://example.test/structured-hospital"
+
+
+def test_place_lookup_tool_evidence_reads_provider_specific_summary_fields() -> None:
+    result = _runtime()._place_lookup_json_from_tool_observations(
+        query="泗县人民医院",
+        city_label="Suzhou, Anhui, China",
+        city_lat=33.63611,
+        city_lon=116.97889,
+        max_distance_km=150.0,
+        max_results=5,
+        observations=[
+            {
+                "tool_name": "WebSearch",
+                "tool_response": {
+                    "query": "泗县人民医院 经纬度",
+                    "results": [{"title": "泗县人民医院", "url": "https://example.test/hospital"}],
+                    "providerSummary": (
+                        "泗县人民医院位于安徽省宿州市泗县。纬度 33.50117，经度 117.88762。"
+                    ),
+                },
+            }
+        ],
+    )
+
+    assert result is not None
+    payload = json.loads(result)
+    assert payload["candidates"][0]["latitude"] == 33.50117
+    assert payload["candidates"][0]["longitude"] == 117.88762
+
+
 def test_place_lookup_tool_evidence_extracts_multi_campus_labelled_coordinates() -> None:
     raw_text = """
     ## 上海市第一妇婴保健院 经纬度
@@ -164,3 +260,39 @@ def test_place_lookup_final_candidate_detection() -> None:
     )
     assert not runtime._place_lookup_result_has_candidates('{"candidates":[]}')
     assert not runtime._place_lookup_result_has_candidates("not json")
+
+
+def test_place_lookup_recovers_candidate_json_from_sdk_error_boundary() -> None:
+    runtime = _runtime()
+
+    recovered = runtime._recover_place_lookup_result(
+        "tool_use",
+        '{"candidates":[{"label":"医院","latitude":31.1,"longitude":121.5}]}',
+    )
+
+    assert recovered is not None
+    assert json.loads(recovered)["candidates"][0]["label"] == "医院"
+
+
+def test_verified_tool_evidence_overrides_agent_candidate_json() -> None:
+    runtime = _runtime()
+    agent_result = AgentRunResult(
+        mode="claude",
+        raw_text='{"candidates":[{"label":"wrong","latitude":1,"longitude":2}]}',
+        session_id="session-1",
+        duration_ms=123,
+        total_cost_usd=0.01,
+        stop_reason="end_turn",
+        model="test-model",
+    )
+
+    resolved = runtime._finalize_place_lookup_result(
+        agent_result,
+        '{"candidates":[{"label":"verified","latitude":31.1,"longitude":121.5}]}',
+    )
+
+    payload = json.loads(resolved.raw_text)
+    assert payload["candidates"][0]["label"] == "verified"
+    assert payload["candidates"][0]["latitude"] == 31.1
+    assert resolved.session_id == "session-1"
+    assert resolved.stop_reason == "end_turn"

@@ -708,10 +708,19 @@ class RectificationEventSemanticFacts(ContractModel):
     date_confidence: Literal["year", "month", "day", "unknown"] = "unknown"
 
 
+class RectificationSemanticAdjustment(ContractModel):
+    applied: bool = False
+    component_multipliers: dict[str, float] = Field(default_factory=dict)
+    used_fields: list[str] = Field(default_factory=list)
+    context_only_fields: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
 class CandidateEvidenceScore(ContractModel):
     event_id: str
     event_fingerprint: str | None = None
     semantic_facts: RectificationEventSemanticFacts | None = None
+    semantic_adjustment: RectificationSemanticAdjustment | None = None
     role: Literal["calibration", "holdout"]
     score: float = Field(ge=-1, le=1)
     support_score: float = Field(ge=0, le=1)

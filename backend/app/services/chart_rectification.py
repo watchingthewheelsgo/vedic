@@ -1028,11 +1028,20 @@ class ChartRectificationService:
             action = "apply_candidate_recalculation"
             directive = "Selected bounded candidate must be recalculated before report synthesis."
         elif status == "underdetermined":
-            action = "rectification_inconclusive"
-            directive = (
-                "Stop adaptive questioning. Preserve the bounded candidate set and ask "
-                "for a narrower source time or additional dated events."
-            )
+            if event_collection_required:
+                action = "collect_dated_life_events"
+                directive = (
+                    "The current evidence is insufficient to compare the bounded candidates. "
+                    "Collect one genuinely new dated event, recalculate the candidates, and "
+                    "select the next question from the updated state."
+                )
+            else:
+                action = "rectification_inconclusive"
+                directive = (
+                    "The available evidence does not distinguish the bounded candidates. "
+                    "Stop adaptive questioning and ask for a narrower source time or a new "
+                    "dated event from a distinct life domain."
+                )
         elif status == "multiple_equivalent":
             action = "build_equivalent_candidate_intersection"
             directive = (
@@ -1151,7 +1160,7 @@ class ChartRectificationService:
     def _event_collection_required(state: dict[str, Any]) -> bool:
         ledger = state.get("lifeEventLedger")
         if not isinstance(ledger, dict):
-            return True
+            return False
         return bool(ledger.get("eventCollectionRequired"))
 
     @staticmethod

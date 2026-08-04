@@ -2274,6 +2274,11 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                             if isinstance(score.get("semanticFacts"), Mapping)
                             else None
                         ),
+                        semantic_adjustment=(
+                            score.get("semanticAdjustment")
+                            if isinstance(score.get("semanticAdjustment"), Mapping)
+                            else None
+                        ),
                         role=str(score.get("role") or "calibration"),
                         score=float(score.get("score") or 0.0),
                         support_score=float(score.get("supportScore") or 0.0),

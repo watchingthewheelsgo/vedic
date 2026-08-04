@@ -123,6 +123,40 @@ def parse_life_event_ledger(
     }
 
 
+def _semantic_adjustment_for_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    facts = event.get("semanticFacts")
+    if not isinstance(facts, dict):
+        return None
+    # The non-Agent fallback emits default facts so the schema stays stable. Do
+    # not silently treat those defaults as an LLM judgement.
+    if not any(
+        facts.get(field) not in {None, "", "unknown", "occurred"}
+        for field in ("occurrence", "impact", "dateConfidence")
+    ):
+        return None
+
+    return {
+        "applied": False,
+        "componentMultipliers": {},
+        "usedFields": [],
+        "contextOnlyFields": ["occurrence", "agency", "impact", "dateConfidence"],
+        "reason": (
+            "Agent-classified event facts are retained as context for the interview and report. "
+            "They do not change deterministic candidate scores; only the user-supplied date "
+            "precision and versioned Jyotish rules may affect scoring."
+        ),
+    }
+
+
+def _apply_semantic_adjustment(
+    event: dict[str, Any],
+) -> dict[str, Any] | None:
+    adjustment = _semantic_adjustment_for_event(event)
+    if adjustment is None:
+        return None
+    return adjustment
+
+
 def score_candidate_events(
     *,
     candidate_id: str,
@@ -214,6 +248,7 @@ def score_candidate_events(
         support_score = 0.0
         contradiction_score = 0.0
         semantic_facts = event.get("semanticFacts")
+        semantic_adjustment = None
         period_entries: list[tuple[str, str]] = []
         unstable_periods: dict[str, list[str]] = {}
         for short_level, level in (
@@ -474,14 +509,25 @@ def score_candidate_events(
                 )
             )
 
-        support_score = round(min(support_score, 1.0), 3)
-        contradiction_score = round(min(contradiction_score, 1.0), 3)
+        semantic_adjustment = _apply_semantic_adjustment(event)
+        support_score = round(
+            min(sum(item["weight"] for item in observations if item["outcome"] == "support"), 1),
+            3,
+        )
+        contradiction_score = round(
+            min(
+                sum(item["weight"] for item in observations if item["outcome"] == "contradiction"),
+                1,
+            ),
+            3,
+        )
         score = round(max(-1.0, min(1.0, support_score - contradiction_score)), 3)
         evidence_scores.append(
             {
                 "eventId": event["eventId"],
                 "eventFingerprint": event.get("eventFingerprint"),
                 "semanticFacts": dict(semantic_facts) if isinstance(semantic_facts, dict) else None,
+                "semanticAdjustment": semantic_adjustment,
                 "role": event.get("role", "calibration"),
                 "score": score,
                 "supportScore": support_score,

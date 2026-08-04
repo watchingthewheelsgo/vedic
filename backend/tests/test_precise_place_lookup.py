@@ -116,6 +116,37 @@ def test_precise_lookup_reports_agent_error_and_falls_back_to_web_or_city(tmp_pa
     assert response.options[0].verification_status == "city-fallback"
 
 
+def test_precise_lookup_rejects_agent_coordinates_without_provenance(tmp_path) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n",
+        encoding="utf-8",
+    )
+    place_service = PlaceService(
+        SimpleNamespace(
+            geonames_path=lambda: geonames,
+            amap_place_fallback_enabled=False,
+            amap_web_service_key="",
+        )
+    )
+    agent = FakeAgentRuntime(
+        '{"candidates":[{"label":"医院","latitude":31.2169,"longitude":121.4541}]}'
+    )
+    lookup = PrecisePlaceLookupService(place_service, agent)  # type: ignore[arg-type]
+
+    response = asyncio.run(
+        lookup.search_precise(
+            query="上海第一妇婴保健院",
+            city_context="Shanghai, Shanghai, China",
+            limit=8,
+        )
+    )
+
+    assert response.options[0].verification_status == "city-fallback"
+    assert response.fallback_source is None
+
+
 def test_precise_lookup_falls_back_when_agent_candidate_conflicts_with_selected_district(
     monkeypatch, tmp_path
 ) -> None:
@@ -162,10 +193,64 @@ def test_precise_lookup_falls_back_when_agent_candidate_conflicts_with_selected_
 
     assert len(agent.calls) == 1
     assert agent.calls[0]["city_label"] == "Shanghai, Shanghai, China"
+    assert agent.calls[0]["selected_scope_label"] == "Pudong, Shanghai, China"
     assert response.verification_base == "Shanghai, Shanghai, China"
     assert response.options[0].source == "geonames-local"
     assert response.options[0].verification_status == "city-fallback"
     assert response.options[0].city_label == "Shanghai, Shanghai, China"
+
+
+def test_precise_lookup_keeps_only_the_candidate_in_selected_district(tmp_path) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n"
+        "Pudong,浦东|Pudong,Shanghai,China,31.23995,121.50094,8\n",
+        encoding="utf-8",
+    )
+    place_service = PlaceService(
+        SimpleNamespace(
+            geonames_path=lambda: geonames,
+            amap_place_fallback_enabled=False,
+            amap_web_service_key="",
+        )
+    )
+    agent = FakeAgentRuntime(
+        """
+        {
+          "candidates": [
+            {
+              "name": "上海市第一妇婴保健院西院",
+                  "address": "上海市静安区长乐路536号",
+                  "latitude": 31.22217,
+                  "longitude": 121.45168,
+                  "accuracy": "poi",
+                  "evidence": "Search evidence for the west campus."
+                },
+                {
+                  "name": "上海市第一妇婴保健院东院",
+                  "address": "上海市浦东新区高科西路2699号",
+                  "latitude": 31.19174,
+                  "longitude": 121.54581,
+                  "accuracy": "poi",
+                  "evidence": "Search evidence for the east campus."
+                }
+          ]
+        }
+        """
+    )
+    lookup = PrecisePlaceLookupService(place_service, agent)  # type: ignore[arg-type]
+
+    response = asyncio.run(
+        lookup.search_precise(
+            query="第一妇婴保健院",
+            city_context="Pudong, Shanghai, China",
+            limit=8,
+        )
+    )
+
+    assert [option.label for option in response.options] == ["上海市第一妇婴保健院东院"]
+    assert response.options[0].verification_status == "verified"
 
 
 def test_precise_lookup_controls_agent_search_queries_for_chinese_poi(tmp_path) -> None:
@@ -199,7 +284,7 @@ def test_precise_lookup_controls_agent_search_queries_for_chinese_poi(tmp_path) 
         "泗县人民医院 安徽 宿州 坐标",
         "泗县人民医院 经纬度",
         "泗县人民医院 地址 经纬度",
-        "泗县人民医院 Suzhou Anhui China latitude longitude coordinates",
-        "泗县人民医院 Suzhou Anhui China WGS84 coordinates",
+        "泗县人民医院 Suzhou, Anhui, China latitude longitude coordinates",
+        "泗县人民医院 Suzhou, Anhui, China WGS84 coordinates",
     ]
     assert response.agent_search_queries == agent.calls[0]["search_queries"]

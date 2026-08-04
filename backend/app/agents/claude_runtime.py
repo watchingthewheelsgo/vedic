@@ -159,6 +159,7 @@ class ClaudeRuntime:
         *,
         query: str,
         city_label: str,
+        selected_scope_label: str | None = None,
         city_lat: float,
         city_lon: float,
         max_distance_km: float,
@@ -227,8 +228,8 @@ class ClaudeRuntime:
             ),
         )
         controlled_queries = search_queries or [
-            f"{query} {city_label} latitude longitude coordinates",
-            f"{query} {city_label} 经纬度 坐标",
+            f"{query} {selected_scope_label or city_label} latitude longitude coordinates",
+            f"{query} {selected_scope_label or city_label} 经纬度 坐标",
         ]
         controlled_query_block = "\n".join(
             f"{index}. {search_query}"
@@ -239,6 +240,7 @@ class ClaudeRuntime:
             {
                 "query": query,
                 "city_label": city_label,
+                "selected_scope_label": selected_scope_label,
                 "city_lat": city_lat,
                 "city_lon": city_lon,
                 "max_distance_km": max_distance_km,
@@ -251,6 +253,7 @@ Find candidate WGS84 coordinates for this place query.
 
 Query: {query}
 Selected city baseline: {city_label}
+Selected place scope: {selected_scope_label or city_label}
 City/admin baseline center: lat={city_lat}, lon={city_lon}
 Administrative verification distance: {max_distance_km} km
 Max candidates: {max_results}
@@ -271,6 +274,9 @@ Rules:
 - Prefer official or map/knowledge-panel evidence when available.
 - Include candidates that plausibly refer to the query inside the selected city or its
   administrative counties/districts.
+- If the selected place scope is narrower than the city baseline, return only candidates whose
+  address or evidence names that selected scope. If no candidate matches that scope, return an
+  empty candidates array instead of mixing nearby districts or campuses.
 - Do not reject a credible POI merely because it is far from the city-center point; the
   backend will verify administrative scope and distance.
 - If evidence lists longitude before latitude, normalize output to latitude then longitude.
@@ -332,27 +338,36 @@ Schema:
             },
         )
         verified_json = tool_state.get("verified_json")
-        if isinstance(verified_json, str) and not self._place_lookup_result_has_candidates(
-            result.raw_text
-        ):
+        if isinstance(verified_json, str) and verified_json.strip():
             self._log_place_trace(
                 "final_from_tool_evidence",
                 {
-                    "reason": "agent_final_missing_verified_candidates",
+                    "reason": "tool_evidence_authoritative",
                     "session_id": result.session_id,
                     "raw_text": verified_json,
                 },
             )
-            return AgentRunResult(
-                mode=result.mode,
-                raw_text=verified_json,
-                session_id=result.session_id,
-                duration_ms=result.duration_ms,
-                total_cost_usd=result.total_cost_usd,
-                stop_reason=result.stop_reason,
-                model=result.model,
-            )
+            return self._finalize_place_lookup_result(result, verified_json)
         return result
+
+    @staticmethod
+    def _finalize_place_lookup_result(
+        result: AgentRunResult,
+        verified_json: str | None,
+    ) -> AgentRunResult:
+        """Make the backend evidence gate, not the Agent prose, the source of truth."""
+
+        if not isinstance(verified_json, str) or not verified_json.strip():
+            return result
+        return AgentRunResult(
+            mode=result.mode,
+            raw_text=verified_json,
+            session_id=result.session_id,
+            duration_ms=result.duration_ms,
+            total_cost_usd=result.total_cost_usd,
+            stop_reason=result.stop_reason,
+            model=result.model,
+        )
 
     async def _trace_place_tool_use(
         self,
@@ -439,16 +454,24 @@ Schema:
                     max_results=max_results,
                     observations=tool_observations,
                 )
-                if verified_json and not tool_state.get("verified_json"):
+                if verified_json:
                     tool_state["verified_json"] = verified_json
                     self._log_place_trace(
-                        "evidence_gate_verified",
+                        "evidence_gate_updated",
                         {
                             "tool_name": tool_name,
                             "tool_use_id": tool_use_id or payload.get("tool_use_id"),
                             "raw_text": verified_json,
                         },
                     )
+                    # The backend has a terminal, validated candidate. Stop the SDK turn here;
+                    # run_place_lookup_task will return the structured evidence through its
+                    # fallback path if the SDK does not emit a final assistant message.
+                    return {
+                        "continue_": False,
+                        "stopReason": "validated place-coordinate evidence collected",
+                        "suppressOutput": False,
+                    }
         return {"continue_": True, "suppressOutput": False}
 
     def _place_lookup_json_from_tool_observations(
@@ -466,39 +489,45 @@ Schema:
         seen: set[tuple[float, float]] = set()
         for observation in observations:
             text = self._json_preview(observation)
-            full_text = self._observation_text(observation)
-            for lat, lon in self._extract_coordinate_pairs(full_text, city_lat, city_lon):
-                key = (round(lat, 5), round(lon, 5))
-                if key in seen:
-                    continue
-                gate = self._place_evidence_gate(
-                    query=query,
-                    city_label=city_label,
-                    text=full_text,
-                    lat=lat,
-                    lon=lon,
-                    city_lat=city_lat,
-                    city_lon=city_lon,
-                    max_distance_km=max_distance_km,
-                )
-                if not gate["accepted"]:
-                    continue
-                seen.add(key)
-                coordinate_context = self._coordinate_context(full_text, lat, lon)
-                label = self._label_from_place_evidence(query, coordinate_context)
-                address = self._address_from_place_evidence(coordinate_context) or city_label
-                candidates.append(
-                    {
-                        "label": label,
-                        "address": address,
-                        "latitude": lat,
-                        "longitude": lon,
-                        "accuracy": "poi",
-                        "sourceUrl": self._first_url(full_text) or "",
-                        "rawEvidence": self._evidence_snippet(full_text, lat, lon) or text,
-                        "confidence": gate["confidence"],
-                    }
-                )
+            for evidence in self._observation_evidence_units(observation):
+                full_text = evidence["text"]
+                coordinate_pairs = self._extract_coordinate_pairs(full_text, city_lat, city_lon)
+                for lat, lon in coordinate_pairs:
+                    key = (round(lat, 5), round(lon, 5))
+                    if key in seen:
+                        continue
+                    gate = self._place_evidence_gate(
+                        query=query,
+                        city_label=city_label,
+                        text=full_text,
+                        lat=lat,
+                        lon=lon,
+                        city_lat=city_lat,
+                        city_lon=city_lon,
+                        max_distance_km=max_distance_km,
+                    )
+                    if not gate["accepted"]:
+                        continue
+                    seen.add(key)
+                    coordinate_context = self._coordinate_context(full_text, lat, lon)
+                    label = self._label_from_place_evidence(query, coordinate_context)
+                    address = self._address_from_place_evidence(coordinate_context) or city_label
+                    candidates.append(
+                        {
+                            "label": label,
+                            "address": address,
+                            "latitude": lat,
+                            "longitude": lon,
+                            "accuracy": "poi",
+                            "sourceUrl": self._source_url_for_evidence(
+                                evidence,
+                                coordinate_context,
+                                coordinate_count=len(coordinate_pairs),
+                            ),
+                            "rawEvidence": self._evidence_snippet(full_text, lat, lon) or text,
+                            "confidence": gate["confidence"],
+                        }
+                    )
         if not candidates:
             return None
         payload = {
@@ -508,6 +537,116 @@ Schema:
             ],
         }
         return json.dumps(payload, ensure_ascii=False)
+
+    def _observation_evidence_units(self, observation: dict[str, Any]) -> list[dict[str, str]]:
+        """Keep coordinates associated with the result block that supplied them."""
+
+        response = observation.get("tool_response")
+        if response is None:
+            response = observation
+        if not isinstance(response, dict):
+            text = self._observation_text(observation)
+            return [{"text": text, "sourceUrl": self._first_url(text) or ""}] if text else []
+
+        units: list[dict[str, str]] = []
+        response_url = str(response.get("url") or "").strip()
+        results = response.get("results")
+        result_urls: list[str] = []
+        if isinstance(results, list):
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+                result_text = self._observation_text(result)
+                result_url = str(result.get("url") or "").strip()
+                if result_url:
+                    result_urls.append(result_url)
+                if result_text:
+                    units.append(
+                        {
+                            "text": result_text,
+                            "sourceUrl": result_url or response_url,
+                        }
+                    )
+
+        summary_source_url = response_url
+        if not summary_source_url and len(result_urls) == 1:
+            summary_source_url = result_urls[0]
+        for key in ("summary", "result", "text", "message", "content", "answer", "output"):
+            value = response.get(key)
+            if value is None:
+                continue
+            text = "\n".join(self._text_fragments(value)).strip()
+            if text:
+                units.append(
+                    {
+                        "text": text,
+                        "sourceUrl": summary_source_url or self._first_url(text) or "",
+                    }
+                )
+
+        # Some SDK adapters attach the search engine's natural-language summary under a
+        # provider-specific key. It is useful only when it carries an explicit coordinate
+        # signal; ignore ordinary metadata such as query, duration, and result counts.
+        known_keys = {
+            "query",
+            "results",
+            "url",
+            "summary",
+            "result",
+            "text",
+            "message",
+            "content",
+            "answer",
+            "output",
+        }
+        for key, value in response.items():
+            if key in known_keys:
+                continue
+            text = "\n".join(self._text_fragments(value)).strip()
+            if text and self._has_coordinate_signal(text):
+                units.append(
+                    {
+                        "text": text,
+                        "sourceUrl": summary_source_url or self._first_url(text) or "",
+                    }
+                )
+
+        if not units:
+            text = self._observation_text(observation)
+            if text:
+                units.append(
+                    {
+                        "text": text,
+                        "sourceUrl": summary_source_url or self._first_url(text) or "",
+                    }
+                )
+        return units
+
+    @staticmethod
+    def _has_coordinate_signal(text: str) -> bool:
+        return bool(
+            re.search(
+                r"纬度|经度|经纬度|坐标|latitude|longitude|coordinates|wgs84",
+                text,
+                re.I,
+            )
+        )
+
+    def _source_url_for_evidence(
+        self,
+        evidence: dict[str, str],
+        coordinate_context: str,
+        *,
+        coordinate_count: int,
+    ) -> str:
+        local_url = self._first_url(coordinate_context)
+        if local_url:
+            return local_url
+        # A summary containing several coordinate pairs cannot safely attribute its first URL
+        # to every candidate. Leave the source unset rather than publishing a false citation.
+        if coordinate_count > 1:
+            return ""
+        return evidence.get("sourceUrl", "")
 
     @staticmethod
     def _place_lookup_result_has_candidates(raw_text: str) -> bool:
@@ -526,6 +665,16 @@ Schema:
             return False
         candidates = payload.get("candidates") if isinstance(payload, dict) else None
         return isinstance(candidates, list) and len(candidates) > 0
+
+    @classmethod
+    def _recover_place_lookup_result(cls, *values: object) -> str | None:
+        """Recover a complete candidate payload from an SDK result/error boundary."""
+
+        for value in values:
+            candidate = str(value or "").strip()
+            if candidate and cls._place_lookup_result_has_candidates(candidate):
+                return candidate
+        return None
 
     def _place_evidence_gate(
         self,
@@ -810,7 +959,19 @@ Schema:
             value = observation
         fragments = ClaudeRuntime._text_fragments(value)
         if fragments:
-            return "\n".join(fragments)
+            text = "\n".join(fragments)
+            if isinstance(value, (dict, list)):
+                try:
+                    serialized = json.dumps(value, ensure_ascii=False, default=str)
+                except TypeError:
+                    serialized = ""
+                if re.search(
+                    r"\"(?:latitude|lat|longitude|lon|lng)\"\s*:",
+                    serialized,
+                    re.I,
+                ):
+                    return f"{text}\n{serialized}"
+            return text
         try:
             return json.dumps(value, ensure_ascii=False, default=str)
         except TypeError:
@@ -939,6 +1100,18 @@ Schema:
                     total_cost_usd = getattr(message, "total_cost_usd", None)
                     stop_reason = getattr(message, "stop_reason", None)
                     if getattr(message, "is_error", False):
+                        # A tool-use stop can mark the SDK result as an error even after the
+                        # model has emitted a complete place candidate. Preserve that bounded
+                        # JSON so the deterministic place service can verify it instead of
+                        # converting a usable answer into a generic agent_error.
+                        if trace_label == "place_lookup":
+                            recovered = self._recover_place_lookup_result(
+                                getattr(message, "result", ""),
+                                "\n".join(assistant_parts),
+                            )
+                            if recovered is not None:
+                                result_text = recovered
+                                continue
                         raise RuntimeError(
                             getattr(message, "result", None)
                             or getattr(message, "stop_reason", None)

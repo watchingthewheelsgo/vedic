@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -521,6 +522,54 @@ def test_candidate_fingerprint_and_stability_track_d1_planet_structure() -> None
     stability = calculator._stability_map(set(changes), {})
     restricted = set(stability["llmRestrictedEvidence"])
     assert {"moonSign", "d1Structure"} <= restricted
+
+
+def test_signature_changes_include_material_continuous_degree_differences() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    base_chart = _base_chart()
+    changed_chart = deepcopy(base_chart)
+    changed_chart["lagna"]["degree"] = 6.25
+    changed_chart["planets"]["Moon"]["longitude"] = 50.3
+    changed_chart["divisional_charts"]["D9"]["Lagna"]["degree"] = 2.0
+
+    base_signature = calculator._chart_signature(base_chart)
+    changed_signature = calculator._chart_signature(changed_chart)
+    changes = calculator._signature_changes(base_signature, changed_signature)
+
+    assert "lagnaDegree" in changes
+    assert "planetLongitude:Moon" in changes
+    assert "d9LagnaDegree" in changes
+
+    small_change_chart = deepcopy(base_chart)
+    small_change_chart["lagna"]["degree"] = 5.8
+    small_change_chart["planets"]["Moon"]["longitude"] = 50.2
+    small_change_chart["divisional_charts"]["D9"]["Lagna"]["degree"] = 0.8
+    small_changes = calculator._signature_changes(
+        base_signature,
+        calculator._chart_signature(small_change_chart),
+    )
+    assert "lagnaDegree" not in small_changes
+    assert "planetLongitude:Moon" not in small_changes
+    assert "d9LagnaDegree" not in small_changes
+
+
+def test_signature_changes_treat_missing_continuous_degrees_as_unresolved() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    base = {
+        "lagnaDegree": 5.0,
+        "planetLongitudes": {"Moon": 50.0},
+        "vargaLagnaDegrees": {"d9LagnaDegree": 1.0},
+    }
+
+    missing_variant = {
+        "lagnaDegree": None,
+        "planetLongitudes": {},
+        "vargaLagnaDegrees": {},
+    }
+    changes = calculator._signature_changes(base, missing_variant)
+
+    assert {"lagnaDegree", "planetLongitude:Moon", "d9LagnaDegree"} <= set(changes)
+    assert calculator._signature_changes(missing_variant, missing_variant) == []
 
 
 def test_candidate_fingerprint_and_stability_track_chara_karaka_roles() -> None:
@@ -1780,6 +1829,9 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
                 or "{}"
             )
             question = interview["questions"][0]
+            assert "questionPool" not in interview
+            assert "lifeEventFocus" not in interview
+            assert all("questionValue" not in item for item in interview["questions"])
             if index == 1:
                 with pytest.raises(ValueError, match="does not match"):
                     await runtime.prepare_rectification_interview(
@@ -2580,6 +2632,49 @@ def test_chara_karaka_boundary_restricts_all_chara_karaka_facts() -> None:
     assert restrict_timing is False
 
 
+def test_partial_supplemental_pyjhora_outputs_are_not_judgement_evidence() -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    record = SimpleNamespace(
+        facts=[
+            SimpleNamespace(
+                fact_id="fact.D1.H1.bhava_bala",
+                fact_type="strength.bhava_bala",
+                input_stability=ConfidenceGrade.CORROBORATED,
+            ),
+            SimpleNamespace(
+                fact_id="fact.D1.special_lagna.hora_lagna",
+                fact_type="point.special_lagna",
+                input_stability=ConfidenceGrade.CORROBORATED,
+            ),
+            SimpleNamespace(
+                fact_id="fact.D1.Venus.vargeeya_bala",
+                fact_type="strength.vargeeya_bala",
+                input_stability=ConfidenceGrade.CORROBORATED,
+            ),
+            SimpleNamespace(
+                fact_id="fact.D1.Venus.position",
+                fact_type="rashi.graha.position",
+                input_stability=ConfidenceGrade.CORROBORATED,
+            ),
+        ],
+        quality_checks=[
+            SimpleNamespace(
+                check_id="calculation.supplemental-input-integrity",
+                status="warning",
+                observed=[{"field": "bhava_bala", "reason": "house-set-mismatch"}],
+            )
+        ],
+    )
+
+    restricted, restrict_timing = runtime._restricted_judgement_evidence(
+        cast(Any, record),
+        {"reportReadiness": {"llmContract": {"mustNotUseAsPrimaryEvidence": []}}},
+    )
+
+    assert restricted == {"fact.D1.H1.bhava_bala"}
+    assert restrict_timing is False
+
+
 def test_interpretive_state_boundary_restricts_only_dependent_fact_family() -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
     record = SimpleNamespace(
@@ -3019,6 +3114,21 @@ def test_tied_dated_events_stop_instead_of_forcing_agent_questions() -> None:
     assert state["status"] == "underdetermined"
     assert state["rectificationPlan"]["action"] == "rectification_inconclusive"
     assert state["reportGate"]["fullReportAllowed"] is False
+
+
+def test_underdetermined_state_collects_only_when_event_collection_is_required() -> None:
+    service = ChartRectificationService()
+    state = {
+        "status": "underdetermined",
+        "lifeEventLedger": {"eventCollectionRequired": True},
+        "candidates": [],
+        "reportGate": {"fullReportAllowed": False},
+    }
+
+    plan = service._build_rectification_plan(state)
+
+    assert plan["action"] == "collect_dated_life_events"
+    assert "recalculate" in plan["directive"]
 
 
 def test_deterministic_calibration_selects_candidate_before_any_reader_question() -> None:
@@ -3748,6 +3858,78 @@ def test_rectification_caps_correlated_matches_and_localizes_event_time(monkeypa
         "product.vedicdust-consultation-standard-1",
     ]
     assert score["eventMappingId"] == RECTIFICATION_EVENT_MAPPING_ID
+
+
+def test_semantic_event_facts_remain_context_only_for_candidate_scoring(monkeypatch) -> None:
+    def fake_dasha(*args, **kwargs):
+        return [
+            {"mahadasha": "Rahu", "antardasha": "Ketu", "pratyantardasha": "Rahu"} for _ in args[-1]
+        ]
+
+    def fake_transits(lagna_index, moon_index, *, as_of):
+        return {"double_transit_houses": [7] if lagna_index == 1 else []}
+
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
+
+    def ledger_for(impact: str) -> dict[str, Any]:
+        return parse_life_event_ledger(
+            "2018年10月 结婚",
+            semantic_evidence=[
+                {
+                    "questionId": "q-marriage",
+                    "date": "2018-10",
+                    "category": "marriage",
+                    "description": "2018年10月 结婚",
+                    "eventFacts": {
+                        "occurrence": "occurred",
+                        "agency": "unknown",
+                        "impact": impact,
+                        "dateConfidence": "month",
+                    },
+                }
+            ],
+        )
+
+    common = {
+        "planetSignIndices": {"Rahu": 3, "Ketu": 4, "Moon": 0},
+    }
+    candidate_a = {
+        **common,
+        "lagnaSign": "Aries",
+        "d9Lagna": "Taurus",
+        "vargaPlanetSignIndices": {"D9": {"Rahu": 2, "Ketu": 0, "Moon": 0}},
+    }
+    candidate_b = {
+        **common,
+        "lagnaSign": "Taurus",
+        "d9Lagna": "Aries",
+        "vargaPlanetSignIndices": {"D9": {"Rahu": 0, "Moon": 0, "Ketu": 0}},
+    }
+
+    def score(candidate_id: str, signature: dict[str, Any], impact: str) -> dict[str, Any]:
+        return score_candidate_events(
+            candidate_id=candidate_id,
+            signature=signature,
+            representative_moment=datetime(1990, 1, 1, 8, 30),
+            latitude=31.2304,
+            longitude=121.4737,
+            timezone_id="Asia/Shanghai",
+            ledger=ledger_for(impact),
+        )["evidenceScores"][0]
+
+    major_a = score("a", candidate_a, "major")
+    major_b = score("b", candidate_b, "major")
+    minor_a = score("a", candidate_a, "minor")
+    minor_b = score("b", candidate_b, "minor")
+
+    assert minor_a["score"] == major_a["score"]
+    assert minor_b["score"] == major_b["score"]
+    assert minor_b["semanticAdjustment"]["applied"] is False
+    assert minor_b["semanticAdjustment"]["componentMultipliers"] == {}
+    assert not any(
+        "semanticAdjustment" in item.get("details", {}) for item in minor_b["observations"]
+    )
 
 
 def test_rectification_dasha_activation_includes_declared_graha_drishti(monkeypatch) -> None:

@@ -79,28 +79,76 @@ async function completePrevalidation(initialSession) {
   let session = initialSession;
   let state = rectificationState(session);
 
-  if (state?.status === "collecting_evidence") {
+  if (
+    state?.status === "collecting_evidence" ||
+    (state?.status === "underdetermined" &&
+      state?.rectificationPlan?.eventCollectionRequired === true)
+  ) {
     if (!rectificationEvents.length) {
       throw new Error(
         "This fixture needs birth-time rectification. Set VEDIC_WORKFLOW_EVENTS_JSON to 3-5 " +
           "dated event objects with date, category, and description."
       );
     }
-    const interviewSession = await postJson("/api/rectification-interview", {
-      sessionId: session.sessionId,
-      locale: birthInput.locale ?? "en"
-    });
-    const interview = parseArtifact(interviewSession, "rectification_interview.json");
-    const boundEvents = bindRectificationEvents(rectificationEvents, interview);
-    console.log(
-      `rectification questions=${interview?.questions?.length ?? 0} source=${interview?.source ?? "unknown"}`
-    );
-    session = await postJson("/api/rectification-life-events", {
-      sessionId: session.sessionId,
-      events: boundEvents
-    });
-    state = rectificationState(session);
-    console.log(`rectification status=${state?.status ?? "unknown"}`);
+    const pendingEvents = rectificationEvents.map((event) => ({ ...event }));
+    const maxRounds = pendingEvents.length * 4 + 8;
+    let round = 0;
+    while (pendingEvents.length && round < maxRounds) {
+      state = rectificationState(session);
+      const plan = state?.rectificationPlan ?? {};
+      const canCollect =
+        state?.status === "collecting_evidence" ||
+        (state?.status === "underdetermined" && plan.eventCollectionRequired === true);
+      if (!canCollect || canStartFullReading(session)) break;
+
+      const interviewSession = await postJson("/api/rectification-interview", {
+        sessionId: session.sessionId,
+        locale: birthInput.locale ?? "en"
+      });
+      const interview = parseArtifact(interviewSession, "rectification_interview.json");
+      const question = interview?.questions?.[0];
+      if (!question?.questionId || !question.category) {
+        throw new Error("Rectification interview returned no current verification question.");
+      }
+      console.log(
+        `rectification round=${round + 1} category=${question.category} source=${interview.source ?? "unknown"}`
+      );
+
+      const eventIndex = pendingEvents.findIndex((event) =>
+        rectificationCategoriesMatch(event.category, question.category)
+      );
+      if (eventIndex < 0) {
+        session = await postJson("/api/rectification-interview", {
+          sessionId: session.sessionId,
+          locale: birthInput.locale ?? "en",
+          currentQuestionId: question.questionId,
+          skippedCategory: question.category
+        });
+        console.log(`rectification skipped category=${question.category}`);
+      } else {
+        const [event] = pendingEvents.splice(eventIndex, 1);
+        session = await postJson("/api/rectification-life-events", {
+          sessionId: session.sessionId,
+          events: [
+            {
+              ...event,
+              questionId: question.questionId,
+              category: question.category
+            }
+          ]
+        });
+      }
+      state = rectificationState(session);
+      console.log(`rectification status=${state?.status ?? "unknown"}`);
+      round += 1;
+    }
+
+    if (pendingEvents.length && !canStartFullReading(session)) {
+      throw new Error(
+        `Rectification stopped before all fixture events were accepted; remaining=${pendingEvents.length}. ` +
+          `status=${rectificationState(session)?.status ?? "unknown"}.`
+      );
+    }
   }
 
   if (canStartFullReading(session)) return session;
@@ -135,30 +183,12 @@ async function completePrevalidation(initialSession) {
   return session;
 }
 
-function bindRectificationEvents(events, interview) {
-  const questions = Array.isArray(interview?.questions) ? interview.questions : [];
-  if (!questions.length) {
-    throw new Error("Rectification interview returned no current verification questions.");
-  }
-  const questionByCategory = new Map(
-    questions
-      .filter((question) => question?.questionId && question?.category)
-      .map((question) => [String(question.category), String(question.questionId)])
+function rectificationCategoriesMatch(eventCategory, questionCategory) {
+  if (eventCategory === questionCategory) return true;
+  return (
+    (eventCategory === "marriage" && questionCategory === "relationship") ||
+    (eventCategory === "relationship" && questionCategory === "marriage")
   );
-  const missing = events
-    .map((event) => event.category)
-    .filter((category) => !questionByCategory.has(category));
-  if (missing.length) {
-    throw new Error(
-      `Rectification fixture categories are not available in the current interview: ${[
-        ...new Set(missing)
-      ].join(", ")}. Available categories: ${[...questionByCategory.keys()].join(", ")}.`
-    );
-  }
-  return events.map((event) => ({
-    ...event,
-    questionId: questionByCategory.get(event.category)
-  }));
 }
 
 async function postJson(path, body) {

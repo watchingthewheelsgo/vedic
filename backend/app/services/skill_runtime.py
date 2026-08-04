@@ -482,10 +482,7 @@ class SkillRuntime:
 
         plan = state.get("rectificationPlan")
         plan = plan if isinstance(plan, dict) else {}
-        if (
-            plan.get("eventCollectionRequired") is not True
-            and state.get("status") != "underdetermined"
-        ):
+        if plan.get("eventCollectionRequired") is not True:
             raise ValueError("this rectification session does not require more life events")
 
         raw_time_context = context.get("time")
@@ -693,6 +690,13 @@ class SkillRuntime:
         if not state_text:
             raise ValueError("session is missing chart rectification state")
         state = self._json_dict(state_text)
+        plan = state.get("rectificationPlan")
+        plan = plan if isinstance(plan, dict) else {}
+        if (
+            state.get("status") == "underdetermined"
+            and plan.get("eventCollectionRequired") is not True
+        ):
+            raise ValueError("this rectification session has no remaining adaptive interview round")
         if state.get("status") not in {"collecting_evidence", "underdetermined"}:
             raise ValueError("this session does not require a rectification interview")
 
@@ -768,6 +772,14 @@ class SkillRuntime:
             except Exception as exc:
                 interview["source"] = "deterministic_fallback"
                 interview["agentFallbackReason"] = self._safe_agent_failure_reason(exc)
+
+        # The candidate-ranking pool is backend-private. The client receives only
+        # the single question selected for this round.
+        interview.pop("questionPool", None)
+        interview.pop("lifeEventFocus", None)
+        for question in interview.get("questions", []):
+            if isinstance(question, dict):
+                question.pop("questionValue", None)
 
         self.workspace.write_artifact(
             session_id,
@@ -1991,28 +2003,28 @@ class SkillRuntime:
         brief: dict[str, Any],
         locale: str,
     ) -> str:
-        return f"""Rewrite the supplied birth-time verification question briefs for a calm,
+        return f"""Choose and rewrite the next birth-time verification question for a calm,
 clear consumer product.
 
 {self._language_instruction(locale)}
 
-The backend has already selected every question identity and event category. You may reorder
-the complete question list so the most independently memorable and highest-value dated event
-is asked first, and improve title, prompt, whyWeAsk, and detailsPlaceholder. Preserve every
-question exactly once. `questionValue` is private ranking context and must never appear in
-visible wording. Do not mention candidate charts,
+The backend provides a bounded approved question pool. Select exactly one question from that pool
+for this round. The backend will recalculate candidates after the answer and issue a new pool for
+the next round. You may improve title, prompt, whyWeAsk, and detailsPlaceholder, but you must not
+invent a questionId or category. `questionValue` is private ranking context and must never appear
+in visible wording. Do not mention candidate charts,
 scores, houses, planets, vargas, D1-D60, or imply that an answer is expected. Keep every
 question factual and non-leading. Never add personality or physical-trait questions.
 
 BACKEND QUESTION BRIEF
-{json.dumps({"questions": brief.get("questions", [])}, ensure_ascii=False, indent=2)}
+{json.dumps({"questionPool": brief.get("questionPool", brief.get("questions", [])), "lifeEventFocus": brief.get("lifeEventFocus", [])}, ensure_ascii=False, indent=2)}
 
 Return JSON only:
 {{
   "questions": [
     {{
-      "questionId": "unchanged backend questionId",
-      "category": "unchanged backend category",
+      "questionId": "one unchanged backend questionId from questionPool",
+      "category": "unchanged backend category from questionPool",
       "title": "short readable title",
       "prompt": "concrete examples of qualifying events",
       "whyWeAsk": "one plain-language sentence",
@@ -3809,6 +3821,41 @@ User request:
             < ConfidenceGrade.CORROBORATED.rank
         }
         restrict_timing = False
+
+        # Optional PyJHora capacity outputs may be partially present. A warning is
+        # not a reason to block the whole chart, but partial output must not become
+        # evidence for a rule that expects the complete measure.
+        supplemental_check = next(
+            (
+                check
+                for check in getattr(record, "quality_checks", [])
+                if check.check_id == "calculation.supplemental-input-integrity"
+            ),
+            None,
+        )
+        if supplemental_check is not None and supplemental_check.status != "passed":
+            observed = supplemental_check.observed
+            observed_items = observed if isinstance(observed, list) else []
+            optional_fact_types: set[str] = set()
+            for item in observed_items:
+                if not isinstance(item, dict):
+                    continue
+                field = str(item.get("field") or "")
+                if field == "bhava_bala":
+                    optional_fact_types.add("strength.bhava_bala")
+                elif field == "special_lagnas":
+                    optional_fact_types.add("point.special_lagna")
+                elif field.startswith("vargeeya_bala"):
+                    optional_fact_types.add("strength.vargeeya_bala")
+            if not optional_fact_types:
+                optional_fact_types = {
+                    "strength.bhava_bala",
+                    "strength.vargeeya_bala",
+                    "point.special_lagna",
+                }
+            restricted.update(
+                fact.fact_id for fact in record.facts if fact.fact_type in optional_fact_types
+            )
 
         d1_lagna_dependent_types = {
             "rashi.lagna.position",

@@ -68,6 +68,11 @@ HIGH_RISK_CHANGED_FIELDS = {
     "d9Lagna",
     "d10Lagna",
 }
+CONTINUOUS_DEGREE_THRESHOLDS = {
+    "lagnaDegree": 1.0,
+    "planetLongitude": 0.25,
+    "vargaLagnaDegree": 1.0,
+}
 CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 TIME_SOURCE_MIN_RADIUS_MINUTES = {
     "出生证/医院记录": 2,
@@ -898,6 +903,10 @@ class VedicCalculator:
                 "domain": "D1 identity, house lords, all house mapping",
                 "severity": "blocking",
             },
+            "lagnaDegree": {
+                "domain": "D1 Ascendant degree and degree-sensitive house interpretation",
+                "severity": "blocking",
+            },
             "d1Structure": {
                 "domain": "D1 graha signs and every relationship derived from them",
                 "severity": "blocking",
@@ -966,6 +975,18 @@ class VedicCalculator:
                 ),
                 "severity": severity,
             }
+            field_impacts[f"d{factor}LagnaDegree"] = {
+                "domain": f"{self._divisional_key(factor)} Ascendant degree sensitivity",
+                "severity": severity,
+            }
+
+        for field in changed_fields:
+            if field.startswith("planetLongitude:"):
+                planet = field.split(":", 1)[1] or "planet"
+                field_impacts[field] = {
+                    "domain": f"{planet} continuous longitude and degree-sensitive aspects",
+                    "severity": "high",
+                }
 
         confidence_by_field = {
             str(value.get("field")): value
@@ -2092,7 +2113,7 @@ class VedicCalculator:
         moon_nakshatra = moon.get("nakshatra") or {}
         signature = {
             "lagnaSign": chart.get("lagna", {}).get("sign"),
-            "lagnaDegree": round(float(chart.get("lagna", {}).get("degree", 0)), 4),
+            "lagnaDegree": self._finite_degree((chart.get("lagna") or {}).get("degree")),
             "moonSign": moon.get("sign"),
             "moonNakshatra": moon_nakshatra.get("name"),
             "moonPada": moon_nakshatra.get("pada"),
@@ -2131,7 +2152,15 @@ class VedicCalculator:
                 for name, position in (chart.get("planets") or {}).items()
                 if isinstance(position, dict) and position.get("sign_idx") is not None
             },
+            "planetLongitudes": {
+                name: round(float(position["longitude"]), 6)
+                for name, position in (chart.get("planets") or {}).items()
+                if isinstance(position, dict)
+                and position.get("longitude") is not None
+                and math.isfinite(float(position["longitude"]))
+            },
             "vargaPlanetSignIndices": {},
+            "vargaLagnaDegrees": {},
         }
         for factor in DIVISIONAL_FACTORS:
             if factor == 1:
@@ -2140,6 +2169,12 @@ class VedicCalculator:
                 chart,
                 factor,
             )
+            divisional_degree = self._divisional_lagna_degree(chart, factor)
+            if divisional_degree is not None:
+                signature["vargaLagnaDegrees"][f"d{factor}LagnaDegree"] = round(
+                    divisional_degree,
+                    4,
+                )
             raw_chart = (chart.get("divisional_charts") or {}).get(f"D{factor}")
             if isinstance(raw_chart, dict) and "error" not in raw_chart:
                 signature["vargaPlanetSignIndices"][f"D{factor}"] = {
@@ -2165,15 +2200,52 @@ class VedicCalculator:
         return None
 
     @staticmethod
+    def _divisional_lagna_degree(chart: dict[str, Any], factor: int) -> float | None:
+        raw_chart = (chart.get("divisional_charts") or {}).get(f"D{factor}")
+        if not isinstance(raw_chart, dict) or "error" in raw_chart:
+            return None
+        lagna = raw_chart.get("Lagna")
+        value = lagna.get("degree") if isinstance(lagna, dict) else None
+        try:
+            degree = float(value)
+        except (TypeError, ValueError):
+            return None
+        return degree if math.isfinite(degree) else None
+
+    @staticmethod
     def _signature_changes(
         base_signature: dict[str, Any], variant_signature: dict[str, Any]
     ) -> list[str]:
         changes = []
         for key, base_value in base_signature.items():
-            if key in {"lagnaDegree", "planetSignIndices", "vargaPlanetSignIndices"}:
+            if key in {
+                "lagnaDegree",
+                "planetLongitudes",
+                "planetSignIndices",
+                "vargaLagnaDegrees",
+                "vargaPlanetSignIndices",
+            }:
                 continue
             if variant_signature.get(key) != base_value:
                 changes.append(key)
+        if VedicCalculator._continuous_degree_changed(
+            base_signature.get("lagnaDegree"),
+            variant_signature.get("lagnaDegree"),
+            CONTINUOUS_DEGREE_THRESHOLDS["lagnaDegree"],
+        ):
+            changes.append("lagnaDegree")
+        base_longitudes = base_signature.get("planetLongitudes")
+        variant_longitudes = variant_signature.get("planetLongitudes")
+        if isinstance(base_longitudes, dict) or isinstance(variant_longitudes, dict):
+            base_longitudes = base_longitudes if isinstance(base_longitudes, dict) else {}
+            variant_longitudes = variant_longitudes if isinstance(variant_longitudes, dict) else {}
+            for planet in sorted(set(base_longitudes) | set(variant_longitudes)):
+                if VedicCalculator._continuous_degree_changed(
+                    base_longitudes.get(planet),
+                    variant_longitudes.get(planet),
+                    CONTINUOUS_DEGREE_THRESHOLDS["planetLongitude"],
+                ):
+                    changes.append(f"planetLongitude:{planet}")
         if variant_signature.get("planetSignIndices") != base_signature.get("planetSignIndices"):
             changes.append("d1Structure")
         base_structures = base_signature.get("vargaPlanetSignIndices")
@@ -2185,7 +2257,50 @@ class VedicCalculator:
                 if base_structures.get(varga_id) != variant_structures.get(varga_id):
                     factor = str(varga_id).removeprefix("D")
                     changes.append(f"d{factor}Structure")
+        base_varga_degrees = base_signature.get("vargaLagnaDegrees")
+        variant_varga_degrees = variant_signature.get("vargaLagnaDegrees")
+        if isinstance(base_varga_degrees, dict) or isinstance(variant_varga_degrees, dict):
+            base_varga_degrees = base_varga_degrees if isinstance(base_varga_degrees, dict) else {}
+            variant_varga_degrees = (
+                variant_varga_degrees if isinstance(variant_varga_degrees, dict) else {}
+            )
+            for field in sorted(set(base_varga_degrees) | set(variant_varga_degrees)):
+                if VedicCalculator._continuous_degree_changed(
+                    base_varga_degrees.get(field),
+                    variant_varga_degrees.get(field),
+                    CONTINUOUS_DEGREE_THRESHOLDS["vargaLagnaDegree"],
+                ):
+                    changes.append(field)
         return changes
+
+    @staticmethod
+    def _finite_degree(value: Any) -> float | None:
+        try:
+            degree = float(value)
+        except (TypeError, ValueError):
+            return None
+        return round(degree, 4) if math.isfinite(degree) else None
+
+    @staticmethod
+    def _continuous_degree_changed(base: Any, variant: Any, threshold: float) -> bool:
+        """Treat missing continuous data as a change, never as a stable value."""
+
+        base_value = VedicCalculator._finite_degree(base)
+        variant_value = VedicCalculator._finite_degree(variant)
+        if base_value is None or variant_value is None:
+            return base_value != variant_value
+        return VedicCalculator._degree_delta(base_value, variant_value) >= threshold
+
+    @staticmethod
+    def _degree_delta(base: Any, variant: Any) -> float:
+        try:
+            base_value = float(base)
+            variant_value = float(variant)
+        except (TypeError, ValueError):
+            return 0.0
+        if not math.isfinite(base_value) or not math.isfinite(variant_value):
+            return 0.0
+        return abs((variant_value - base_value + 180.0) % 360.0 - 180.0)
 
     @staticmethod
     def _current_dasha_label(chart: dict[str, Any]) -> str | None:
@@ -2274,6 +2389,11 @@ class VedicCalculator:
         if scan_errors:
             risk_factors.append(f"scan_errors:{len(scan_errors)}")
 
+        # Planet longitudes move continuously even when no discrete chart boundary
+        # changes. Surface those movements for sensitivity reporting, but do not
+        # turn every ordinary minute-to-minute ephemeris delta into a rectification
+        # blocker. Missing/invalid values are still represented as changes and are
+        # rejected by the deterministic position-integrity checks.
         blocking_changed = sorted(changed & HIGH_RISK_CHANGED_FIELDS)
         unresolved_place = place.accuracy in {"city", "district"}
         if (
@@ -2317,7 +2437,10 @@ class VedicCalculator:
             policy = varga_domain_policy(factor)
             interval = round(120 / factor, 3)
             structure_field = f"d{factor}Structure"
-            division_changed = field in changed or structure_field in changed
+            degree_field = "lagnaDegree" if factor == 1 else f"d{factor}LagnaDegree"
+            division_changed = (
+                field in changed or structure_field in changed or degree_field in changed
+            )
             confidence = VedicCalculator._confidence_for_division(
                 precision,
                 radius_minutes,
@@ -2329,7 +2452,9 @@ class VedicCalculator:
                 f"approx average {key} Lagna slice is {interval}m",
             ]
             if division_changed:
-                changed_parts = [item for item in (field, structure_field) if item in changed]
+                changed_parts = [
+                    item for item in (field, degree_field, structure_field) if item in changed
+                ]
                 reasons.insert(0, f"{', '.join(changed_parts)} changed in sensitivity scan")
             if policy.usage_tier == "final_confirmation_only":
                 reasons.append(
