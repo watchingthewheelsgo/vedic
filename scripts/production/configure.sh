@@ -198,6 +198,7 @@ trap 'rm -f "${temp_file}"' EXIT
   printf '\n'
   printf 'DATABASE_URL=%s\n' "$(dotenv_quote "${DATABASE_URL}")"
   printf 'DATABASE_ECHO=false\n'
+  printf 'DATABASE_SCHEMA_MODE=migrations\n'
   printf '\n'
   printf 'DEEPSEEK_API_KEY=%s\n' "$(dotenv_quote "${DEEPSEEK_API_KEY}")"
   printf 'VEDIC_AI_MODE=\n'
@@ -211,6 +212,12 @@ trap 'rm -f "${temp_file}"' EXIT
   printf 'AGENT_EFFORT=%s\n' "$(dotenv_quote "${AGENT_EFFORT}")"
   printf 'AGENT_MAX_TURNS=%s\n' "$(dotenv_quote "${AGENT_MAX_TURNS}")"
   printf 'AGENT_TIMEOUT_MS=%s\n' "$(dotenv_quote "${AGENT_TIMEOUT_MS}")"
+  printf 'PLACE_LOOKUP_AGENT_TIMEOUT_SECONDS=120\n'
+  printf 'PLACE_LOOKUP_AGENT_MAX_TURNS=8\n'
+  printf 'PLACE_LOOKUP_TRACE_ENABLED=false\n'
+  printf 'PLACE_LOOKUP_RATE_LIMIT=30\n'
+  printf 'PLACE_LOOKUP_RATE_WINDOW_SECONDS=60\n'
+  printf 'PLACE_LOOKUP_MAX_CONCURRENT=4\n'
   printf '\n'
   printf 'AMAP_WEB_SERVICE_KEY=%s\n' "$(dotenv_quote "${AMAP_WEB_SERVICE_KEY}")"
   printf 'AMAP_PLACE_FALLBACK_ENABLED=%s\n' "${AMAP_PLACE_FALLBACK_ENABLED}"

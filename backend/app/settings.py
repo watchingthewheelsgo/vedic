@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from pydantic import Field
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
     database_echo: bool = Field(default=False, alias="DATABASE_ECHO")
+    database_schema_mode: Literal["create_all", "migrations"] = Field(
+        default="create_all", alias="DATABASE_SCHEMA_MODE"
+    )
     supabase_project_ref: str = Field(default="", alias="SUPABASE_PROJECT_REF")
     supabase_db_password: str = Field(default="", alias="SUPABASE_DB_PASSWORD")
     supabase_db_user: str = Field(default="postgres", alias="SUPABASE_DB_USER")
@@ -74,8 +78,18 @@ class Settings(BaseSettings):
     place_lookup_agent_timeout_seconds: float = Field(
         default=120.0, alias="PLACE_LOOKUP_AGENT_TIMEOUT_SECONDS"
     )
-    place_lookup_trace_enabled: bool = Field(default=True, alias="PLACE_LOOKUP_TRACE_ENABLED")
+    place_lookup_agent_max_turns: int = Field(
+        default=8, alias="PLACE_LOOKUP_AGENT_MAX_TURNS", ge=1, le=16
+    )
+    # POI search traces can contain user-entered addresses and provider evidence.
+    # Operators must opt in explicitly when diagnosing a lookup in a safe environment.
+    place_lookup_trace_enabled: bool = Field(default=False, alias="PLACE_LOOKUP_TRACE_ENABLED")
     place_lookup_trace_max_chars: int = Field(default=4000, alias="PLACE_LOOKUP_TRACE_MAX_CHARS")
+    place_lookup_rate_limit: int = Field(default=30, alias="PLACE_LOOKUP_RATE_LIMIT", ge=1)
+    place_lookup_rate_window_seconds: float = Field(
+        default=60.0, alias="PLACE_LOOKUP_RATE_WINDOW_SECONDS", gt=0
+    )
+    place_lookup_max_concurrent: int = Field(default=4, alias="PLACE_LOOKUP_MAX_CONCURRENT", ge=1)
 
     anthropic_base_url: str = Field(
         default="https://api.deepseek.com/anthropic", alias="ANTHROPIC_BASE_URL"
@@ -216,6 +230,7 @@ class Settings(BaseSettings):
             "baseUrl": self.anthropic_base_url,
             "model": self.anthropic_model,
             "maxTurns": self.agent_max_turns,
+            "placeLookupMaxTurns": self.place_lookup_agent_max_turns,
             "timeoutMs": self.agent_timeout_ms,
             "skillRuntime": "claude-agent-sdk-python",
         }

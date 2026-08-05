@@ -117,7 +117,15 @@ class CreemBillingService:
                 .where(UserSubscriptionRecord.owner_user_id == owner_user_id)
                 .order_by(UserSubscriptionRecord.updated_at.desc())
             )
-            return result.scalars().first()
+            records = list(result.scalars().all())
+            # A terminal webhook for the newest subscription must not hide an
+            # older, still-valid entitlement (and an expired "active" record
+            # must not grant access). Keep the newest active record as the
+            # effective subscription, otherwise expose the newest history row.
+            return next(
+                (record for record in records if _is_active(record)),
+                records[0] if records else None,
+            )
 
     async def create_checkout(
         self,
@@ -448,8 +456,16 @@ def _subscription_response(
     )
 
 
-def _is_active(record: UserSubscriptionRecord | None) -> bool:
-    return bool(record and record.status in ACTIVE_SUBSCRIPTION_STATUSES)
+def _is_active(record: UserSubscriptionRecord | None, now: datetime | None = None) -> bool:
+    if not record or record.status not in ACTIVE_SUBSCRIPTION_STATUSES:
+        return False
+    period_end = record.current_period_end
+    if period_end is None:
+        return True
+    current = now or datetime.now(timezone.utc)
+    if period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=timezone.utc)
+    return period_end > current
 
 
 def _event_object(payload: dict[str, Any]) -> dict[str, Any]:

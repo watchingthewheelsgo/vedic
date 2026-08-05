@@ -39,7 +39,7 @@ def test_creem_webhook_syncs_subscription_and_deduplicates_events(tmp_path: Path
                     "customer": {"id": "cust_123", "email": "reader@example.com"},
                     "status": "active",
                     "current_period_start_date": "2026-07-01T00:00:00.000Z",
-                    "current_period_end_date": "2026-08-01T00:00:00.000Z",
+                    "current_period_end_date": "2026-09-01T00:00:00.000Z",
                     "metadata": {
                         "clerk_user_id": "user_123",
                         "plan_key": "pro_monthly",

@@ -8,14 +8,17 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlparse
 
 from app.settings import Settings
+from app.services.place_entity_matching import matches_place_entity, place_category_in_text
 
 
 logger = logging.getLogger(__name__)
 place_trace_logger = logging.getLogger("uvicorn.error")
 
 AgentEffort = Literal["low", "medium", "high", "xhigh", "max"]
+AgentProvenance = Literal["tool_observation", "agent_final"]
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,10 @@ class AgentRunResult:
     total_cost_usd: float | None = None
     stop_reason: str | None = None
     model: str | None = None
+    # A place candidate is trusted by the business service only when the runtime
+    # built it from an SDK PostToolUse observation. The model's final prose is
+    # intentionally a separate, non-authoritative provenance.
+    provenance: AgentProvenance = "agent_final"
 
 
 class ClaudeRuntime:
@@ -212,7 +219,7 @@ class ClaudeRuntime:
             add_dirs=[Path.cwd()],
             env=self._agent_env(),
             model=model_name,
-            max_turns=8,
+            max_turns=self.settings.place_lookup_agent_max_turns,
             effort="low",
             hooks={
                 "PreToolUse": [HookMatcher(matcher=None, hooks=[trace_place_tool_use])],
@@ -280,6 +287,10 @@ Rules:
 - Do not reject a credible POI merely because it is far from the city-center point; the
   backend will verify administrative scope and distance.
 - If evidence lists longitude before latitude, normalize output to latitude then longitude.
+- Only return coordinates when the source is WGS84/EPSG:4326. If the source uses GCJ-02, BD-09,
+  or does not identify the datum, leave the candidate out rather than silently relabeling it.
+- Preserve the source's original place name in `label`; do not replace a Chinese name with an
+  English translation. The backend uses the label/address/evidence to verify entity identity.
 - If you cannot find credible coordinates, return an empty candidates array.
 - Return valid JSON only, no markdown fences.
 
@@ -291,6 +302,7 @@ Schema:
       "address": "short address or locality",
       "latitude": 31.0,
       "longitude": 121.0,
+      "coordinateSystem": "WGS84",
       "accuracy": "poi",
       "sourceUrl": "https://...",
       "rawEvidence": "short quote or summary of where the coordinates came from",
@@ -327,7 +339,12 @@ Schema:
                     "raw_text": fallback_json,
                 },
             )
-            return AgentRunResult(mode="claude", raw_text=fallback_json, model=model_name)
+            return AgentRunResult(
+                mode="claude",
+                raw_text=fallback_json,
+                model=model_name,
+                provenance="tool_observation",
+            )
         self._log_place_trace(
             "final",
             {
@@ -367,6 +384,7 @@ Schema:
             total_cost_usd=result.total_cost_usd,
             stop_reason=result.stop_reason,
             model=result.model,
+            provenance="tool_observation",
         )
 
     async def _trace_place_tool_use(
@@ -454,7 +472,7 @@ Schema:
                     max_results=max_results,
                     observations=tool_observations,
                 )
-                if verified_json:
+                if verified_json and self._place_lookup_result_has_wgs84_coordinates(verified_json):
                     tool_state["verified_json"] = verified_json
                     self._log_place_trace(
                         "evidence_gate_updated",
@@ -519,6 +537,10 @@ Schema:
                             "latitude": lat,
                             "longitude": lon,
                             "accuracy": "poi",
+                            "coordinateSystem": self._coordinate_system_for_evidence(
+                                evidence,
+                                coordinate_context,
+                            ),
                             "sourceUrl": self._source_url_for_evidence(
                                 evidence,
                                 coordinate_context,
@@ -537,6 +559,32 @@ Schema:
             ],
         }
         return json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _coordinate_system_for_evidence(evidence: dict[str, str], coordinate_context: str) -> str:
+        text = f"{evidence.get('sourceUrl', '')} {coordinate_context}"
+        if re.search(
+            r"wgs\s*84|epsg\s*:?\s*4326|openstreetmap|mapcarta|geonames|"
+            r"google\s*maps?|maps\.google|bing\s*maps?|here\s*maps?",
+            text,
+            re.I,
+        ):
+            return "WGS84"
+        hostname = urlparse(evidence.get("sourceUrl", "")).hostname or ""
+        if hostname.lower().endswith(
+            (
+                "wikipedia.org",
+                "wikidata.org",
+                "latlong.net",
+                "google.com",
+                "googleusercontent.com",
+                "bing.com",
+                "here.com",
+            )
+        ):
+            return "WGS84"
+        # Do not silently label coordinates from an unknown map datum as WGS84.
+        return "unknown"
 
     def _observation_evidence_units(self, observation: dict[str, Any]) -> list[dict[str, str]]:
         """Keep coordinates associated with the result block that supplied them."""
@@ -667,6 +715,31 @@ Schema:
         return isinstance(candidates, list) and len(candidates) > 0
 
     @classmethod
+    def _place_lookup_result_has_wgs84_coordinates(cls, raw_text: str) -> bool:
+        stripped = raw_text.strip()
+        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.S)
+        if fence:
+            stripped = fence.group(1)
+        if not stripped.startswith("{"):
+            start = stripped.find("{")
+            end = stripped.rfind("}")
+            if start >= 0 and end > start:
+                stripped = stripped[start : end + 1]
+        try:
+            payload = json.loads(stripped)
+        except Exception:
+            return False
+        candidates = payload.get("candidates") if isinstance(payload, dict) else None
+        if not isinstance(candidates, list) or not candidates:
+            return False
+        return all(
+            isinstance(candidate, dict)
+            and str(candidate.get("coordinateSystem") or "").upper()
+            in {"WGS84", "EPSG:4326", "EPSG4326"}
+            for candidate in candidates
+        )
+
+    @classmethod
     def _recover_place_lookup_result(cls, *values: object) -> str | None:
         """Recover a complete candidate payload from an SDK result/error boundary."""
 
@@ -704,41 +777,12 @@ Schema:
         return {"accepted": True, "confidence": confidence}
 
     def _place_evidence_mentions_entity(self, query: str, city_label: str, text: str) -> bool:
-        normalized_query = self._compact_for_match(query)
-        normalized_text = self._compact_for_match(text)
-        if normalized_query and normalized_query in normalized_text:
-            return True
-
-        query_has_cjk = bool(re.search(r"[\u4e00-\u9fff]", query))
-        category_in_query = self._place_category_in_text(query)
-        category_in_text = self._place_category_in_text(text)
-        if query_has_cjk:
-            terms = self._cjk_entity_terms(query)
-            has_specific_term = any(term in text for term in terms)
-            if category_in_query:
-                return has_specific_term and category_in_text
-            return has_specific_term
-
-        if self._looks_like_pinyin_hospital_query(query):
-            return category_in_text and self._place_evidence_has_admin_context(city_label, text)
-
-        query_tokens = [
-            token
-            for token in re.findall(r"[a-z0-9]+", query.lower())
-            if len(token) >= 3
-            and token
-            not in {
-                "china",
-                "coordinates",
-                "coordinate",
-                "latitude",
-                "longitude",
-                "wgs84",
-            }
-        ]
-        if category_in_query or "hospital" in query.lower():
-            return category_in_text and any(token in text.lower() for token in query_tokens)
-        return len(query_tokens) >= 2 and all(token in text.lower() for token in query_tokens[:2])
+        del city_label
+        if not matches_place_entity(query, text):
+            return False
+        if place_category_in_text(query) and not place_category_in_text(text):
+            return False
+        return True
 
     def _place_evidence_has_admin_context(self, city_label: str, text: str) -> bool:
         lowered = text.lower()
@@ -759,21 +803,8 @@ Schema:
         )
 
     @staticmethod
-    def _looks_like_pinyin_hospital_query(query: str) -> bool:
-        lowered = query.lower()
-        return "yi yuan" in lowered or "yiyuan" in lowered or "hospital" in lowered
-
-    @staticmethod
     def _place_category_in_text(text: str) -> bool:
-        lowered = text.lower()
-        return bool(
-            re.search(
-                r"医院|保健院|卫生院|妇幼|妇婴|医科|诊所|"
-                r"\b(?:hospital|medical center|clinic|maternity)\b",
-                lowered,
-                re.I,
-            )
-        )
+        return place_category_in_text(text)
 
     def _looks_like_city_center_only(self, query: str, text: str) -> bool:
         if self._place_category_in_text(query) and self._place_category_in_text(text):
@@ -781,27 +812,6 @@ Schema:
         lowered = text.lower()
         city_only_markers = ["city center", "general consensus coordinates", "municipal government"]
         return any(marker in lowered for marker in city_only_markers)
-
-    @staticmethod
-    def _cjk_entity_terms(query: str) -> list[str]:
-        compact = "".join(re.findall(r"[\u4e00-\u9fff]+", query))
-        compact = re.sub(
-            r"(医院|保健院|卫生院|人民|市立|省立|县立|区立|"
-            r"第一|第二|第三|第四|第五|第[一二三四五六七八九十]+)",
-            "",
-            compact,
-        )
-        terms: list[str] = []
-        if len(compact) >= 2:
-            terms.append(compact[:2])
-            terms.append(compact[-2:])
-        if len(compact) >= 4:
-            terms.append(compact[:4])
-        return [term for index, term in enumerate(terms) if term and term not in terms[:index]]
-
-    @staticmethod
-    def _compact_for_match(value: str) -> str:
-        return re.sub(r"\s+", "", value).lower()
 
     def _extract_coordinate_pairs(
         self, text: str, city_lat: float, city_lon: float

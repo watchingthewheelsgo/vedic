@@ -34,8 +34,13 @@ async def init_db(settings: Settings) -> None:
     )
     AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_ensure_runtime_columns)
+        if getattr(settings, "database_schema_mode", "create_all") == "migrations":
+            await conn.run_sync(_assert_migration_schema)
+        else:
+            # Local development and the isolated test database remain self-contained.
+            # Production uses the release-time Alembic command and only validates here.
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(_ensure_runtime_columns)
 
 
 async def close_db() -> None:
@@ -94,6 +99,15 @@ def _ensure_runtime_columns(sync_conn) -> None:
             sync_conn.execute(
                 text("ALTER TABLE vedic_artifacts ADD COLUMN chart_record_sha256 VARCHAR(80)")
             )
+
+
+def _assert_migration_schema(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    table_names = set(inspector.get_table_names())
+    if "alembic_version" not in table_names:
+        raise RuntimeError(
+            "DATABASE_SCHEMA_MODE=migrations requires Alembic to run before the API starts."
+        )
 
 
 def database_diagnostic_context(settings: Settings | None = None) -> dict[str, object]:

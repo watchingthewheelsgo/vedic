@@ -202,8 +202,7 @@ export const api = {
   recordRectificationLifeEvents(input: RectificationLifeEventsInput) {
     return postJson<SkillSessionResponse, RectificationLifeEventsInput>(
       "/api/rectification-life-events",
-      input,
-      { requireAuth: true }
+      input
     );
   },
   prepareRectificationInterview(input: RectificationInterviewInput) {

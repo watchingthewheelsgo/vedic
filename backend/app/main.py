@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import logging
 from typing import Literal
+from uuid import uuid4
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -38,9 +39,19 @@ from app.schemas import (
     SynastryBirthInput,
 )
 from app.settings import get_settings
+from app.services.place_lookup_budget import PlaceLookupRateLimitError
 
 
 logger = logging.getLogger(__name__)
+
+
+def _internal_server_error(operation: str, exc: Exception) -> HTTPException:
+    reference = uuid4().hex[:12]
+    logger.exception("%s failed reference=%s", operation, reference, exc_info=exc)
+    return HTTPException(
+        status_code=500,
+        detail=f"{operation} failed. Reference: {reference}",
+    )
 
 
 @asynccontextmanager
@@ -76,26 +87,17 @@ async def health() -> dict[str, object]:
     return {
         "ok": True,
         "service": "vedic-skills-runtime",
+        "status": "ready",
         "backend": "python-fastapi",
         "calculationMode": "real_vedic",
-        "calculatorRoot": str(settings.calculator_root),
-        "skillsRoot": str(settings.skills_root),
-        "runtimeSitePackages": str(settings.calculator_site_packages()),
-        "runtimePreflight": {
-            "dependencies": container.runtime_preflight.dependencies,
-            "ephemerisFiles": container.runtime_preflight.ephemeris_files,
-            "geonamesPath": container.runtime_preflight.geonames_path,
+        "checks": {
+            "runtime": bool(container.runtime_preflight.dependencies),
+            "ephemeris": bool(container.runtime_preflight.ephemeris_files),
+            "places": bool(container.runtime_preflight.geonames_path),
+            "database": bool(database_diagnostic_context(settings).get("initialized")),
+            "agentConfigured": container.agent_runtime.is_configured(),
+            "billingConfigured": bool(settings.creem_api_key.strip()),
         },
-        "startupConfig": {
-            "envFile": container.startup_config_preflight.env_file,
-            "agentMode": container.startup_config_preflight.agent_mode,
-            "baseUrl": container.startup_config_preflight.base_url,
-            "model": container.startup_config_preflight.model,
-        },
-        "agent": container.agent_runtime.config_summary(),
-        "auth": settings.auth_config_summary(),
-        "billing": settings.billing_config_summary(),
-        "database": database_diagnostic_context(settings),
     }
 
 
@@ -116,11 +118,12 @@ async def places(
             limit=limit,
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("place search", exc) from exc
 
 
 @app.get("/api/precise-places", response_model=PrecisePlaceSearchResponse)
 async def precise_places(
+    request: Request,
     q: str = Query(default="", min_length=0, max_length=120),
     city: str | None = Query(default=None, max_length=160),
     limit: int = Query(default=8, ge=1, le=20),
@@ -130,11 +133,18 @@ async def precise_places(
             query=q,
             limit=limit,
             city_context=city,
+            client_key=request.client.host if request.client else "unknown",
         )
+    except PlaceLookupRateLimitError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="地点查询请求过于频繁，请稍后再试。",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("precise place search", exc) from exc
 
 
 @app.get("/api/admin/sessions", response_model=AdminSessionListResponse)
@@ -154,7 +164,7 @@ async def list_admin_sessions(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("admin session list", exc) from exc
 
 
 @app.get("/api/admin/sessions/{session_id}", response_model=AdminSessionDetailResponse)
@@ -180,7 +190,7 @@ async def get_admin_session(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("admin session detail", exc) from exc
 
 
 @app.get("/api/me", response_model=AccountProfileResponse)
@@ -205,7 +215,7 @@ async def list_my_sessions(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("session list", exc) from exc
 
 
 @app.get("/api/billing/account", response_model=BillingAccountResponse)
@@ -217,7 +227,7 @@ async def get_billing_account(
         account_user = await _sync_account_user(container, current_user)
         return await container.billing.account_for_user(account_user)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("billing account", exc) from exc
 
 
 @app.post("/api/billing/checkout", response_model=BillingCheckoutResponse)
@@ -234,7 +244,7 @@ async def create_billing_checkout(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("billing checkout", exc) from exc
 
 
 @app.post("/api/billing/portal", response_model=BillingPortalResponse)
@@ -252,7 +262,7 @@ async def create_billing_portal(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("billing portal", exc) from exc
 
 
 @app.post("/api/webhooks/creem", response_model=CreemWebhookResponse)
@@ -270,7 +280,7 @@ async def receive_creem_webhook(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("billing webhook", exc) from exc
 
 
 @app.post("/api/skill-sessions", response_model=SkillSessionResponse)
@@ -294,7 +304,7 @@ async def create_skill_session(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("skill session creation", exc) from exc
 
 
 @app.post("/api/bazi-sessions", response_model=SkillSessionResponse)
@@ -316,7 +326,7 @@ async def create_bazi_session(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("bazi session creation", exc) from exc
 
 
 @app.get("/api/skill-sessions/{session_id}", response_model=SkillSessionResponse)
@@ -336,13 +346,13 @@ async def get_skill_session(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("skill session load", exc) from exc
 
 
 @app.post("/api/rectification-life-events", response_model=SkillSessionResponse)
 async def record_rectification_life_events(
     input_data: RectificationLifeEventsInput,
-    current_user: AuthenticatedUser = Depends(require_user),
+    current_user: AuthenticatedUser = Depends(resolve_session_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -363,7 +373,7 @@ async def record_rectification_life_events(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("rectification events", exc) from exc
 
 
 @app.post("/api/rectification-interview", response_model=SkillSessionResponse)
@@ -387,7 +397,7 @@ async def prepare_rectification_interview(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("rectification interview", exc) from exc
 
 
 @app.post("/api/consultation-questions", response_model=ConsultationAnswerResponse)
@@ -408,7 +418,7 @@ async def answer_consultation_question(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("consultation answer", exc) from exc
 
 
 @app.get(
@@ -432,7 +442,7 @@ async def get_consultation_conversation(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("consultation conversation", exc) from exc
 
 
 @app.get("/api/skill-sessions/{session_id}/report.pdf")
@@ -462,7 +472,7 @@ async def download_skill_session_report_pdf(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("report export", exc) from exc
 
 
 @app.post("/api/skill-synastry-subject", response_model=SkillSessionResponse)
@@ -488,7 +498,7 @@ async def create_synastry_subject(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("synastry subject", exc) from exc
 
 
 @app.post("/api/skill-runs", response_model=SkillSessionResponse)
@@ -547,7 +557,7 @@ async def run_skill(
             ),
         ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("skill run", exc) from exc
 
 
 @app.post("/api/core-jobs", response_model=CoreJobResponse)
@@ -571,7 +581,7 @@ async def start_core_job(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("core job start", exc) from exc
 
 
 @app.get("/api/core-jobs/{job_id}", response_model=CoreJobResponse)
@@ -591,7 +601,7 @@ async def get_core_job(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("core job lookup", exc) from exc
 
 
 @app.post("/api/skill-feedback", response_model=SkillSessionResponse)
@@ -615,7 +625,7 @@ async def record_skill_feedback(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _internal_server_error("skill feedback", exc) from exc
 
 
 async def _claim_or_assert_session_access(

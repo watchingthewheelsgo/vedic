@@ -723,8 +723,8 @@ export function Session() {
   }
 
   async function onSubmitLifeEvents(events: RectificationLifeEventInput[]) {
-    if (!authLoaded || !isSignedIn) {
-      setError("Sign in to save dated life events and continue rectification.");
+    if (!authLoaded) {
+      setError("正在确认会话，请稍后再试。");
       return;
     }
     setError("");

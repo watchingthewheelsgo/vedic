@@ -141,7 +141,7 @@ fi
 if [[ -f "${VEDICSIGN_ROOT}/backend/alembic.ini" && -d "${VEDICSIGN_ROOT}/backend/alembic" ]]; then
   vd_warn "Database migrations are forward-only during automatic application rollback."
   run_logged "Apply database migrations" compose run --rm --no-deps backend \
-    alembic -c backend/alembic.ini upgrade head
+    python scripts/production/run-migrations.py
 fi
 
 new_runtime_started=false

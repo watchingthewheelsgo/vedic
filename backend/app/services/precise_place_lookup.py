@@ -8,6 +8,8 @@ from typing import Any, Literal, cast
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import PrecisePlaceOption, PrecisePlaceSearchResponse
+from app.services.place_entity_matching import matches_place_entity
+from app.services.place_lookup_budget import PlaceLookupBudget, PlaceLookupRateLimitError
 from app.services.place_service import PlaceService, ResolvedPlace
 
 
@@ -21,9 +23,20 @@ class PrecisePlaceLookupService:
     def __init__(self, place_service: PlaceService, agent_runtime: ClaudeRuntime) -> None:
         self.place_service = place_service
         self.agent_runtime = agent_runtime
+        settings = getattr(agent_runtime, "settings", None)
+        self._agent_budget = PlaceLookupBudget(
+            limit=int(getattr(settings, "place_lookup_rate_limit", 30)),
+            window_seconds=float(getattr(settings, "place_lookup_rate_window_seconds", 60.0)),
+            max_concurrent=int(getattr(settings, "place_lookup_max_concurrent", 4)),
+        )
 
     async def search_precise(
-        self, *, query: str = "", city_context: str | None = None, limit: int = 8
+        self,
+        *,
+        query: str = "",
+        city_context: str | None = None,
+        limit: int = 8,
+        client_key: str | None = None,
     ) -> PrecisePlaceSearchResponse:
         agent_enabled = self.agent_runtime.is_configured()
         baseline = self.place_service.search_precise(
@@ -56,9 +69,12 @@ class PrecisePlaceLookupService:
         )
         agent_error: str | None = None
         agent_attempted = False
+        budget_acquired = False
         if agent_enabled:
             agent_attempted = True
             try:
+                self._agent_budget.acquire(client_key or "internal")
+                budget_acquired = True
                 agent_settings = getattr(self.agent_runtime, "settings", None)
                 async with asyncio.timeout(
                     float(
@@ -79,7 +95,7 @@ class PrecisePlaceLookupService:
                         max_results=min(limit, 5),
                         search_queries=agent_search_queries,
                     )
-                agent_options = self._agent_result_to_options(result.raw_text, query, city_base)
+                agent_options = self._agent_result_to_options(result, query, city_base)
             except TimeoutError:
                 agent_error = "agent place lookup timed out"
                 self._log_place_trace(
@@ -98,9 +114,12 @@ class PrecisePlaceLookupService:
                         ),
                     },
                 )
+            except PlaceLookupRateLimitError:
+                raise
             except Exception as exc:
-                agent_error = str(exc)
-                logger.warning("precise_place_agent_lookup_failed: %s", agent_error)
+                internal_error = str(exc)
+                agent_error = "agent place lookup failed"
+                logger.warning("precise_place_agent_lookup_failed: %s", internal_error)
                 self._log_place_trace(
                     "agent_error",
                     {
@@ -108,9 +127,12 @@ class PrecisePlaceLookupService:
                         "city_context": city_context,
                         "city_label": city_base.label,
                         "agent_search_queries": agent_search_queries,
-                        "error": agent_error,
+                        "error": internal_error,
                     },
                 )
+            finally:
+                if budget_acquired:
+                    self._agent_budget.release()
 
         final = self.place_service.search_precise(
             query=query,
@@ -287,7 +309,7 @@ class PrecisePlaceLookupService:
 
     def _log_place_trace(self, event: str, payload: dict[str, object]) -> None:
         settings = getattr(self.agent_runtime, "settings", None)
-        if settings is not None and not getattr(settings, "place_lookup_trace_enabled", True):
+        if settings is not None and not getattr(settings, "place_lookup_trace_enabled", False):
             return
         max_chars = max(
             500,
@@ -302,8 +324,20 @@ class PrecisePlaceLookupService:
         place_trace_logger.warning("place_lookup_trace event=%s payload=%s", event, text)
 
     def _agent_result_to_options(
-        self, raw_text: str, query: str, city_base: ResolvedPlace
+        self, result: object, query: str, city_base: ResolvedPlace
     ) -> list[PrecisePlaceOption]:
+        provenance = getattr(result, "provenance", "agent_final")
+        if provenance != "tool_observation":
+            # Never let a model-generated final JSON become geocoding evidence.
+            # Only Claude SDK PostToolUse observations are parsed below.
+            self._log_place_trace(
+                "agent_result_rejected",
+                {"reason": "untrusted_agent_final_provenance", "provenance": provenance},
+            )
+            return []
+        raw_text = getattr(result, "raw_text", "")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            return []
         payload = self._parse_json_payload(raw_text)
         candidates = payload.get("candidates") if isinstance(payload, dict) else None
         if not isinstance(candidates, list):
@@ -362,6 +396,13 @@ class PrecisePlaceLookupService:
             )
         else:
             accuracy = "poi"
+        coordinate_system = self._string_value(
+            item.get("coordinateSystem") or item.get("coordinate_system")
+        ).upper()
+        if coordinate_system not in {"WGS84", "EPSG:4326", "EPSG4326"}:
+            # Geodetic datum is part of the calculator input, not cosmetic
+            # metadata. Unknown/GCJ-02/BD-09 coordinates must not be used.
+            return None
         source_url = self._string_value(item.get("sourceUrl")) or self._string_value(
             item.get("url")
         )
@@ -373,6 +414,11 @@ class PrecisePlaceLookupService:
         if not source_url and not raw_evidence:
             # Coordinates without provenance are indistinguishable from model guesses.
             # Tool adapters may omit a URL, but they must still provide an evidence summary.
+            return None
+        entity_evidence = " | ".join(value for value in [label, address, raw_evidence] if value)
+        if not matches_place_entity(query, entity_evidence):
+            # A same-city coordinate is still unsafe when the Agent did not establish
+            # that it belongs to the requested entity. Let PlaceService return city fallback.
             return None
         readable = ", ".join(part for part in [label, city_base.label] if part)
         return PrecisePlaceOption(
