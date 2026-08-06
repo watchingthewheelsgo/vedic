@@ -1,0 +1,4 @@
+interface:
+  display_name: "VedicDust Rectification Check"
+  short_description: "Create cautious post-selection time-check prompts"
+  default_prompt: "Use $vedicdust-rectification-confirmation to create the final retrospective checks."

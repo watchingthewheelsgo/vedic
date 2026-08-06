@@ -202,7 +202,8 @@ function readerPipelineNode(
   );
   const rectificationStatus = parseArtifactStatus(rectification?.content);
   let status = "pending";
-  if (feedback) status = "completed";
+  if (rectificationStatus === "rectification_confirmation_required") status = "waiting";
+  else if (feedback) status = "completed";
   else if (prevalidation) status = "waiting";
   else if (readerRunning) status = "running";
   else if (rectificationStatus === "corrected_chart_ready") status = "completed";

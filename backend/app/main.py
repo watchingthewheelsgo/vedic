@@ -30,6 +30,7 @@ from app.schemas import (
     CreemWebhookResponse,
     PrecisePlaceSearchResponse,
     PlaceSearchResponse,
+    RectificationConfirmationInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
     SkillBirthInput,
@@ -398,6 +399,29 @@ async def prepare_rectification_interview(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise _internal_server_error("rectification interview", exc) from exc
+
+
+@app.post("/api/rectification-confirmation", response_model=SkillSessionResponse)
+async def confirm_rectification_result(
+    input_data: RectificationConfirmationInput,
+    current_user: AuthenticatedUser = Depends(resolve_session_user),
+) -> SkillSessionResponse:
+    try:
+        container = get_container()
+        account_user = await _sync_account_user(container, current_user)
+        await _claim_or_assert_session_access(container, input_data.session_id, account_user)
+        return await container.skill_runtime.confirm_rectification_result(
+            input_data,
+            owner_user_id=account_user.owner_user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _internal_server_error("rectification confirmation", exc) from exc
 
 
 @app.post("/api/consultation-questions", response_model=ConsultationAnswerResponse)

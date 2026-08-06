@@ -4,7 +4,9 @@ import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
+  Baby,
   BookOpen,
+  Briefcase,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -13,13 +15,23 @@ import {
   Download,
   Eye,
   FileText,
+  GraduationCap,
+  Heart,
+  HeartCrack,
+  Home,
   Info,
   ListChecks,
   LoaderCircle,
   MapPinned,
   RefreshCw,
+  Scale,
+  Sparkles,
+  Stethoscope,
   Target,
-  Workflow
+  Users,
+  Wallet,
+  Workflow,
+  type LucideIcon
 } from "lucide-react";
 import { api } from "../api";
 import { AccountCenter } from "../components/AccountCenter";
@@ -54,6 +66,8 @@ import type {
   BirthInput,
   ConsultationExchangeResponse,
   CoreJobResponse,
+  RectificationConfirmationAnswer,
+  RectificationConfirmationResponse,
   RectificationLifeEventCategory,
   RectificationLifeEventInput,
   SkillArtifact,
@@ -148,6 +162,55 @@ type RectificationState = {
     revision?: number;
     source?: string;
     candidateId?: string | null;
+  };
+  rectificationConclusion?: {
+    schemaVersion?: string;
+    status?: string;
+    chartRevision?: number;
+    candidateId?: string;
+    confidence?: string;
+    correctedBirthTime?: {
+      localDate?: string;
+      localTime?: string;
+      timezoneId?: string | null;
+      utcOffsetSeconds?: number | null;
+      displayPrecision?: string;
+    };
+    selectedInterval?: {
+      start?: string;
+      end?: string;
+    };
+    evidenceSummary?: {
+      calibrationEventCount?: number;
+      calibrationCategoryCount?: number;
+      holdoutEventCount?: number;
+      holdoutResult?: string;
+      method?: string;
+    };
+    examples?: Array<{
+      exampleId?: string;
+      startDate?: string;
+      endDate?: string;
+      category?: RectificationLifeEventCategory | string;
+      prompt?: string;
+      description?: string;
+      source?: "post_selection_agent" | "submitted_evidence" | string;
+      usedForSelection?: boolean;
+    }>;
+    generation?: {
+      source?: string;
+      postSelectionOnly?: boolean;
+      usedForSelection?: boolean;
+      disclaimer?: string;
+    };
+    confirmation?: {
+      status?: string;
+      responses?: Array<{
+        exampleId?: string;
+        answer?: RectificationConfirmationAnswer;
+        note?: string;
+      }>;
+    };
   };
 };
 
@@ -338,6 +401,432 @@ const VALIDATION_CHOICES: Array<{
 type LifeEventDraft = RectificationLifeEventInput & {
   category: RectificationLifeEventCategory | "";
   datePrecision: "year" | "month";
+  choiceId: string;
+  note: string;
+};
+
+type LifeEventChoice = {
+  id: string;
+  label: { en: string; zh: string; ja: string };
+  requiresNote?: boolean;
+};
+
+const LIFE_EVENT_CHOICES: Record<RectificationLifeEventCategory, LifeEventChoice[]> = {
+  education: [
+    {
+      id: "admission",
+      label: {
+        en: "Started a new school or was admitted",
+        zh: "升学 / 被学校录取",
+        ja: "進学・入学が決まった"
+      }
+    },
+    {
+      id: "graduation",
+      label: { en: "Graduated or received a degree", zh: "毕业 / 获得学位", ja: "卒業・学位取得" }
+    },
+    {
+      id: "exam",
+      label: {
+        en: "Took an important exam",
+        zh: "参加重要考试或资格考试",
+        ja: "重要な試験を受けた"
+      }
+    },
+    {
+      id: "study_abroad",
+      label: {
+        en: "Transferred, studied abroad, or left school long-term",
+        zh: "转学、留学或长期离开学校",
+        ja: "転校・留学・長期の休学や離学"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major education change",
+        zh: "其他明显的教育变化",
+        ja: "その他の大きな学業の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  career: [
+    {
+      id: "first_job",
+      label: {
+        en: "Started my first regular job",
+        zh: "开始第一份正式工作",
+        ja: "初めての本格的な仕事を始めた"
+      }
+    },
+    {
+      id: "promotion",
+      label: {
+        en: "Got a major promotion or responsibility change",
+        zh: "明显升职或职责发生重大变化",
+        ja: "大きな昇進や責任の変化があった"
+      }
+    },
+    {
+      id: "job_change",
+      label: {
+        en: "Changed industries, moved for work, or started a business",
+        zh: "换行业、因工作迁居或开始创业",
+        ja: "転職・転業・仕事のための転居・起業"
+      }
+    },
+    {
+      id: "job_loss",
+      label: {
+        en: "Lost a job or had a long work interruption",
+        zh: "失业、停工或被迫离开工作",
+        ja: "失職・長期の仕事中断があった"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major work change",
+        zh: "其他明显的工作变化",
+        ja: "その他の大きな仕事の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  relationship: [
+    {
+      id: "started_relationship",
+      label: {
+        en: "Started an important relationship",
+        zh: "开始一段重要关系",
+        ja: "大切な関係が始まった"
+      }
+    },
+    {
+      id: "marriage",
+      label: {
+        en: "Married, registered, or began living together",
+        zh: "结婚、登记或开始长期同居",
+        ja: "結婚・入籍・同居を始めた"
+      }
+    },
+    {
+      id: "separation",
+      label: {
+        en: "Separated, divorced, or ended a major relationship",
+        zh: "分手、分居或离婚",
+        ja: "別居・離婚・大きな関係の終了"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major relationship change",
+        zh: "其他明显的关系变化",
+        ja: "その他の大きな関係の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  relocation: [
+    {
+      id: "moved_city",
+      label: { en: "Moved to another city", zh: "搬到另一座城市", ja: "別の都市へ引っ越した" }
+    },
+    {
+      id: "moved_country",
+      label: {
+        en: "Moved abroad or relocated long-term",
+        zh: "出国或长期迁居",
+        ja: "海外移住・長期の転居"
+      }
+    },
+    {
+      id: "first_home",
+      label: {
+        en: "Started living independently for the first time",
+        zh: "第一次独立居住",
+        ja: "初めて一人暮らし・独立生活を始めた"
+      }
+    },
+    {
+      id: "other",
+      label: { en: "Another major move", zh: "其他明显的搬迁变化", ja: "その他の大きな転居" },
+      requiresNote: true
+    }
+  ],
+  child: [
+    {
+      id: "pregnancy",
+      label: { en: "Pregnancy became part of my life", zh: "经历怀孕", ja: "妊娠を経験した" }
+    },
+    {
+      id: "birth",
+      label: {
+        en: "A child was born or joined the family",
+        zh: "生育或迎来孩子",
+        ja: "出産・子どもを家族に迎えた"
+      }
+    },
+    {
+      id: "child_major",
+      label: {
+        en: "A major event happened in a child's life",
+        zh: "孩子经历了重要变化",
+        ja: "子どもの人生に大きな出来事があった"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major child-related change",
+        zh: "其他明显的子女相关变化",
+        ja: "その他の大きな子どもに関する変化"
+      },
+      requiresNote: true
+    }
+  ],
+  health: [
+    {
+      id: "surgery",
+      label: {
+        en: "Had surgery or a significant hospital stay",
+        zh: "做过手术或经历较长住院",
+        ja: "手術・大きな入院を経験した"
+      }
+    },
+    {
+      id: "diagnosis",
+      label: {
+        en: "Received a clear diagnosis or began long-term treatment",
+        zh: "明确诊断或开始长期治疗",
+        ja: "診断を受けた・長期治療を始めた"
+      }
+    },
+    {
+      id: "accident",
+      label: {
+        en: "Had a serious accident or physical injury",
+        zh: "经历重大事故或身体损伤",
+        ja: "大きな事故・けがを経験した"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major health change",
+        zh: "其他明显的健康变化",
+        ja: "その他の大きな健康上の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  family: [
+    {
+      id: "family_structure",
+      label: {
+        en: "A family member joined or left the household",
+        zh: "家庭成员增加或离开家庭",
+        ja: "家族が増えた・家を離れた"
+      }
+    },
+    {
+      id: "parent_change",
+      label: {
+        en: "A parent's marriage, work, or home changed significantly",
+        zh: "父母的婚姻、工作或居住发生重大变化",
+        ja: "親の結婚・仕事・住居に大きな変化があった"
+      }
+    },
+    {
+      id: "caregiving",
+      label: {
+        en: "I began caring for a family member long-term",
+        zh: "开始长期照护家人",
+        ja: "家族の長期的な介護や世話を始めた"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major family change",
+        zh: "其他明显的家庭变化",
+        ja: "その他の大きな家族の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  finance: [
+    {
+      id: "major_gain",
+      label: {
+        en: "Had a first major income rise or financial gain",
+        zh: "第一次明显增收或获得较大利益",
+        ja: "初めて大きな収入増・利益があった"
+      }
+    },
+    {
+      id: "major_loss",
+      label: {
+        en: "Had a major loss, debt, or financial interruption",
+        zh: "经历重大亏损、负债或财务中断",
+        ja: "大きな損失・負債・財務中断があった"
+      }
+    },
+    {
+      id: "financial_independence",
+      label: { en: "Became financially independent", zh: "开始经济独立", ja: "経済的に自立した" }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major financial change",
+        zh: "其他明显的财务变化",
+        ja: "その他の大きな金銭上の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  property: [
+    {
+      id: "purchase",
+      label: {
+        en: "Bought a home or important property",
+        zh: "买房或购置重要资产",
+        ja: "家・重要な不動産を購入した"
+      }
+    },
+    {
+      id: "sale",
+      label: {
+        en: "Sold property or lost a home",
+        zh: "卖房、失去住处或重要资产",
+        ja: "不動産を売却・住居を失った"
+      }
+    },
+    {
+      id: "move_home",
+      label: { en: "Moved into a new home", zh: "入住新家", ja: "新しい住居に入った" }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major property change",
+        zh: "其他明显的房产变化",
+        ja: "その他の大きな住居・不動産の変化"
+      },
+      requiresNote: true
+    }
+  ],
+  legal: [
+    {
+      id: "lawsuit",
+      label: {
+        en: "Entered a lawsuit or formal legal process",
+        zh: "进入诉讼或正式法律程序",
+        ja: "訴訟・正式な法的手続きに入った"
+      }
+    },
+    {
+      id: "settlement",
+      label: {
+        en: "Reached a major legal result or settlement",
+        zh: "得到重大法律结果或达成和解",
+        ja: "大きな法的決着・和解があった"
+      }
+    },
+    {
+      id: "documents",
+      label: {
+        en: "Had a major change in status or official documents",
+        zh: "身份、移民或重要证件发生重大变化",
+        ja: "身分・移民・重要書類に大きな変化があった"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major legal change",
+        zh: "其他明显的法律变化",
+        ja: "その他の大きな法的変化"
+      },
+      requiresNote: true
+    }
+  ],
+  loss: [
+    {
+      id: "bereavement",
+      label: {
+        en: "A close person or important relationship ended through death",
+        zh: "亲人或重要关系中的人离世",
+        ja: "身近な人・大切な関係者との死別"
+      }
+    },
+    {
+      id: "sudden_loss",
+      label: {
+        en: "A major loss changed my home or daily life",
+        zh: "重大失去改变了居住或日常生活",
+        ja: "大きな喪失で住居や日常が変わった"
+      }
+    },
+    {
+      id: "other",
+      label: { en: "Another major loss", zh: "其他重大失去或告别", ja: "その他の大きな喪失" },
+      requiresNote: true
+    }
+  ],
+  spiritual: [
+    {
+      id: "practice",
+      label: {
+        en: "Started a sustained spiritual or religious practice",
+        zh: "开始持续的宗教、冥想或修行",
+        ja: "継続的な宗教・瞑想・精神的実践を始めた"
+      }
+    },
+    {
+      id: "belief_change",
+      label: {
+        en: "My beliefs or worldview changed significantly",
+        zh: "信仰或世界观发生明显改变",
+        ja: "信念・世界観が大きく変わった"
+      }
+    },
+    {
+      id: "community",
+      label: {
+        en: "Joined or left a spiritual community",
+        zh: "加入或离开一个宗教 / 修行团体",
+        ja: "宗教・精神的なコミュニティに参加・離脱した"
+      }
+    },
+    {
+      id: "other",
+      label: {
+        en: "Another major values change",
+        zh: "其他明显的价值观变化",
+        ja: "その他の大きな価値観の変化"
+      },
+      requiresNote: true
+    }
+  ]
+};
+
+const LIFE_EVENT_CATEGORY_ICONS: Record<RectificationLifeEventCategory, LucideIcon> = {
+  education: GraduationCap,
+  career: Briefcase,
+  relationship: Heart,
+  relocation: MapPinned,
+  child: Baby,
+  health: Stethoscope,
+  family: Users,
+  finance: Wallet,
+  property: Home,
+  legal: Scale,
+  loss: HeartCrack,
+  spiritual: Sparkles
 };
 
 type RectificationInterviewAction = {
@@ -414,6 +903,8 @@ export function Session() {
   const [validationFeedback, setValidationFeedback] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [submittingLifeEvents, setSubmittingLifeEvents] = useState(false);
+  const [submittingRectificationConfirmation, setSubmittingRectificationConfirmation] =
+    useState(false);
   const [preparingRectificationInterview, setPreparingRectificationInterview] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [baziRunning, setBaziRunning] = useState(false);
@@ -493,7 +984,7 @@ export function Session() {
   );
 
   const startCoreReport = useCallback(
-    async (options: { resume?: boolean } = {}) => {
+    async (options: { resume?: boolean; sessionOverride?: SkillSessionResponse } = {}) => {
       if (!id || (coreStartedRef.current && !options.resume)) return;
       if (!authLoaded) {
         setError("Account status is still loading. Please try again in a moment.");
@@ -501,6 +992,13 @@ export function Session() {
       }
       if (!isSignedIn) {
         setError("Sign in or create an account to start the full reading.");
+        return;
+      }
+      if (
+        readingContinuationAction(options.sessionOverride ?? session) === "confirm_rectification"
+      ) {
+        setSelectedStageId("reader");
+        setError(t("session.rectification.conclusion.mustConfirm"));
         return;
       }
       coreStartedRef.current = true;
@@ -519,7 +1017,7 @@ export function Session() {
         setError(userFacingError(caught, t("session.error.startReading")));
       }
     },
-    [authLoaded, id, isSignedIn, locale, t]
+    [authLoaded, id, isSignedIn, locale, session, t]
   );
 
   const resumeCoreReport = useCallback(async () => {
@@ -607,6 +1105,7 @@ export function Session() {
           if (nextStep === "full_report") void startCoreReport();
           else if (nextStep === "reader") void startReaderValidation({ force: true });
           else if (nextStep === "collect_events") setSelectedStageId("reader");
+          else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
           else setSelectedStageId("chart");
         } else if (hasReader) {
           setSelectedStageId("reader");
@@ -614,6 +1113,7 @@ export function Session() {
           const nextStep = readingContinuationAction(loaded);
           if (nextStep === "reader") void startReaderValidation();
           else if (nextStep === "collect_events") setSelectedStageId("reader");
+          else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
           else setSelectedStageId("chart");
         }
       } catch (caught) {
@@ -711,9 +1211,10 @@ export function Session() {
       });
       setSession(updated);
       const nextStep = readingContinuationAction(updated);
-      if (nextStep === "full_report") await startCoreReport();
+      if (nextStep === "full_report") await startCoreReport({ sessionOverride: updated });
       else if (nextStep === "reader") await startReaderValidation({ force: true });
       else if (nextStep === "collect_events") setSelectedStageId("reader");
+      else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
       setError(userFacingError(caught, "Could not save your replies. Please try again."));
@@ -743,11 +1244,47 @@ export function Session() {
       if (nextStep === "full_report") await startCoreReport();
       else if (nextStep === "reader") await startReaderValidation({ force: true });
       else if (nextStep === "collect_events") setSelectedStageId("reader");
+      else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
       setError(userFacingError(caught, "Could not save these life events. Please try again."));
     } finally {
       setSubmittingLifeEvents(false);
+    }
+  }
+
+  async function onSubmitRectificationConfirmation(responses: RectificationConfirmationResponse[]) {
+    if (!authLoaded) {
+      setError("正在确认会话，请稍后再试。");
+      return;
+    }
+    if (!isSignedIn) {
+      setError("请先登录，再确认生时校正结果。");
+      return;
+    }
+    setError("");
+    setSubmittingRectificationConfirmation(true);
+    try {
+      const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
+      const expectedChartRevision = numberLike(chartRecord?.revision);
+      const updated = await api.confirmRectification({
+        sessionId: id,
+        responses,
+        ...(expectedChartRevision != null ? { expectedChartRevision } : {})
+      });
+      setSession(updated);
+      readerStartedRef.current = false;
+      const nextStep = readingContinuationAction(updated);
+      if (nextStep === "full_report") await startCoreReport({ sessionOverride: updated });
+      else if (nextStep === "collect_events") setSelectedStageId("reader");
+      else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
+      else setSelectedStageId("chart");
+    } catch (caught) {
+      setError(
+        userFacingError(caught, "Could not save the rectification check. Please try again.")
+      );
+    } finally {
+      setSubmittingRectificationConfirmation(false);
     }
   }
 
@@ -831,10 +1368,12 @@ export function Session() {
             validationFeedback={validationFeedback}
             submittingFeedback={submittingFeedback}
             submittingLifeEvents={submittingLifeEvents}
+            submittingRectificationConfirmation={submittingRectificationConfirmation}
             preparingRectificationInterview={preparingRectificationInterview}
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
             onSubmitLifeEvents={onSubmitLifeEvents}
+            onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
             onPrepareRectificationInterview={prepareRectificationInterview}
             onResumeCoreReport={resumeCoreReport}
             onStartBaziReport={startBaziReport}
@@ -1566,10 +2105,12 @@ function WorkshopDetailPanel({
   validationFeedback,
   submittingFeedback,
   submittingLifeEvents,
+  submittingRectificationConfirmation,
   preparingRectificationInterview,
   onValidationFeedbackChange,
   onSubmitFeedback,
   onSubmitLifeEvents,
+  onSubmitRectificationConfirmation,
   onPrepareRectificationInterview,
   onResumeCoreReport,
   onStartBaziReport,
@@ -1591,10 +2132,14 @@ function WorkshopDetailPanel({
   validationFeedback: string;
   submittingFeedback: boolean;
   submittingLifeEvents: boolean;
+  submittingRectificationConfirmation: boolean;
   preparingRectificationInterview: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onSubmitRectificationConfirmation: (
+    responses: RectificationConfirmationResponse[]
+  ) => Promise<void>;
   onPrepareRectificationInterview: (action?: RectificationInterviewAction) => Promise<void>;
   onResumeCoreReport: () => Promise<void>;
   onStartBaziReport: () => Promise<void>;
@@ -1658,10 +2203,12 @@ function WorkshopDetailPanel({
           validationFeedback={validationFeedback}
           submittingFeedback={submittingFeedback}
           submittingLifeEvents={submittingLifeEvents}
+          submittingRectificationConfirmation={submittingRectificationConfirmation}
           preparingRectificationInterview={preparingRectificationInterview}
           onValidationFeedbackChange={onValidationFeedbackChange}
           onSubmitFeedback={onSubmitFeedback}
           onSubmitLifeEvents={onSubmitLifeEvents}
+          onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
           onPrepareRectificationInterview={onPrepareRectificationInterview}
           authLoaded={authLoaded}
           isSignedIn={isSignedIn}
@@ -1963,6 +2510,7 @@ function ChartConfirmationCard({
     : hasChartFacts
       ? t("session.chart.readiness.checks")
       : t("session.chart.readiness.preparing");
+  const nextStepLabel = rectificationNextStepLabel(rectificationState, t);
 
   return (
     <section className="my-5 overflow-hidden rounded-[16px] border border-gold/30 bg-[linear-gradient(135deg,rgba(201,169,110,0.14),rgba(255,255,255,0.035))] shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
@@ -1993,11 +2541,35 @@ function ChartConfirmationCard({
         <ChartConfirmationRow
           label={t("session.chart.confirmed.readiness")}
           value={statusLabel}
-          detail={rectificationState?.reportGate?.nextStep || t("session.chart.confirmed.next")}
+          detail={nextStepLabel || t("session.chart.confirmed.next")}
         />
       </div>
     </section>
   );
+}
+
+function rectificationNextStepLabel(state: RectificationState | null, t: Translate): string {
+  if (!state) return "";
+  if (state.status === "rectification_confirmation_required") {
+    return t("session.rectification.conclusion.title");
+  }
+  if (state.status === "corrected_chart_ready") {
+    return t("session.chart.readiness.ready");
+  }
+  if (
+    state.status === "collecting_evidence" ||
+    state.status === "underdetermined" ||
+    state.status === "multiple_equivalent"
+  ) {
+    return t("session.rectification.continueCheck");
+  }
+  if (state.status === "input_resolution_required") {
+    return t("session.rectification.inputResolution");
+  }
+  if (state.status === "calculation_failed") {
+    return t("session.rectification.calculationFailed");
+  }
+  return t("session.rectification.continue");
 }
 
 function ChartConfirmationRow({
@@ -2026,6 +2598,7 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
   const gateAllowed = state.reportGate?.fullReportAllowed === true;
   const hasEquivalentCandidates = state.status === "multiple_equivalent";
   const isUnderdetermined = state.status === "underdetermined";
+  const needsConfirmation = state.status === "rectification_confirmation_required";
   const needsInputResolution = state.status === "input_resolution_required";
   const calculationFailed = state.status === "calculation_failed";
   const { t } = useI18n();
@@ -2033,28 +2606,33 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
     ? state.status === "corrected_chart_ready"
       ? t("session.rectification.corrected")
       : t("session.rectification.accepted")
-    : calculationFailed
-      ? t("session.rectification.calculationFailed")
-      : needsInputResolution
-        ? t("session.rectification.inputResolution")
-        : hasEquivalentCandidates
-          ? t("session.rectification.equivalent")
-          : isUnderdetermined
-            ? t("session.rectification.underdetermined")
-            : t("session.rectification.waiting");
+    : needsConfirmation
+      ? t("session.rectification.conclusion.title")
+      : calculationFailed
+        ? t("session.rectification.calculationFailed")
+        : needsInputResolution
+          ? t("session.rectification.inputResolution")
+          : hasEquivalentCandidates
+            ? t("session.rectification.equivalent")
+            : isUnderdetermined
+              ? t("session.rectification.underdetermined")
+              : t("session.rectification.waiting");
   const confidenceBody = gateAllowed
     ? t("session.rectification.body.ready")
-    : calculationFailed
-      ? t("session.rectification.body.calculationFailed")
-      : needsInputResolution
-        ? t("session.rectification.body.inputResolution")
-        : hasEquivalentCandidates
-          ? t("session.rectification.body.equivalent", {
-              count: state.equivalentCandidateIds?.length ?? 0
-            })
-          : isUnderdetermined
-            ? t("session.rectification.body.underdetermined")
-            : t("session.rectification.body.more");
+    : needsConfirmation
+      ? t("session.rectification.conclusion.body")
+      : calculationFailed
+        ? t("session.rectification.body.calculationFailed")
+        : needsInputResolution
+          ? t("session.rectification.body.inputResolution")
+          : hasEquivalentCandidates
+            ? t("session.rectification.body.equivalent", {
+                count: state.equivalentCandidateIds?.length ?? 0
+              })
+            : isUnderdetermined
+              ? t("session.rectification.body.underdetermined")
+              : t("session.rectification.body.more");
+  const nextStepLabel = rectificationNextStepLabel(state, t);
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
@@ -2078,15 +2656,9 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
           />
           <InfoRow
             label={t("session.rectification.nextStep")}
-            value={state.reportGate?.nextStep || t("session.rectification.continue")}
+            value={nextStepLabel || t("session.rectification.continue")}
           />
         </div>
-
-        {state.reportGate?.reason && (
-          <p className="m-0 mt-3 text-[12.5px] leading-[1.65] text-muted">
-            {state.reportGate.reason}
-          </p>
-        )}
         {candidates.length > 0 && (
           <details className="mt-3 rounded-lg border border-gold/18 bg-cream/60 px-3 py-2">
             <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[1.2px] text-muted outline-none">
@@ -2143,49 +2715,99 @@ function LifeEventCollector({
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const ui =
     locale === "zh"
       ? {
-          preparing: "正在根据盘面边界准备下一题…",
-          notReady: "下一道校正问题尚未准备好。",
+          preparing: "正在准备下一道问题…",
+          notReady: "下一道问题还没有准备好。",
           prepare: "准备问题",
-          exhausted: "现有证据无法进一步缩小时间范围",
-          exhaustedBody: "系统会保留剩余时间范围，而不是给出虚假的精确时间。",
-          next: "下一题",
-          compare: "开始比较候选时间",
-          skip: "不适用，跳过",
-          reset: "重新选择问题",
-          monthKnown: "记得月份",
-          yearOnly: "只记得年份"
+          exhausted: "暂时找不到适合继续确认的经历",
+          exhaustedBody: "我们会保留当前的时间范围，不会假装得出没有依据的精确时间。",
+          eyebrow: "出生时间校准",
+          title: "先选一件你记得清楚的事",
+          body: "不用写完整履历。每次只选一个最接近的经历，再告诉我们大概发生在哪一年。",
+          progress: (current: number, total: number) => `第 ${current} / ${total} 件`,
+          recorded: (count: number, total: number) => `已记录 ${count} / ${total} 件`,
+          chooseEvent: "哪一项最符合？",
+          dateTitle: "这件事大概在什么时候？",
+          dateHint: "不用精确到某一天。记得月份就选月份，不记得也没关系。",
+          monthKnown: "记得大概月份",
+          yearOnly: "只记得年份",
+          yearPlaceholder: "年份",
+          record: "记录这件事",
+          compare: "完成校准并比较",
+          skip: "没有这类经历，换一类",
+          reset: "重新选择",
+          optionalNote: "补充一句（可选）",
+          requiredNote: "请补充几个词说明是什么变化",
+          notePlaceholder: "例如：第一次被大学录取",
+          noteHint: "不用写小作文，几个词就够了。",
+          why: "为什么问这个？",
+          selected: "已选择",
+          saved: "已记录的经历"
         }
       : locale === "ja"
         ? {
-            preparing: "チャートの境界から次の質問を準備しています…",
-            notReady: "次の確認質問はまだ準備できていません。",
+            preparing: "次の質問を準備しています…",
+            notReady: "次の質問をまだ準備できません。",
             prepare: "質問を準備",
-            exhausted: "現在の証拠では時間帯をこれ以上絞れません",
-            exhaustedBody: "誤った精密さを示さず、残る時間範囲を保持します。",
-            next: "次の質問",
-            compare: "出生時刻候補を比較",
-            skip: "該当しないためスキップ",
-            reset: "質問を選び直す",
+            exhausted: "続けて確認できる適切な出来事がありません",
+            exhaustedBody: "根拠のない精密さを示さず、現在の時間範囲を保ちます。",
+            eyebrow: "出生時刻の確認",
+            title: "まず、覚えている出来事を一つ選んでください",
+            body: "人生の履歴を書く必要はありません。近い出来事を一つ選び、おおよその時期を教えてください。",
+            progress: (current: number, total: number) => `${current} / ${total} 件目`,
+            recorded: (count: number, total: number) => `${count} / ${total} 件を記録済み`,
+            chooseEvent: "最も近いものはどれですか？",
+            dateTitle: "この出来事はいつ頃でしたか？",
+            dateHint:
+              "日にちまでは不要です。月が分かれば月を、分からなければ年だけを選んでください。",
             monthKnown: "月まで分かる",
-            yearOnly: "年のみ"
+            yearOnly: "年だけ分かる",
+            yearPlaceholder: "年",
+            record: "この出来事を記録",
+            compare: "確認を終えて比較",
+            skip: "該当しないため別の種類へ",
+            reset: "選び直す",
+            optionalNote: "一言を追加（任意）",
+            requiredNote: "数語で内容を補足してください",
+            notePlaceholder: "例：大学への合格が決まった",
+            noteHint: "長い文章は不要です。数語で十分です。",
+            why: "なぜ聞くのですか？",
+            selected: "選択済み",
+            saved: "記録した出来事"
           }
         : {
-            preparing: "Preparing the next question from the chart boundaries...",
-            notReady: "The next verification question is not ready yet.",
+            preparing: "Preparing the next question...",
+            notReady: "The next question is not ready yet.",
             prepare: "Prepare question",
-            exhausted: "We cannot narrow the time further from the available evidence",
+            exhausted: "There is no suitable event left to check",
             exhaustedBody:
-              "The chart will keep the remaining time range instead of claiming false precision.",
-            next: "Next question",
-            compare: "Compare birth-time candidates",
-            skip: "Doesn't apply, skip",
-            reset: "Choose another question",
-            monthKnown: "I know the month",
-            yearOnly: "Year only"
+              "We will keep the current time range instead of claiming unsupported precision.",
+            eyebrow: "Birth-time check",
+            title: "Choose one event you remember clearly",
+            body: "You do not need to write your life story. Pick the closest event, then tell us roughly when it happened.",
+            progress: (current: number, total: number) => `${current} / ${total}`,
+            recorded: (count: number, total: number) => `${count} / ${total} recorded`,
+            chooseEvent: "Which one is closest?",
+            dateTitle: "When did this happen?",
+            dateHint:
+              "The day is not needed. Choose the month if you remember it, or the year only.",
+            monthKnown: "I remember the month",
+            yearOnly: "I only know the year",
+            yearPlaceholder: "Year",
+            record: "Record this event",
+            compare: "Finish check and compare",
+            skip: "None of these, choose another type",
+            reset: "Choose again",
+            optionalNote: "Add one short note (optional)",
+            requiredNote: "Add a few words about the change",
+            notePlaceholder: "For example: accepted to my first university",
+            noteHint: "No essay needed. A few words are enough.",
+            why: "Why are we asking this?",
+            selected: "Selected",
+            saved: "Events already recorded"
           };
   const interview = useMemo(
     () => parseRectificationInterview(interviewContent),
@@ -2216,13 +2838,24 @@ function LifeEventCollector({
         date: "",
         category: question.category,
         description: "",
-        datePrecision: "month" as const
+        datePrecision: "month" as const,
+        choiceId: "",
+        note: ""
       })
     : null;
-  const answerComplete = Boolean(answer?.date && answer.description.trim().length >= 3);
+  const choices = question ? (LIFE_EVENT_CHOICES[question.category] ?? []) : [];
+  const selectedChoice = choices.find((choice) => choice.id === answer?.choiceId);
+  const answerComplete = Boolean(
+    answer?.date &&
+    selectedChoice &&
+    (!selectedChoice.requiresNote || answer.note.trim().length >= 3)
+  );
   const reachesTarget = Boolean(
     interview && existingEvents.length + 1 >= interview.progress.target
   );
+  const currentStep = existingEvents.length + 1;
+  const target = interview?.progress.target ?? 3;
+  const CategoryIcon = question ? LIFE_EVENT_CATEGORY_ICONS[question.category] : Target;
 
   useEffect(() => {
     setDraft(null);
@@ -2238,13 +2871,20 @@ function LifeEventCollector({
     }));
   }
 
-  function submitCurrent(currentAnswer: LifeEventDraft) {
+  function buildDescription(currentAnswer: LifeEventDraft, choice: LifeEventChoice) {
+    const label = choice.label[locale];
+    const note = currentAnswer.note.trim();
+    if (!note) return label;
+    return locale === "zh" ? `${label}（${note}）` : `${label} (${note})`;
+  }
+
+  function submitCurrent(currentAnswer: LifeEventDraft, choice: LifeEventChoice) {
     if (!interview || !question) return;
     void onSubmit([
       {
         questionId: currentAnswer.questionId,
         date: currentAnswer.date,
-        description: currentAnswer.description,
+        description: buildDescription(currentAnswer, choice),
         category: currentAnswer.category as RectificationLifeEventCategory
       }
     ]);
@@ -2298,93 +2938,207 @@ function LifeEventCollector({
     );
   }
 
+  if (!answer) return null;
+
   return (
     <form
       className="mt-5 grid gap-5"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!answerComplete || !answer) return;
+        if (!answerComplete || !answer || !selectedChoice) return;
         const currentAnswer = { ...answer, category: question.category };
         setDraft(currentAnswer);
-        submitCurrent(currentAnswer);
+        submitCurrent(currentAnswer, selectedChoice);
       }}
     >
-      <div>
-        <div className="mb-2 text-[11px] uppercase tracking-[1.4px] text-gold-dim">
-          <span>{interview.progress.label}</span>
+      <header className="flex flex-col gap-4 border-b border-gold/20 pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
+            {ui.eyebrow}
+          </div>
+          <h3 className="m-0 text-xl font-semibold tracking-normal text-ink">{ui.title}</h3>
+          <p className="mt-2 max-w-2xl text-[13px] leading-6 text-body">{ui.body}</p>
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-gold/30 bg-cream-2 p-5 shadow-[0_18px_50px_rgba(31,25,17,0.07)] sm:p-6">
-        <div className="mb-4 flex size-9 items-center justify-center rounded-full border border-gold/35 text-gold-dim">
-          <Target size={17} />
-        </div>
-        <h4 className="mb-2 text-xl font-medium tracking-normal text-ink">{question.title}</h4>
-        <p className="mb-5 text-[13px] leading-7 text-body">{question.prompt}</p>
-        <div className="grid gap-4 sm:grid-cols-[170px_1fr]">
-          <div className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
-            {question.dateLabel}
-            <div className="grid grid-cols-2 rounded-lg border border-gold/20 bg-cream p-1 normal-case tracking-normal">
-              {(["month", "year"] as const).map((precision) => (
-                <button
-                  key={precision}
-                  type="button"
-                  className={`h-8 rounded-md text-[11px] transition-colors ${
-                    answer?.datePrecision === precision
-                      ? "bg-gold text-white"
-                      : "text-muted hover:text-ink"
-                  }`}
-                  onClick={() =>
-                    updateAnswer({
-                      datePrecision: precision,
-                      date: answer?.date.slice(0, precision === "year" ? 4 : 7) ?? ""
-                    })
-                  }
-                >
-                  {precision === "month" ? ui.monthKnown : ui.yearOnly}
-                </button>
-              ))}
-            </div>
-            <input
-              required
-              type={answer?.datePrecision === "year" ? "number" : "month"}
-              min={answer?.datePrecision === "year" ? 1900 : "1900-01"}
-              max={
-                answer?.datePrecision === "year"
-                  ? new Date().getFullYear()
-                  : new Date().toISOString().slice(0, 7)
-              }
-              value={answer?.date ?? ""}
-              className="h-11 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] normal-case tracking-normal text-ink outline-none focus:border-gold"
-              onChange={(event) => updateAnswer({ date: event.target.value })}
+        <div className="w-full shrink-0 sm:w-36">
+          <div className="mb-2 flex items-center justify-between text-[11px] text-muted">
+            <span>{ui.progress(currentStep, target)}</span>
+            <span>{ui.recorded(existingEvents.length, target)}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-gold/15">
+            <div
+              className="h-full rounded-full bg-gold transition-[width] duration-300"
+              style={{ width: `${Math.min(100, (existingEvents.length / target) * 100)}%` }}
             />
           </div>
-          <label className="grid gap-2 text-[11px] uppercase tracking-[1.2px] text-muted">
-            {question.detailsLabel}
-            <Textarea
-              required
-              rows={2}
-              value={answer?.description ?? ""}
-              placeholder={question.detailsPlaceholder}
-              onChange={(event) => updateAnswer({ description: event.target.value })}
-            />
-          </label>
         </div>
-        <div className="mt-4 flex items-start gap-2 text-[12px] leading-6 text-muted">
-          <Info className="mt-1 size-3.5 shrink-0" />
-          <span>{question.whyWeAsk}</span>
-        </div>
-      </div>
+      </header>
 
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" onClick={skipQuestion}>
-            {ui.skip}
-          </Button>
+      {existingEvents.length > 0 && (
+        <div className="border-b border-gold/15 pb-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[1.3px] text-muted">
+            {ui.saved}
+          </div>
+          <div className="grid gap-2">
+            {existingEvents.map((event) => (
+              <div
+                className="flex items-start gap-3 text-[12px] leading-5 text-body"
+                key={`${event.date}-${event.category}-${event.description}`}
+              >
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-gold" />
+                <span>
+                  <strong className="font-semibold text-ink">{event.date}</strong>
+                  <span className="mx-1.5 text-muted">·</span>
+                  {event.description}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
+
+      <section className="rounded-2xl border border-gold/30 bg-cream-2 p-5 shadow-[0_18px_50px_rgba(31,25,17,0.07)] sm:p-6">
+        <div className="flex items-start gap-3 border-b border-gold/15 pb-5">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-gold/35 bg-gold/10 text-gold-dim">
+            <CategoryIcon size={18} />
+          </div>
+          <div className="min-w-0">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[1.3px] text-gold-dim">
+              {t(`session.events.category.${question.category}`)}
+            </div>
+            <h4 className="m-0 text-lg font-semibold tracking-normal text-ink">{question.title}</h4>
+            <p className="m-0 mt-1.5 text-[13px] leading-6 text-body">{question.prompt}</p>
+          </div>
+        </div>
+
+        <div className="pt-5">
+          <div className="mb-3 text-sm font-semibold text-ink">{ui.chooseEvent}</div>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {choices.map((choice) => {
+              const selected = answer.choiceId === choice.id;
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  aria-pressed={selected}
+                  className={`flex min-h-12 items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-[border-color,background,box-shadow] ${
+                    selected
+                      ? "border-gold bg-gold/10 text-ink shadow-[0_0_0_2px_rgba(201,169,110,0.12)]"
+                      : "border-gold/20 bg-cream text-body hover:border-gold/55 hover:bg-gold/5"
+                  }`}
+                  onClick={() => updateAnswer({ choiceId: choice.id, note: "" })}
+                >
+                  {selected ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-gold" />
+                  ) : (
+                    <span className="size-4 shrink-0 rounded-full border border-gold/40" />
+                  )}
+                  <span className="text-[13px] leading-5">{choice.label[locale]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {selectedChoice && (
+          <div className="mt-5 grid gap-4 border-t border-gold/15 pt-5">
+            <div>
+              <div className="mb-1 text-sm font-semibold text-ink">{ui.dateTitle}</div>
+              <p className="m-0 text-[12px] leading-5 text-muted">{ui.dateHint}</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)] sm:items-end">
+              <div className="grid gap-2">
+                <div className="grid grid-cols-2 rounded-lg border border-gold/20 bg-cream p-1">
+                  {(["month", "year"] as const).map((precision) => (
+                    <button
+                      key={precision}
+                      type="button"
+                      aria-pressed={answer.datePrecision === precision}
+                      className={`h-9 rounded-md text-[11px] transition-colors ${
+                        answer.datePrecision === precision
+                          ? "bg-gold text-white"
+                          : "text-muted hover:text-ink"
+                      }`}
+                      onClick={() =>
+                        updateAnswer({
+                          datePrecision: precision,
+                          date:
+                            precision === "year"
+                              ? answer.date.slice(0, 4)
+                              : answer.date.length >= 7
+                                ? answer.date.slice(0, 7)
+                                : ""
+                        })
+                      }
+                    >
+                      {precision === "month" ? ui.monthKnown : ui.yearOnly}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  required
+                  aria-label={ui.dateTitle}
+                  type={answer.datePrecision === "year" ? "number" : "month"}
+                  min={answer.datePrecision === "year" ? 1900 : "1900-01"}
+                  max={
+                    answer.datePrecision === "year"
+                      ? new Date().getFullYear()
+                      : new Date().toISOString().slice(0, 7)
+                  }
+                  value={answer.date}
+                  placeholder={answer.datePrecision === "year" ? ui.yearPlaceholder : undefined}
+                  className="h-11 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
+                  onChange={(event) => updateAnswer({ date: event.target.value })}
+                />
+              </div>
+
+              {selectedChoice.requiresNote ? (
+                <label className="grid gap-2 text-[12px] text-body">
+                  <span className="font-semibold text-ink">{ui.requiredNote}</span>
+                  <input
+                    required
+                    maxLength={160}
+                    value={answer.note}
+                    placeholder={ui.notePlaceholder}
+                    className="h-11 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] text-ink outline-none placeholder:text-muted focus:border-gold focus:ring-4 focus:ring-gold/10"
+                    onChange={(event) => updateAnswer({ note: event.target.value })}
+                  />
+                </label>
+              ) : (
+                <details className="rounded-lg border border-gold/15 bg-cream px-3 py-2">
+                  <summary className="cursor-pointer select-none text-[12px] font-semibold text-body outline-none">
+                    {ui.optionalNote}
+                  </summary>
+                  <div className="mt-2 grid gap-1.5">
+                    <input
+                      maxLength={160}
+                      value={answer.note}
+                      placeholder={ui.notePlaceholder}
+                      className="h-10 rounded-lg border border-gold/20 bg-cream-2 px-3 text-[12px] text-ink outline-none placeholder:text-muted focus:border-gold focus:ring-4 focus:ring-gold/10"
+                      onChange={(event) => updateAnswer({ note: event.target.value })}
+                    />
+                    <span className="text-[11px] text-muted">{ui.noteHint}</span>
+                  </div>
+                </details>
+              )}
+            </div>
+          </div>
+        )}
+
+        <details className="mt-5 border-t border-gold/15 pt-4">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-[12px] text-muted outline-none">
+            <Info className="size-3.5" /> {ui.why}
+          </summary>
+          <p className="m-0 mt-2 pl-5 text-[12px] leading-5 text-muted">{question.whyWeAsk}</p>
+        </details>
+      </section>
+
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button type="button" variant="ghost" onClick={skipQuestion} disabled={submitting}>
+          {ui.skip}
+        </Button>
         <Button disabled={!answerComplete || submitting || !authLoaded}>
           {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-          {reachesTarget ? ui.compare : ui.next}
+          {reachesTarget ? ui.compare : ui.record}
           {!reachesTarget && <ChevronRight size={15} />}
         </Button>
       </div>
@@ -2568,6 +3322,239 @@ function ConsultationQuestionPanel({
   );
 }
 
+function RectificationConclusion({
+  state,
+  submitting,
+  onSubmit,
+  authLoaded,
+  isSignedIn
+}: {
+  state: RectificationState;
+  submitting: boolean;
+  onSubmit: (responses: RectificationConfirmationResponse[]) => Promise<void>;
+  authLoaded: boolean;
+  isSignedIn: boolean;
+}) {
+  const { t } = useI18n();
+  const conclusion = state.rectificationConclusion;
+  const examples = (conclusion?.examples ?? []).filter((example) => Boolean(example.exampleId));
+  const exampleSignature = examples
+    .map((example) => `${example.exampleId}:${example.startDate}:${example.endDate}`)
+    .join("|");
+  const [answers, setAnswers] = useState<Record<string, RectificationConfirmationAnswer>>({});
+
+  useEffect(() => {
+    setAnswers({});
+  }, [exampleSignature]);
+
+  const corrected = conclusion?.correctedBirthTime;
+  const interval = conclusion?.selectedInterval;
+  const evidence = conclusion?.evidenceSummary;
+  const answeredCount = examples.filter((example) => answers[example.exampleId ?? ""]).length;
+  const allAnswered = examples.length > 0 && answeredCount === examples.length;
+  const confidenceLabel =
+    conclusion?.confidence === "high"
+      ? t("session.rectification.conclusion.confidenceHigh")
+      : conclusion?.confidence === "medium"
+        ? t("session.rectification.conclusion.confidenceMedium")
+        : conclusion?.confidence === "low"
+          ? t("session.rectification.conclusion.confidenceLow")
+          : t("session.rectification.conclusion.bounded");
+  const categoryLabel = (category?: string) => {
+    if (!category || category === "unknown") return t("session.rectification.conclusion.event");
+    return t(`session.events.category.${category}`);
+  };
+  const formatRange = (start?: string, end?: string) => {
+    if (!start) return "—";
+    if (!end || end === start) return start;
+    return `${start} – ${end}`;
+  };
+  const formatCorrectedTime = () => {
+    const local = [corrected?.localDate, corrected?.localTime].filter(Boolean).join(" ");
+    if (!local) return "—";
+    return corrected?.timezoneId ? `${local} · ${corrected.timezoneId}` : local;
+  };
+
+  function submit() {
+    if (!allAnswered || submitting) return;
+    void onSubmit(
+      examples.map((example) => ({
+        exampleId: example.exampleId ?? "",
+        answer: answers[example.exampleId ?? ""]
+      }))
+    );
+  }
+
+  return (
+    <section className="mt-5 grid gap-5" aria-live="polite">
+      <header className="border-b border-gold/20 pb-4">
+        <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
+          <Clock3 className="size-4" />
+          {t("session.rectification.conclusion.eyebrow")}
+        </div>
+        <h3 className="m-0 text-xl font-semibold tracking-normal text-ink">
+          {t("session.rectification.conclusion.title")}
+        </h3>
+        <p className="m-0 mt-2 text-[13px] leading-6 text-body">
+          {t("session.rectification.conclusion.body")}
+        </p>
+      </header>
+
+      <section className="rounded-2xl border border-gold/35 bg-gold/10 p-5 shadow-[0_18px_50px_rgba(201,169,110,0.12)]">
+        <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.4px] text-gold-dim">
+          <CheckCircle2 className="size-4" />
+          {t("session.rectification.conclusion.resultTitle")}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
+            <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
+              {t("session.rectification.conclusion.correctedTime")}
+            </div>
+            <div className="mt-1 text-sm font-semibold leading-6 text-ink">
+              {formatCorrectedTime()}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
+            <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
+              {t("session.rectification.conclusion.range")}
+            </div>
+            <div className="mt-1 text-sm font-semibold leading-6 text-ink">
+              {formatRange(interval?.start, interval?.end)}
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 text-[12.5px] leading-6 text-body">
+          <InfoRow
+            label={t("session.rectification.conclusion.confidence")}
+            value={confidenceLabel}
+          />
+          <InfoRow
+            label={t("session.rectification.conclusion.evidence")}
+            value={t("session.rectification.conclusion.evidenceValue", {
+              events: evidence?.calibrationEventCount ?? 0,
+              categories: evidence?.calibrationCategoryCount ?? 0,
+              holdout: evidence?.holdoutEventCount ?? 0
+            })}
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-3">
+        <div>
+          <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.4px] text-gold-dim">
+            <ListChecks className="size-4" />
+            {t("session.rectification.conclusion.examplesTitle")}
+          </div>
+          <p className="m-0 text-[13px] leading-6 text-body">
+            {t("session.rectification.conclusion.examplesBody")}
+          </p>
+        </div>
+
+        {examples.length === 0 ? (
+          <div className="rounded-xl border border-danger/25 bg-danger/5 px-4 py-3 text-[13px] leading-6 text-body">
+            {t("session.rectification.conclusion.noExamples")}
+          </div>
+        ) : (
+          examples.map((example, index) => {
+            const exampleId = example.exampleId ?? `example-${index}`;
+            const selected = answers[exampleId];
+            const prompt =
+              example.source === "submitted_evidence"
+                ? example.description || example.prompt
+                : example.prompt;
+            return (
+              <article
+                className="rounded-2xl border border-gold/25 bg-cream-2 p-4 shadow-[0_14px_34px_rgba(31,25,17,0.06)]"
+                key={exampleId}
+              >
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[1.2px] text-gold-dim">
+                    <span>{categoryLabel(example.category)}</span>
+                    <span className="text-muted">·</span>
+                    <span className="font-normal text-muted">
+                      {formatRange(example.startDate, example.endDate)}
+                    </span>
+                  </div>
+                  <Badge variant="neutral">
+                    {t(
+                      example.source === "submitted_evidence"
+                        ? "session.rectification.conclusion.sourceSubmitted"
+                        : "session.rectification.conclusion.sourceAgent"
+                    )}
+                  </Badge>
+                </div>
+                <p className="m-0 text-[14px] leading-7 text-ink">{prompt}</p>
+                <div className="mt-4 grid gap-2">
+                  {VALIDATION_CHOICES.map((choice) => {
+                    const isSelected = selected === choice.value;
+                    return (
+                      <button
+                        type="button"
+                        key={choice.value}
+                        className={cn(
+                          "rounded-lg border px-3.5 py-2.5 text-left transition",
+                          isSelected
+                            ? "border-gold bg-gold text-white shadow-sm"
+                            : "border-gold/25 bg-cream text-body hover:border-gold/60 hover:bg-gold/10"
+                        )}
+                        onClick={() =>
+                          setAnswers((current) => ({ ...current, [exampleId]: choice.value }))
+                        }
+                      >
+                        <span className="block text-sm font-semibold">{t(choice.labelKey)}</span>
+                        <span
+                          className={cn(
+                            "mt-0.5 block text-[12px]",
+                            isSelected ? "text-white/80" : "text-muted"
+                          )}
+                        >
+                          {t(choice.descriptionKey)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </article>
+            );
+          })
+        )}
+      </section>
+
+      {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
+      <div className="rounded-xl border border-gold/18 bg-cream-2 px-4 py-3 text-[12.5px] leading-6 text-muted">
+        <Sparkles className="mr-1 inline size-3.5 text-gold" />
+        {t("session.rectification.conclusion.guardrail")}
+      </div>
+      <Button
+        type="button"
+        className="w-full"
+        disabled={!allAnswered || submitting || !authLoaded || !isSignedIn}
+        onClick={submit}
+      >
+        {submitting ? (
+          <>
+            <LoaderCircle className="size-4 animate-spin" />
+            {t("session.rectification.conclusion.confirming")}
+          </>
+        ) : (
+          <>
+            <CheckCircle2 className="size-4" />
+            {t("session.rectification.conclusion.confirm")}
+          </>
+        )}
+      </Button>
+      {!allAnswered && examples.length > 0 && (
+        <p className="m-0 text-center text-[12px] text-muted">
+          {t("session.rectification.conclusion.answerAll", {
+            answered: answeredCount,
+            total: examples.length
+          })}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function ReaderDetail({
   session,
   readerRunning,
@@ -2576,10 +3563,12 @@ function ReaderDetail({
   validationFeedback,
   submittingFeedback,
   submittingLifeEvents,
+  submittingRectificationConfirmation,
   preparingRectificationInterview,
   onValidationFeedbackChange,
   onSubmitFeedback,
   onSubmitLifeEvents,
+  onSubmitRectificationConfirmation,
   onPrepareRectificationInterview,
   authLoaded,
   isSignedIn
@@ -2591,10 +3580,14 @@ function ReaderDetail({
   validationFeedback: string;
   submittingFeedback: boolean;
   submittingLifeEvents: boolean;
+  submittingRectificationConfirmation: boolean;
   preparingRectificationInterview: boolean;
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onSubmitRectificationConfirmation: (
+    responses: RectificationConfirmationResponse[]
+  ) => Promise<void>;
   onPrepareRectificationInterview: (action?: RectificationInterviewAction) => Promise<void>;
   authLoaded: boolean;
   isSignedIn: boolean;
@@ -2620,6 +3613,9 @@ function ReaderDetail({
   const continuingLifeEvents =
     rectificationState?.status === "underdetermined" &&
     rectificationState.rectificationPlan?.eventCollectionRequired === true;
+  const rectificationConfirmationRequired =
+    rectificationState?.status === "rectification_confirmation_required" &&
+    rectificationState.rectificationConclusion?.confirmation?.status === "pending";
   const interviewArtifact = findArtifact(session, "rectification_interview.json");
   const [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
   const [anchorFeedback, setAnchorFeedback] = useState<
@@ -2691,6 +3687,18 @@ function ReaderDetail({
 
   function movePrev() {
     setActiveAnchorIndex((current) => Math.max(0, current - 1));
+  }
+
+  if (rectificationConfirmationRequired && rectificationState) {
+    return (
+      <RectificationConclusion
+        state={rectificationState}
+        submitting={submittingRectificationConfirmation}
+        onSubmit={onSubmitRectificationConfirmation}
+        authLoaded={authLoaded}
+        isSignedIn={isSignedIn}
+      />
+    );
   }
 
   if (!prevalidation) {
@@ -3929,20 +4937,30 @@ function canStartFullReading(session: SkillSessionResponse | null): boolean {
   return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
 }
 
-type ReadingContinuationAction = "full_report" | "reader" | "collect_events" | "stop";
+type ReadingContinuationAction =
+  "full_report" | "reader" | "collect_events" | "confirm_rectification" | "stop";
 
 const READER_CONTINUATION_STATUSES = new Set(["not_required"]);
 
 function readingContinuationAction(
   session: SkillSessionResponse | null
 ): ReadingContinuationAction {
+  const state = parseJsonArtifact(session, "chart_rectification_state.json");
+  if (state) {
+    const status = String(state.status ?? "").trim();
+    const conclusion = objectValue(state, "rectificationConclusion");
+    const confirmation = objectValue(conclusion, "confirmation");
+    if (status === "rectification_confirmation_required" || confirmation?.status === "pending") {
+      return "confirm_rectification";
+    }
+  }
+
   if (canStartFullReading(session)) return "full_report";
 
   const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
   const prevalidationDecision = objectValue(prevalidationResult, "decision");
   if (prevalidationDecision?.nextStep === "review_birth_details_or_stop") return "stop";
 
-  const state = parseJsonArtifact(session, "chart_rectification_state.json");
   if (!state) return "reader";
 
   const status = String(state.status ?? "").trim();

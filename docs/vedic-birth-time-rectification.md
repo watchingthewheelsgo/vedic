@@ -41,11 +41,17 @@ by the user is not independent evidence and cannot change a chart score.
 9. Evaluate the selected candidate or equivalence class against the reserved
    event. A failed or inconclusive holdout returns `underdetermined`.
 10. Every passed candidate is recalculated once at its bounded representative
-    time/place and becomes `corrected_chart_ready`, including when the selected
-    interval contains the user's reported time. This canonical calculation does not start a second
-    uncertainty search around the representative moment: the original candidate
-    scan and refined boundaries remain the selection evidence. The final chart
-    revision, audit, and report gate are then persisted as one active revision.
+    time/place and enters `rectification_confirmation_required`, including when
+    the selected interval contains the user's reported time. The system shows
+    the representative local time, the remaining bounded interval, and up to two
+    cautious retrospective checks. These checks are generated after selection and
+    never score or change the candidate. The canonical calculation does not start
+    a second uncertainty search around the representative moment: the original
+    candidate scan and refined boundaries remain the selection evidence.
+11. The user confirms whether those checks broadly match lived experience. A
+    mismatch returns the session to `underdetermined` and requests another dated
+    event instead of releasing a report. Only an explicit confirmation moves the
+    recalculated revision to `corrected_chart_ready` and opens the report gate.
 
 Every event mutation is serialized per session, checked against the chart
 revision observed by the client, and recorded with an idempotency fingerprint.
@@ -63,8 +69,12 @@ prepared.
   under all permitted evidence. No exact time is selected.
 - `needs_recalculation`: a bounded interval passed calibration and holdout but has
   not yet been materialized as the active chart.
-- `corrected_chart_ready`: the selected bounded interval passed and its chart was
-  recalculated at the recorded representative moment.
+- `rectification_confirmation_required`: the selected bounded interval passed,
+  its chart was recalculated, and the stage conclusion is waiting for the user's
+  reality check.
+- `corrected_chart_ready`: the selected bounded interval passed, its chart was
+  recalculated at the recorded representative moment, and the user confirmed the
+  stage conclusion.
 - `input_resolution_required` / `calculation_failed`: civil-time/place or
   deterministic provider failure must be fixed before astrological questioning.
 
@@ -93,6 +103,12 @@ still use the ordinary pre-reading quality check.
   override the deterministic astrological score.
 - `reader_prevalidation.md` / `prevalidation_result.json`: stable-chart reading
   quality checks only; they have no candidate-selection authority.
+
+The optional Agent-generated retrospective checks must cite the exact Mahadasha or
+Antardasha windows supplied by the finalized chart. The backend rejects invented
+period IDs, dates outside a cited window, and dates that reuse submitted selection
+events. This keeps the final check traceable without treating it as independent
+proof.
 
 ## Divisional sensitivity
 

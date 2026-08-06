@@ -167,6 +167,20 @@ export type RectificationInterviewInput = {
   resetSkipped?: boolean;
 };
 
+export type RectificationConfirmationAnswer = "accurate" | "partly" | "inaccurate";
+
+export type RectificationConfirmationResponse = {
+  exampleId: string;
+  answer: RectificationConfirmationAnswer;
+  note?: string;
+};
+
+export type RectificationConfirmationInput = {
+  sessionId: string;
+  expectedChartRevision?: number;
+  responses: RectificationConfirmationResponse[];
+};
+
 export type ConsultationQuestionInput = {
   sessionId: string;
   question: string;

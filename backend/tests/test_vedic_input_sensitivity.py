@@ -1728,7 +1728,9 @@ def test_materialized_chart_revision_keeps_original_candidate_scan(
 
     updated_state = runtime._materialize_rectification_selection(session_id, state, artifacts)
 
-    assert updated_state["status"] == "corrected_chart_ready"
+    assert updated_state["status"] == "rectification_confirmation_required"
+    assert updated_state["rectificationConclusion"]["status"] == "ready_for_confirmation"
+    assert updated_state["reportGate"]["fullReportAllowed"] is False
     assert workspace.read_artifact_text(session_id, "sensitivity_scan.json") == original_scan
     active_scan = json.loads(
         workspace.read_artifact_text(session_id, "active_chart_sensitivity.json") or "{}"
@@ -1933,6 +1935,19 @@ def test_core_readiness_accepts_backend_rectification_gate_without_reader_preval
                 "status": "corrected_chart_ready",
                 "holdoutResult": "passed",
                 "reportGate": {"fullReportAllowed": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_dir / "prevalidation_result.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "vedic-prevalidation-result/2.0.0",
+                "decision": {
+                    "reportAllowed": False,
+                    "reportScope": "prevalidation_or_d1_only",
+                    "nextStep": "confirm_rectification_result",
+                },
             }
         ),
         encoding="utf-8",
@@ -2910,9 +2925,10 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
         ready,
     )
 
-    assert ready["status"] == "corrected_chart_ready"
-    assert decision["reportAllowed"] is True
-    assert decision["nextStep"] == "report_allowed_after_rectification"
+    assert ready["status"] == "rectification_confirmation_required"
+    assert ready["rectificationConclusion"]["examples"]
+    assert decision["reportAllowed"] is False
+    assert decision["nextStep"] == "confirm_rectification_result"
 
 
 def test_initial_rectification_state_includes_backend_next_round_plan() -> None:

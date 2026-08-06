@@ -14,6 +14,7 @@ import type {
   PlaceSearchLevel,
   PlaceSearchResponse,
   PrecisePlaceSearchResponse,
+  RectificationConfirmationInput,
   RectificationInterviewInput,
   RectificationLifeEventsInput,
   SkillBirthInput,
@@ -208,6 +209,12 @@ export const api = {
   prepareRectificationInterview(input: RectificationInterviewInput) {
     return postJson<SkillSessionResponse, RectificationInterviewInput>(
       "/api/rectification-interview",
+      input
+    );
+  },
+  confirmRectification(input: RectificationConfirmationInput) {
+    return postJson<SkillSessionResponse, RectificationConfirmationInput>(
+      "/api/rectification-confirmation",
       input
     );
   },

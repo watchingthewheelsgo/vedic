@@ -24,6 +24,7 @@ from app.schemas import (
     ConsultationAnswerResponse,
     ConsultationConversationResponse,
     ConsultationQuestionInput,
+    RectificationConfirmationInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
     SkillBirthInput,
@@ -39,6 +40,10 @@ from app.services.rectification_interview import (
     validate_agent_question_wording,
     validate_rectification_event_bindings,
     validate_rectification_event_dates,
+)
+from app.services.rectification_confirmation import (
+    agent_snapshot,
+    replace_with_agent_examples,
 )
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
@@ -325,6 +330,15 @@ class SkillRuntime:
             json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
         )
         self._sync_chart_record_rectification(session_id, updated_state)
+        updated_state = await self._prepare_rectification_confirmation_examples(
+            session_id,
+            updated_state,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+        )
         self._checkpoint_active_chart_sensitivity(session_id)
         updated_chart_record = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         if updated_chart_record is None:
@@ -615,6 +629,15 @@ class SkillRuntime:
             json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
         )
         self._sync_chart_record_rectification(session_id, updated_state)
+        updated_state = await self._prepare_rectification_confirmation_examples(
+            session_id,
+            updated_state,
+        )
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+        )
         self._checkpoint_active_chart_sensitivity(session_id)
         updated_chart_record = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         if updated_chart_record is None:
@@ -660,6 +683,300 @@ class SkillRuntime:
                 "Your dated life events are saved. The system can now compare the bounded "
                 "birth-time candidates."
             ),
+            artifacts=self.workspace.read_artifacts(session_id),
+            active_artifact="chart_rectification_state.json",
+        )
+
+    async def _prepare_rectification_confirmation_examples(
+        self,
+        session_id: str,
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Optionally add post-selection retrospective prompts.
+
+        This runs only after deterministic candidate selection and chart
+        recalculation. The result is presentation-only: confirmation answers
+        never enter the candidate scoring function.
+        """
+
+        if state.get("status") != "rectification_confirmation_required":
+            return state
+        conclusion = state.get("rectificationConclusion")
+        if not isinstance(conclusion, dict):
+            return state
+        if self.agent_runtime is None or not self.agent_runtime.is_configured():
+            return state
+        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if not chart_record_text:
+            return state
+        chart_record = self._json_dict(chart_record_text)
+        rectified_input = state.get("rectifiedInput")
+        rectified_input = rectified_input if isinstance(rectified_input, dict) else {}
+        birth_date = str(rectified_input.get("birthDate") or "")
+        if not birth_date:
+            birth_assertion = chart_record.get("birthAssertion")
+            birth_assertion = birth_assertion if isinstance(birth_assertion, dict) else {}
+            birth_date = str(birth_assertion.get("localDate") or "")
+        if not birth_date:
+            return state
+        locale = self.workspace.read_session_locale(session_id)
+        snapshot = agent_snapshot(chart_record)
+        prompt = self._rectification_confirmation_prompt(snapshot, locale)
+        ledger = state.get("lifeEventLedger")
+        ledger = ledger if isinstance(ledger, dict) else {}
+        ledger_events = ledger.get("events")
+        ledger_events = ledger_events if isinstance(ledger_events, list) else []
+        excluded_dates = {
+            str(event.get("date") or "")
+            for event in ledger_events
+            if isinstance(event, dict) and event.get("date")
+        }
+        try:
+            result = await self.agent_runtime.run_skill_prompt_task(
+                "vedicdust-rectification-confirmation",
+                prompt,
+                skills=["vedicdust-rectification-confirmation"],
+                max_turns=2,
+                allow_file_tools=False,
+            )
+            payload = self._parse_json_object(result.raw_text)
+            enriched = replace_with_agent_examples(
+                conclusion,
+                payload,
+                birth_date=birth_date,
+                excluded_dates=excluded_dates,
+                timing_periods=snapshot.get("timingPeriods"),
+            )
+            next_state = copy.deepcopy(state)
+            next_state["rectificationConclusion"] = enriched
+            return next_state
+        except Exception as exc:
+            # Keep the deterministic, honest fallback. Agent availability must
+            # never block a valid rectification session.
+            next_state = copy.deepcopy(state)
+            fallback = dict(conclusion)
+            generation = fallback.get("generation")
+            generation = generation if isinstance(generation, dict) else {}
+            fallback["generation"] = {
+                **generation,
+                "agentAttempted": True,
+                "agentFallbackReason": self._safe_agent_failure_reason(exc),
+            }
+            next_state["rectificationConclusion"] = fallback
+            return next_state
+
+    def _rectification_confirmation_prompt(
+        self,
+        snapshot: dict[str, Any],
+        locale: str,
+    ) -> str:
+        return f"""Create up to two cautious retrospective prompts for a user to check after a Vedic birth-time rectification has already been completed.
+
+{self._language_instruction(locale)}
+
+This is a post-selection sanity check, not candidate selection. The deterministic backend has already selected and recalculated the chart. Do not choose, score, move, or question the birth time. Do not use user life-event text because it is intentionally not supplied here. Use only the finalized chart timing periods and facts below.
+
+Write broad, falsifiable prompts about past events. A prompt asks whether a change may have happened; it must not assert that it definitely happened. Use a year or month range from the supplied timing periods, never an exact day or minute. Do not generate medical diagnoses, death, legal accusations, guaranteed outcomes, future predictions, personality traits, or technical astrology terms. Avoid sensational language.
+
+FINALIZED CHART MATERIAL
+{json.dumps(snapshot, ensure_ascii=False, indent=2)}
+
+Return JSON only:
+{{
+  "examples": [
+    {{
+      "category": "career|education|relationship|relocation|child|family|finance|property|spiritual",
+      "startDate": "YYYY or YYYY-MM",
+      "endDate": "YYYY or YYYY-MM",
+      "prompt": "A short neutral question the user can answer from memory.",
+      "rationale": "A short internal reason based on the supplied timing material.",
+      "supportingPeriodIds": ["periodId from the supplied timingPeriods"]
+    }}
+  ]
+}}"""
+
+    async def confirm_rectification_result(
+        self,
+        input_data: RectificationConfirmationInput,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SkillSessionResponse:
+        async with self._rectification_transaction_lock(input_data.session_id):
+            session_id = input_data.session_id
+            state = self._json_dict(
+                self.workspace.read_artifact_text(session_id, "chart_rectification_state.json")
+                or ""
+            )
+            if state.get("status") != "rectification_confirmation_required":
+                raise ValueError("this session is not waiting for a rectification confirmation")
+            conclusion = state.get("rectificationConclusion")
+            if not isinstance(conclusion, dict):
+                raise ValueError("rectification conclusion is missing or expired")
+            chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+            if not chart_record_text:
+                raise ValueError("session is missing the recalculated chart")
+            chart_record = ChartRecord.model_validate_json(chart_record_text)
+            active_chart_revision = state.get("activeChartRevision")
+            active_chart_revision = (
+                active_chart_revision if isinstance(active_chart_revision, dict) else {}
+            )
+            active_revision = int(active_chart_revision.get("revision") or chart_record.revision)
+            if input_data.expected_chart_revision is not None and (
+                input_data.expected_chart_revision != chart_record.revision
+                or input_data.expected_chart_revision != active_revision
+            ):
+                raise ValueError("This rectification conclusion is outdated. Refresh the session.")
+            if int(conclusion.get("chartRevision") or 0) != chart_record.revision:
+                raise ValueError(
+                    "rectification conclusion does not belong to the active chart revision"
+                )
+            examples = conclusion.get("examples")
+            if not isinstance(examples, list) or not examples:
+                raise ValueError("rectification conclusion has no confirmation examples")
+            expected_ids = {
+                str(example.get("exampleId") or "")
+                for example in examples
+                if isinstance(example, dict) and example.get("exampleId")
+            }
+            responses = [
+                {
+                    "exampleId": response.example_id,
+                    "answer": response.answer,
+                    "note": response.note.strip(),
+                }
+                for response in input_data.responses
+            ]
+            response_ids = {str(item["exampleId"]) for item in responses}
+            if response_ids != expected_ids:
+                raise ValueError(
+                    "Please answer each rectification confirmation example exactly once."
+                )
+
+            next_state = copy.deepcopy(state)
+            next_conclusion = copy.deepcopy(conclusion)
+            has_inaccurate = any(item["answer"] == "inaccurate" for item in responses)
+            has_partly = any(item["answer"] == "partly" for item in responses)
+            next_conclusion["confirmation"] = {
+                "status": "rejected"
+                if has_inaccurate
+                else "confirmed_with_caveat"
+                if has_partly
+                else "confirmed",
+                "responses": responses,
+            }
+            next_conclusion["status"] = "rejected" if has_inaccurate else "confirmed"
+            next_state["rectificationConclusion"] = next_conclusion
+            if has_inaccurate:
+                ledger = next_state.get("lifeEventLedger")
+                ledger = ledger if isinstance(ledger, dict) else {}
+                ledger["eventCollectionRequired"] = True
+                next_state["lifeEventLedger"] = ledger
+                next_state.update(
+                    {
+                        "revision": int(next_state.get("revision") or 0) + 1,
+                        "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "status": "underdetermined",
+                        "provisionalCandidateId": next_state.get("selectedCandidateId"),
+                        "selectedCandidateId": None,
+                        "selectionConfidence": "none",
+                        "reportGate": {
+                            "fullReportAllowed": False,
+                            "reason": (
+                                "A post-selection check did not fit the proposed timing. The system "
+                                "will not force the chart; provide one new dated event from a different "
+                                "area or review the reported birth time."
+                            ),
+                            "nextStep": "provide_more_precise_or_additional_event_evidence",
+                        },
+                    }
+                )
+                message = (
+                    "Thanks for checking. The mismatch is recorded, so the chart will not be forced. "
+                    "Add one new dated event to continue the birth-time check."
+                )
+            else:
+                next_state.update(
+                    {
+                        "revision": int(next_state.get("revision") or 0) + 1,
+                        "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "status": "corrected_chart_ready",
+                        "reportGate": {
+                            "fullReportAllowed": True,
+                            "reason": (
+                                "The bounded candidate passed the dated-event and reserved-holdout "
+                                "checks, was recalculated, and the user confirmed the post-selection "
+                                "retrospective checkpoint."
+                            ),
+                            "nextStep": "full_report",
+                        },
+                    }
+                )
+                message = "The corrected birth-time checkpoint is confirmed. The full Vedic report can now begin."
+            next_state["rectificationPlan"] = self.rectification._build_rectification_plan(
+                next_state
+            )
+            return await self._persist_rectification_state(
+                session_id,
+                next_state,
+                message=message,
+                owner_user_id=owner_user_id,
+            )
+
+    async def _persist_rectification_state(
+        self,
+        session_id: str,
+        state: dict[str, Any],
+        *,
+        message: str,
+        owner_user_id: str | None,
+    ) -> SkillSessionResponse:
+        self.workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        )
+        self._sync_chart_record_rectification(session_id, state)
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            "chart_rectification_state.json",
+            producer="vedicdust-rectification-confirmation",
+        )
+        record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if not record_text:
+            raise ValueError("rectification confirmation did not persist chart_record.json")
+        record = ChartRecord.model_validate_json(record_text)
+        identity = ChartRecordIdentity(
+            reading_session_id=session_id,
+            chart_record_id=record.chart_record_id,
+            subject_id=record.subject.subject_id,
+            revision=record.revision,
+        )
+        self._write_reading_session(
+            session_id,
+            identity=identity,
+            locale=self.workspace.read_session_locale(session_id),
+            stage="rectification",
+            rectification_status=self._chart_rectification_status(record_text),
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            READING_SESSION_JSON,
+            producer="vedicdust-reading-orchestrator",
+        )
+        self.workspace.write_session_manifest(
+            session_id,
+            locale=self.workspace.read_session_locale(session_id),
+        )
+        await self._sync_metadata(
+            session_id,
+            stage="reader_ready",
+            status="draft",
+            owner_user_id=owner_user_id,
+        )
+        return SkillSessionResponse(
+            session_id=session_id,
+            stage="reader_ready",
+            chat_message=message,
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="chart_rectification_state.json",
         )
@@ -1323,32 +1640,35 @@ class SkillRuntime:
                     "当前盘面尚未通过确定性审计，不能生成完整报告。"
                     f" 审计结果：{findings if isinstance(findings, list) else 'unknown'}"
                 )
+        state_text = (
+            read_artifact_text(session_id, "chart_rectification_state.json")
+            if callable(read_artifact_text)
+            else (session_dir / "chart_rectification_state.json").read_text(encoding="utf-8")
+            if (session_dir / "chart_rectification_state.json").exists()
+            else ""
+        )
+        state = self._json_dict(state_text or "")
+        conclusion = state.get("rectificationConclusion")
+        conclusion = conclusion if isinstance(conclusion, dict) else {}
+        confirmation = conclusion.get("confirmation")
+        confirmation = confirmation if isinstance(confirmation, dict) else {}
+        if state.get("status") == "rectification_confirmation_required" or (
+            confirmation.get("status") == "pending"
+        ):
+            raise ValueError("请先确认阶段性的生时校正结论，再生成完整报告。")
+        state_status = str(state.get("status") or "")
+        raw_state_gate = state.get("reportGate")
+        state_gate: dict[str, object] = raw_state_gate if isinstance(raw_state_gate, dict) else {}
+        if (
+            state_status == "corrected_chart_ready"
+            and state.get("holdoutResult") == "passed"
+            and state_gate.get("fullReportAllowed") is True
+        ):
+            if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
+                self._prepare_judgement_context(session_id, user_message)
+            return
         result_path = session_dir / "prevalidation_result.json"
         if not result_path.exists():
-            state_path = session_dir / "chart_rectification_state.json"
-            state_text = (
-                read_artifact_text(session_id, "chart_rectification_state.json")
-                if callable(read_artifact_text)
-                else state_path.read_text(encoding="utf-8")
-                if state_path.exists()
-                else ""
-            )
-            state = self._json_dict(state_text or "")
-            state_status = str(state.get("status") or "")
-            raw_state_gate = state.get("reportGate")
-            state_gate: dict[str, object] = (
-                raw_state_gate if isinstance(raw_state_gate, dict) else {}
-            )
-            if (
-                state_status == "corrected_chart_ready"
-                and state.get("holdoutResult") == "passed"
-                and state_gate.get("fullReportAllowed") is True
-            ):
-                if callable(read_artifact_text) and read_artifact_text(
-                    session_id, CHART_RECORD_JSON
-                ):
-                    self._prepare_judgement_context(session_id, user_message)
-                return
             raise ValueError(
                 "请先运行验前事并提交反馈。完整报告需要 prevalidation_result.json "
                 "确认输入风险和命中率后才能生成。"
@@ -1516,6 +1836,7 @@ class SkillRuntime:
         owner_user_id: str | None = None,
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
+        self.assert_core_readiness(input_data.session_id, input_data.user_message)
         locale = self._run_locale(input_data)
         batches = batches or self.core_batches(input_data.user_message, locale)
         expected = set(self.core_batch_files(batch))
@@ -2749,7 +3070,10 @@ Return JSON only:
             decision_status = "input_resolution_required"
         elif rectification_state_status == "calculation_failed":
             decision_status = "calculation_failed"
-        elif rectification_state_status == "corrected_chart_ready":
+        elif rectification_state_status in {
+            "rectification_confirmation_required",
+            "corrected_chart_ready",
+        }:
             decision_status = "bounded_interval"
         elif rectification_state_status == "underdetermined":
             decision_status = "underdetermined"
@@ -4006,6 +4330,8 @@ User request:
             or not dossier_json
         ):
             return
+
+        self.assert_core_readiness(session_id)
 
         record = ChartRecord.model_validate_json(chart_record_json)
         context = JudgementContext.model_validate_json(judgement_context_json)

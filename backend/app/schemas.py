@@ -123,6 +123,32 @@ class RectificationInterviewInput(ApiModel):
     reset_skipped: bool = Field(default=False, alias="resetSkipped")
 
 
+RectificationConfirmationAnswer = Literal["accurate", "partly", "inaccurate"]
+
+
+class RectificationConfirmationResponse(ApiModel):
+    example_id: str = Field(alias="exampleId", min_length=1, max_length=80)
+    answer: RectificationConfirmationAnswer
+    note: str = Field(default="", max_length=400)
+
+
+class RectificationConfirmationInput(ApiModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    expected_chart_revision: int | None = Field(
+        default=None,
+        alias="expectedChartRevision",
+        ge=1,
+    )
+    responses: list[RectificationConfirmationResponse] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_unique_examples(self) -> RectificationConfirmationInput:
+        example_ids = [response.example_id for response in self.responses]
+        if len(example_ids) != len(set(example_ids)):
+            raise ValueError("rectification confirmation responses must be distinct")
+        return self
+
+
 class ConsultationQuestionInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
     question: str = Field(min_length=3, max_length=1200)

@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from app.schemas import BirthInput, ReaderRelationship
 from app.services.life_event_rectification import build_life_event_focus
+from app.services.rectification_confirmation import build_rectification_conclusion
 from app.vedicdust.rectification_policy import (
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_HOLDOUT_POLICY_ID,
@@ -701,15 +702,16 @@ class ChartRectificationService:
             {
                 "revision": int(next_state.get("revision") or 0) + 1,
                 "updatedAt": self._now(),
-                "status": "corrected_chart_ready",
+                "status": "rectification_confirmation_required",
                 "activeCandidateId": selected_id,
                 "reportGate": {
-                    "fullReportAllowed": True,
+                    "fullReportAllowed": False,
                     "reason": (
                         "Calibration events selected a bounded candidate, the reserved event "
-                        "validated it, and the chart was recalculated."
+                        "validated it, and the chart was recalculated. Review the corrected time "
+                        "and the post-selection retrospective checks before the full report."
                     ),
-                    "nextStep": "full_report",
+                    "nextStep": "confirm_rectification_result",
                 },
                 "activeChartRevision": {
                     "revision": chart_revision,
@@ -718,6 +720,11 @@ class ChartRectificationService:
                 },
                 "rectifiedInput": rectified_input.model_dump(by_alias=True),
             }
+        )
+        next_state["rectificationConclusion"] = build_rectification_conclusion(
+            next_state,
+            rectified_input=rectified_input,
+            chart_revision=chart_revision,
         )
         next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
         return next_state
@@ -785,6 +792,17 @@ class ChartRectificationService:
                         ),
                     }
                 )
+        elif status == "rectification_confirmation_required":
+            next_decision.update(
+                {
+                    "nextStep": "confirm_rectification_result",
+                    "timeConfidence": "medium",
+                    "reportAllowed": False,
+                    "reportScope": "prevalidation_or_d1_only",
+                    "reason": gate.get("reason")
+                    or "Review the rectification conclusion before the full report.",
+                }
+            )
         elif status == "corrected_chart_ready":
             next_decision.update(
                 {
@@ -1021,9 +1039,16 @@ class ChartRectificationService:
         if status == "not_required":
             action = "full_report"
             directive = "Rectification is not required; run standard prevalidation only."
+        elif status == "rectification_confirmation_required":
+            action = "confirm_rectification_result"
+            directive = (
+                "The deterministic candidate has been recalculated. Present the bounded "
+                "representative time and post-selection retrospective checks; do not start the "
+                "full report until the user confirms or supplies another dated event."
+            )
         elif status == "corrected_chart_ready":
             action = "full_report"
-            directive = "Rectified chart has been recalculated; use activeChartRevision as source."
+            directive = "Rectified chart has been confirmed; use activeChartRevision as source."
         elif status == "needs_recalculation":
             action = "apply_candidate_recalculation"
             directive = "Selected bounded candidate must be recalculated before report synthesis."
