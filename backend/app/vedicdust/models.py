@@ -687,7 +687,14 @@ class LifeEvent(ContractModel):
 
 class RectificationEvidenceObservation(ContractModel):
     observation_id: str
-    component: Literal["dasha", "varga", "double_transit"]
+    component: Literal[
+        "dasha",
+        "varga",
+        "double_transit",
+        "node_transit",
+        "sade_sati",
+        "kp_sub_lord",
+    ]
     outcome: Literal["support", "contradiction", "missing"]
     weight: float = Field(ge=0, le=1)
     details: dict[str, Any] = Field(default_factory=dict)
@@ -778,6 +785,9 @@ class CandidateInterval(ContractModel):
     left_boundary_uncertainty: TimeRange | None = None
     eligible: bool = True
     exclusion_reason: str | None = None
+    ayanamsa_risk: Literal["none", "medium", "high"] = "none"
+    chara_dasha_score: float | None = None
+    dasha_system_agreement: Literal["agrees", "disagrees", "not_applicable"] = "not_applicable"
 
     @model_validator(mode="after")
     def validate_representative_moment(self) -> CandidateInterval:
@@ -842,7 +852,7 @@ class RectificationDecision(ContractModel):
 
 
 class RectificationRecord(ContractModel):
-    schema_version: Literal["vedicdust-rectification/1.1.0"] = "vedicdust-rectification/1.1.0"
+    schema_version: Literal["vedicdust-rectification/1.4.0"] = "vedicdust-rectification/1.4.0"
     selection_policy_id: str | None = None
     event_mapping_id: str | None = None
     holdout_policy_id: str | None = None

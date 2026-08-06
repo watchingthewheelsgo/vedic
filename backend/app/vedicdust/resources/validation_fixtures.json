@@ -107,6 +107,26 @@
       "description": "Checks that rectification scores only the declared event-domain varga structure."
     },
     {
+      "fixtureId": "calculator.rectification-kp-sub-lord-corroboration",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_alone_is_suppressed",
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_counts_when_corroborated",
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_not_matched_stays_missing"
+      ],
+      "description": "Checks that KP cuspal sub-lord activation cannot support an event alone and only counts once corroborated by Dasha, varga, or double-transit evidence."
+    },
+    {
+      "fixtureId": "calculator.rectification-chara-dasha-system-agreement",
+      "fixtureKind": "contract",
+      "testNodes": [
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_chara_dasha_score_activates_on_matched_rasi",
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_chara_dasha_score_stays_zero_when_not_activated",
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_dasha_system_agreement_flags_preferred_candidate"
+      ],
+      "description": "Checks that Jaimini Chara Dasha activation is scored independently of the main additive score and that dashaSystemAgreement correctly flags whether Vimshottari and Chara Dasha prefer the same candidate."
+    },
+    {
       "fixtureId": "calculator.sade-sati-sign-phase",
       "fixtureKind": "contract",
       "testNodes": [

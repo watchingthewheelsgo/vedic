@@ -697,6 +697,7 @@ class VedicCalculator:
         )
         for index, item in enumerate(sorted_items):
             item["candidateId"] = self._candidate_label(index)
+            item["ayanamsaRisk"] = self._ayanamsa_risk_from_signature(item.get("signature") or {})
         return sorted_items
 
     @staticmethod
@@ -786,6 +787,56 @@ class VedicCalculator:
                         "scoringError": str(exc),
                     }
                 )
+        VedicCalculator._apply_dasha_system_agreement(candidates)
+
+    @staticmethod
+    def _apply_dasha_system_agreement(candidates: list[dict[str, Any]]) -> None:
+        """Flag whether Vimshottari and Jaimini Chara Dasha prefer the same candidate.
+
+        Chara Dasha is a second, independent dasha system; two systems agreeing on
+        the same candidate is a stronger signal than either alone, but the plan
+        explicitly keeps this comparison out of the additive support/contradiction
+        score (it's a cross-check, not more evidence for a single hypothesis).
+        """
+        main_scored = [
+            candidate
+            for candidate in candidates
+            if isinstance(candidate.get("aggregateScore"), (int, float))
+        ]
+        chara_scored = [
+            candidate
+            for candidate in candidates
+            if isinstance(candidate.get("charaDashaScore"), (int, float))
+        ]
+        if not main_scored or not chara_scored:
+            return
+        main_preferred = max(main_scored, key=lambda candidate: candidate["aggregateScore"])
+        chara_preferred = max(chara_scored, key=lambda candidate: candidate["charaDashaScore"])
+        main_preferred["dashaSystemAgreement"] = (
+            "agrees"
+            if main_preferred.get("candidateId") == chara_preferred.get("candidateId")
+            else "disagrees"
+        )
+
+    @staticmethod
+    def _ayanamsa_risk_from_signature(signature: dict[str, Any]) -> str:
+        """Classify a candidate's ayanamsa-boundary risk from its rectification signature.
+
+        This is a reliability caveat, not evidence for or against any life event —
+        it must stay separate from the additive support/contradiction scoring so it
+        cannot distort holdout margins. Consumers should use it to withhold or
+        downgrade confidence, not to rank candidates.
+        """
+        ayanamsa_check = signature.get("ayanamsaCrossCheck")
+        if not isinstance(ayanamsa_check, dict):
+            return "none"
+        if not ayanamsa_check.get("lagnaSignAgrees", True):
+            return "high"
+        lagna_degree = float(signature.get("lagnaDegree", 0) or 0)
+        lagna_distance = min(lagna_degree, 30 - lagna_degree)
+        if lagna_distance <= 1.0:
+            return "medium"
+        return "none"
 
     @staticmethod
     def _candidate_label(index: int) -> str:

@@ -72,6 +72,11 @@ except ImportError as e:
     _special_lagnas_pyjhora = None
     _vargeeya_bala_pyjhora = None
     _load_errors.append(f"extras_pyjhora: {e}")
+try:
+    from .kp_pyjhora import calc_kp_sub_lords as _kp_pyjhora
+except ImportError as e:
+    _kp_pyjhora = None
+    _load_errors.append(f"kp_pyjhora: {e}")
 
 # Fail-fast: 核心模块必须全部加载
 _REQUIRED = {
@@ -923,6 +928,7 @@ def calculate_rectification_signature(
         utc_offset_seconds=utc_offset_seconds,
     )
     lagna = calc_lagna(jd, lat, lon)
+    ayanamsa_check = ayanamsa_cross_check(jd, lagna["longitude"])
     planets = {name: calc_planet(jd, planet_id) for name, planet_id in PLANETS_SWE.items()}
     rahu = calc_planet(jd, swe.MEAN_NODE)
     ketu_longitude = (float(rahu["longitude"]) + 180.0) % 360.0
@@ -955,9 +961,27 @@ def calculate_rectification_signature(
         chart_factors=factors,
         second=second,
     )
+    kp_cuspal_sub_lords = None
+    if _kp_pyjhora is not None:
+        try:
+            kp_cuspal_sub_lords = _kp_pyjhora(
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                lat,
+                lon,
+                timezone_offset,
+                second=second,
+            )
+        except Exception as exc:
+            print(f"⚠️ KP副星主计算失败，跳过: {exc}", file=sys.stderr)
     signature = {
         "lagnaSign": lagna.get("sign"),
         "lagnaDegree": round(float(lagna.get("degree", 0)), 4),
+        "ayanamsaCrossCheck": ayanamsa_check,
+        "kpCuspalSubLords": kp_cuspal_sub_lords,
         "moonSign": moon.get("sign"),
         "moonNakshatra": moon_nakshatra.get("name"),
         "moonPada": moon_nakshatra.get("pada"),

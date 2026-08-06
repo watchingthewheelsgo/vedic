@@ -3134,6 +3134,18 @@ Return JSON only:
                 )
             record.status = "rectified"
             record.rectification.decision.unresolved_questions = []
+            if selected_candidate.ayanamsa_risk == "high":
+                if record.rectification.decision.confidence.rank > ConfidenceGrade.PROVISIONAL.rank:
+                    record.rectification.decision.confidence = ConfidenceGrade.PROVISIONAL
+                record.rectification.decision.reasons = [
+                    *record.rectification.decision.reasons,
+                    "Selected candidate sits on an ayanamsa sign-boundary; the sidereal "
+                    "cross-check disagrees with the configured ayanamsa near this candidate's lagna.",
+                ]
+                record.rectification.decision.unresolved_questions = [
+                    "Confirm the birth lagna against an alternate ayanamsa before treating "
+                    "this bounded interval as final."
+                ]
             record.rectification.decision.resulting_interval = selected_candidate.interval
             record.rectification.decision.resulting_intervals = []
             if record.canonical_moment is not None:

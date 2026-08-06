@@ -6,8 +6,9 @@ from typing import Any, Mapping
 
 
 RECTIFICATION_RULE_ID = "rectify.event-evidence-ranking"
-RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.9.0"
-RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.2.0"
+RECTIFICATION_KP_RULE_ID = "rectify.kp-sub-lord-corroboration"
+RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.12.0"
+RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.3.0"
 RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.0.0"
 RECTIFICATION_METHOD_MATURITY = "product_hypothesis"
 RECTIFICATION_VALIDATION_STATUS = "internal_regression_only"
@@ -23,6 +24,10 @@ class RectificationScoringPolicy:
     dasha_level_weights: Mapping[str, float]
     varga_lagna_lord_support_weight: float
     double_transit_support_weight: float
+    node_transit_support_weight: float
+    sade_sati_support_weight: float
+    kp_sub_lord_support_weight: float
+    chara_dasha_level_weights: Mapping[str, float]
     minimum_calibration_events: int
     minimum_calibration_categories: int
     event_discrimination_min_margin: float
@@ -37,6 +42,10 @@ RECTIFICATION_SCORING_POLICY = RectificationScoringPolicy(
     dasha_level_weights=MappingProxyType({"md": 0.12, "ad": 0.16, "pd": 0.10}),
     varga_lagna_lord_support_weight=0.08,
     double_transit_support_weight=0.22,
+    node_transit_support_weight=0.11,
+    sade_sati_support_weight=0.09,
+    kp_sub_lord_support_weight=0.10,
+    chara_dasha_level_weights=MappingProxyType({"md": 0.08, "ad": 0.10, "pd": 0.06}),
     minimum_calibration_events=2,
     minimum_calibration_categories=2,
     event_discrimination_min_margin=0.05,
@@ -71,6 +80,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "vargas": ["D10"],
             "karakas": ["Sun", "Saturn", "Mercury"],
             "fields": ["d10Lagna", "d10Structure", "currentDasha"],
+            "sadeSatiRelevant": True,
         },
         "education": {
             "label": "education / examination",
@@ -114,6 +124,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "vargas": ["D30"],
             "karakas": ["Mars", "Saturn"],
             "fields": ["d30Lagna", "d30Structure", "lagnaSign", "currentDasha"],
+            "sadeSatiRelevant": True,
         },
         "family": {
             "label": "family event",
@@ -121,6 +132,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "vargas": ["D12"],
             "karakas": ["Moon", "Sun"],
             "fields": ["d12Lagna", "d12Structure", "lagnaSign", "currentDasha"],
+            "sadeSatiRelevant": True,
         },
         "finance": {
             "label": "finance / income shock",
@@ -128,6 +140,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "vargas": ["D2"],
             "karakas": ["Jupiter", "Venus", "Saturn"],
             "fields": ["d2Lagna", "d2Structure", "currentDasha", "lagnaSign"],
+            "sadeSatiRelevant": True,
         },
         "legal": {
             "label": "legal / dispute",
@@ -149,6 +162,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
                 "lagnaSign",
                 "currentDasha",
             ],
+            "sadeSatiRelevant": True,
         },
         "spiritual": {
             "label": "spiritual turn",

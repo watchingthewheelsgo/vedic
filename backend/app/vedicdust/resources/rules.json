@@ -952,7 +952,7 @@
     },
     {
       "ruleId": "rectify.event-evidence-ranking",
-      "ruleVersion": "1.6.0",
+      "ruleVersion": "1.7.0",
       "title": "Rank birth-time candidates against dated life-event evidence",
       "ruleKind": "judgement",
       "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
@@ -982,7 +982,59 @@
         "Year-only events cannot contribute double-transit support. Month- and day-level events contribute only when the mapped activation remains present at every interval sample.",
         "Every event sample must resolve a complete MD/AD/PD hierarchy; a partial provider result fails candidate scoring instead of silently weakening one candidate.",
         "Candidate ranking uses calibration events only. One score-blind reserved event tests the selected candidate or equivalence class; Agent-authored testimony cannot change candidate rank.",
-        "Automatic selection requires at least two calibration events from at least two distinct mapped life domains. Repeated events from one domain may remain context but cannot manufacture independent breadth."
+        "Automatic selection requires at least two calibration events from at least two distinct mapped life domains. Repeated events from one domain may remain context but cannot manufacture independent breadth.",
+        "Rahu/Ketu transit house activation and Sade Sati phase are secondary, lower-weighted evidence: both reuse the double-transit sampling and stability gates, and Sade Sati only applies to event categories the map marks sadeSatiRelevant since a ~7.5-year window has weak discriminating power for most life domains."
+      ]
+    },
+    {
+      "ruleId": "rectify.kp-sub-lord-corroboration",
+      "ruleVersion": "1.0.0",
+      "title": "Corroborate birth-time candidates with KP cuspal sub-lord activation",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rectification",
+      "requiredEvidenceLayers": ["natal_promise", "timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "corroborate_candidate_intervals_with_kp_sub_lord_activation",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": ["product.vedicdust-consultation-standard-1"],
+      "status": "provisional",
+      "validationFixtureIds": ["calculator.rectification-kp-sub-lord-corroboration"],
+      "limitations": [
+        "This is a distinct methodological lineage from rectify.event-evidence-ranking (Krishnamurti Paddhati cuspal sub-lord theory rather than P.V.R. Narasimha Rao's integrated Parashari approach) and has no dedicated pinned classical KP source in this catalog yet; it is cited against the product consultation standard only, pending a proper KP source citation.",
+        "Cuspal longitudes use PyJHora's bhava-chalita (Placidus-style) KP house computation under this project's standard Lahiri ayanamsa. KP literature also has a distinct 'KP ayanamsa' variant, which is a known but unimplemented alternative; the ayanamsa actually used is recorded explicitly in each observation's details.",
+        "A house's star lord or sub lord activates the house only by being a declared karaka for the event category, ruling one of the event's mapped houses, or occupying one of the event's mapped houses; no other KP techniques (such as ruling planets or significators) are evaluated.",
+        "KP cuspal sub-lord activation can never support an event on its own: it is only counted when at least one of Dasha, varga, or double-transit evidence also supports the same event for the same candidate, since this channel is new and has not independently been validated.",
+        "The score corroborates or withholds corroboration for a candidate interval and cannot by itself prove a birth time."
+      ]
+    },
+    {
+      "ruleId": "rectify.chara-dasha-system-agreement",
+      "ruleVersion": "1.0.0",
+      "title": "Cross-check birth-time candidates against Jaimini Chara Dasha activation",
+      "ruleKind": "judgement",
+      "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
+      "topic": "rectification",
+      "requiredEvidenceLayers": ["natal_promise", "timing"],
+      "allOf": [],
+      "anyOf": [],
+      "noneOf": [],
+      "outputCode": "flag_dasha_system_agreement_between_vimshottari_and_chara_dasha",
+      "evidenceClass": "product_hypothesis",
+      "sourceIds": [
+        "lineage.pvr-integrated-approach-2000-2010",
+        "product.vedicdust-consultation-standard-1"
+      ],
+      "status": "provisional",
+      "validationFixtureIds": ["calculator.rectification-chara-dasha-system-agreement"],
+      "limitations": [
+        "Jaimini Chara Dasha is a rasi-based (sign-based, not planet-based) dasha system, computed using the PVN Rao calculation method (chosen for being gender-neutral and for lineage consistency with the P.V.R. Narasimha Rao source already cited by rectify.event-evidence-ranking); other classical Chara Dasha methods (KN Rao, Raghava Bhatta, Iranganti, MindSutra) exist and would produce different running periods.",
+        "Activation uses rasi occupation of the event's mapped houses, Jaimini rasi drishti (a distinct sign-to-sign aspect rule from Parashari graha drishti, taken directly from PyJHora's own rasi-drishti table rather than re-derived), the rasi lord's karaka relevance, and the rasi lord's house rulership — this is a new, less-established activation heuristic that has not been cross-checked against a professional Jaimini astrologer's judgement.",
+        "This channel does not feed the same additive support/contradiction score as rectify.event-evidence-ranking. It instead flags, per scoring pass, whether the candidate most favored by the primary Vimshottari-based score is also the candidate most favored by this independent Chara Dasha score ('agrees'/'disagrees'), following the professional practice of cross-checking two independent dasha systems rather than combining them into one number.",
+        "Of the three phases in this rectification upgrade (ayanamsa/node/Sade Sati, KP sub-lord, Chara Dasha), this is the least mature: the underlying rasi-drishti and activation rules are the most exposed to methodological disagreement between classical sources, and automated tests cannot catch a subtly wrong variant.",
+        "The flag corroborates or withholds corroboration for the candidate the primary score already selected and cannot by itself prove or select a birth time."
       ]
     },
     {

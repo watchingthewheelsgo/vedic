@@ -40,6 +40,7 @@ from app.vedicdust.models import (
 )
 from app.vedicdust.rectification_policy import (
     RECTIFICATION_EVENT_MAPPING_ID,
+    RECTIFICATION_KP_RULE_ID,
     RECTIFICATION_RULE_ID,
     RECTIFICATION_SCORING_POLICY,
     RECTIFICATION_SCORING_POLICY_ID,
@@ -4310,6 +4311,323 @@ def test_rectification_varga_score_uses_domain_house_structure(monkeypatch) -> N
         if item["observationId"].endswith("d10.domain_activation")
     )
     assert varga_observation["details"]["activatedPeriodLords"] == {"Mars": ["occupies_H10"]}
+
+
+def _kp_neutral_dasha(*args, **kwargs):
+    # Mars in this fixture's D1/D9 frame occupies house 3, rules none of the
+    # marriage houses (7, 2, 11), and its 4th/7th/8th-house aspects land on
+    # houses 9/6/10 -- so it cannot activate the marriage event map at all.
+    return [
+        {"mahadasha": "Mars", "antardasha": "Mars", "pratyantardasha": "Mars"} for _ in args[-1]
+    ]
+
+
+def _kp_neutral_transits(lagna_index, moon_index, *, as_of):
+    return {
+        "double_transit_houses": [],
+        "Rahu": {"house": 3},
+        "Ketu": {"house": 9},
+        "sade_sati": "inactive",
+    }
+
+
+def test_rectification_kp_sub_lord_alone_is_suppressed(monkeypatch) -> None:
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    score = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Mars": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Mars": 2}},
+            "kpCuspalSubLords": {
+                "ayanamsa": "Lahiri",
+                "cuspMethod": "bhava_chalita_kp_placidus",
+                "houses": [{"house": 7, "starLord": "Saturn", "subLord": "Venus"}],
+            },
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+
+    kp_observation = next(
+        item
+        for item in score["observations"]
+        if item["observationId"].endswith("kp_sub_lord.activation")
+    )
+    assert kp_observation["outcome"] == "missing"
+    assert kp_observation["weight"] == 0.0
+    assert kp_observation["details"]["suppressedReason"] == (
+        "kp_sub_lord_requires_corroboration_from_dasha_varga_or_double_transit"
+    )
+    assert score["supportScore"] == 0.0
+    assert score["score"] == 0.0
+
+
+def test_rectification_kp_sub_lord_counts_when_corroborated(monkeypatch) -> None:
+    def fake_dasha(*args, **kwargs):
+        return [
+            {"mahadasha": "Venus", "antardasha": "Venus", "pratyantardasha": "Venus"}
+            for _ in args[-1]
+        ]
+
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    score = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Venus": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Venus": 2}},
+            "kpCuspalSubLords": {
+                "ayanamsa": "Lahiri",
+                "cuspMethod": "bhava_chalita_kp_placidus",
+                "houses": [{"house": 7, "starLord": "Mercury", "subLord": "Venus"}],
+            },
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+
+    kp_observation = next(
+        item
+        for item in score["observations"]
+        if item["observationId"].endswith("kp_sub_lord.activation")
+    )
+    assert kp_observation["outcome"] == "support"
+    assert kp_observation["weight"] == RECTIFICATION_SCORING_POLICY.kp_sub_lord_support_weight
+    assert kp_observation["details"]["matchedHouses"] == [
+        {
+            "house": 7,
+            "starLord": "Mercury",
+            "subLord": "Venus",
+            "matchedDimensions": ["subLord_karaka", "subLord_rules_relevant_house"],
+        }
+    ]
+    assert score["supportScore"] >= RECTIFICATION_SCORING_POLICY.kp_sub_lord_support_weight
+    assert score["ruleIds"] == [RECTIFICATION_RULE_ID, RECTIFICATION_KP_RULE_ID]
+
+
+def test_rectification_kp_sub_lord_alone_is_suppressed_omits_kp_rule_id(monkeypatch) -> None:
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    score = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Mars": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Mars": 2}},
+            "kpCuspalSubLords": {
+                "ayanamsa": "Lahiri",
+                "cuspMethod": "bhava_chalita_kp_placidus",
+                "houses": [{"house": 7, "starLord": "Saturn", "subLord": "Venus"}],
+            },
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+
+    assert score["ruleIds"] == [RECTIFICATION_RULE_ID]
+
+
+def test_rectification_kp_sub_lord_not_matched_stays_missing(monkeypatch) -> None:
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    score = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Mars": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Mars": 2}},
+            "kpCuspalSubLords": {
+                "ayanamsa": "Lahiri",
+                "cuspMethod": "bhava_chalita_kp_placidus",
+                "houses": [{"house": 7, "starLord": "Sun", "subLord": "Mercury"}],
+            },
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+
+    kp_observation = next(
+        item
+        for item in score["observations"]
+        if item["observationId"].endswith("kp_sub_lord.activation_not_observed")
+    )
+    assert kp_observation["outcome"] == "missing"
+    assert kp_observation["details"]["reason"] == "positive_activation_rule_not_matched"
+
+
+def _chara_dasha_stable_rasi(rasi_name):
+    def _mock(*args, **kwargs):
+        return [
+            {"mahaRasi": rasi_name, "antarRasi": rasi_name, "pratyantarRasi": rasi_name}
+            for _ in args[-1]
+        ]
+
+    return _mock
+
+
+def test_rectification_chara_dasha_score_activates_on_matched_rasi(monkeypatch) -> None:
+    # Libra (lord Venus) from an Aries lagna occupies house 7, is aspected by
+    # Jaimini rasi drishti onto houses 2/11, is ruled by a marriage karaka
+    # (Venus), and rules houses 2 and 7 -- all four dimensions fire at once for
+    # every Chara Dasha level, so this is a clean "fully activated" fixture.
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    monkeypatch.setattr(
+        "app.calculator.chara_dasha_pyjhora.calculate_chara_dasha_lords_at",
+        _chara_dasha_stable_rasi("Libra"),
+    )
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    result = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Mars": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Mars": 2}},
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )
+
+    assert result["charaDashaScore"] == pytest.approx(0.24)
+    diagnostic = result["charaDashaDiagnostics"][0]
+    assert diagnostic["score"] == pytest.approx(0.24)
+    for level in diagnostic["levels"]:
+        assert level["outcome"] == "support"
+        assert level["rasi"] == "Libra"
+        assert level["matchedDimensions"] == ["occupant", "rasi_drishti", "karaka", "lord"]
+
+
+def test_rectification_chara_dasha_score_stays_zero_when_not_activated(monkeypatch) -> None:
+    # Gemini (lord Mercury) from an Aries lagna occupies house 3, aspects
+    # houses 6/9/12, and its lord Mercury is neither a marriage karaka nor a
+    # ruler of houses 7/2/11 -- none of the four activation dimensions fire.
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    monkeypatch.setattr(
+        "app.calculator.chara_dasha_pyjhora.calculate_chara_dasha_lords_at",
+        _chara_dasha_stable_rasi("Gemini"),
+    )
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    result = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Mars": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Mars": 2}},
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )
+
+    assert result["charaDashaScore"] == 0.0
+    diagnostic = result["charaDashaDiagnostics"][0]
+    assert diagnostic["score"] == 0.0
+    for level in diagnostic["levels"]:
+        assert level["outcome"] == "not_observed"
+        assert level["weight"] == 0.0
+        assert level["matchedDimensions"] == []
+
+
+def test_rectification_chara_dasha_score_is_none_when_calculation_fails(monkeypatch) -> None:
+    # A total Chara Dasha calculation failure must report `None`, not `0.0` --
+    # 0.0 is indistinguishable from "computed successfully, found no
+    # activation", which would let a broken calculation silently masquerade
+    # as a real (negative) cross-check result in `dashaSystemAgreement`.
+    def _failing_chara_dasha(*args, **kwargs):
+        raise RuntimeError("PyJHora Chara Dasha lookup failed")
+
+    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
+    monkeypatch.setattr(
+        "app.calculator.chara_dasha_pyjhora.calculate_chara_dasha_lords_at",
+        _failing_chara_dasha,
+    )
+    ledger = parse_life_event_ledger("2018年10月 结婚")
+
+    result = score_candidate_events(
+        candidate_id="candidate-a",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": {"Mars": 2, "Moon": 0},
+            "d9Lagna": "Aries",
+            "vargaPlanetSignIndices": {"D9": {"Mars": 2}},
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )
+
+    assert result["charaDashaScore"] is None
+    diagnostic = result["charaDashaDiagnostics"][0]
+    assert diagnostic["score"] == 0.0
+    for level in diagnostic["levels"]:
+        assert level["outcome"] == "unavailable"
+        assert level["reason"] == "period_rasi_unavailable"
+
+
+def test_rectification_dasha_system_agreement_flags_preferred_candidate() -> None:
+    disagreeing = [
+        {"candidateId": "a", "aggregateScore": 0.5, "charaDashaScore": 0.1},
+        {"candidateId": "b", "aggregateScore": 0.3, "charaDashaScore": 0.4},
+    ]
+    VedicCalculator._apply_dasha_system_agreement(disagreeing)
+    assert disagreeing[0]["dashaSystemAgreement"] == "disagrees"
+    assert "dashaSystemAgreement" not in disagreeing[1]
+
+    agreeing = [
+        {"candidateId": "a", "aggregateScore": 0.5, "charaDashaScore": 0.4},
+        {"candidateId": "b", "aggregateScore": 0.3, "charaDashaScore": 0.1},
+    ]
+    VedicCalculator._apply_dasha_system_agreement(agreeing)
+    assert agreeing[0]["dashaSystemAgreement"] == "agrees"
+    assert "dashaSystemAgreement" not in agreeing[1]
+
+    unavailable = [
+        {"candidateId": "a", "aggregateScore": 0.5, "charaDashaScore": None},
+        {"candidateId": "b", "aggregateScore": 0.3, "charaDashaScore": 0.4},
+    ]
+    VedicCalculator._apply_dasha_system_agreement(unavailable)
+    assert unavailable[0]["dashaSystemAgreement"] == "disagrees"
+    assert "dashaSystemAgreement" not in unavailable[1]
 
 
 def test_birth_input_context_includes_life_event_ledger() -> None:

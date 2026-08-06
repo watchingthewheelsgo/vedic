@@ -521,6 +521,30 @@
           ],
           "default": null,
           "title": "Exclusionreason"
+        },
+        "ayanamsaRisk": {
+          "default": "none",
+          "enum": ["none", "medium", "high"],
+          "title": "Ayanamsarisk",
+          "type": "string"
+        },
+        "charaDashaScore": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Charadashascore"
+        },
+        "dashaSystemAgreement": {
+          "default": "not_applicable",
+          "enum": ["agrees", "disagrees", "not_applicable"],
+          "title": "Dashasystemagreement",
+          "type": "string"
         }
       },
       "required": ["candidateId", "interval", "representativeMoment", "fingerprint"],
@@ -1144,7 +1168,7 @@
           "type": "string"
         },
         "component": {
-          "enum": ["dasha", "varga", "double_transit"],
+          "enum": ["dasha", "varga", "double_transit", "node_transit", "sade_sati", "kp_sub_lord"],
           "title": "Component",
           "type": "string"
         },
@@ -1173,8 +1197,8 @@
       "additionalProperties": false,
       "properties": {
         "schemaVersion": {
-          "const": "vedicdust-rectification/1.1.0",
-          "default": "vedicdust-rectification/1.1.0",
+          "const": "vedicdust-rectification/1.4.0",
+          "default": "vedicdust-rectification/1.4.0",
           "title": "Schemaversion",
           "type": "string"
         },

@@ -2304,6 +2304,21 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                 left_boundary_uncertainty=_boundary_range(
                     raw.get("leftBoundaryUncertainty"), source.timezone_id
                 ),
+                ayanamsa_risk=(
+                    str(raw["ayanamsaRisk"])
+                    if raw.get("ayanamsaRisk") in {"none", "medium", "high"}
+                    else "none"
+                ),
+                chara_dasha_score=(
+                    float(raw["charaDashaScore"])
+                    if raw.get("charaDashaScore") is not None
+                    else None
+                ),
+                dasha_system_agreement=(
+                    str(raw["dashaSystemAgreement"])
+                    if raw.get("dashaSystemAgreement") in {"agrees", "disagrees", "not_applicable"}
+                    else "not_applicable"
+                ),
             )
         )
     return result

@@ -14,6 +14,7 @@ from app.vedicdust.rectification_policy import (
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_EVENT_RULES,
     RECTIFICATION_HOLDOUT_POLICY_ID,
+    RECTIFICATION_KP_RULE_ID,
     RECTIFICATION_RULE_ID,
     RECTIFICATION_SOURCE_IDS,
     RECTIFICATION_SCORING_POLICY,
@@ -179,7 +180,13 @@ def score_candidate_events(
         if isinstance(event, dict) and event.get("role") in {"calibration", "holdout"}
     ]
     if not events:
-        return {"evidenceScores": [], "aggregateScore": None, "holdoutScore": None}
+        return {
+            "evidenceScores": [],
+            "aggregateScore": None,
+            "holdoutScore": None,
+            "charaDashaScore": None,
+            "charaDashaDiagnostics": [],
+        }
 
     local_timezone = pytz.timezone(timezone_id)
     event_local_moments = [_event_midpoint(event) for event in events]
@@ -195,6 +202,7 @@ def score_candidate_events(
         event_period_sample_indices.append((start_index, len(event_period_utc_moments)))
     localized_birth = _localized_birth_moment(representative_moment, local_timezone)
     from app.calculator.dasha_pyjhora import calculate_dasha_lords_at
+    from app.calculator.chara_dasha_pyjhora import calculate_chara_dasha_lords_at, rasi_drishti
     from app.calculator.engine import SPECIAL_DRISHTI, calc_transits
 
     dasha_lords = calculate_dasha_lords_at(
@@ -213,6 +221,28 @@ def score_candidate_events(
         raise RuntimeError(
             "Vimshottari event lookup returned an incomplete event-boundary result set"
         )
+    chara_dasha_periods: list[dict[str, Any]] | None
+    try:
+        chara_dasha_periods = calculate_chara_dasha_lords_at(
+            localized_birth.year,
+            localized_birth.month,
+            localized_birth.day,
+            localized_birth.hour,
+            localized_birth.minute,
+            latitude,
+            longitude,
+            localized_birth.utcoffset().total_seconds() / 3600.0,
+            event_period_utc_moments,
+            birth_second=localized_birth.second,
+        )
+        if len(chara_dasha_periods) != len(event_period_utc_moments):
+            raise RuntimeError(
+                "Chara Dasha event lookup returned an incomplete event-boundary result set"
+            )
+    except Exception:
+        # Chara Dasha is a diagnostic-only, non-additive signal (see below); a
+        # calculation failure must not break the primary Vimshottari-based score.
+        chara_dasha_periods = None
     for sample_index, period in enumerate(dasha_lords):
         missing_levels = [
             level
@@ -236,10 +266,16 @@ def score_candidate_events(
     if not isinstance(varga_planet_signs, dict):
         raise RuntimeError("rectification signature has no divisional planetary sign map")
     evidence_scores: list[dict[str, Any]] = []
+    chara_dasha_event_scores: list[dict[str, Any]] = []
     for event, event_local, sample_range in zip(
         events, event_local_moments, event_period_sample_indices, strict=True
     ):
         sample_periods = dasha_lords[sample_range[0] : sample_range[1]]
+        chara_sample_periods = (
+            chara_dasha_periods[sample_range[0] : sample_range[1]]
+            if chara_dasha_periods is not None
+            else []
+        )
         rules = event.get("rectificationRules") or RECTIFICATION_EVENT_RULES["unknown"]
         relevant_houses = {int(value) for value in rules.get("houses") or []}
         karakas = {str(value) for value in rules.get("karakas") or []}
@@ -509,6 +545,338 @@ def score_candidate_events(
                 )
             )
 
+        node_house_samples = [
+            {
+                int(transit[node]["house"])
+                for node in ("Rahu", "Ketu")
+                if isinstance(transit.get(node), dict)
+            }
+            for transit in transit_samples
+        ]
+        observed_node_houses = sorted(set().union(*node_house_samples))
+        stable_node_houses = sorted(
+            set.intersection(*node_house_samples) if node_house_samples else set()
+        )
+        node_activated = relevant_houses & set(stable_node_houses)
+        if event.get("datePrecision") == "year":
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "node_transit.unavailable",
+                    component="node_transit",
+                    outcome="missing",
+                    weight=0.0,
+                    details={
+                        "reason": "reported_year_too_broad_for_transit_evidence",
+                        "observedHouses": observed_node_houses,
+                    },
+                )
+            )
+        elif node_activated:
+            weight = RECTIFICATION_SCORING_POLICY.node_transit_support_weight
+            support_score += weight
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "node_transit.activation",
+                    component="node_transit",
+                    outcome="support",
+                    weight=weight,
+                    details={
+                        "activatedHouses": sorted(node_activated),
+                        "stableAcrossReportedInterval": True,
+                        "sampleCount": len(node_house_samples),
+                    },
+                )
+            )
+        else:
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "node_transit.activation_not_observed",
+                    component="node_transit",
+                    outcome="missing",
+                    weight=0.0,
+                    details={
+                        "reason": (
+                            "activation_not_stable_across_reported_interval"
+                            if relevant_houses and set(observed_node_houses) & relevant_houses
+                            else "positive_activation_rule_not_matched"
+                            if relevant_houses
+                            else "event_category_has_no_house_mapping"
+                        ),
+                        "observedHouses": observed_node_houses,
+                        "stableHouses": stable_node_houses,
+                    },
+                )
+            )
+
+        sade_sati_relevant = bool(rules.get("sadeSatiRelevant"))
+        sade_sati_samples = [
+            str(transit.get("sade_sati") or "inactive") for transit in transit_samples
+        ]
+        distinct_sade_sati_states = sorted(set(sade_sati_samples))
+        if not sade_sati_relevant:
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "sade_sati.not_applicable",
+                    component="sade_sati",
+                    outcome="missing",
+                    weight=0.0,
+                    details={"reason": "event_category_not_sade_sati_relevant"},
+                )
+            )
+        elif event.get("datePrecision") == "year":
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "sade_sati.unavailable",
+                    component="sade_sati",
+                    outcome="missing",
+                    weight=0.0,
+                    details={
+                        "reason": "reported_year_too_broad_for_transit_evidence",
+                        "observedStates": distinct_sade_sati_states,
+                    },
+                )
+            )
+        elif (
+            sade_sati_samples
+            and len(distinct_sade_sati_states) == 1
+            and distinct_sade_sati_states[0] != "inactive"
+        ):
+            weight = RECTIFICATION_SCORING_POLICY.sade_sati_support_weight
+            support_score += weight
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "sade_sati.active",
+                    component="sade_sati",
+                    outcome="support",
+                    weight=weight,
+                    details={
+                        "phase": distinct_sade_sati_states[0],
+                        "stableAcrossReportedInterval": True,
+                        "sampleCount": len(sade_sati_samples),
+                    },
+                )
+            )
+        else:
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "sade_sati.activation_not_observed",
+                    component="sade_sati",
+                    outcome="missing",
+                    weight=0.0,
+                    details={
+                        "reason": (
+                            "phase_changes_within_reported_date_range"
+                            if len(distinct_sade_sati_states) > 1
+                            else "sade_sati_not_active"
+                        ),
+                        "observedStates": distinct_sade_sati_states,
+                    },
+                )
+            )
+
+        kp_data = signature.get("kpCuspalSubLords")
+        if not isinstance(kp_data, dict) or not kp_data.get("houses"):
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "kp_sub_lord.unavailable",
+                    component="kp_sub_lord",
+                    outcome="missing",
+                    weight=0.0,
+                    details={"reason": "kp_calculation_unavailable"},
+                )
+            )
+        elif not relevant_houses:
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "kp_sub_lord.activation_not_observed",
+                    component="kp_sub_lord",
+                    outcome="missing",
+                    weight=0.0,
+                    details={"reason": "event_category_has_no_house_mapping"},
+                )
+            )
+        else:
+            cusp_by_house = {int(item["house"]): item for item in kp_data["houses"]}
+            matched_houses: list[dict[str, Any]] = []
+            for house in sorted(relevant_houses):
+                cusp = cusp_by_house.get(house)
+                if not cusp:
+                    continue
+                matched_dimensions: list[str] = []
+                for role, lord in (
+                    ("starLord", cusp.get("starLord")),
+                    ("subLord", cusp.get("subLord")),
+                ):
+                    if not lord:
+                        continue
+                    if lord in karakas:
+                        matched_dimensions.append(f"{role}_karaka")
+                    if any(SIGN_LORDS[(lagna_index + h - 1) % 12] == lord for h in relevant_houses):
+                        matched_dimensions.append(f"{role}_rules_relevant_house")
+                    sign_index = planet_signs.get(lord)
+                    if sign_index is not None:
+                        occupied_house = (int(sign_index) - lagna_index) % 12 + 1
+                        if occupied_house in relevant_houses:
+                            matched_dimensions.append(f"{role}_occupies_relevant_house")
+                if matched_dimensions:
+                    matched_houses.append(
+                        {
+                            "house": house,
+                            "starLord": cusp.get("starLord"),
+                            "subLord": cusp.get("subLord"),
+                            "matchedDimensions": matched_dimensions,
+                        }
+                    )
+            if matched_houses:
+                weight = RECTIFICATION_SCORING_POLICY.kp_sub_lord_support_weight
+                observations.append(
+                    _observation(
+                        candidate_id,
+                        event["eventId"],
+                        "kp_sub_lord.activation",
+                        component="kp_sub_lord",
+                        outcome="support",
+                        weight=weight,
+                        details={
+                            "matchedHouses": matched_houses,
+                            "ayanamsaUsed": kp_data.get("ayanamsa"),
+                            "cuspMethod": kp_data.get("cuspMethod"),
+                        },
+                    )
+                )
+            else:
+                observations.append(
+                    _observation(
+                        candidate_id,
+                        event["eventId"],
+                        "kp_sub_lord.activation_not_observed",
+                        component="kp_sub_lord",
+                        outcome="missing",
+                        weight=0.0,
+                        details={
+                            "reason": "positive_activation_rule_not_matched",
+                            "relevantHouses": sorted(relevant_houses),
+                        },
+                    )
+                )
+
+        # KP is a new, unvalidated evidence channel: it must not be able to carry an
+        # event on its own. If it is the only support source, downgrade it to missing
+        # rather than let it contribute to support_score.
+        kp_support_observations = [
+            item
+            for item in observations
+            if item["outcome"] == "support" and item["component"] == "kp_sub_lord"
+        ]
+        if kp_support_observations:
+            corroborated = any(
+                item["outcome"] == "support"
+                and item["component"] in {"dasha", "varga", "double_transit"}
+                for item in observations
+            )
+            if not corroborated:
+                for item in kp_support_observations:
+                    item["outcome"] = "missing"
+                    item["weight"] = 0.0
+                    item["details"] = {
+                        **item["details"],
+                        "suppressedReason": "kp_sub_lord_requires_corroboration_from_dasha_varga_or_double_transit",
+                    }
+
+        # Jaimini Chara Dasha is a distinct rasi-based dasha system from Vimshottari.
+        # Its activation logic operates on rasis, not planets, so it cannot reuse the
+        # dasha block above: occupation is the rasi's own house position, aspect uses
+        # Jaimini rasi drishti (not Parashari graha drishti), and karaka/lordship look
+        # at the rasi's lord rather than a period-lord planet. Per the plan, this is
+        # kept out of `observations`/support_score entirely (a separate, unvalidated
+        # dasha system should not silently inflate the same additive score) and is
+        # instead surfaced as a standalone per-candidate `charaDashaScore` used only
+        # to compare which candidate each dasha system independently prefers.
+        chara_levels: list[dict[str, Any]] = []
+        for short_level, level in (
+            ("md", "mahaRasi"),
+            ("ad", "antarRasi"),
+            ("pd", "pratyantarRasi"),
+        ):
+            sampled_rasis = [str(period.get(level) or "") for period in chara_sample_periods]
+            distinct_rasis = sorted({rasi for rasi in sampled_rasis if rasi})
+            if not (sampled_rasis and all(sampled_rasis) and len(distinct_rasis) == 1):
+                chara_levels.append(
+                    {
+                        "level": short_level,
+                        "outcome": "unavailable",
+                        "reason": (
+                            "period_changes_within_reported_date_range"
+                            if len(distinct_rasis) > 1
+                            else "period_rasi_unavailable"
+                        ),
+                    }
+                )
+                continue
+            rasi_name = distinct_rasis[0]
+            rasi_index = SIGNS.index(rasi_name)
+            matched_dimensions: list[str] = []
+            occupied_house = (rasi_index - lagna_index) % 12 + 1
+            if occupied_house in relevant_houses:
+                matched_dimensions.append("occupant")
+            aspected_relevant_houses = sorted(
+                relevant_houses
+                & {
+                    (aspected_rasi - lagna_index) % 12 + 1
+                    for aspected_rasi in rasi_drishti(rasi_index)
+                }
+            )
+            if aspected_relevant_houses:
+                matched_dimensions.append("rasi_drishti")
+            rasi_lord = SIGN_LORDS[rasi_index]
+            if rasi_lord in karakas:
+                matched_dimensions.append("karaka")
+            ruled_houses = sorted(
+                house
+                for house in relevant_houses
+                if SIGN_LORDS[(lagna_index + house - 1) % 12] == rasi_lord
+            )
+            if ruled_houses:
+                matched_dimensions.append("lord")
+            weight = RECTIFICATION_SCORING_POLICY.chara_dasha_level_weights[short_level]
+            chara_levels.append(
+                {
+                    "level": short_level,
+                    "rasi": rasi_name,
+                    "outcome": "support" if matched_dimensions else "not_observed",
+                    "weight": weight if matched_dimensions else 0.0,
+                    "matchedDimensions": matched_dimensions,
+                    "aspectedRelevantHouses": aspected_relevant_houses,
+                    "ruledHouses": ruled_houses,
+                }
+            )
+        chara_dasha_event_scores.append(
+            {
+                "eventId": event["eventId"],
+                "role": event.get("role", "calibration"),
+                "score": round(min(sum(item.get("weight", 0.0) for item in chara_levels), 1.0), 3),
+                "levels": chara_levels,
+            }
+        )
+
         semantic_adjustment = _apply_semantic_adjustment(event)
         support_score = round(
             min(sum(item["weight"] for item in observations if item["outcome"] == "support"), 1),
@@ -522,6 +890,12 @@ def score_candidate_events(
             3,
         )
         score = round(max(-1.0, min(1.0, support_score - contradiction_score)), 3)
+        rule_ids = [RECTIFICATION_RULE_ID]
+        if any(
+            item["component"] == "kp_sub_lord" and item["outcome"] == "support"
+            for item in observations
+        ):
+            rule_ids.append(RECTIFICATION_KP_RULE_ID)
         evidence_scores.append(
             {
                 "eventId": event["eventId"],
@@ -533,7 +907,7 @@ def score_candidate_events(
                 "supportScore": support_score,
                 "contradictionScore": contradiction_score,
                 "observations": observations,
-                "ruleIds": [RECTIFICATION_RULE_ID],
+                "ruleIds": rule_ids,
                 "sourceIds": list(RECTIFICATION_SOURCE_IDS),
                 "scoringPolicyId": RECTIFICATION_SCORING_POLICY.policy_id,
                 "eventMappingId": RECTIFICATION_EVENT_MAPPING_ID,
@@ -550,11 +924,20 @@ def score_candidate_events(
 
     calibration = [item["score"] for item in evidence_scores if item["role"] == "calibration"]
     holdout = [item["score"] for item in evidence_scores if item["role"] == "holdout"]
+    chara_dasha_calibration = [
+        item["score"] for item in chara_dasha_event_scores if item["role"] == "calibration"
+    ]
     return {
         "evidenceScores": evidence_scores,
         "aggregateScore": round(sum(calibration) / len(calibration), 3) if calibration else None,
         "holdoutScore": round(sum(holdout) / len(holdout), 3) if holdout else None,
         "scoringPolicy": RECTIFICATION_SCORING_POLICY.policy_id,
+        "charaDashaScore": (
+            round(sum(chara_dasha_calibration) / len(chara_dasha_calibration), 3)
+            if chara_dasha_calibration and chara_dasha_periods is not None
+            else None
+        ),
+        "charaDashaDiagnostics": chara_dasha_event_scores,
     }
 
 
