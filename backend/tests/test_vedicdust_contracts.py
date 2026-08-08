@@ -187,11 +187,22 @@ def test_rectification_life_event_submission_builds_a_parseable_ledger() -> None
     submission = RectificationLifeEventsInput(
         sessionId="session-1",
         events=[
-            {"date": "2012-06", "category": "education", "description": "Graduated"},
-            {"date": "2018-03", "category": "career", "description": "Changed employer"},
+            {
+                "date": "2012-06",
+                "category": "education",
+                "eventSubtype": "graduation",
+                "description": "Graduated",
+            },
+            {
+                "date": "2018-03",
+                "category": "career",
+                "eventSubtype": "job_change",
+                "description": "Changed employer",
+            },
             {
                 "date": "2021-10",
                 "category": "relationship",
+                "eventSubtype": "marriage",
                 "description": "Registered marriage",
             },
         ],
@@ -328,9 +339,9 @@ def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
     assert rectification is not None
     assert rectification.decision.status == "input_resolution_required"
     assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
-    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.12.0"
-    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.3.0"
-    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.0.0"
+    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.13.0"
+    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.5.0"
+    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.1.0"
     assert rectification.method_maturity == "product_hypothesis"
     assert rectification.validation_status == "internal_regression_only"
     assert rectification.source_ids == [

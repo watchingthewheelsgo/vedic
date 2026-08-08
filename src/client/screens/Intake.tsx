@@ -53,7 +53,7 @@ type SelectOption<T extends string = string> = {
   labelKey: string;
 };
 
-type FieldKey = "birthDate" | "birthTime" | "timeSource" | "place" | "submit";
+type FieldKey = "birthDate" | "birthTime" | "place" | "submit";
 type FormErrors = Partial<Record<FieldKey, string>>;
 type AmbiguousTimeChoice = {
   utcOffsetSeconds: number;
@@ -124,8 +124,7 @@ export function Intake() {
     ]
   );
   const birthTimeReady = timePrecision === "unknown" || Boolean(birthTime);
-  const timeSourceReady = timePrecision === "unknown" || Boolean(timeSource);
-  const birthMomentReady = Boolean(birthDate) && birthTimeReady && timeSourceReady;
+  const birthMomentReady = Boolean(birthDate) && birthTimeReady;
   const locationReady = Boolean(place) && locationConfirmed;
   const optionalProfileTouched = Boolean(name || gender || relationship || readingFocus.trim());
   const currentStep = !birthMomentReady ? 1 : !locationReady ? 2 : 3;
@@ -157,9 +156,6 @@ export function Intake() {
     if (timePrecision !== "unknown" && !birthTime) {
       nextErrors.birthTime =
         timePrecision === "part_of_day" ? t("intake.error.birthHour") : t("intake.error.birthTime");
-    }
-    if (timePrecision !== "unknown" && !timeSource) {
-      nextErrors.timeSource = t("intake.error.timeSource");
     }
     if (!place) nextErrors.place = t("intake.error.place");
 
@@ -271,21 +267,9 @@ export function Intake() {
               if (next === "unknown") {
                 setTimeSource("");
                 clearError(setErrors, "birthTime");
-                clearError(setErrors, "timeSource");
               }
             }}
           />
-
-          {timePrecision !== "unknown" && (
-            <BirthTimeSourceField
-              value={timeSource}
-              error={errors.timeSource}
-              onChange={(value) => {
-                setTimeSource(value);
-                clearError(setErrors, "timeSource");
-              }}
-            />
-          )}
 
           {timePrecision === "unknown" && (
             <div className="rounded-[12px] border border-gold/25 bg-gold/10 px-4 py-3 text-[13px] leading-relaxed text-body">
@@ -367,7 +351,10 @@ export function Intake() {
               <summary className="cursor-pointer select-none text-[12px] font-semibold uppercase tracking-[1.4px] text-gold-light outline-none">
                 {t("intake.flow.profile.optional")}
               </summary>
-              <div className="mt-4">
+              <div className="mt-4 grid gap-4">
+                {timePrecision !== "unknown" && (
+                  <BirthTimeSourceField value={timeSource} onChange={setTimeSource} />
+                )}
                 <Field
                   label={t("intake.lifeEvents.label")}
                   hint={t("intake.lifeEvents.hint")}
@@ -603,8 +590,6 @@ function buildBirthInput({
   if (!birthDate) return null;
   if (!place) return null;
   if (timePrecision !== "unknown" && !birthTime) return null;
-  if (timePrecision !== "unknown" && !timeSource) return null;
-
   return {
     birthDate: formatBirthDate(birthDate),
     birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
@@ -615,7 +600,7 @@ function buildBirthInput({
     readingFocus: readingFocus.trim(),
     lifeEvents: "",
     readerRelationship: "self",
-    timeSource: timePrecision === "unknown" ? "时间未知" : timeSource,
+    timeSource: timePrecision === "unknown" ? "时间未知" : timeSource || "未提供",
     ...(utcOffsetSeconds !== null ? { utcOffsetSeconds } : {}),
     locale
   };

@@ -17,10 +17,11 @@ reports and separate career/love report generators are intentionally excluded.
 - Lock Vimshottari to the declared mean-sidereal year, serialize exact MD/AD/PD
   boundaries with historical IANA offsets, and use half-open boundary semantics.
 - Evaluate dated events as uncertainty intervals rather than invented midpoint
-  instants; only Dasha levels stable across the interval can rank candidates.
-- Sample the start, midpoint, and end of each reported event interval. Year-only
-  events cannot add double-transit support, and month/day support requires the
-  mapped activation to remain present at every sample.
+  instants; only a Dasha level whose exact PyJHora period covers the complete
+  interval can rank candidates.
+- Sample start, midpoint, and end only for slow-transit and diagnostic Chara
+  Dasha checks. Year-only events cannot add double-transit support, and month/day
+  support requires the mapped activation to remain present at every sample.
 - Localize every candidate birth moment before requesting its Vimshottari
   hierarchy, so a place hypothesis in another IANA zone cannot be scored with
   the original location's wall-clock fields.
@@ -150,9 +151,9 @@ reports and separate career/love report generators are intentionally excluded.
   Judgement Conclusion, Claim Graph, report evidence, and future-Q&A context.
   Context-only associations and Yogas now use `contextFactIds` and cannot be
   mislabeled as affirmative support by the Agent.
-- Keep rectification discriminator fields aligned with the declared varga-domain map
-  and make event-score audit text describe the actual start/midpoint/end interval
-  samples rather than an invented local-noon instant.
+- Keep rectification discriminator fields aligned with the declared varga-domain map;
+  event-score audits distinguish exact Vimshottari boundary coverage from sampled
+  slow-transit and diagnostic Chara Dasha checks.
 - Preserve the original full-window sensitivity scan as rectification evidence while
   writing a separate active-chart sensitivity contract after selected-interval recalculation;
   judgement now consumes the contract generated from the active canonical chart.
@@ -259,9 +260,9 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
       recalculation, unmaterializable selections, and `reportAllowed` transitions.
 - [x] Make the rectification interview adaptive at the interaction boundary: the
       backend emits one deterministic question, recalculates after the answer, and
-      derives the next question from the updated candidate discriminators. Agent
-      output may only rewrite approved wording; it cannot choose, score, or stop
-      the candidate set.
+      derives and selects the next question from aggregate candidate partitions.
+      The Agent may rewrite only that selected item; it cannot switch to a lower-ranked
+      pool item, invent a domain, inspect chart values, score, or stop the candidate set.
 - [x] Make one-answer rectification mutations concurrency-safe. Each session now
       uses an in-process and Unix file lock, checks the client-observed chart
       revision, records an idempotency fingerprint, and returns the saved session
@@ -269,7 +270,9 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
 - [x] Bind skip actions to the currently issued question and provide a reset path
       when skipped categories exhaust the interview. Accepted Agent evidence is
       normalized into bounded event facts and carried into the typed candidate
-      evidence record without changing deterministic score weights.
+      evidence record without changing deterministic score weights. Users can also
+      clear mistaken event evidence and rebuild rectification from the original
+      reported birth input.
 
 ## P0: judgement and report quality
 
@@ -288,7 +291,7 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
 - [x] Remove circular event confirmation from candidate selection. A user answer to
       a restatement of an event they already submitted is not independent evidence.
       New sessions now rank candidates only from calibration-event calculations,
-      reserve the final event for a blind backend check, and return underdetermined
+      reserve the third eligible submission for a blind backend check, and return underdetermined
       instead of using Reader prose to manufacture an extra vote.
 - [x] Make professional-review fixtures auditable. A fixture label is no longer
       sufficient: directional release evidence must retain protocol, reviewer,
@@ -306,8 +309,9 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
       ineligible instead of leaving a misleading eligible audit record.
 - [x] Close the missing-event runtime gap. Rectification collects three to five
       structured dated events, rejects duplicates, preserves explicit categories,
-      reserves a score-blind holdout, requires calibration-domain breadth, and
-      stops as underdetermined when deterministic evidence is insufficient.
+      preserves meaningful subtypes, reserves a stable score-blind holdout, requires
+      calibration-domain breadth, and continues one answer at a time through round
+      five before stopping as underdetermined when evidence remains insufficient.
 - [x] Separate source-pinned structural method identities for house-lord placement,
       house occupancy, declared graha drishti, eligible varga confirmation, and
       same-sign/kendra-trikona association. They remain provisional and context-only;

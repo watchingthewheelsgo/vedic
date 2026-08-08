@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_SUBTYPES
+
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -75,7 +77,20 @@ class RectificationLifeEventInput(ApiModel):
         pattern=r"^(?:19|20)\d{2}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$"
     )
     category: LifeEventCategory
+    event_subtype: str = Field(
+        alias="eventSubtype",
+        pattern=r"^[a-z][a-z0-9_]{1,39}$",
+    )
     description: str = Field(min_length=3, max_length=240)
+
+    @model_validator(mode="after")
+    def validate_event_subtype(self) -> RectificationLifeEventInput:
+        allowed = RECTIFICATION_EVENT_SUBTYPES.get(self.category, ())
+        if self.event_subtype not in allowed:
+            raise ValueError(
+                f"event subtype {self.event_subtype!r} is not valid for category {self.category!r}"
+            )
+        return self
 
 
 class RectificationLifeEventsInput(ApiModel):
@@ -98,7 +113,12 @@ class RectificationLifeEventsInput(ApiModel):
     @model_validator(mode="after")
     def validate_independent_events(self) -> RectificationLifeEventsInput:
         fingerprints = [
-            (event.date, event.category, " ".join(event.description.casefold().split()))
+            (
+                event.date,
+                event.category,
+                event.event_subtype,
+                " ".join(event.description.casefold().split()),
+            )
             for event in self.events
         ]
         if len(fingerprints) != len(set(fingerprints)):
@@ -109,6 +129,15 @@ class RectificationLifeEventsInput(ApiModel):
         return "\n".join(
             f"{event.date} {event.category}: {event.description.strip()}" for event in self.events
         )
+
+
+class RectificationLifeEventsResetInput(ApiModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    expected_chart_revision: int | None = Field(
+        default=None,
+        alias="expectedChartRevision",
+        ge=1,
+    )
 
 
 class RectificationInterviewInput(ApiModel):

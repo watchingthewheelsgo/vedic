@@ -39,6 +39,7 @@ from app.calculator.dasha_pyjhora import (
     _period_lord_at,
     calculate_dasha_fixed,
     calculate_dasha_lords_at,
+    calculate_dasha_lords_for_intervals,
 )
 from app.calculator.provenance import calculation_runtime_provenance
 from app.calculator.provider_runtime import (
@@ -466,6 +467,35 @@ def test_dasha_event_lookup_rejects_naive_moments() -> None:
             -4.0,
             [datetime(2018, 12, 15, 12)],
         )
+
+
+def test_dasha_interval_lookup_detects_boundaries_missed_by_three_samples() -> None:
+    args = (1990, 3, 15, 12, 0, 31.2304, 121.4737, 8.0)
+    samples = [
+        datetime(2055, 1, 1, 4, tzinfo=timezone.utc),
+        datetime(2055, 7, 1, 4, tzinfo=timezone.utc),
+        datetime(2055, 12, 31, 4, tzinfo=timezone.utc),
+    ]
+    sampled = calculate_dasha_lords_at(*args, samples)
+
+    # All three old sample points report Rahu PD, even though multiple AD/PD
+    # boundaries occur during the year. Exact boundary coverage must withhold it.
+    assert {item["pratyantardasha"] for item in sampled} == {"Rahu"}
+    interval = calculate_dasha_lords_for_intervals(
+        *args,
+        [
+            (
+                datetime(2054, 12, 31, 16, tzinfo=timezone.utc),
+                datetime(2055, 12, 31, 15, 59, 59, tzinfo=timezone.utc),
+            )
+        ],
+    )[0]
+    assert interval == {
+        "mahadasha": "Ketu",
+        "antardasha": None,
+        "pratyantardasha": None,
+        "unstableLevels": ["ad", "pd"],
+    }
 
 
 def test_dasha_adapter_uses_the_profile_mean_sidereal_year() -> None:

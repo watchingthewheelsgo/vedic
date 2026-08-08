@@ -154,11 +154,28 @@ type RectificationState = {
   };
   lifeEventLedger?: {
     events?: Array<{
+      eventId?: string;
       date?: string;
       category?: RectificationLifeEventCategory;
+      eventSubtype?: string;
       description?: string;
     }>;
   };
+  rectificationRounds?: Array<{
+    round?: number;
+    evidenceImpact?: {
+      scoreSpread?: number | null;
+      discriminating?: boolean;
+    };
+    decision?: {
+      outcome?:
+        | "bounded_candidate_selected"
+        | "holdout_failed"
+        | "holdout_inconclusive"
+        | "candidate_scores_separated"
+        | "evidence_recorded_without_required_margin";
+    };
+  }>;
   activeChartRevision?: {
     revision?: number;
     source?: string;
@@ -188,6 +205,16 @@ type RectificationState = {
       holdoutResult?: string;
       method?: string;
     };
+    evidenceHighlights?: Array<{
+      date?: string;
+      datePrecision?: "day" | "month" | "year" | "range";
+      category?: RectificationLifeEventCategory | string;
+      eventSubtype?: string;
+      description?: string;
+      role?: "calibration" | "holdout";
+      result?: "used_for_candidate_comparison" | "passed_reserved_cross_check";
+      usedForSelection?: boolean;
+    }>;
     examples?: Array<{
       exampleId?: string;
       startDate?: string;
@@ -238,10 +265,13 @@ const STAGE_COPY: Record<string, StageCopy> = {
     expected: "Generated immediately after the birth details are accepted."
   },
   reader: {
-    purpose: "Checks a few lived-experience signals before the full reading begins.",
-    userResult: "You get 3-5 short checks to mark as accurate, partly accurate, or inaccurate.",
-    userAction: "Answer one check at a time. The full reading starts after your replies are saved.",
-    expected: "Usually a few minutes while the system prepares your birth-time questions."
+    purpose: "Narrows an uncertain birth-time window using dated events from your life.",
+    userResult:
+      "You receive a bounded time range, or a clear explanation that the evidence is not yet decisive.",
+    userAction:
+      "Choose one event that really happened, then add the date as precisely as you remember it.",
+    expected:
+      "Usually three events, with up to five only when the remaining chart ranges are still difficult to separate."
   },
   judgement: {
     purpose: "Turns qualified chart facts into a small set of traceable conclusions.",
@@ -399,7 +429,8 @@ const VALIDATION_CHOICES: Array<{
   }
 ];
 
-type LifeEventDraft = RectificationLifeEventInput & {
+type LifeEventDraft = Omit<RectificationLifeEventInput, "eventSubtype"> & {
+  eventSubtype?: string;
   category: RectificationLifeEventCategory | "";
   datePrecision: "day" | "month" | "year";
   choiceId: string;
@@ -871,6 +902,7 @@ type RectificationInterviewQuestion = {
   dateLabel: string;
   detailsLabel: string;
   detailsPlaceholder: string;
+  allowedSubtypes?: string[];
 };
 
 type RectificationInterview = {
@@ -879,7 +911,9 @@ type RectificationInterview = {
     | "vedicdust-rectification-interview/1.1.0"
     | "vedicdust-rectification-interview/1.2.0"
     | "vedicdust-rectification-interview/1.3.0"
-    | "vedicdust-rectification-interview/1.4.0";
+    | "vedicdust-rectification-interview/1.4.0"
+    | "vedicdust-rectification-interview/1.5.0"
+    | "vedicdust-rectification-interview/1.6.0";
   title: string;
   intro: string;
   source: string;
@@ -1288,6 +1322,32 @@ export function Session() {
     }
   }
 
+  async function onResetLifeEvents() {
+    if (!authLoaded) {
+      setError("正在确认会话，请稍后再试。");
+      return;
+    }
+    setError("");
+    setSubmittingLifeEvents(true);
+    try {
+      const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
+      const expectedChartRevision = numberLike(chartRecord?.revision);
+      const updated = await api.resetRectificationLifeEvents({
+        sessionId: id,
+        ...(expectedChartRevision != null ? { expectedChartRevision } : {})
+      });
+      setSession(updated);
+      readerStartedRef.current = false;
+      setSelectedStageId("reader");
+    } catch (caught) {
+      setError(
+        userFacingError(caught, "Could not restart the birth-time check. Please try again.")
+      );
+    } finally {
+      setSubmittingLifeEvents(false);
+    }
+  }
+
   async function onSubmitRectificationConfirmation(responses: RectificationConfirmationResponse[]) {
     if (!authLoaded) {
       setError("正在确认会话，请稍后再试。");
@@ -1415,6 +1475,7 @@ export function Session() {
             onValidationFeedbackChange={setValidationFeedback}
             onSubmitFeedback={onSubmitFeedback}
             onSubmitLifeEvents={onSubmitLifeEvents}
+            onResetLifeEvents={onResetLifeEvents}
             onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
             onPrepareRectificationInterview={prepareRectificationInterview}
             onResumeCoreReport={resumeCoreReport}
@@ -2152,6 +2213,7 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange,
   onSubmitFeedback,
   onSubmitLifeEvents,
+  onResetLifeEvents,
   onSubmitRectificationConfirmation,
   onPrepareRectificationInterview,
   onResumeCoreReport,
@@ -2179,6 +2241,7 @@ function WorkshopDetailPanel({
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onResetLifeEvents: () => Promise<void>;
   onSubmitRectificationConfirmation: (
     responses: RectificationConfirmationResponse[]
   ) => Promise<void>;
@@ -2255,6 +2318,7 @@ function WorkshopDetailPanel({
           onValidationFeedbackChange={onValidationFeedbackChange}
           onSubmitFeedback={onSubmitFeedback}
           onSubmitLifeEvents={onSubmitLifeEvents}
+          onResetLifeEvents={onResetLifeEvents}
           onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
           onPrepareRectificationInterview={onPrepareRectificationInterview}
           authLoaded={authLoaded}
@@ -2640,7 +2704,6 @@ function ChartConfirmationRow({
 }
 
 function ChartRectificationSummary({ state }: { state: RectificationState }) {
-  const candidates = state.candidates ?? [];
   const revision = state.activeChartRevision?.revision ?? 0;
   const gateAllowed = state.reportGate?.fullReportAllowed === true;
   const hasEquivalentCandidates = state.status === "multiple_equivalent";
@@ -2680,6 +2743,10 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
               ? t("session.rectification.body.underdetermined")
               : t("session.rectification.body.more");
   const nextStepLabel = rectificationNextStepLabel(state, t);
+  const latestRound = state.rectificationRounds?.[state.rectificationRounds.length - 1];
+  const latestRoundFeedback = latestRound?.decision?.outcome
+    ? t(`session.rectification.round.${latestRound.decision.outcome}`)
+    : "";
 
   return (
     <section className="my-5 border-t border-gold/25 pt-4">
@@ -2705,39 +2772,10 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
             label={t("session.rectification.nextStep")}
             value={nextStepLabel || t("session.rectification.continue")}
           />
+          {latestRoundFeedback && (
+            <InfoRow label={t("session.rectification.latestAnswer")} value={latestRoundFeedback} />
+          )}
         </div>
-        {candidates.length > 0 && (
-          <details className="mt-3 rounded-lg border border-gold/18 bg-cream/60 px-3 py-2">
-            <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[1.2px] text-muted outline-none">
-              {t("session.rectification.advanced")}
-            </summary>
-            <div className="mt-3 grid gap-2">
-              {candidates.slice(0, 4).map((candidate) => (
-                <div
-                  className="flex items-center justify-between gap-3 rounded-lg border border-gold/20 bg-cream px-3 py-2 text-[12px]"
-                  key={candidate.candidateId}
-                >
-                  <div className="min-w-0">
-                    <span className="font-semibold text-ink">{candidate.candidateId}</span>
-                    {candidate.isBase && (
-                      <span className="ml-1 text-muted">
-                        ({t("session.rectification.baseCandidate")})
-                      </span>
-                    )}
-                    {candidate.changedFromBase?.length ? (
-                      <span className="ml-2 text-muted">
-                        {candidate.changedFromBase.slice(0, 3).join(", ")}
-                      </span>
-                    ) : null}
-                  </div>
-                  <span className="shrink-0 tabular-nums text-muted">
-                    {t("session.rectification.score", { score: candidate.score ?? 0 })}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
       </div>
     </section>
   );
@@ -2979,6 +3017,7 @@ function LifeEventCollector({
   onPrepare,
   submitting,
   onSubmit,
+  onReset,
   authLoaded,
   isSignedIn
 }: {
@@ -2989,6 +3028,7 @@ function LifeEventCollector({
   onPrepare: (action?: RectificationInterviewAction) => Promise<void>;
   submitting: boolean;
   onSubmit: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onReset: () => Promise<void>;
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
@@ -3023,7 +3063,8 @@ function LifeEventCollector({
           noteHint: "不用写小作文，几个词就够了。",
           why: "为什么问这个？",
           selected: "已选择",
-          saved: "已记录的经历"
+          saved: "已记录的经历",
+          restart: "清空并重新填写"
         }
       : locale === "ja"
         ? {
@@ -3054,7 +3095,8 @@ function LifeEventCollector({
             noteHint: "長い文章は不要です。数語で十分です。",
             why: "なぜ聞くのですか？",
             selected: "選択済み",
-            saved: "記録した出来事"
+            saved: "記録した出来事",
+            restart: "消去してやり直す"
           }
         : {
             preparing: "Preparing the next question...",
@@ -3085,7 +3127,8 @@ function LifeEventCollector({
             noteHint: "No essay needed. A few words are enough.",
             why: "Why are we asking this?",
             selected: "Selected",
-            saved: "Events already recorded"
+            saved: "Events already recorded",
+            restart: "Clear and start again"
           };
   const interview = useMemo(
     () => parseRectificationInterview(interviewContent),
@@ -3122,7 +3165,12 @@ function LifeEventCollector({
         note: ""
       })
     : null;
-  const choices = question ? (LIFE_EVENT_CHOICES[question.category] ?? []) : [];
+  const choices = question
+    ? (LIFE_EVENT_CHOICES[question.category] ?? []).filter(
+        (choice) =>
+          !question.allowedSubtypes?.length || question.allowedSubtypes.includes(choice.id)
+      )
+    : [];
   const selectedChoice = choices.find((choice) => choice.id === answer?.choiceId);
   const answerComplete = Boolean(
     answer?.date &&
@@ -3166,6 +3214,7 @@ function LifeEventCollector({
       {
         questionId: currentAnswer.questionId,
         date: currentAnswer.date,
+        eventSubtype: choice.id,
         description: buildDescription(currentAnswer, choice),
         category: currentAnswer.category as RectificationLifeEventCategory
       }
@@ -3271,8 +3320,18 @@ function LifeEventCollector({
 
       {existingEvents.length > 0 && (
         <div className="border-b border-gold/15 pb-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[1.3px] text-muted">
-            {ui.saved}
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[1.3px] text-muted">
+              {ui.saved}
+            </div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 text-[11px] text-muted transition-colors hover:text-ink"
+              onClick={() => void onReset()}
+            >
+              <RefreshCw className="size-3" />
+              {ui.restart}
+            </button>
           </div>
           <div className="grid gap-2">
             {existingEvents.map((event) => (
@@ -3651,7 +3710,7 @@ function RectificationConclusion({
   authLoaded: boolean;
   isSignedIn: boolean;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const conclusion = state.rectificationConclusion;
   const examples = (conclusion?.examples ?? []).filter((example) => Boolean(example.exampleId));
   const exampleSignature = examples
@@ -3666,6 +3725,7 @@ function RectificationConclusion({
   const corrected = conclusion?.correctedBirthTime;
   const interval = conclusion?.selectedInterval;
   const evidence = conclusion?.evidenceSummary;
+  const evidenceHighlights = conclusion?.evidenceHighlights ?? [];
   const answeredCount = examples.filter((example) => answers[example.exampleId ?? ""]).length;
   const allAnswered = examples.length > 0 && answeredCount === examples.length;
   const confidenceLabel =
@@ -3677,6 +3737,9 @@ function RectificationConclusion({
           ? t("session.rectification.conclusion.confidenceLow")
           : t("session.rectification.conclusion.bounded");
   const categoryLabel = (category?: string) => {
+    if (category === "input_review") {
+      return locale === "zh" ? "结果确认" : locale === "ja" ? "結果の確認" : "Result review";
+    }
     if (!category || category === "unknown") return t("session.rectification.conclusion.event");
     return t(`session.events.category.${category}`);
   };
@@ -3724,18 +3787,18 @@ function RectificationConclusion({
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
             <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
-              {t("session.rectification.conclusion.correctedTime")}
-            </div>
-            <div className="mt-1 text-sm font-semibold leading-6 text-ink">
-              {formatCorrectedTime()}
-            </div>
-          </div>
-          <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
-            <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
               {t("session.rectification.conclusion.range")}
             </div>
             <div className="mt-1 text-sm font-semibold leading-6 text-ink">
               {formatRange(interval?.start, interval?.end)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
+            <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
+              {t("session.rectification.conclusion.correctedTime")}
+            </div>
+            <div className="mt-1 text-sm font-semibold leading-6 text-ink">
+              {formatCorrectedTime()}
             </div>
           </div>
         </div>
@@ -3754,6 +3817,50 @@ function RectificationConclusion({
           />
         </div>
       </section>
+
+      {evidenceHighlights.length > 0 && (
+        <section className="grid gap-3 border-y border-gold/18 py-4">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-[1.4px] text-gold-dim">
+              {t("session.rectification.conclusion.explanationTitle")}
+            </div>
+            <p className="m-0 mt-1 text-[12.5px] leading-6 text-body">
+              {t("session.rectification.conclusion.explanationBody")}
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {evidenceHighlights.map((highlight, index) => (
+              <article
+                key={`${highlight.role}-${highlight.date}-${index}`}
+                className="rounded-xl border border-gold/20 bg-cream-2 px-3.5 py-3"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[1.1px] text-muted">
+                  <Badge variant={highlight.role === "holdout" ? "done" : "neutral"}>
+                    {t(
+                      highlight.role === "holdout"
+                        ? "session.rectification.conclusion.holdoutRole"
+                        : "session.rectification.conclusion.calibrationRole"
+                    )}
+                  </Badge>
+                  <span>{highlight.date || "—"}</span>
+                  <span>·</span>
+                  <span>{categoryLabel(highlight.category)}</span>
+                </div>
+                <p className="m-0 mt-2 text-[13px] leading-6 text-ink">
+                  {cleanStoredEventDescription(highlight.description || "")}
+                </p>
+                <p className="m-0 mt-2 text-[11.5px] leading-5 text-muted">
+                  {t(
+                    highlight.result === "passed_reserved_cross_check"
+                      ? "session.rectification.conclusion.holdoutResult"
+                      : "session.rectification.conclusion.calibrationResult"
+                  )}
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-3">
         <div>
@@ -3778,6 +3885,46 @@ function RectificationConclusion({
               example.source === "submitted_evidence"
                 ? example.description || example.prompt
                 : example.prompt;
+            const inputReview = example.source === "deterministic_input_review";
+            const inputReviewChoices: Record<
+              RectificationConfirmationAnswer,
+              { label: string; description: string }
+            > =
+              locale === "zh"
+                ? {
+                    accurate: { label: "可以接受", description: "这个校正范围符合我的基本记忆" },
+                    partly: {
+                      label: "还不确定",
+                      description: "我需要保留这个范围，不确认精确时间"
+                    },
+                    inaccurate: { label: "无法接受", description: "这个范围与我掌握的信息冲突" }
+                  }
+                : locale === "ja"
+                  ? {
+                      accurate: { label: "受け入れられる", description: "記憶と大きく矛盾しない" },
+                      partly: {
+                        label: "まだ不確か",
+                        description: "範囲を保留し、時刻を確定しない"
+                      },
+                      inaccurate: {
+                        label: "受け入れられない",
+                        description: "把握している情報と矛盾する"
+                      }
+                    }
+                  : {
+                      accurate: {
+                        label: "I can accept this range",
+                        description: "It does not conflict with what I remember"
+                      },
+                      partly: {
+                        label: "I am still unsure",
+                        description: "Keep the range without claiming an exact time"
+                      },
+                      inaccurate: {
+                        label: "I cannot accept it",
+                        description: "It conflicts with information I trust"
+                      }
+                    };
             return (
               <article
                 className="rounded-2xl border border-gold/25 bg-cream-2 p-4 shadow-[0_14px_34px_rgba(31,25,17,0.06)]"
@@ -3792,11 +3939,13 @@ function RectificationConclusion({
                     </span>
                   </div>
                   <Badge variant="neutral">
-                    {t(
-                      example.source === "submitted_evidence"
-                        ? "session.rectification.conclusion.sourceSubmitted"
-                        : "session.rectification.conclusion.sourceAgent"
-                    )}
+                    {inputReview
+                      ? categoryLabel("input_review")
+                      : t(
+                          example.source === "submitted_evidence"
+                            ? "session.rectification.conclusion.sourceSubmitted"
+                            : "session.rectification.conclusion.sourceAgent"
+                        )}
                   </Badge>
                 </div>
                 <p className="m-0 text-[14px] leading-7 text-ink">{prompt}</p>
@@ -3817,14 +3966,20 @@ function RectificationConclusion({
                           setAnswers((current) => ({ ...current, [exampleId]: choice.value }))
                         }
                       >
-                        <span className="block text-sm font-semibold">{t(choice.labelKey)}</span>
+                        <span className="block text-sm font-semibold">
+                          {inputReview
+                            ? inputReviewChoices[choice.value].label
+                            : t(choice.labelKey)}
+                        </span>
                         <span
                           className={cn(
                             "mt-0.5 block text-[12px]",
                             isSelected ? "text-white/80" : "text-muted"
                           )}
                         >
-                          {t(choice.descriptionKey)}
+                          {inputReview
+                            ? inputReviewChoices[choice.value].description
+                            : t(choice.descriptionKey)}
                         </span>
                       </button>
                     );
@@ -3884,6 +4039,7 @@ function ReaderDetail({
   onValidationFeedbackChange,
   onSubmitFeedback,
   onSubmitLifeEvents,
+  onResetLifeEvents,
   onSubmitRectificationConfirmation,
   onPrepareRectificationInterview,
   authLoaded,
@@ -3901,6 +4057,7 @@ function ReaderDetail({
   onValidationFeedbackChange: (value: string) => void;
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
+  onResetLifeEvents: () => Promise<void>;
   onSubmitRectificationConfirmation: (
     responses: RectificationConfirmationResponse[]
   ) => Promise<void>;
@@ -4038,6 +4195,7 @@ function ReaderDetail({
           onPrepare={onPrepareRectificationInterview}
           submitting={submittingLifeEvents}
           onSubmit={onSubmitLifeEvents}
+          onReset={onResetLifeEvents}
           authLoaded={authLoaded}
           isSignedIn={isSignedIn}
         />
@@ -5242,7 +5400,9 @@ function parseRectificationInterview(content: string): RectificationInterview | 
         parsed.schemaVersion === "vedicdust-rectification-interview/1.1.0" ||
         parsed.schemaVersion === "vedicdust-rectification-interview/1.2.0" ||
         parsed.schemaVersion === "vedicdust-rectification-interview/1.3.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.4.0"
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.4.0" ||
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.5.0" ||
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.6.0"
       ) ||
       !Array.isArray(parsed.questions) ||
       !parsed.progress

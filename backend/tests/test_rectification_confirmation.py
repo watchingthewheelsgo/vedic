@@ -1,107 +1,141 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from app.services.rectification_confirmation import replace_with_agent_examples
+from app.schemas import BirthInput
+from app.services.rectification_confirmation import build_rectification_conclusion
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
 
 
-def test_post_selection_examples_are_marked_as_non_scoring_checks() -> None:
-    conclusion = {
-        "status": "ready_for_confirmation",
-        "examples": [],
-        "generation": {"source": "deterministic_submitted_evidence"},
-    }
-    timing_periods = [
+def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() -> None:
+    conclusion = build_rectification_conclusion(
         {
-            "periodId": "vimshottari.md.01",
-            "level": "mahadasha",
-            "start": "2018-01-01T00:00:00+00:00",
-            "end": "2020-12-31T00:00:00+00:00",
-        }
-    ]
-
-    updated = replace_with_agent_examples(
-        conclusion,
-        {
-            "examples": [
+            "selectedCandidateId": "candidate-a",
+            "selectionConfidence": "medium",
+            "candidates": [
                 {
-                    "category": "career",
-                    "startDate": "2019",
-                    "endDate": "2020",
-                    "prompt": "Did your role or work direction change during this period?",
-                    "rationale": "A broad timing period indicates a possible public-life transition.",
-                    "supportingPeriodIds": ["vimshottari.md.01"],
-                }
-            ]
+                    "candidateId": "candidate-a",
+                    "interval": {
+                        "start": "1990-01-01 08:20",
+                        "end": "1990-01-01 08:25",
+                    },
+                    "evidenceScores": [
+                        {"eventId": "event-calibration", "score": 0.4},
+                        {"eventId": "event-generic", "score": 0.8},
+                        {"eventId": "event-holdout", "score": 0.3},
+                    ],
+                },
+                {
+                    "candidateId": "candidate-b",
+                    "interval": {
+                        "start": "1990-01-01 08:25",
+                        "end": "1990-01-01 08:30",
+                    },
+                    "evidenceScores": [
+                        {"eventId": "event-calibration", "score": 0.0},
+                        {"eventId": "event-generic", "score": 0.8},
+                        {"eventId": "event-holdout", "score": 0.1},
+                    ],
+                },
+            ],
+            "lifeEventLedger": {
+                "events": [
+                    {
+                        "eventId": "event-calibration",
+                        "date": "2018",
+                        "description": "Submitted marriage event",
+                        "category": "relationship",
+                        "eventSubtype": "marriage",
+                        "role": "calibration",
+                        "intakeSequence": 1,
+                    },
+                    {
+                        "eventId": "event-generic",
+                        "date": "2020",
+                        "description": "Submitted career event",
+                        "category": "career",
+                        "eventSubtype": "job_change",
+                        "role": "calibration",
+                        "intakeSequence": 2,
+                    },
+                    {
+                        "eventId": "event-holdout",
+                        "date": "2022-06",
+                        "description": "Submitted relocation event",
+                        "category": "relocation",
+                        "eventSubtype": "moved_city",
+                        "role": "holdout",
+                        "intakeSequence": 3,
+                    },
+                ]
+            },
+            "selectionEvidence": {},
+            "holdoutResult": "passed",
         },
-        birth_date="1990-01-01",
-        excluded_dates={"2018-06"},
-        timing_periods=timing_periods,
+        rectified_input=BirthInput(
+            birthDate="1990-01-01",
+            birthTime="08:22",
+            birthPlace="Shanghai, China",
+            birthTimePrecision="exact",
+            locale="en",
+        ),
+        chart_revision=2,
     )
 
-    assert updated["examples"][0]["source"] == "post_selection_agent"
-    assert updated["examples"][0]["usedForSelection"] is False
-    assert updated["generation"]["postSelectionOnly"] is True
-    assert updated["generation"]["usedForSelection"] is False
-
-
-def test_post_selection_examples_cannot_reuse_submitted_event_window() -> None:
-    timing_periods = [
+    assert conclusion["examples"][0]["source"] == "deterministic_input_review"
+    assert conclusion["examples"][0]["usedForSelection"] is False
+    assert "Submitted marriage event" not in conclusion["examples"][0]["prompt"]
+    assert conclusion["generation"]["usedForSelection"] is False
+    assert conclusion["evidenceHighlights"] == [
         {
-            "periodId": "vimshottari.md.01",
-            "level": "mahadasha",
-            "start": "2017-01-01T00:00:00+00:00",
-            "end": "2020-12-31T00:00:00+00:00",
-        }
+            "date": "2018",
+            "datePrecision": None,
+            "category": "relationship",
+            "eventSubtype": "marriage",
+            "description": "Submitted marriage event",
+            "role": "calibration",
+            "result": "used_for_candidate_comparison",
+            "usedForSelection": True,
+        },
+        {
+            "date": "2022-06",
+            "datePrecision": None,
+            "category": "relocation",
+            "eventSubtype": "moved_city",
+            "description": "Submitted relocation event",
+            "role": "holdout",
+            "result": "passed_reserved_cross_check",
+            "usedForSelection": False,
+        },
     ]
-    with pytest.raises(ValueError, match="reused a submitted event"):
-        replace_with_agent_examples(
-            {"examples": []},
-            {
-                "examples": [
-                    {
-                        "category": "education",
-                        "startDate": "2018",
-                        "prompt": "Did your study direction change during this period?",
-                        "supportingPeriodIds": ["vimshottari.md.01"],
-                    }
-                ]
-            },
-            birth_date="1990-01-01",
-            excluded_dates={"2018-06"},
-            timing_periods=timing_periods,
-        )
 
 
-def test_post_selection_examples_must_cite_a_period_covering_the_date() -> None:
-    with pytest.raises(ValueError, match="outside its cited timing period"):
-        replace_with_agent_examples(
-            {"examples": []},
-            {
-                "examples": [
-                    {
-                        "category": "career",
-                        "startDate": "2021",
-                        "prompt": "Did your work direction change during this period?",
-                        "supportingPeriodIds": ["vimshottari.md.01"],
-                    }
-                ]
-            },
-            birth_date="1990-01-01",
-            timing_periods=[
-                {
-                    "periodId": "vimshottari.md.01",
-                    "level": "mahadasha",
-                    "start": "2018-01-01T00:00:00+00:00",
-                    "end": "2020-12-31T00:00:00+00:00",
-                }
-            ],
-        )
+def test_confirmation_checkpoint_does_not_generate_agent_life_events() -> None:
+    class FailingAgentRuntime:
+        async def run_skill_prompt_task(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("confirmation Agent must not run")
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    runtime.agent_runtime = FailingAgentRuntime()  # type: ignore[assignment]
+    state = {
+        "status": "rectification_confirmation_required",
+        "rectificationConclusion": {
+            "generation": {"source": "deterministic_input_review"},
+            "examples": [{"source": "deterministic_input_review"}],
+        },
+    }
+
+    prepared = asyncio.run(runtime._prepare_rectification_confirmation_examples("session", state))
+
+    assert prepared is state
+    assert prepared["rectificationConclusion"]["examples"] == [
+        {"source": "deterministic_input_review"}
+    ]
 
 
 def test_core_readiness_rejects_pending_rectification_checkpoint(tmp_path) -> None:

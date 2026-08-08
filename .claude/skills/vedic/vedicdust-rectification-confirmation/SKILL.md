@@ -1,6 +1,6 @@
 ---
 name: vedicdust-rectification-confirmation
-description: Generate cautious retrospective confirmation prompts from a finalized Vedic chart after deterministic birth-time rectification.
+description: Reserved contract for the deterministic post-rectification confirmation checkpoint.
 disable-model-invocation: true
 ---
 
@@ -8,41 +8,35 @@ disable-model-invocation: true
 
 ## Purpose
 
-This skill runs only after the deterministic rectification service has selected a bounded candidate and recalculated the chart. It creates at most two plain-language, retrospective prompts so the user can sanity-check the provisional conclusion before the full report begins.
+This bundle documents the post-rectification checkpoint. The active runtime does not invoke a model here. After the deterministic service selects a bounded candidate and recalculates the chart, the user reviews the retained interval and its calculation reference time before the full report begins.
 
-This is a user-facing post-selection confirmation step, not another rectification algorithm. The prompts are derived from the active chart, so they are not independent proof of the selected time. The skill must never select a candidate, rank candidates, change the birth time, or turn an answer into new scoring evidence.
+Chart-derived retrospective events are not independent evidence and must not be generated merely to make the result appear accurate. This checkpoint must never select a candidate, rank candidates, change the birth time, or create new scoring evidence.
 
 ## Input boundary
 
-The input contains only finalized chart facts and timing material. It intentionally does not contain the user's submitted life-event descriptions or the competing candidate charts. Do not infer or recreate those facts.
+The active checkpoint receives the deterministic conclusion, calculation reference time, bounded candidate interval, aggregate evidence counts, and up to two submitted-evidence highlights. A calibration highlight explains candidate comparison; a holdout highlight explains the separately reserved check. Neither is a new prediction or another user vote. The checkpoint does not ask a model to infer additional life events.
 
 ## Output contract
 
-Return JSON only:
+The backend owns the conclusion schema. Its visible check contains only:
 
 ```json
 {
-  "examples": [
-    {
-      "category": "career|education|relationship|relocation|child|family|finance|property|spiritual",
-      "startDate": "YYYY or YYYY-MM",
-      "endDate": "YYYY or YYYY-MM",
-      "prompt": "A short neutral question about a possible past change.",
-      "rationale": "A short internal explanation based on the supplied timing material."
-    }
-  ]
+  "correctedBirthTime": {"localDate": "YYYY-MM-DD", "localTime": "HH:MM"},
+  "selectedInterval": {"start": "local datetime", "end": "local datetime"},
+  "evidenceSummary": {"calibrationEventCount": 2, "holdoutEventCount": 1},
+  "evidenceHighlights": [{"role": "calibration|holdout", "usedForSelection": true}],
+  "confirmation": {"status": "pending", "responses": []}
 }
 ```
 
-Use zero to two examples only when the supplied material supports them. The backend validator may discard the output if it is unsafe or not independently dated.
+No model-generated retrospective example is permitted in the active runtime. A future implementation may enable one only when every statement cites a backend-released, independently validated claim.
 
 ## Writing rules
 
-- Ask whether a broad past change may have happened; do not state that it definitely happened.
-- Use a year or month range from the supplied material. Never claim an exact day, minute, or certainty.
-- Keep each prompt short, concrete, and answerable from memory without writing an essay.
-- Prefer observable changes such as a role change, move, study milestone, relationship transition, family change, property decision, or change in spiritual practice.
-- Do not use astrology terminology, chart terminology, candidate terminology, or explain the calculation.
-- Do not generate medical diagnoses, death, legal accusations, guaranteed outcomes, future predictions, or sensational claims.
-- Do not reuse a submitted event or ask the user to agree with a chart-derived assertion.
-- If the evidence does not support a safe prompt, return an empty list rather than inventing a life event.
+- Present the retained interval first and label the representative minute as a calculation reference.
+- Ask the user only to review the retained interval.
+- Label confidence and unresolved ambiguity plainly.
+- Do not present submitted events as an independent blind hit.
+- Do not generate medical, bereavement, legal, or other life-event claims from timing periods.
+- A negative confirmation reopens an underdetermined result; it does not silently choose another chart.

@@ -27,6 +27,7 @@ from app.schemas import (
     RectificationConfirmationInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
+    RectificationLifeEventsResetInput,
     SkillBirthInput,
     SkillRunInput,
     SkillSessionResponse,
@@ -41,10 +42,6 @@ from app.services.rectification_interview import (
     validate_rectification_event_bindings,
     validate_rectification_event_dates,
 )
-from app.services.rectification_confirmation import (
-    agent_snapshot,
-    replace_with_agent_examples,
-)
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
 from app.tools.registry import BackendToolRunner
@@ -57,6 +54,7 @@ from app.vedicdust.models import (
     ConsultationDossier,
     JudgementContext,
     ReadingSession,
+    RectificationRoundRecord,
     TimeRange,
 )
 from app.vedicdust.judgement import build_judgement_context
@@ -104,12 +102,13 @@ PREVALIDATION_DEPENDENCY_PATHS = [
 def _rectification_event_fingerprint(event: dict[str, Any]) -> str:
     date_value = " ".join(str(event.get("date") or "").split())
     category = str(event.get("category") or "").strip().casefold()
+    event_subtype = str(event.get("eventSubtype") or "").strip().casefold()
     description = " ".join(str(event.get("description") or "").split())
     prefix = f"{date_value} {category}:"
     if description.casefold().startswith(prefix):
         description = description[len(prefix) :].strip()
     payload = json.dumps(
-        [date_value, category, description.casefold()],
+        [date_value, category, event_subtype, description.casefold()],
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -628,6 +627,16 @@ class SkillRuntime:
             updated_state,
             current_artifacts,
         )
+        active_chart_revision = updated_state.get("activeChartRevision")
+        active_chart_revision = (
+            active_chart_revision if isinstance(active_chart_revision, dict) else {}
+        )
+        updated_state = self.rectification.record_evidence_round(
+            state,
+            updated_state,
+            submitted_events=submitted_events,
+            chart_revision=int(active_chart_revision.get("revision") or revision),
+        )
         self.workspace.write_artifact(
             session_id,
             "chart_rectification_state.json",
@@ -692,113 +701,146 @@ class SkillRuntime:
             active_artifact="chart_rectification_state.json",
         )
 
+    async def reset_rectification_life_events(
+        self,
+        input_data: RectificationLifeEventsResetInput,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SkillSessionResponse:
+        async with self._rectification_transaction_lock(input_data.session_id):
+            session_id = input_data.session_id
+            artifacts = {
+                artifact.path: artifact.content
+                for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
+            }
+            context = self._json_dict(artifacts.get("birth_input_context.json", ""))
+            record_payload = self._json_dict(artifacts.get(CHART_RECORD_JSON, ""))
+            state = self._json_dict(artifacts.get("chart_rectification_state.json", ""))
+            if not context or not record_payload or not state:
+                raise ValueError(
+                    "session is missing the chart inputs required to reset life events"
+                )
+            if state.get("status") not in {
+                "collecting_evidence",
+                "underdetermined",
+                "rectification_confirmation_required",
+            }:
+                raise ValueError("this session is not accepting rectification evidence changes")
+            current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
+            if (
+                input_data.expected_chart_revision is not None
+                and input_data.expected_chart_revision != current_record.revision
+            ):
+                raise ValueError("This chart changed. Refresh the session before restarting.")
+
+            birth_input = self.rectification.birth_input_with_life_events(
+                context,
+                record_payload,
+                "",
+            )
+            birth_input.life_event_facts = "[]"
+            revision = current_record.revision + 1
+            identity = self._chart_record_identity(session_id, revision=revision)
+            calculation = self.calculator.calculate(birth_input, identity=identity)
+
+            self._archive_current_chart_artifacts(
+                session_id,
+                current_record.revision,
+                artifacts,
+            )
+            session_dir = self.workspace.require_session_dir(session_id)
+            for stale_path in [
+                "reader_prevalidation.md",
+                "prevalidation_result.json",
+                "user_context.md",
+                "rectification_question_set.json",
+                "rectification_answer_batch.json",
+                RECTIFICATION_INTERVIEW_JSON,
+                LIFE_EVENT_EVIDENCE_VALIDATION_JSON,
+                ACTIVE_CHART_SENSITIVITY_JSON,
+            ]:
+                (session_dir / stale_path).unlink(missing_ok=True)
+            self._write_chart_calculation(
+                session_id,
+                calculation.birth_input_context_json,
+                calculation.sensitivity_scan_json,
+                calculation.chart_record_json,
+                producer="calculator:life-event-reset",
+                identity=identity,
+            )
+            updated_state = self._write_initial_rectification_state(
+                session_id,
+                calculation.birth_input_context_json,
+                calculation.sensitivity_scan_json,
+            )
+            updated_state["rectificationMutations"] = []
+            self.workspace.write_artifact(
+                session_id,
+                "chart_rectification_state.json",
+                json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+            )
+            self._sync_chart_record_rectification(session_id, updated_state)
+            self._checkpoint_active_chart_sensitivity(session_id)
+
+            updated_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+            if not updated_record_text:
+                raise ValueError("life-event reset did not persist chart_record.json")
+            updated_record = ChartRecord.model_validate_json(updated_record_text)
+            active_identity = ChartRecordIdentity(
+                reading_session_id=session_id,
+                chart_record_id=updated_record.chart_record_id,
+                subject_id=updated_record.subject.subject_id,
+                revision=updated_record.revision,
+            )
+            self._write_reading_session(
+                session_id,
+                identity=active_identity,
+                locale=self.workspace.read_session_locale(session_id),
+                stage="rectification",
+                rectification_status=self._chart_rectification_status(updated_record_text),
+            )
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                READING_SESSION_JSON,
+                producer="vedicdust-reading-orchestrator",
+            )
+            self.workspace.mark_artifact_checkpoint(
+                session_id,
+                "chart_rectification_state.json",
+                producer="chart-rectification:life-event-reset",
+            )
+            self.workspace.write_session_manifest(
+                session_id,
+                locale=self.workspace.read_session_locale(session_id),
+            )
+            await self._sync_metadata(
+                session_id,
+                stage="reader_ready",
+                status="draft",
+                owner_user_id=owner_user_id,
+            )
+            return SkillSessionResponse(
+                session_id=session_id,
+                stage="reader_ready",
+                chat_message="The previous verification events were cleared. Start again with one dated event.",
+                artifacts=self.workspace.read_artifacts(session_id),
+                active_artifact="chart_rectification_state.json",
+            )
+
     async def _prepare_rectification_confirmation_examples(
         self,
         session_id: str,
         state: dict[str, Any],
     ) -> dict[str, Any]:
-        """Optionally add post-selection retrospective prompts.
+        """Keep confirmation grounded in submitted events and deterministic scores.
 
-        This runs only after deterministic candidate selection and chart
-        recalculation. The result is presentation-only: confirmation answers
-        never enter the candidate scoring function.
+        Generating new retrospective events from finalized timing periods creates
+        unverified claims. The Agent therefore has no production role at this
+        gate until each example can reference a backend-released claim.
         """
 
-        if state.get("status") != "rectification_confirmation_required":
-            return state
-        conclusion = state.get("rectificationConclusion")
-        if not isinstance(conclusion, dict):
-            return state
-        if self.agent_runtime is None or not self.agent_runtime.is_configured():
-            return state
-        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
-        if not chart_record_text:
-            return state
-        chart_record = self._json_dict(chart_record_text)
-        rectified_input = state.get("rectifiedInput")
-        rectified_input = rectified_input if isinstance(rectified_input, dict) else {}
-        birth_date = str(rectified_input.get("birthDate") or "")
-        if not birth_date:
-            birth_assertion = chart_record.get("birthAssertion")
-            birth_assertion = birth_assertion if isinstance(birth_assertion, dict) else {}
-            birth_date = str(birth_assertion.get("localDate") or "")
-        if not birth_date:
-            return state
-        locale = self.workspace.read_session_locale(session_id)
-        snapshot = agent_snapshot(chart_record)
-        prompt = self._rectification_confirmation_prompt(snapshot, locale)
-        ledger = state.get("lifeEventLedger")
-        ledger = ledger if isinstance(ledger, dict) else {}
-        ledger_events = ledger.get("events")
-        ledger_events = ledger_events if isinstance(ledger_events, list) else []
-        excluded_dates = {
-            str(event.get("date") or "")
-            for event in ledger_events
-            if isinstance(event, dict) and event.get("date")
-        }
-        try:
-            result = await self.agent_runtime.run_skill_prompt_task(
-                "vedicdust-rectification-confirmation",
-                prompt,
-                skills=["vedicdust-rectification-confirmation"],
-                max_turns=2,
-                allow_file_tools=False,
-            )
-            payload = self._parse_json_object(result.raw_text)
-            enriched = replace_with_agent_examples(
-                conclusion,
-                payload,
-                birth_date=birth_date,
-                excluded_dates=excluded_dates,
-                timing_periods=snapshot.get("timingPeriods"),
-            )
-            next_state = copy.deepcopy(state)
-            next_state["rectificationConclusion"] = enriched
-            return next_state
-        except Exception as exc:
-            # Keep the deterministic, honest fallback. Agent availability must
-            # never block a valid rectification session.
-            next_state = copy.deepcopy(state)
-            fallback = dict(conclusion)
-            generation = fallback.get("generation")
-            generation = generation if isinstance(generation, dict) else {}
-            fallback["generation"] = {
-                **generation,
-                "agentAttempted": True,
-                "agentFallbackReason": self._safe_agent_failure_reason(exc),
-            }
-            next_state["rectificationConclusion"] = fallback
-            return next_state
-
-    def _rectification_confirmation_prompt(
-        self,
-        snapshot: dict[str, Any],
-        locale: str,
-    ) -> str:
-        return f"""Create up to two cautious retrospective prompts for a user to check after a Vedic birth-time rectification has already been completed.
-
-{self._language_instruction(locale)}
-
-This is a post-selection sanity check, not candidate selection. The deterministic backend has already selected and recalculated the chart. Do not choose, score, move, or question the birth time. Do not use user life-event text because it is intentionally not supplied here. Use only the finalized chart timing periods and facts below.
-
-Write broad, falsifiable prompts about past events. A prompt asks whether a change may have happened; it must not assert that it definitely happened. Use a year or month range from the supplied timing periods, never an exact day or minute. Do not generate medical diagnoses, death, legal accusations, guaranteed outcomes, future predictions, personality traits, or technical astrology terms. Avoid sensational language.
-
-FINALIZED CHART MATERIAL
-{json.dumps(snapshot, ensure_ascii=False, indent=2)}
-
-Return JSON only:
-{{
-  "examples": [
-    {{
-      "category": "career|education|relationship|relocation|child|family|finance|property|spiritual",
-      "startDate": "YYYY or YYYY-MM",
-      "endDate": "YYYY or YYYY-MM",
-      "prompt": "A short neutral question the user can answer from memory.",
-      "rationale": "A short internal reason based on the supplied timing material.",
-      "supportingPeriodIds": ["periodId from the supplied timingPeriods"]
-    }}
-  ]
-}}"""
+        _ = session_id
+        return state
 
     async def confirm_rectification_result(
         self,
@@ -871,6 +913,9 @@ Return JSON only:
             }
             next_conclusion["status"] = "rejected" if has_inaccurate else "confirmed"
             next_state["rectificationConclusion"] = next_conclusion
+            generation = conclusion.get("generation")
+            generation = generation if isinstance(generation, dict) else {}
+            input_review_only = generation.get("source") == "deterministic_input_review"
             if has_inaccurate:
                 ledger = next_state.get("lifeEventLedger")
                 ledger = ledger if isinstance(ledger, dict) else {}
@@ -887,19 +932,33 @@ Return JSON only:
                         "reportGate": {
                             "fullReportAllowed": False,
                             "reason": (
-                                "A post-selection check did not fit the proposed timing. The system "
-                                "will not force the chart; provide one new dated event from a different "
-                                "area or review the reported birth time."
+                                "The user did not accept the corrected time interval. The system will "
+                                "not force the chart; provide one new dated event or review the "
+                                "reported birth time."
                             ),
                             "nextStep": "provide_more_precise_or_additional_event_evidence",
                         },
                     }
                 )
                 message = (
-                    "Thanks for checking. The mismatch is recorded, so the chart will not be forced. "
-                    "Add one new dated event to continue the birth-time check."
+                    "Thanks for checking. The corrected interval was not accepted, so the chart will "
+                    "not be forced. Add one new dated event to continue the birth-time check."
                 )
             else:
+                report_reason = (
+                    "The bounded candidate passed the dated-event and reserved-holdout checks "
+                    "and was recalculated. The user retained the bounded interval with an "
+                    "explicit uncertainty caveat; the report must use only interval-stable facts "
+                    "and must not present the representative minute as exact."
+                    if has_partly
+                    else (
+                        "The bounded candidate passed the dated-event and reserved-holdout "
+                        "checks and was recalculated. The user acknowledged the bounded result; "
+                        "this acknowledgement did not increase selection confidence."
+                        if input_review_only
+                        else "The bounded candidate passed and the corrected interval was acknowledged."
+                    )
+                )
                 next_state.update(
                     {
                         "revision": int(next_state.get("revision") or 0) + 1,
@@ -907,16 +966,17 @@ Return JSON only:
                         "status": "corrected_chart_ready",
                         "reportGate": {
                             "fullReportAllowed": True,
-                            "reason": (
-                                "The bounded candidate passed the dated-event and reserved-holdout "
-                                "checks, was recalculated, and the user confirmed the post-selection "
-                                "retrospective checkpoint."
-                            ),
+                            "reason": report_reason,
                             "nextStep": "full_report",
                         },
                     }
                 )
-                message = "The corrected birth-time checkpoint is confirmed. The full Vedic report can now begin."
+                message = (
+                    "The bounded birth-time range is retained with your uncertainty note. "
+                    "The report will use only conclusions stable across that range."
+                    if has_partly
+                    else "The corrected birth-time checkpoint is confirmed. The full Vedic report can now begin."
+                )
             next_state["rectificationPlan"] = self.rectification._build_rectification_plan(
                 next_state
             )
@@ -2343,28 +2403,28 @@ Return JSON only:
         brief: dict[str, Any],
         locale: str,
     ) -> str:
-        return f"""Choose and rewrite the next birth-time verification question for a calm,
+        return f"""Rewrite the backend-selected birth-time verification question for a calm,
 clear consumer product.
 
 {self._language_instruction(locale)}
 
-The backend provides a bounded approved question pool. Select exactly one question from that pool
-for this round. The backend will recalculate candidates after the answer and issue a new pool for
-the next round. You may improve title, prompt, whyWeAsk, and detailsPlaceholder, but you must not
-invent a questionId or category. `questionValue` is private ranking context and must never appear
+The backend has already selected exactly one question for this round. Rewrite only that question.
+The backend will recalculate candidates after the answer and select the next question. You may
+improve title, prompt, whyWeAsk, and detailsPlaceholder, but you must not invent or switch a
+questionId or category. `questionValue` is private ranking context and must never appear
 in visible wording. Do not mention candidate charts,
 scores, houses, planets, vargas, D1-D60, or imply that an answer is expected. Keep every
 question factual and non-leading. Never add personality or physical-trait questions.
 
 BACKEND QUESTION BRIEF
-{json.dumps({"questionPool": brief.get("questionPool", brief.get("questions", [])), "lifeEventFocus": brief.get("lifeEventFocus", [])}, ensure_ascii=False, indent=2)}
+{json.dumps({"questions": brief.get("questions", [])}, ensure_ascii=False, indent=2)}
 
 Return JSON only:
 {{
   "questions": [
     {{
-      "questionId": "one unchanged backend questionId from questionPool",
-      "category": "unchanged backend category from questionPool",
+      "questionId": "the unchanged backend questionId",
+      "category": "the unchanged backend category",
       "title": "short readable title",
       "prompt": "concrete examples of qualifying events",
       "whyWeAsk": "one plain-language sentence",
@@ -2385,6 +2445,7 @@ Return JSON only:
                     {
                         "questionId": event["questionId"],
                         "category": event["category"],
+                        "eventSubtype": event.get("eventSubtype"),
                         "date": event.get("date", ""),
                         "description": event.get("description", ""),
                         "accepted": True,
@@ -2401,8 +2462,9 @@ Return JSON only:
             }
 
         prompt = f"""Validate whether each user statement is a concrete dated life event that
-matches the backend-assigned category. This is evidence intake, not astrology interpretation.
-Do not infer chart meaning, score candidates, rewrite the user's statement, or change a category.
+matches the backend-assigned category and selected subtype. This is evidence intake, not astrology
+interpretation. Do not infer chart meaning, score candidates, rewrite the user's statement, or
+change a category or eventSubtype.
 Accept ordinary wording when it clearly describes a real event; reject personality descriptions,
 hypotheticals, wishes, unrelated trivia, and category mismatches. A year-only date is valid.
 
@@ -2415,6 +2477,7 @@ Return JSON only:
     {{
       "questionId": "exact submitted questionId",
 	      "category": "exact submitted category",
+	      "eventSubtype": "exact submitted eventSubtype",
 	      "accepted": true,
 	      "reason": "short user-facing reason",
 	      "eventFacts": {{
@@ -3081,6 +3144,11 @@ Return JSON only:
         record.rectification.source_ids = [
             str(source_id) for source_id in (state.get("sourceIds") or []) if source_id
         ]
+        record.rectification.rounds = [
+            RectificationRoundRecord.model_validate(item)
+            for item in (state.get("rectificationRounds") or [])
+            if isinstance(item, dict)
+        ]
         self._sync_candidate_time_bounds(record, state)
         rectification_state_status = str(state.get("status") or "")
         if rectification_state_status == "not_required":
@@ -3644,17 +3712,7 @@ Return JSON only:
         time_source = (
             str(first_evidence.get("sourceLabel") or "") if isinstance(first_evidence, dict) else ""
         )
-        reliable_source = bool(
-            re.search(r"出生证|医院|birth certificate|hospital", time_source, re.I)
-        )
-        approximate_source = bool(
-            re.search(r"大概|估计|记忆|回忆|未追问|unknown|approx", time_source, re.I)
-        )
-        time_reliability = (
-            "reliable_exact"
-            if time_precision == "exact" and reliable_source and not approximate_source
-            else "uncertain"
-        )
+        time_reliability = "reported_exact" if time_precision == "exact" else "uncertain"
         return {
             "birthDate": birth_assertion.get("localDate"),
             "birthTime": birth_assertion.get("reportedLocalTime"),
@@ -3704,7 +3762,7 @@ Return JSON only:
         threshold_high = hit_rate >= 0.8
         threshold_medium = hit_rate >= 0.6
         meets_readiness_threshold = hit_rate >= min_hit_rate
-        reliable_exact = time_reliability == "reliable_exact"
+        reliable_exact = time_reliability in {"reported_exact", "reliable_exact"}
         if mode == "rectification_required":
             return {
                 "nextStep": "complete_deterministic_rectification",
@@ -3745,7 +3803,11 @@ Return JSON only:
                 "reportScope": "guarded_full_report" if input_risk_level == "high" else scope,
                 "inputRiskLevel": input_risk_level,
                 "llmContract": llm_contract,
-                "reason": "Reliable exact time source and validation feedback passed the publication threshold.",
+                "reason": (
+                    "The user reported an exact time, the sensitivity scan did not require "
+                    "rectification, and validation feedback passed the publication threshold. "
+                    "The source label itself did not change confidence."
+                ),
             }
         if core_allowed_without_rectification and meets_readiness_threshold:
             return {

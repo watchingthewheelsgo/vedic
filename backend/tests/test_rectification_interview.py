@@ -4,10 +4,15 @@ import asyncio
 import json
 from datetime import date
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from app.schemas import ConsultationAnswerResponse
+from app.schemas import (
+    ConsultationAnswerResponse,
+    RectificationInterviewInput,
+    RectificationLifeEventInput,
+)
 from app.services.rectification_interview import (
     build_rectification_interview,
     validate_agent_event_evidence,
@@ -17,6 +22,8 @@ from app.services.rectification_interview import (
 )
 from app.services.skill_runtime import SkillRuntime
 from app.services.life_event_rectification import parse_life_event_ledger
+from app.services.chart_rectification import ChartRectificationService
+from app.services.skill_workspace import SkillWorkspace
 
 
 def _state(
@@ -24,7 +31,7 @@ def _state(
     status: str = "collecting_evidence",
     fields: list[str] | None = None,
     categories: list[str] | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     events = [
         {
             "eventId": f"evt-{index}",
@@ -63,6 +70,30 @@ def test_question_categories_follow_candidate_discriminators() -> None:
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
 
 
+def test_question_ranking_prefers_the_field_with_better_candidate_partition() -> None:
+    state = _state(fields=["d10Lagna", "d4Structure"])
+    state["rectificationPlan"]["questionDiscrimination"] = {
+        "d10Lagna": {
+            "candidateCount": 3,
+            "partitionCount": 2,
+            "largestPartitionSize": 2,
+        },
+        "d4Structure": {
+            "candidateCount": 3,
+            "partitionCount": 3,
+            "largestPartitionSize": 1,
+        },
+    }
+    interview = build_rectification_interview(
+        state,
+        session_id="session-test",
+        locale="en",
+    )
+
+    assert interview["questions"][0]["category"] == "relocation"
+    assert interview["questions"][0]["questionValue"]["partitionCount"] == 3
+
+
 def test_user_available_categories_bound_the_candidate_driven_question_pool() -> None:
     interview = build_rectification_interview(
         _state(fields=["d10Lagna", "d4Structure"]),
@@ -94,6 +125,7 @@ def test_agent_event_evidence_prompt_renders_nested_json_contract() -> None:
                             {
                                 "questionId": "q-education",
                                 "category": "education",
+                                "eventSubtype": "graduation",
                                 "accepted": True,
                                 "reason": "Concrete dated event.",
                                 "eventFacts": {
@@ -117,6 +149,7 @@ def test_agent_event_evidence_prompt_renders_nested_json_contract() -> None:
                 {
                     "questionId": "q-education",
                     "category": "education",
+                    "eventSubtype": "graduation",
                     "date": "2012-09",
                     "description": "Started university",
                 }
@@ -125,10 +158,51 @@ def test_agent_event_evidence_prompt_renders_nested_json_contract() -> None:
     )
 
     assert result["source"] == "agent_semantic_validation"
+    assert result["results"][0]["eventSubtype"] == "graduation"
     assert result["results"][0]["eventFacts"]["dateConfidence"] == "month"
 
 
-def test_undertermined_round_offers_remaining_domains_but_targets_one_more_event() -> None:
+def test_underdetermined_state_requests_round_four_until_maximum_evidence() -> None:
+    service = ChartRectificationService()
+    ledger = parse_life_event_ledger(
+        "2012 education: Graduated\n2018 career: Changed jobs\n2020 relationship: Married"
+    )
+    state = {
+        "lifeEventLedger": ledger,
+        "candidates": [
+            {
+                "candidateId": "A",
+                "score": 0.1,
+                "evidenceScores": [],
+                "changedFromBase": [],
+                "signature": {"d10Lagna": "Aries"},
+            },
+            {
+                "candidateId": "B",
+                "score": 0.1,
+                "evidenceScores": [],
+                "changedFromBase": ["d10Lagna"],
+                "signature": {"d10Lagna": "Taurus"},
+            },
+        ],
+        "status": "comparing_candidates",
+        "reportGate": {"fullReportAllowed": False},
+    }
+
+    updated = service._apply_initial_deterministic_event_decision(state)
+
+    assert updated["status"] == "underdetermined"
+    assert updated["lifeEventLedger"]["eventCollectionRequired"] is True
+    assert updated["rectificationPlan"]["action"] == "collect_dated_life_events"
+
+    updated["lifeEventLedger"]["eligibleEventCount"] = 5
+    service._set_additional_event_request(updated)
+    updated["rectificationPlan"] = service._build_rectification_plan(updated)
+    assert updated["lifeEventLedger"]["eventCollectionRequired"] is False
+    assert updated["rectificationPlan"]["action"] == "rectification_inconclusive"
+
+
+def test_underdetermined_round_can_reuse_best_domain_after_breadth_requirement() -> None:
     interview = build_rectification_interview(
         _state(
             status="underdetermined",
@@ -140,16 +214,80 @@ def test_undertermined_round_offers_remaining_domains_but_targets_one_more_event
     )
 
     assert len(interview["questions"]) == 1
-    assert {question["category"] for question in interview["questions"]}.isdisjoint(
-        {
-            "career",
-            "relocation",
-            "education",
-        }
-    )
+    assert interview["questions"][0]["category"] == "career"
     assert interview["progress"]["answered"] == 3
     assert interview["progress"]["target"] == 4
     assert interview["progress"]["maximumAccepted"] == 5
+
+
+def test_third_reserved_event_prefers_a_new_domain_when_available() -> None:
+    interview = build_rectification_interview(
+        _state(
+            status="collecting_evidence",
+            fields=["d10Lagna", "d4Structure", "d24Lagna"],
+            categories=["career", "relocation"],
+        ),
+        session_id="session-test",
+        locale="en",
+        available_categories={"career", "relocation", "education"},
+    )
+
+    assert interview["questions"][0]["category"] == "education"
+
+
+def test_third_reserved_event_may_repeat_when_only_two_domains_are_available() -> None:
+    interview = build_rectification_interview(
+        _state(
+            status="collecting_evidence",
+            fields=["d10Lagna", "d4Structure"],
+            categories=["career", "relocation"],
+        ),
+        session_id="session-test",
+        locale="en",
+        available_categories={"career", "relocation"},
+    )
+
+    assert interview["questions"][0]["category"] in {"career", "relocation"}
+
+
+def test_runtime_allows_round_four_when_recalculation_requests_more_evidence(tmp_path) -> None:
+    async def run() -> None:
+        workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+        session_id = workspace.create_session("round-four")
+        state = _state(
+            status="underdetermined",
+            fields=["d30Lagna"],
+            categories=["career", "relocation", "education"],
+        )
+        state["rectificationPlan"]["eventCollectionRequired"] = True
+        workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(state),
+        )
+        runtime = SkillRuntime(
+            calculator=object(),  # type: ignore[arg-type]
+            workspace=workspace,
+            agent_runtime=None,  # type: ignore[arg-type]
+        )
+
+        response = await runtime.prepare_rectification_interview(
+            RectificationInterviewInput(
+                sessionId=session_id,
+                locale="en",
+                availableCategories=["career", "relocation", "education", "health"],
+            ),
+            use_agent=False,
+        )
+        interview = json.loads(
+            workspace.read_artifact_text(session_id, "rectification_interview.json") or "{}"
+        )
+
+        assert response.stage == "reader_ready"
+        assert interview["round"] == 4
+        assert interview["questions"][0]["category"] == "health"
+
+    asyncio.run(run())
 
 
 def test_skipped_category_is_not_reissued() -> None:
@@ -215,7 +353,7 @@ def test_agent_may_rephrase_but_not_change_question_identity() -> None:
     }
 
     accepted = validate_agent_question_wording(brief, proposed)
-    assert accepted["source"] == "agent_selection_and_wording"
+    assert accepted["source"] == "agent_wording"
     assert "questionPool" not in accepted
     assert "questionValue" not in accepted["questions"][0]
 
@@ -224,7 +362,7 @@ def test_agent_may_rephrase_but_not_change_question_identity() -> None:
         validate_agent_question_wording(brief, proposed)
 
 
-def test_agent_may_select_one_approved_question_but_cannot_invent_one() -> None:
+def test_agent_cannot_switch_to_a_lower_ranked_pool_question() -> None:
     brief = build_rectification_interview(
         _state(fields=["d10Lagna", "d4Structure"]),
         session_id="session-test",
@@ -244,11 +382,7 @@ def test_agent_may_select_one_approved_question_but_cannot_invent_one() -> None:
         ]
     }
 
-    accepted = validate_agent_question_wording(brief, proposed)
-    assert accepted["questions"][0]["questionId"] == selected["questionId"]
-
-    proposed["questions"][0]["questionId"] = "rectify.r1.q99.invented"
-    with pytest.raises(ValueError, match="approved question pool"):
+    with pytest.raises(ValueError, match="backend question set"):
         validate_agent_question_wording(brief, proposed)
 
 
@@ -357,6 +491,7 @@ def test_rectification_event_must_match_backend_question_category() -> None:
         "questionId": question["questionId"],
         "date": "2018",
         "category": question["category"],
+        "eventSubtype": question["allowedSubtypes"][0],
         "description": "Changed employer",
     }
     assert validate_rectification_event_bindings([event], state=state, interview=interview) == [
@@ -366,6 +501,13 @@ def test_rectification_event_must_match_backend_question_category() -> None:
     with pytest.raises(ValueError, match="does not match"):
         validate_rectification_event_bindings(
             [{**event, "category": "health"}],
+            state=state,
+            interview=interview,
+        )
+
+    with pytest.raises(ValueError, match="subtype does not match"):
+        validate_rectification_event_bindings(
+            [{**event, "eventSubtype": "not_an_option"}],
             state=state,
             interview=interview,
         )
@@ -383,6 +525,50 @@ def test_rectification_event_must_match_backend_question_category() -> None:
             state=state,
             interview=interview,
         )
+
+
+def test_rectification_event_schema_rejects_cross_category_subtype() -> None:
+    with pytest.raises(ValueError, match="not valid for category"):
+        RectificationLifeEventInput.model_validate(
+            {
+                "questionId": "rectify.r1.q1.career",
+                "date": "2018",
+                "category": "career",
+                "eventSubtype": "marriage",
+                "description": "Changed employer",
+            }
+        )
+
+
+def test_rectification_event_schema_requires_backend_bound_subtype() -> None:
+    with pytest.raises(ValueError, match="eventSubtype"):
+        RectificationLifeEventInput.model_validate(
+            {
+                "questionId": "rectify.r1.q1.career",
+                "date": "2018",
+                "category": "career",
+                "description": "Started a new job",
+            }
+        )
+
+
+def test_agent_cannot_duplicate_the_single_backend_question() -> None:
+    brief = build_rectification_interview(
+        _state(fields=["d10Lagna"]),
+        session_id="session-duplicate-question",
+        locale="en",
+    )
+    original = brief["questions"][0]
+    wording = {
+        **original,
+        "title": "A career turning point",
+        "prompt": "Which dated career change do you remember most clearly?",
+        "whyWeAsk": "A dated event helps compare the remaining time ranges.",
+        "detailsPlaceholder": "Choose the event and add a short factual note.",
+    }
+
+    with pytest.raises(ValueError, match="exactly once"):
+        validate_agent_question_wording(brief, {"questions": [wording, wording]})
 
 
 def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:

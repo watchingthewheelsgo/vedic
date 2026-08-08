@@ -74,17 +74,6 @@ CONTINUOUS_DEGREE_THRESHOLDS = {
     "vargaLagnaDegree": 1.0,
 }
 CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
-TIME_SOURCE_MIN_RADIUS_MINUTES = {
-    "出生证/医院记录": 2,
-    "birth certificate / hospital record": 2,
-    "birth certificate": 2,
-    "hospital record": 2,
-    "家人明确记忆": 10,
-    "clear family memory": 10,
-    "家人大概回忆": 30,
-    "approximate family memory": 30,
-    "family memory": 30,
-}
 
 
 @dataclass(frozen=True)
@@ -1777,21 +1766,19 @@ class VedicCalculator:
     def _time_radius_minutes(precision: str, time_source: str) -> int:
         if precision == "unknown":
             return 720
-        precision_radius = {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
-        source_radius = TIME_SOURCE_MIN_RADIUS_MINUTES.get(time_source.strip().lower(), 0)
-        return max(precision_radius, source_radius)
+        return {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
 
     @staticmethod
     def _time_source_policy(time_source: str) -> dict[str, Any]:
-        source_radius = TIME_SOURCE_MIN_RADIUS_MINUTES.get(time_source.strip().lower())
         return {
             "source": time_source,
-            "minimumRadiusMinutes": source_radius,
+            "minimumRadiusMinutes": None,
             "directionalBiasApplied": False,
-            "status": "recognized_product_prior" if source_radius is not None else "unclassified",
+            "status": "recorded_provenance_only",
             "limitation": (
-                "The source adjusts only the minimum uncertainty radius; it never shifts the "
-                "reported time earlier or later without user evidence."
+                "The source is retained for audit and user-facing context only. Search radius "
+                "comes from the user's stated precision and is not narrowed or widened by an "
+                "assumed reliability hierarchy."
             ),
         }
 

@@ -7,14 +7,35 @@ from typing import Any, Mapping
 
 RECTIFICATION_RULE_ID = "rectify.event-evidence-ranking"
 RECTIFICATION_KP_RULE_ID = "rectify.kp-sub-lord-corroboration"
-RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.12.0"
-RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.3.0"
-RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.0.0"
+RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.13.0"
+RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.5.0"
+RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.1.0"
 RECTIFICATION_METHOD_MATURITY = "product_hypothesis"
 RECTIFICATION_VALIDATION_STATUS = "internal_regression_only"
 RECTIFICATION_SOURCE_IDS = (
     "lineage.pvr-integrated-approach-2000-2010",
     "product.vedicdust-consultation-standard-1",
+)
+
+
+# Event subtypes are user-selected backend facts. They are versioned beside the
+# scoring map so a free-form description or Agent response cannot silently
+# switch the deterministic rule applied to an event.
+RECTIFICATION_EVENT_SUBTYPES: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "education": ("admission", "graduation", "exam", "study_abroad", "other"),
+        "career": ("first_job", "promotion", "job_change", "job_loss", "other"),
+        "relationship": ("started_relationship", "marriage", "separation", "other"),
+        "relocation": ("moved_city", "moved_country", "first_home", "other"),
+        "child": ("pregnancy", "birth", "child_major", "other"),
+        "health": ("surgery", "diagnosis", "accident", "other"),
+        "family": ("family_structure", "parent_change", "caregiving", "other"),
+        "finance": ("major_gain", "major_loss", "financial_independence", "other"),
+        "property": ("purchase", "sale", "move_home", "other"),
+        "legal": ("lawsuit", "settlement", "documents", "other"),
+        "loss": ("bereavement", "sudden_loss", "other"),
+        "spiritual": ("practice", "belief_change", "community", "other"),
+    }
 )
 
 
@@ -186,3 +207,103 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
         },
     }
 )
+
+
+RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] = MappingProxyType(
+    {
+        ("relationship", "marriage"): RECTIFICATION_EVENT_RULES["marriage"],
+        ("relationship", "separation"): MappingProxyType(
+            {
+                "label": "separation / divorce",
+                "houses": [7, 8, 12],
+                "vargas": ["D9"],
+                "karakas": ["Venus", "Mars", "Saturn"],
+                "fields": ["d9Lagna", "d9Structure", "currentDasha"],
+                "sadeSatiRelevant": True,
+            }
+        ),
+        ("career", "promotion"): MappingProxyType(
+            {
+                "label": "promotion / authority increase",
+                "houses": [2, 10, 11],
+                "vargas": ["D10"],
+                "karakas": ["Sun", "Jupiter", "Saturn"],
+                "fields": ["d10Lagna", "d10Structure", "currentDasha"],
+            }
+        ),
+        ("career", "job_loss"): MappingProxyType(
+            {
+                "label": "job loss / work interruption",
+                "houses": [6, 8, 10, 12],
+                "vargas": ["D10"],
+                "karakas": ["Saturn", "Mars", "Rahu"],
+                "fields": ["d10Lagna", "d10Structure", "currentDasha"],
+                "sadeSatiRelevant": True,
+            }
+        ),
+        ("finance", "major_gain"): MappingProxyType(
+            {
+                "label": "major financial gain",
+                "houses": [2, 9, 11],
+                "vargas": ["D2"],
+                "karakas": ["Jupiter", "Venus"],
+                "fields": ["d2Lagna", "d2Structure", "currentDasha", "lagnaSign"],
+            }
+        ),
+        ("finance", "major_loss"): MappingProxyType(
+            {
+                "label": "major financial loss",
+                "houses": [2, 8, 12],
+                "vargas": ["D2", "D30"],
+                "karakas": ["Saturn", "Mars", "Rahu"],
+                "fields": [
+                    "d2Lagna",
+                    "d2Structure",
+                    "d30Lagna",
+                    "d30Structure",
+                    "currentDasha",
+                    "lagnaSign",
+                ],
+                "sadeSatiRelevant": True,
+            }
+        ),
+        ("property", "purchase"): MappingProxyType(
+            {
+                "label": "property purchase",
+                "houses": [2, 4, 11],
+                "vargas": ["D4"],
+                "karakas": ["Mars", "Moon", "Jupiter"],
+                "fields": ["d4Lagna", "d4Structure", "currentDasha"],
+            }
+        ),
+        ("property", "sale"): MappingProxyType(
+            {
+                "label": "property sale",
+                "houses": [4, 8, 12],
+                "vargas": ["D4"],
+                "karakas": ["Mars", "Saturn"],
+                "fields": ["d4Lagna", "d4Structure", "currentDasha"],
+            }
+        ),
+        ("health", "surgery"): MappingProxyType(
+            {
+                "label": "surgery / hospitalization",
+                "houses": [1, 6, 8, 12],
+                "vargas": ["D30"],
+                "karakas": ["Mars", "Saturn", "Ketu"],
+                "fields": ["d30Lagna", "d30Structure", "lagnaSign", "currentDasha"],
+                "sadeSatiRelevant": True,
+            }
+        ),
+    }
+)
+
+
+def rectification_rules_for(category: str, event_subtype: str | None = None) -> Mapping[str, Any]:
+    """Resolve a versioned event rule without letting Agent semantics invent one."""
+
+    subtype = str(event_subtype or "").strip().casefold()
+    return RECTIFICATION_EVENT_SUBTYPE_RULES.get(
+        (category, subtype),
+        RECTIFICATION_EVENT_RULES.get(category, RECTIFICATION_EVENT_RULES["unknown"]),
+    )

@@ -678,6 +678,7 @@ class InputSensitivityAssessment(ContractModel):
 class LifeEvent(ContractModel):
     event_id: str
     category: str
+    event_subtype: str | None = None
     interval: TimeRange
     date_precision: Literal["day", "month", "year", "range"]
     description: str
@@ -726,6 +727,7 @@ class RectificationSemanticAdjustment(ContractModel):
 class CandidateEvidenceScore(ContractModel):
     event_id: str
     event_fingerprint: str | None = None
+    event_subtype: str | None = None
     semantic_facts: RectificationEventSemanticFacts | None = None
     semantic_adjustment: RectificationSemanticAdjustment | None = None
     role: Literal["calibration", "holdout"]
@@ -851,8 +853,71 @@ class RectificationDecision(ContractModel):
         return self
 
 
+class RectificationRoundCandidateMetrics(ContractModel):
+    candidate_interval_count: int = Field(ge=0)
+    equivalence_class_count: int = Field(ge=0)
+    leader_candidate_id: str | None = None
+    leader_score: float | None = Field(default=None, ge=-1, le=1)
+    leader_margin: float | None = Field(default=None, ge=0, le=2)
+
+
+class RectificationRoundAnsweredEvent(ContractModel):
+    question_id: str | None = None
+    event_id: str | None = None
+    event_fingerprint: str | None = None
+    category: str | None = None
+    event_subtype: str | None = None
+    date: str | None = None
+    date_precision: Literal["day", "month", "year", "range"] | None = None
+    role: Literal["calibration", "holdout"] | None = None
+
+
+class RectificationRoundEvidenceImpact(ContractModel):
+    event_id: str | None = None
+    role: Literal["calibration", "holdout"] | None = None
+    scored_candidate_classes: int = Field(ge=0)
+    minimum_score: float | None = Field(default=None, ge=-1, le=1)
+    maximum_score: float | None = Field(default=None, ge=-1, le=1)
+    score_spread: float | None = Field(default=None, ge=0, le=2)
+    required_spread: float = Field(ge=0, le=2)
+    discriminating: bool
+
+
+class RectificationRoundDecisionSummary(ContractModel):
+    outcome: Literal[
+        "bounded_candidate_selected",
+        "holdout_failed",
+        "holdout_inconclusive",
+        "candidate_scores_separated",
+        "evidence_recorded_without_required_margin",
+    ]
+    status: str = Field(min_length=1)
+    next_action: str | None = None
+    selection_blockers: list[str] = Field(default_factory=list)
+    holdout_result: Literal["passed", "failed", "inconclusive", "not_run"] = "not_run"
+    selected_candidate_id: str | None = None
+    equivalent_candidate_ids: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class RectificationRoundRecord(ContractModel):
+    schema_version: Literal["rectification-round-decision/v1"] = "rectification-round-decision/v1"
+    round: int = Field(gt=0)
+    chart_revision: int = Field(ge=0)
+    answered_question: RectificationRoundAnsweredEvent
+    candidate_state: dict[Literal["before", "after"], RectificationRoundCandidateMetrics]
+    evidence_impact: RectificationRoundEvidenceImpact
+    decision: RectificationRoundDecisionSummary
+
+    @model_validator(mode="after")
+    def validate_candidate_state(self) -> RectificationRoundRecord:
+        if set(self.candidate_state) != {"before", "after"}:
+            raise ValueError("rectification round requires before and after candidate metrics")
+        return self
+
+
 class RectificationRecord(ContractModel):
-    schema_version: Literal["vedicdust-rectification/1.4.0"] = "vedicdust-rectification/1.4.0"
+    schema_version: Literal["vedicdust-rectification/1.5.0"] = "vedicdust-rectification/1.5.0"
     selection_policy_id: str | None = None
     event_mapping_id: str | None = None
     holdout_policy_id: str | None = None
@@ -868,6 +933,7 @@ class RectificationRecord(ContractModel):
     reported_window: TimeRange | None = None
     life_events: list[LifeEvent] = Field(default_factory=list)
     candidates: list[CandidateInterval] = Field(default_factory=list)
+    rounds: list[RectificationRoundRecord] = Field(default_factory=list)
     decision: RectificationDecision
 
     @model_validator(mode="after")

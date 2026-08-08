@@ -333,6 +333,18 @@
           "default": null,
           "title": "Eventfingerprint"
         },
+        "eventSubtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventsubtype"
+        },
         "semanticFacts": {
           "anyOf": [
             {
@@ -925,6 +937,18 @@
           "title": "Category",
           "type": "string"
         },
+        "eventSubtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventsubtype"
+        },
         "interval": {
           "$ref": "#/$defs/TimeRange"
         },
@@ -1197,8 +1221,8 @@
       "additionalProperties": false,
       "properties": {
         "schemaVersion": {
-          "const": "vedicdust-rectification/1.4.0",
-          "default": "vedicdust-rectification/1.4.0",
+          "const": "vedicdust-rectification/1.5.0",
+          "default": "vedicdust-rectification/1.5.0",
           "title": "Schemaversion",
           "type": "string"
         },
@@ -1289,12 +1313,402 @@
           "title": "Candidates",
           "type": "array"
         },
+        "rounds": {
+          "items": {
+            "$ref": "#/$defs/RectificationRoundRecord"
+          },
+          "title": "Rounds",
+          "type": "array"
+        },
         "decision": {
           "$ref": "#/$defs/RectificationDecision"
         }
       },
       "required": ["decision"],
       "title": "RectificationRecord",
+      "type": "object"
+    },
+    "RectificationRoundAnsweredEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "questionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Questionid"
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventid"
+        },
+        "eventFingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventfingerprint"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "eventSubtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventsubtype"
+        },
+        "date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date"
+        },
+        "datePrecision": {
+          "anyOf": [
+            {
+              "enum": ["day", "month", "year", "range"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dateprecision"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": ["calibration", "holdout"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        }
+      },
+      "title": "RectificationRoundAnsweredEvent",
+      "type": "object"
+    },
+    "RectificationRoundCandidateMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateIntervalCount": {
+          "minimum": 0,
+          "title": "Candidateintervalcount",
+          "type": "integer"
+        },
+        "equivalenceClassCount": {
+          "minimum": 0,
+          "title": "Equivalenceclasscount",
+          "type": "integer"
+        },
+        "leaderCandidateId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leadercandidateid"
+        },
+        "leaderScore": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": -1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leaderscore"
+        },
+        "leaderMargin": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leadermargin"
+        }
+      },
+      "required": ["candidateIntervalCount", "equivalenceClassCount"],
+      "title": "RectificationRoundCandidateMetrics",
+      "type": "object"
+    },
+    "RectificationRoundDecisionSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "bounded_candidate_selected",
+            "holdout_failed",
+            "holdout_inconclusive",
+            "candidate_scores_separated",
+            "evidence_recorded_without_required_margin"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "status": {
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        },
+        "nextAction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextaction"
+        },
+        "selectionBlockers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selectionblockers",
+          "type": "array"
+        },
+        "holdoutResult": {
+          "default": "not_run",
+          "enum": ["passed", "failed", "inconclusive", "not_run"],
+          "title": "Holdoutresult",
+          "type": "string"
+        },
+        "selectedCandidateId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selectedcandidateid"
+        },
+        "equivalentCandidateIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Equivalentcandidateids",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": ["outcome", "status"],
+      "title": "RectificationRoundDecisionSummary",
+      "type": "object"
+    },
+    "RectificationRoundEvidenceImpact": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventid"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": ["calibration", "holdout"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "scoredCandidateClasses": {
+          "minimum": 0,
+          "title": "Scoredcandidateclasses",
+          "type": "integer"
+        },
+        "minimumScore": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": -1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimumscore"
+        },
+        "maximumScore": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": -1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximumscore"
+        },
+        "scoreSpread": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scorespread"
+        },
+        "requiredSpread": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Requiredspread",
+          "type": "number"
+        },
+        "discriminating": {
+          "title": "Discriminating",
+          "type": "boolean"
+        }
+      },
+      "required": ["scoredCandidateClasses", "requiredSpread", "discriminating"],
+      "title": "RectificationRoundEvidenceImpact",
+      "type": "object"
+    },
+    "RectificationRoundRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "rectification-round-decision/v1",
+          "default": "rectification-round-decision/v1",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "round": {
+          "exclusiveMinimum": 0,
+          "title": "Round",
+          "type": "integer"
+        },
+        "chartRevision": {
+          "minimum": 0,
+          "title": "Chartrevision",
+          "type": "integer"
+        },
+        "answeredQuestion": {
+          "$ref": "#/$defs/RectificationRoundAnsweredEvent"
+        },
+        "candidateState": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RectificationRoundCandidateMetrics"
+          },
+          "propertyNames": {
+            "enum": ["before", "after"]
+          },
+          "title": "Candidatestate",
+          "type": "object"
+        },
+        "evidenceImpact": {
+          "$ref": "#/$defs/RectificationRoundEvidenceImpact"
+        },
+        "decision": {
+          "$ref": "#/$defs/RectificationRoundDecisionSummary"
+        }
+      },
+      "required": [
+        "round",
+        "chartRevision",
+        "answeredQuestion",
+        "candidateState",
+        "evidenceImpact",
+        "decision"
+      ],
+      "title": "RectificationRoundRecord",
       "type": "object"
     },
     "RectificationSemanticAdjustment": {

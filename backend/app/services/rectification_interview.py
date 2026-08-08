@@ -5,11 +5,14 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from app.schemas import AppLocale
-from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_RULES
+from app.services.life_event_rectification import MAX_RECTIFICATION_EVENTS
+from app.vedicdust.rectification_policy import (
+    RECTIFICATION_EVENT_RULES,
+    RECTIFICATION_EVENT_SUBTYPES,
+)
 
 
-INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.4.0"
-MAX_RECTIFICATION_EVENTS = 5
+INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.7.0"
 
 
 _FIELD_CATEGORY_PRIORITY: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -174,25 +177,52 @@ def build_rectification_interview(
     ledger = state.get("lifeEventLedger") if isinstance(state.get("lifeEventLedger"), dict) else {}
     existing = [item for item in ledger.get("events", []) if isinstance(item, dict)]
     existing_categories = {str(item.get("category") or "") for item in existing}
+    # Prefer a third distinct domain for the reserved event. If the user only has
+    # two reliably dated domains, permit a repeat rather than invent an event.
+    excluded_categories = existing_categories if len(existing) < 3 else set()
     remaining = max(0, MAX_RECTIFICATION_EVENTS - len(existing))
     categories = _rank_categories(
         plan.get("discriminatingFields"),
-        existing_categories,
+        excluded_categories,
         life_stage=life_stage,
         candidate_summaries=(
             plan.get("candidateSummaries")
             if isinstance(plan.get("candidateSummaries"), list)
             else []
         ),
+        question_discrimination=(
+            plan.get("questionDiscrimination")
+            if isinstance(plan.get("questionDiscrimination"), dict)
+            else {}
+        ),
     )
     skipped = skipped_categories or set()
     categories = [category for category in categories if category not in skipped]
     if available_categories is not None:
         categories = [category for category in categories if category in available_categories]
+    if not categories and len(existing) == 2 and len(existing_categories) >= 2:
+        categories = _rank_categories(
+            plan.get("discriminatingFields"),
+            set(),
+            life_stage=life_stage,
+            candidate_summaries=(
+                plan.get("candidateSummaries")
+                if isinstance(plan.get("candidateSummaries"), list)
+                else []
+            ),
+            question_discrimination=(
+                plan.get("questionDiscrimination")
+                if isinstance(plan.get("questionDiscrimination"), dict)
+                else {}
+            ),
+        )
+        categories = [category for category in categories if category not in skipped]
+        if available_categories is not None:
+            categories = [category for category in categories if category in available_categories]
     # One question is a complete interaction round. The answer is recalculated
     # before the next question is selected from the updated candidate state. The
-    # Agent may choose from this bounded pool, but it cannot invent a category or
-    # inspect the private candidate ranking context.
+    # backend selects one question from its private ranking. The Agent may
+    # only rewrite that selected question; it cannot choose a different category.
     pool_categories = categories[: min(3, remaining)]
     copy = _COPY.get(locale, _COPY["en"])
     target = min(MAX_RECTIFICATION_EVENTS, max(3, len(existing) + 1))
@@ -201,6 +231,12 @@ def build_rectification_interview(
     for index, category in enumerate(pool_categories, start=1):
         title, prompt = copy["category"][category]
         matched_fields = _category_discriminating_fields(category, discriminating_fields)
+        partition_summary = _category_partition_summary(
+            category,
+            plan.get("questionDiscrimination")
+            if isinstance(plan.get("questionDiscrimination"), dict)
+            else {},
+        )
         question_pool.append(
             {
                 "questionId": f"rectify.r{len(existing) + 1}.q{index}.{category}",
@@ -212,11 +248,13 @@ def build_rectification_interview(
                 "detailsLabel": copy["details"],
                 "detailsPlaceholder": copy["placeholder"],
                 "answerType": "dated_event",
+                "allowedSubtypes": list(RECTIFICATION_EVENT_SUBTYPES.get(category, ())),
                 "allowSkip": True,
                 "questionValue": {
                     "tier": "discriminating" if matched_fields else "coverage",
                     "matchedFieldCount": len(matched_fields),
                     "matchedFields": matched_fields,
+                    **partition_summary,
                 },
             }
         )
@@ -231,8 +269,8 @@ def build_rectification_interview(
         )
     else:
         stop_reason = (
-            "No unused event category remains in this round. Ask for a different dated event "
-            "or continue with the bounded candidates."
+            "No usable event category remains after the user's availability and skip choices. "
+            "Continue with the bounded candidates or revise event availability."
         )
     return {
         "schemaVersion": INTERVIEW_SCHEMA_VERSION,
@@ -253,9 +291,6 @@ def build_rectification_interview(
         },
         "questions": questions,
         "questionPool": question_pool,
-        "lifeEventFocus": [
-            item for item in plan.get("lifeEventFocus", []) if isinstance(item, dict)
-        ],
         "source": "deterministic_brief",
         "availableCategories": sorted(available_categories or []),
         "stopReason": stop_reason,
@@ -269,9 +304,7 @@ def validate_agent_question_wording(
     proposed = payload.get("questions")
     if not isinstance(proposed, list):
         raise ValueError("rectification interview response must contain questions")
-    pool = brief.get("questionPool")
-    has_pool = isinstance(pool, list) and bool(pool)
-    raw_expected_items = pool if has_pool else brief.get("questions")
+    raw_expected_items = brief.get("questions")
     expected_items = raw_expected_items if isinstance(raw_expected_items, list) else []
     expected = {
         str(item["questionId"]): item
@@ -283,14 +316,13 @@ def validate_agent_question_wording(
         for item in proposed
         if isinstance(item, dict) and item.get("questionId")
     }
-    if has_pool:
-        if len(proposed) != 1 or len(proposed_ids) != 1 or not proposed_ids <= set(expected):
-            raise ValueError("rectification interview must select one approved question pool item")
-    elif proposed_ids != set(expected):
+    if len(proposed) != len(expected) or len(proposed_ids) != len(proposed):
+        raise ValueError("rectification interview must return each backend question exactly once")
+    if proposed_ids != set(expected):
         raise ValueError("rectification interview changed the backend question set")
     result = {
         **brief,
-        "source": "agent_selection_and_wording" if has_pool else "agent_wording",
+        "source": "agent_wording",
     }
     result.pop("questionPool", None)
     result.pop("lifeEventFocus", None)
@@ -363,7 +395,10 @@ def validate_rectification_event_bindings(
     """Return newly answered events after enforcing backend-issued question identity."""
 
     questions = {
-        str(item.get("questionId")): str(item.get("category"))
+        str(item.get("questionId")): {
+            "category": str(item.get("category")),
+            "allowedSubtypes": {str(value) for value in item.get("allowedSubtypes") or [] if value},
+        }
         for item in interview.get("questions", [])
         if isinstance(item, dict) and item.get("questionId") and item.get("category")
     }
@@ -374,11 +409,16 @@ def validate_rectification_event_bindings(
     category = str(event.get("category") or "")
     if not question_id:
         raise ValueError("new life events must answer a current verification question")
-    expected_category = questions.get(question_id)
-    if expected_category is None:
+    expected_question = questions.get(question_id)
+    if expected_question is None:
         raise ValueError("life event references an expired verification question")
+    expected_category = str(expected_question["category"])
     if category != expected_category:
         raise ValueError("life event category does not match its verification question")
+    event_subtype = str(event.get("eventSubtype") or "")
+    allowed_subtypes = expected_question["allowedSubtypes"]
+    if not event_subtype or event_subtype not in allowed_subtypes:
+        raise ValueError("life event subtype does not match its verification question")
     return [event]
 
 
@@ -393,7 +433,11 @@ def validate_agent_event_evidence(
         raise ValueError("life event evidence audit must contain results")
     expected_by_question = {str(item.get("questionId")): item for item in expected_events}
     expected = {
-        question_id: str(item.get("category")) for question_id, item in expected_by_question.items()
+        question_id: {
+            "category": str(item.get("category")),
+            "eventSubtype": str(item.get("eventSubtype") or ""),
+        }
+        for question_id, item in expected_by_question.items()
     }
     observed: dict[str, dict[str, Any]] = {}
     for item in raw_results:
@@ -402,8 +446,10 @@ def validate_agent_event_evidence(
         question_id = str(item.get("questionId") or "")
         if question_id in observed or question_id not in expected:
             raise ValueError("life event evidence audit changed the submitted question set")
-        if str(item.get("category") or "") != expected[question_id]:
+        if str(item.get("category") or "") != expected[question_id]["category"]:
             raise ValueError("life event evidence audit changed an event category")
+        if str(item.get("eventSubtype") or "") != expected[question_id]["eventSubtype"]:
+            raise ValueError("life event evidence audit changed an event subtype")
         observed[question_id] = item
     if set(observed) != set(expected):
         raise ValueError("life event evidence audit omitted a submitted event")
@@ -420,7 +466,8 @@ def validate_agent_event_evidence(
         normalized.append(
             {
                 "questionId": question_id,
-                "category": expected[question_id],
+                "category": expected[question_id]["category"],
+                "eventSubtype": expected[question_id]["eventSubtype"],
                 "date": str(expected_event.get("date") or ""),
                 "description": str(expected_event.get("description") or ""),
                 "accepted": True,
@@ -463,6 +510,7 @@ def _rank_categories(
     *,
     life_stage: str | None,
     candidate_summaries: list[dict[str, Any]],
+    question_discrimination: dict[str, Any],
 ) -> list[str]:
     fields = [str(value).casefold() for value in raw_fields or []]
     ranked: list[str] = []
@@ -491,7 +539,12 @@ def _rank_categories(
     return sorted(
         result,
         key=lambda category: (
-            -_category_information_score(category, fields, candidate_summaries),
+            -_category_information_score(
+                category,
+                fields,
+                candidate_summaries,
+                question_discrimination,
+            ),
             priority[category],
         ),
     )
@@ -501,11 +554,25 @@ def _category_information_score(
     category: str,
     discriminating_fields: list[str],
     candidate_summaries: list[dict[str, Any]],
+    question_discrimination: dict[str, Any],
 ) -> int:
+    normalized_discrimination = {
+        str(field).casefold(): value for field, value in question_discrimination.items()
+    }
     rules = RECTIFICATION_EVENT_RULES.get(category, RECTIFICATION_EVENT_RULES["unknown"])
     preferred = {str(value).casefold() for value in rules.get("fields") or []}
     matched = [field for field in discriminating_fields if field.casefold() in preferred]
     score = len(matched) * 100
+    for field in matched:
+        partition = normalized_discrimination.get(field.casefold())
+        if not isinstance(partition, dict):
+            continue
+        candidate_count = int(partition.get("candidateCount") or 0)
+        partition_count = int(partition.get("partitionCount") or 0)
+        largest = int(partition.get("largestPartitionSize") or candidate_count)
+        if candidate_count > 1 and partition_count > 1:
+            balance = candidate_count - largest
+            score += (partition_count - 1) * 40 + balance * 10
     if not candidate_summaries:
         return score
     for field in matched:
@@ -517,6 +584,27 @@ def _category_information_score(
         if 0 < changed_count < len(candidate_summaries):
             score += 20 + min(changed_count, len(candidate_summaries) - changed_count)
     return score
+
+
+def _category_partition_summary(
+    category: str,
+    question_discrimination: dict[str, Any],
+) -> dict[str, int]:
+    rules = RECTIFICATION_EVENT_RULES.get(category, RECTIFICATION_EVENT_RULES["unknown"])
+    normalized_discrimination = {
+        str(field).casefold(): value for field, value in question_discrimination.items()
+    }
+    summaries = [
+        normalized_discrimination.get(str(field).casefold())
+        for field in rules.get("fields") or []
+        if isinstance(normalized_discrimination.get(str(field).casefold()), dict)
+    ]
+    if not summaries:
+        return {"partitionCount": 1, "candidateCount": 0}
+    return {
+        "partitionCount": max(int(item.get("partitionCount") or 1) for item in summaries),
+        "candidateCount": max(int(item.get("candidateCount") or 0) for item in summaries),
+    }
 
 
 def _category_discriminating_fields(

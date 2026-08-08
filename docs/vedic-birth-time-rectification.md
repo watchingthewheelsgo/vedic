@@ -26,11 +26,18 @@ by the user is not independent evidence and cannot change a chart score.
 5. If multiple material candidates remain, stop report synthesis and collect
    3-5 structured, dated life events. The UI asks for one event per round; after
    each accepted answer the backend recalculates the bounded candidate state and
-   issues the next deterministic question. Consultation focus is never evidence.
-6. Split eligible events without looking at candidate scores. Calibration keeps
-   the broadest available category coverage; one date-precise event is reserved
-   as a blind holdout. The Agent never receives holdout content, scores, or
-   derived partitions.
+   issues the next deterministic question. Each round records the answered event,
+   score spread across candidate classes, before/after leader margin, remaining
+   blockers, and the backend-owned next action. Consultation focus is never evidence.
+6. Split eligible events without looking at candidate scores. The third eligible
+   submission is reserved immediately as a stable blind holdout. The interview
+   prefers a third life domain when the user has one and permits a repeated domain
+   only when that is the available factual evidence. Later answers cannot
+   retroactively move an event from calibration into holdout. The Agent
+   never receives holdout content, candidate identities, scores, or chart values.
+   The backend selects the next category from its private discrimination ranking.
+   The Agent may rewrite only that one selected question and cannot switch to a
+   lower-ranked pool item.
 7. Score each candidate from calibration events only. The current versioned
    policy records Dasha activation, relevant Varga domain activation, and stable
    Jupiter/Saturn double-transit support. Missing positive support is neutral,
@@ -43,13 +50,16 @@ by the user is not independent evidence and cannot change a chart score.
 10. Every passed candidate is recalculated once at its bounded representative
     time/place and enters `rectification_confirmation_required`, including when
     the selected interval contains the user's reported time. The system shows
-    the representative local time, the remaining bounded interval, and up to two
-    cautious retrospective checks. These checks are generated after selection and
-    never score or change the candidate. The canonical calculation does not start
+    the remaining bounded interval first, the representative local time only as
+    its calculation reference, and the submitted-evidence summary. The summary
+    names the most candidate-discriminating calibration event and the separately
+    checked reserved event; it is not another prediction or user vote. The system
+    does not generate new retrospective events from the selected chart. The
+    canonical calculation does not start
     a second uncertainty search around the representative moment: the original
     candidate scan and refined boundaries remain the selection evidence.
-11. The user confirms whether those checks broadly match lived experience. A
-    mismatch returns the session to `underdetermined` and requests another dated
+11. The user confirms whether the corrected time and retained interval are
+    acceptable. A mismatch returns the session to `underdetermined` and requests another dated
     event instead of releasing a report. Only an explicit confirmation moves the
     recalculated revision to `corrected_chart_ready` and opens the report gate.
 
@@ -60,13 +70,19 @@ the calculator again. A stale answer is rejected and must be refreshed. The
 same lock also protects the current interview while a skip or reset is being
 prepared.
 
+The event date is interpreted as a civil interval in the event location's IANA
+timezone. DST folds include both real instants; a midnight DST gap advances to
+the first valid instant rather than dropping the event. A civil date with no
+valid instant is rejected explicitly.
+
 ## Outcomes
 
 - `collecting_evidence`: fewer than three recognized dated events.
 - `underdetermined`: insufficient domain breadth, no clear calibration margin,
   or failed/inconclusive holdout.
-- `multiple_equivalent`: several bounded candidates remain indistinguishable
-  under all permitted evidence. No exact time is selected.
+- `multiple_equivalent`: after the maximum five-event set, several bounded
+  candidates remain indistinguishable. With remaining event capacity, the state
+  stays `underdetermined` and asks another candidate-discriminating question.
 - `needs_recalculation`: a bounded interval passed calibration and holdout but has
   not yet been materialized as the active chart.
 - `rectification_confirmation_required`: the selected bounded interval passed,
@@ -94,7 +110,10 @@ still use the ordinary pre-reading quality check.
   canonical recalculation input after any selected bounded interval. Judgement uses this
   version while the original full-window scan remains the rectification audit.
 - `chart_rectification_state.json`: active selection policy IDs, candidate state,
-  hidden-holdout result, report gate, and materialized chart revision.
+  hidden-holdout result, report gate, materialized chart revision, and the
+  append-only `rectificationRounds` decision trail. The stage conclusion also
+  exposes non-technical `evidenceHighlights` for the selected calibration event
+  and reserved check while keeping candidate scores internal.
 - `chart_record.json`: typed auditable chart, event evidence, candidates, and the
   final bounded decision consumed by judgement/report stages. Accepted event
   descriptions may also carry bounded semantic facts (`occurrence`, `agency`,
@@ -104,11 +123,9 @@ still use the ordinary pre-reading quality check.
 - `reader_prevalidation.md` / `prevalidation_result.json`: stable-chart reading
   quality checks only; they have no candidate-selection authority.
 
-The optional Agent-generated retrospective checks must cite the exact Mahadasha or
-Antardasha windows supplied by the finalized chart. The backend rejects invented
-period IDs, dates outside a cited window, and dates that reuse submitted selection
-events. This keeps the final check traceable without treating it as independent
-proof.
+The confirmation gate does not generate chart-derived past events. Such prompts
+would not be independent validation and are disabled until every visible claim can
+cite a backend-released, independently validated claim record.
 
 ## Divisional sensitivity
 

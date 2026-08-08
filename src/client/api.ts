@@ -17,6 +17,7 @@ import type {
   RectificationConfirmationInput,
   RectificationInterviewInput,
   RectificationLifeEventsInput,
+  RectificationLifeEventsResetInput,
   SkillBirthInput,
   SkillFeedbackInput,
   SkillRunInput,
@@ -203,6 +204,12 @@ export const api = {
   recordRectificationLifeEvents(input: RectificationLifeEventsInput) {
     return postJson<SkillSessionResponse, RectificationLifeEventsInput>(
       "/api/rectification-life-events",
+      input
+    );
+  },
+  resetRectificationLifeEvents(input: RectificationLifeEventsResetInput) {
+    return postJson<SkillSessionResponse, RectificationLifeEventsResetInput>(
+      "/api/rectification-life-events/reset",
       input
     );
   },

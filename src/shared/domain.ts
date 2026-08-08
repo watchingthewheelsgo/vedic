@@ -149,6 +149,7 @@ export type RectificationLifeEventInput = {
   questionId?: string;
   date: string;
   category: RectificationLifeEventCategory;
+  eventSubtype: string;
   description: string;
 };
 
@@ -157,6 +158,11 @@ export type RectificationLifeEventsInput = {
   expectedChartRevision?: number;
   idempotencyKey?: string;
   events: RectificationLifeEventInput[];
+};
+
+export type RectificationLifeEventsResetInput = {
+  sessionId: string;
+  expectedChartRevision?: number;
 };
 
 export type RectificationInterviewInput = {

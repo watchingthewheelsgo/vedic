@@ -104,6 +104,42 @@ def _period_lord_at(jd: float, starts) -> object | None:
     return None
 
 
+def _stable_period_for_interval(
+    start_jd: float,
+    end_jd: float,
+    starts,
+    *,
+    parent_end_jd: float | None = None,
+    final_duration_days: float | None = None,
+) -> tuple[object | None, float | None, float | None]:
+    """Return the one half-open period covering an entire closed event interval."""
+
+    items = sorted(starts.items(), key=lambda item: float(item[1]))
+    for index, (lord, period_start) in enumerate(items):
+        period_start = float(period_start)
+        if index + 1 < len(items):
+            period_end = float(items[index + 1][1])
+        elif parent_end_jd is not None:
+            period_end = float(parent_end_jd)
+        elif final_duration_days is not None:
+            period_end = period_start + float(final_duration_days)
+        else:
+            return None, None, None
+        if period_start <= start_jd and end_jd < period_end:
+            return lord, period_start, period_end
+    return None, None, None
+
+
+def _event_jd(moment: datetime, fixed_offset: timezone) -> float:
+    provider_moment = _event_provider_coordinate(moment, fixed_offset)
+    return swe.julday(
+        provider_moment.year,
+        provider_moment.month,
+        provider_moment.day,
+        provider_moment.hour + provider_moment.minute / 60.0 + provider_moment.second / 3600.0,
+    )
+
+
 def _setup_jhora():
     """Install the process-wide PyJHora compatibility layer."""
     ensure_pyjhora_swe_compat()
@@ -384,6 +420,119 @@ def calculate_dasha_lords_at(
                 "mahadasha": _PLANET_NAMES.get(md_id),
                 "antardasha": _PLANET_NAMES.get(ad_id),
                 "pratyantardasha": _PLANET_NAMES.get(pd_id),
+            }
+        )
+    return results
+
+
+@serialized_provider_call
+def calculate_dasha_lords_for_intervals(
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    lat,
+    lon,
+    tz_offset,
+    event_intervals,
+    *,
+    birth_second=0,
+):
+    """Resolve only MD/AD/PD lords that cover each complete event interval.
+
+    A year or month is not reduced to a few sampled instants. If any exact
+    PyJHora period boundary falls inside the reported interval, that level is
+    returned as unavailable and listed in ``unstableLevels``.
+    """
+
+    _setup_jhora()
+    from jhora import const
+    from jhora.panchanga.drik import Place
+    from jhora.horoscope.dhasa.graha import vimsottari
+
+    configure_vedicdust_pyjhora()
+    _lock_profile_dasha_year(const, vimsottari)
+    place = Place("birth_place", lat, lon, tz_offset)
+    fixed_offset = timezone(timedelta(hours=float(tz_offset)))
+    birth_jd = swe.julday(
+        year,
+        month,
+        day,
+        hour + minute / 60.0 + birth_second / 3600.0,
+    )
+    mahadashas = vimsottari.vimsottari_mahadasa(birth_jd, place)
+    results = []
+    for interval in event_intervals:
+        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
+            raise ValueError("Vimshottari event intervals must contain start and end instants")
+        start_moment, end_moment = interval
+        start_jd = _event_jd(start_moment, fixed_offset)
+        end_jd = _event_jd(end_moment, fixed_offset)
+        if end_jd < start_jd:
+            raise ValueError("Vimshottari event interval ends before it starts")
+
+        md_start_id = _period_lord_at(start_jd, mahadashas)
+        md_duration = (
+            _DASHA_YEARS.get(_PLANET_NAMES.get(md_start_id, ""), 0) * _DASHA_YEAR_DURATION_DAYS
+        )
+        md_id, _md_start, md_end = _stable_period_for_interval(
+            start_jd,
+            end_jd,
+            mahadashas,
+            final_duration_days=md_duration or None,
+        )
+        unstable_levels: list[str] = []
+        if md_id is None:
+            unstable_levels.extend(("md", "ad", "pd"))
+            results.append(
+                {
+                    "mahadasha": None,
+                    "antardasha": None,
+                    "pratyantardasha": None,
+                    "unstableLevels": unstable_levels,
+                }
+            )
+            continue
+
+        antardashas = vimsottari._vimsottari_bhukti(md_id, mahadashas[md_id])
+        ad_id, _ad_start, ad_end = _stable_period_for_interval(
+            start_jd,
+            end_jd,
+            antardashas,
+            parent_end_jd=md_end,
+        )
+        if ad_id is None:
+            unstable_levels.extend(("ad", "pd"))
+            results.append(
+                {
+                    "mahadasha": _PLANET_NAMES.get(md_id),
+                    "antardasha": None,
+                    "pratyantardasha": None,
+                    "unstableLevels": unstable_levels,
+                }
+            )
+            continue
+
+        pratyantardashas = vimsottari._vimsottari_antara(
+            md_id,
+            ad_id,
+            antardashas[ad_id],
+        )
+        pd_id, _pd_start, _pd_end = _stable_period_for_interval(
+            start_jd,
+            end_jd,
+            pratyantardashas,
+            parent_end_jd=ad_end,
+        )
+        if pd_id is None:
+            unstable_levels.append("pd")
+        results.append(
+            {
+                "mahadasha": _PLANET_NAMES.get(md_id),
+                "antardasha": _PLANET_NAMES.get(ad_id),
+                "pratyantardasha": _PLANET_NAMES.get(pd_id),
+                "unstableLevels": unstable_levels,
             }
         )
     return results

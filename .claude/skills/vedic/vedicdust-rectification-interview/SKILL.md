@@ -14,7 +14,7 @@ holdout validation, stopping, and every birth-time decision.
 
 ## Inputs
 
-- A sanitized list of question IDs and life-event categories
+- One backend-selected question ID, life-event category, and allowed subtype list
 - Locale
 - The fields that may be rewritten
 
@@ -22,7 +22,7 @@ No candidate identity, score, chart signature, or holdout event is available.
 
 ## Method
 
-1. Preserve every question ID and category exactly.
+1. Preserve the one question ID, category, and subtype options exactly.
 2. Ask for a dated, independently remembered event.
 3. Give two or three concrete examples of events that qualify.
 4. Use calm, non-leading language. Make it acceptable to skip a sensitive topic.
@@ -34,4 +34,4 @@ No candidate identity, score, chart signature, or holdout event is available.
 - Never score evidence or recommend a birth time.
 - Never ask the user to confirm a prediction generated from the same candidate set.
 - Never promise minute-level or second-level accuracy.
-- Never add a new question or change an event category.
+- Never select another pool item, add a question, or change an event category.

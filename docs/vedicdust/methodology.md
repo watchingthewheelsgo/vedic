@@ -108,11 +108,11 @@ UTC offset is validated against the zone, persisted in the Canonical Birth Momen
 and reused by Swiss Ephemeris, PyJHora adapters, independent-reference selection,
 and any later rectified chart revision.
 
-The time source changes the minimum search radius, not the direction of a time
-correction: a certificate or hospital record has a two-minute minimum radius,
-clear family memory ten minutes, and approximate family memory thirty minutes.
-These are VedicDust product priors, not empirical error distributions. Explicit
-user precision may widen the radius; the source never moves the center by itself.
+The stated precision controls the search radius. The time source is retained as
+provenance for audit and conversation context, but it does not narrow or widen
+the candidate window and never shifts the reported time. A hospital record,
+certificate, and family memory can all contain human recording error; VedicDust
+does not impose an unvalidated reliability hierarchy between them.
 
 ### 2. Calculation qualification
 
@@ -222,20 +222,25 @@ result. D60 is unavailable as primary evidence until the input is already
 stable enough for D60 to remain meaningful.
 
 An event date is an uncertainty interval unless an event time was supplied.
-The calculator converts the interval boundaries and midpoint from the
-birth-place IANA time zone to UTC. Dasha, varga-lagna, and double-transit
-matches sampled across that interval are transparent ranking features under
-`vedicdust-rectification-event-ranking/1.6.0`: correlated matches
-within one Dasha level contribute that level's weight once. Varga-domain selection
+The calculator converts the full interval from the birth-place IANA time zone
+to UTC. Vimshottari eligibility is checked against exact PyJHora MD/AD/PD
+boundaries; slow-transit and diagnostic Chara Dasha evidence may still sample
+the interval. These transparent ranking features use
+`vedicdust-rectification-event-ranking/1.13.0`: correlated matches within one
+Dasha level contribute that level's weight once. Varga-domain selection
 uses `vedicdust-varga-domain-policy/1.0.0`, pinned to P.V.R. Narasimha Rao's
 _Vedic Astrology: An Integrated Approach_ (first published 2000; author update
-2010, PDF pp. 71-73). Event-house and karaka mappings and all numerical weights
+2010, PDF pp. 71-73). The backend-bound event subtype is part of the event
+identity and may choose a more specific versioned mapping; free text and Agent
+output cannot change it. Event-house and karaka mappings and all numerical weights
 remain VedicDust product hypotheses. An unmatched
 activation is neutral missing evidence, not a contradiction, because the
-versioned event map is not an exhaustive causal theory. Only Dasha lords that
-remain stable across the start, midpoint, and end of the user's reported date
-interval, including the whole day when no event time was supplied, are eligible.
-A partial MD/AD/PD lookup fails candidate scoring. Year-only events cannot add
+versioned event map is not an exhaustive causal theory. Only Dasha lords whose
+exact half-open period covers the user's complete reported date interval,
+including the whole day when no event time was supplied, are eligible.
+A period level crossed by the reported interval is withheld. A provider response
+that omits a level without reporting such a boundary fails candidate scoring.
+Year-only events cannot add
 double-transit evidence; month- and day-level transit support must remain active
 at every interval sample rather than appearing at one convenient instant. The support score ranks candidates;
 it is not a probability or proof that an event was astrologically caused.
@@ -269,10 +274,16 @@ for any candidate interval, rectification enters `calculation_failed`; successfu
 siblings cannot be ranked against an incompletely evaluated alternative, and no
 model-generated questions are accepted until calculation is retried.
 
+Three events are the minimum, not an automatic stopping point. If calibration,
+holdout, or candidate equivalence remains inconclusive, the backend issues one
+new candidate-discriminating question at a time up to five events. Only then
+does it preserve an underdetermined or equivalent interval instead of forcing a
+representative minute.
+
 When a chart-changing input window has fewer than three recognized dated events,
 the workflow enters `collecting_evidence` without invoking the Reader. The user
 supplies three to five concise event records through structured cards; one event
-is selected score-blind as holdout, and the calculator reruns candidate event
+is reserved score-blind as holdout, and the calculator reruns candidate event
 scoring. Calibration ranking and the reserved-event check are backend-owned; the
 Reader never receives candidate contrasts and no repeated confirmation of an
 already submitted event can change the ranking. Generic traits and an initial

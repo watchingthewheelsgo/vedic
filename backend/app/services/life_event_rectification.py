@@ -4,7 +4,7 @@ import hashlib
 import re
 from calendar import monthrange
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytz
@@ -18,6 +18,7 @@ from app.vedicdust.rectification_policy import (
     RECTIFICATION_RULE_ID,
     RECTIFICATION_SOURCE_IDS,
     RECTIFICATION_SCORING_POLICY,
+    rectification_rules_for,
 )
 
 
@@ -64,6 +65,7 @@ DATE_PATTERN = re.compile(
     r"(?:\s*(?:-|/|\.)?\s*(?P<day>3[01]|[12]\d|0?[1-9])\s*日?)?"
     r")?"
 )
+MAX_RECTIFICATION_EVENTS = 5
 
 
 def parse_life_event_ledger(
@@ -72,33 +74,57 @@ def parse_life_event_ledger(
     semantic_evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     text = (raw or "").strip()
-    semantic_by_fingerprint = {
-        _event_fingerprint(
+    semantic_by_fingerprint: dict[str, list[dict[str, Any]]] = {}
+    for item in semantic_evidence or []:
+        if (
+            not isinstance(item, dict)
+            or not str(item.get("date") or "").strip()
+            or not str(item.get("category") or "").strip()
+        ):
+            continue
+        match_key = _event_match_fingerprint(
             str(item.get("date") or ""),
             str(item.get("category") or ""),
             str(item.get("description") or ""),
-        ): item
-        for item in semantic_evidence or []
-        if isinstance(item, dict)
-        and str(item.get("date") or "").strip()
-        and str(item.get("category") or "").strip()
-    }
+        )
+        semantic_by_fingerprint.setdefault(match_key, []).append(item)
     events: list[dict[str, Any]] = []
     for index, line in enumerate(_candidate_lines(text), start=1):
         event = _parse_event_line(line, index)
         if event is not None:
-            semantic = semantic_by_fingerprint.get(str(event.get("eventFingerprint") or ""))
+            event["intakeSequence"] = index
+            semantic_matches = semantic_by_fingerprint.get(
+                str(event.get("eventFingerprint") or ""), []
+            )
+            semantic = semantic_matches.pop(0) if semantic_matches else None
             if semantic:
                 event["questionId"] = str(semantic.get("questionId") or "")
                 event["semanticFacts"] = dict(semantic.get("eventFacts") or {})
+                event_subtype = str(semantic.get("eventSubtype") or "").strip().casefold()
+                if event_subtype:
+                    event["eventSubtype"] = event_subtype
+                    _apply_event_rules(event, event_subtype=event_subtype)
+                    event_fingerprint = _event_fingerprint(
+                        str(event.get("date") or ""),
+                        str(event.get("category") or ""),
+                        str(event.get("description") or ""),
+                        event_subtype,
+                    )
+                    event["eventFingerprint"] = event_fingerprint
+                    event["eventId"] = f"evt_{event_fingerprint[:16]}"
             events.append(event)
 
-    events.sort(key=lambda event: str(event.get("date") or ""))
     eligible_events = [event for event in events if event.get("category") != "unknown"]
     for event in events:
         event["role"] = "calibration" if event in eligible_events else "context_only"
     if len(eligible_events) >= 3:
         _select_holdout_event(eligible_events)["role"] = "holdout"
+    events.sort(
+        key=lambda event: (
+            str(event.get("date") or ""),
+            int(event.get("intakeSequence") or 0),
+        )
+    )
     calibration_categories = {
         str(event.get("category"))
         for event in eligible_events
@@ -114,6 +140,7 @@ def parse_life_event_ledger(
         "calibrationCategoryCount": len(calibration_categories),
         "eventCollectionRequired": len(eligible_events) < 3,
         "recommendedMinimumEvents": 3,
+        "maximumAcceptedEvents": MAX_RECTIFICATION_EVENTS,
         "holdoutPolicyId": RECTIFICATION_HOLDOUT_POLICY_ID,
         "recommendedRectificationUse": (
             "Use dated life events as the primary rectification evidence before generic traits."
@@ -190,22 +217,29 @@ def score_candidate_events(
 
     local_timezone = pytz.timezone(timezone_id)
     event_local_moments = [_event_midpoint(event) for event in events]
+    event_period_intervals = [_event_interval_bounds(event) for event in events]
+    event_period_utc_intervals = [
+        _localize_event_interval(start, end, local_timezone)
+        for start, end in event_period_intervals
+    ]
+    # Chara Dasha remains diagnostic-only and is sampled over broad user date
+    # ranges. Primary Vimshottari evidence uses exact interval boundaries below.
     event_period_samples = [_event_interval_samples(event) for event in events]
     event_period_sample_indices: list[tuple[int, int]] = []
     event_period_utc_moments: list[datetime] = []
     for samples in event_period_samples:
         start_index = len(event_period_utc_moments)
         event_period_utc_moments.extend(
-            local_timezone.localize(moment, is_dst=None).astimezone(timezone.utc)
-            for moment in samples
+            _localize_event_sample(moment, local_timezone, index=index, total=len(samples))
+            for index, moment in enumerate(samples)
         )
         event_period_sample_indices.append((start_index, len(event_period_utc_moments)))
     localized_birth = _localized_birth_moment(representative_moment, local_timezone)
-    from app.calculator.dasha_pyjhora import calculate_dasha_lords_at
+    from app.calculator.dasha_pyjhora import calculate_dasha_lords_for_intervals
     from app.calculator.chara_dasha_pyjhora import calculate_chara_dasha_lords_at, rasi_drishti
     from app.calculator.engine import SPECIAL_DRISHTI, calc_transits
 
-    dasha_lords = calculate_dasha_lords_at(
+    dasha_lords = calculate_dasha_lords_for_intervals(
         localized_birth.year,
         localized_birth.month,
         localized_birth.day,
@@ -214,12 +248,12 @@ def score_candidate_events(
         latitude,
         longitude,
         localized_birth.utcoffset().total_seconds() / 3600.0,
-        event_period_utc_moments,
+        event_period_utc_intervals,
         birth_second=localized_birth.second,
     )
-    if len(dasha_lords) != len(event_period_utc_moments):
+    if len(dasha_lords) != len(events):
         raise RuntimeError(
-            "Vimshottari event lookup returned an incomplete event-boundary result set"
+            "Vimshottari event lookup returned an incomplete event-interval result set"
         )
     chara_dasha_periods: list[dict[str, Any]] | None
     try:
@@ -243,16 +277,21 @@ def score_candidate_events(
         # Chara Dasha is a diagnostic-only, non-additive signal (see below); a
         # calculation failure must not break the primary Vimshottari-based score.
         chara_dasha_periods = None
-    for sample_index, period in enumerate(dasha_lords):
+    for event_index, period in enumerate(dasha_lords):
+        unstable_levels = {str(level) for level in period.get("unstableLevels") or []}
         missing_levels = [
-            level
-            for level in ("mahadasha", "antardasha", "pratyantardasha")
-            if not str(period.get(level) or "").strip()
+            short_level
+            for short_level, level in (
+                ("md", "mahadasha"),
+                ("ad", "antardasha"),
+                ("pd", "pratyantardasha"),
+            )
+            if not str(period.get(level) or "").strip() and short_level not in unstable_levels
         ]
         if missing_levels:
             raise RuntimeError(
                 "Vimshottari event lookup returned an incomplete hierarchy "
-                f"at sample {sample_index}: {', '.join(missing_levels)}"
+                f"for event {event_index}: {', '.join(missing_levels)}"
             )
     lagna_sign = str(signature.get("lagnaSign") or "")
     if lagna_sign not in SIGNS:
@@ -267,10 +306,13 @@ def score_candidate_events(
         raise RuntimeError("rectification signature has no divisional planetary sign map")
     evidence_scores: list[dict[str, Any]] = []
     chara_dasha_event_scores: list[dict[str, Any]] = []
-    for event, event_local, sample_range in zip(
-        events, event_local_moments, event_period_sample_indices, strict=True
+    for event, event_local, sample_range, event_period in zip(
+        events,
+        event_local_moments,
+        event_period_sample_indices,
+        dasha_lords,
+        strict=True,
     ):
-        sample_periods = dasha_lords[sample_range[0] : sample_range[1]]
         chara_sample_periods = (
             chara_dasha_periods[sample_range[0] : sample_range[1]]
             if chara_dasha_periods is not None
@@ -286,18 +328,15 @@ def score_candidate_events(
         semantic_facts = event.get("semanticFacts")
         semantic_adjustment = None
         period_entries: list[tuple[str, str]] = []
-        unstable_periods: dict[str, list[str]] = {}
+        unstable_periods = {str(level) for level in event_period.get("unstableLevels") or []}
         for short_level, level in (
             ("md", "mahadasha"),
             ("ad", "antardasha"),
             ("pd", "pratyantardasha"),
         ):
-            sampled_lords = [str(period.get(level) or "") for period in sample_periods]
-            distinct_lords = sorted({lord for lord in sampled_lords if lord})
-            if sampled_lords and all(sampled_lords) and len(distinct_lords) == 1:
-                period_entries.append((short_level, distinct_lords[0]))
-            elif len(distinct_lords) > 1:
-                unstable_periods[short_level] = distinct_lords
+            lord = str(event_period.get(level) or "")
+            if lord:
+                period_entries.append((short_level, lord))
         period_lords = [lord for _, lord in period_entries]
         for lord in period_lords:
             _required_sign_index(planet_signs, lord, scope="D1")
@@ -319,7 +358,8 @@ def score_candidate_events(
                                 if level in unstable_periods
                                 else "period_lord_unavailable"
                             ),
-                            "sampledLords": unstable_periods.get(level, []),
+                            "exactBoundaryCheck": True,
+                            "reportedDate": event.get("date"),
                         },
                     )
                 )
@@ -900,6 +940,7 @@ def score_candidate_events(
             {
                 "eventId": event["eventId"],
                 "eventFingerprint": event.get("eventFingerprint"),
+                "eventSubtype": event.get("eventSubtype"),
                 "semanticFacts": dict(semantic_facts) if isinstance(semantic_facts, dict) else None,
                 "semanticAdjustment": semantic_adjustment,
                 "role": event.get("role", "calibration"),
@@ -916,7 +957,8 @@ def score_candidate_events(
                     f"relevant vargas {relevant_vargas or ['none']}; "
                     "double-transit houses stable across the reported interval "
                     f"{stable_transit_houses}."
-                    f" Event interval sampled at its start, midpoint, and end in {timezone_id}; "
+                    " Vimshottari eligibility checked against exact period boundaries;"
+                    f" slow-transit and diagnostic Chara checks sampled in {timezone_id}; "
                     f"display midpoint {event_local.isoformat()}."
                 ),
             }
@@ -975,24 +1017,21 @@ def candidate_event_period_fingerprint(
 
     local_timezone = pytz.timezone(timezone_id)
     localized_birth = _localized_birth_moment(birth_moment, local_timezone)
-    event_sample_counts: list[int] = []
-    event_moments: list[datetime] = []
+    event_intervals: list[tuple[datetime, datetime]] = []
     for event in events:
-        samples = _event_interval_samples(event)
-        event_sample_counts.append(len(samples))
-        event_moments.extend(
-            local_timezone.localize(moment, is_dst=None).astimezone(timezone.utc)
-            for moment in samples
-        )
-    current_index = None
+        start, end = _event_interval_bounds(event)
+        event_intervals.append(_localize_event_interval(start, end, local_timezone))
+    current_moments: list[datetime] = []
     if reference_moment is not None:
         if reference_moment.tzinfo is None or reference_moment.utcoffset() is None:
             raise ValueError("rectification reference moment must be timezone-aware")
-        current_index = len(event_moments)
-        event_moments.append(reference_moment.astimezone(timezone.utc))
-    from app.calculator.dasha_pyjhora import calculate_dasha_lords_at
+        current_moments.append(reference_moment.astimezone(timezone.utc))
+    from app.calculator.dasha_pyjhora import (
+        calculate_dasha_lords_at,
+        calculate_dasha_lords_for_intervals,
+    )
 
-    periods = calculate_dasha_lords_at(
+    birth_args = (
         localized_birth.year,
         localized_birth.month,
         localized_birth.day,
@@ -1001,24 +1040,30 @@ def candidate_event_period_fingerprint(
         latitude,
         longitude,
         localized_birth.utcoffset().total_seconds() / 3600.0,
-        event_moments,
+    )
+    periods = calculate_dasha_lords_for_intervals(
+        *birth_args,
+        event_intervals,
         birth_second=localized_birth.second,
     )
-    event_fingerprint: list[str] = []
-    period_index = 0
-    for sample_count in event_sample_counts:
-        sample_keys = [
-            "/".join(
-                str(period.get(level) or "unavailable")
-                for level in ("mahadasha", "antardasha", "pratyantardasha")
-            )
-            for period in periods[period_index : period_index + sample_count]
-        ]
-        event_fingerprint.append("|".join(sample_keys))
-        period_index += sample_count
+    if len(periods) != len(events):
+        raise RuntimeError(
+            "Vimshottari event fingerprint lookup returned an incomplete interval result set"
+        )
+    event_fingerprint = [
+        "/".join(
+            str(period.get(level) or "unavailable")
+            for level in ("mahadasha", "antardasha", "pratyantardasha")
+        )
+        for period in periods
+    ]
     current_dasha = None
-    if current_index is not None:
-        current_period = periods[current_index]
+    if current_moments:
+        current_period = calculate_dasha_lords_at(
+            *birth_args,
+            current_moments,
+            birth_second=localized_birth.second,
+        )[0]
         current_dasha = "-".join(
             str(current_period.get(level) or "unavailable") for level in ("mahadasha", "antardasha")
         )
@@ -1034,6 +1079,79 @@ def _localized_birth_moment(value: datetime, local_timezone) -> datetime:
     return value.astimezone(local_timezone)
 
 
+def _localize_event_interval(
+    start: datetime,
+    end: datetime,
+    local_timezone,
+) -> tuple[datetime, datetime]:
+    """Map a user-supplied civil interval to every real instant it represents."""
+
+    localized_start = _localize_civil_boundary(start, local_timezone, direction="forward")
+    localized_end = _localize_civil_boundary(end, local_timezone, direction="backward")
+    start_utc = localized_start.astimezone(timezone.utc)
+    end_utc = localized_end.astimezone(timezone.utc)
+    if start_utc > end_utc:
+        raise ValueError(
+            "life-event date does not contain a valid civil instant in the selected timezone"
+        )
+    return start_utc, end_utc
+
+
+def _localize_event_sample(
+    value: datetime,
+    local_timezone,
+    *,
+    index: int,
+    total: int,
+) -> datetime:
+    direction = "backward" if total > 1 and index == total - 1 else "forward"
+    return _localize_civil_boundary(value, local_timezone, direction=direction).astimezone(
+        timezone.utc
+    )
+
+
+def _localize_civil_boundary(
+    value: datetime,
+    local_timezone,
+    *,
+    direction: str,
+) -> datetime:
+    """Resolve DST gaps/folds without dropping a broad dated event."""
+
+    try:
+        return local_timezone.localize(value, is_dst=None)
+    except pytz.AmbiguousTimeError:
+        alternatives = [
+            local_timezone.localize(value, is_dst=True),
+            local_timezone.localize(value, is_dst=False),
+        ]
+        key = lambda item: item.astimezone(timezone.utc)
+        return min(alternatives, key=key) if direction == "forward" else max(alternatives, key=key)
+    except pytz.NonExistentTimeError:
+        step = timedelta(minutes=1 if direction == "forward" else -1)
+        probe = value
+        for _ in range(6 * 60):
+            probe += step
+            try:
+                return local_timezone.localize(probe, is_dst=None)
+            except pytz.AmbiguousTimeError:
+                alternatives = [
+                    local_timezone.localize(probe, is_dst=True),
+                    local_timezone.localize(probe, is_dst=False),
+                ]
+                key = lambda item: item.astimezone(timezone.utc)
+                return (
+                    min(alternatives, key=key)
+                    if direction == "forward"
+                    else max(alternatives, key=key)
+                )
+            except pytz.NonExistentTimeError:
+                continue
+        raise ValueError(
+            "life-event civil time cannot be resolved inside the selected timezone"
+        ) from None
+
+
 def _event_midpoint(event: dict[str, Any]) -> datetime:
     raw = str(event.get("date") or "")
     if re.fullmatch(r"\d{4}-\d{2}", raw):
@@ -1042,6 +1160,26 @@ def _event_midpoint(event: dict[str, Any]) -> datetime:
     if re.fullmatch(r"\d{4}", raw):
         return datetime(int(raw), 7, 1, 12)
     return datetime.fromisoformat(raw).replace(hour=12, minute=0, second=0, microsecond=0)
+
+
+def _event_interval_bounds(event: dict[str, Any]) -> tuple[datetime, datetime]:
+    """Return the full local civil interval represented by a partial event date."""
+
+    raw = str(event.get("date") or "")
+    if re.fullmatch(r"\d{4}-\d{2}", raw):
+        year, month = (int(value) for value in raw.split("-"))
+        return (
+            datetime(year, month, 1),
+            datetime(year, month, monthrange(year, month)[1], 23, 59, 59),
+        )
+    if re.fullmatch(r"\d{4}", raw):
+        year = int(raw)
+        return datetime(year, 1, 1), datetime(year, 12, 31, 23, 59, 59)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        day = datetime.fromisoformat(raw)
+        return day, day.replace(hour=23, minute=59, second=59)
+    midpoint = _event_midpoint(event)
+    return midpoint, midpoint
 
 
 def _event_interval_samples(event: dict[str, Any]) -> list[datetime]:
@@ -1105,6 +1243,7 @@ def build_life_event_focus(
             {
                 "eventId": event.get("eventId"),
                 "category": event.get("category"),
+                "eventSubtype": event.get("eventSubtype"),
                 "date": event.get("date"),
                 "datePrecision": event.get("datePrecision"),
                 "description": event.get("description"),
@@ -1151,7 +1290,7 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
         except (TypeError, ValueError):
             return None
     category = _explicit_category(line) or _classify_category(line)
-    rules = RECTIFICATION_EVENT_RULES[category]
+    rules = rectification_rules_for(category)
     date_value = (
         f"{year:04d}-{month:02d}-{day:02d}"
         if day is not None
@@ -1160,7 +1299,9 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
         else f"{year:04d}"
     )
     date_precision = "day" if day is not None else "month" if month is not None else "year"
-    event_fingerprint = _event_fingerprint(date_value, category, line)
+    # The raw ledger omits subtype by design. Use the text-only key for the
+    # semantic join, then replace it with the full identity after attachment.
+    event_fingerprint = _event_match_fingerprint(date_value, category, line)
     return {
         "eventId": f"evt_{event_fingerprint[:16]}",
         "eventFingerprint": event_fingerprint,
@@ -1180,7 +1321,20 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
     }
 
 
-def _event_fingerprint(date_value: str, category: str, description: str) -> str:
+def _apply_event_rules(event: dict[str, Any], *, event_subtype: str | None) -> None:
+    rules = rectification_rules_for(str(event.get("category") or "unknown"), event_subtype)
+    event["categoryLabel"] = rules["label"]
+    event["rectificationRules"] = {
+        "houses": rules["houses"],
+        "vargas": rules["vargas"],
+        "karakas": rules["karakas"],
+        "fields": rules["fields"],
+    }
+
+
+def _event_match_fingerprint(date_value: str, category: str, description: str) -> str:
+    """Join the text ledger to structured evidence before subtype attachment."""
+
     normalized_description = _clean_event_description(description, date_value, category)
     payload = "|".join(
         (
@@ -1189,6 +1343,19 @@ def _event_fingerprint(date_value: str, category: str, description: str) -> str:
             normalized_description,
         )
     )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _event_fingerprint(
+    date_value: str,
+    category: str,
+    description: str,
+    event_subtype: str | None = None,
+) -> str:
+    """Identify a scored event, including the backend-bound subtype."""
+
+    match_fingerprint = _event_match_fingerprint(date_value, category, description)
+    payload = "|".join((match_fingerprint, str(event_subtype or "").strip().casefold()))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -1221,29 +1388,9 @@ def _explicit_category(line: str) -> str | None:
 
 
 def _select_holdout_event(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """Reserve evidence without inspecting any candidate score.
+    """Reserve the third eligible submission before it can enter calibration."""
 
-    Prefer a precise event while preserving the broadest possible category
-    coverage in calibration. The final date tie-break keeps the split stable.
-    """
-
-    precision_rank = {"year": 0, "month": 1, "day": 2}
-
-    def rank(item: tuple[int, dict[str, Any]]) -> tuple[int, int, str, int]:
-        index, holdout = item
-        calibration_categories = {
-            str(event.get("category"))
-            for candidate_index, event in enumerate(events)
-            if candidate_index != index and event.get("category")
-        }
-        return (
-            len(calibration_categories),
-            precision_rank.get(str(holdout.get("datePrecision") or ""), -1),
-            str(holdout.get("date") or ""),
-            index,
-        )
-
-    return max(enumerate(events), key=rank)[1]
+    return sorted(events, key=lambda event: int(event.get("intakeSequence") or 0))[2]
 
 
 def _observation(

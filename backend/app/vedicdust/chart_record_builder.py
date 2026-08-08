@@ -2264,6 +2264,9 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                 evidence_scores=[
                     CandidateEvidenceScore(
                         event_id=str(score.get("eventId")),
+                        event_subtype=(
+                            str(score["eventSubtype"]) if score.get("eventSubtype") else None
+                        ),
                         event_fingerprint=(
                             str(score["eventFingerprint"])
                             if score.get("eventFingerprint")
@@ -2372,6 +2375,7 @@ def _life_events(source: ChartRecordBuildInput) -> list[LifeEvent]:
             LifeEvent(
                 event_id=str(raw["eventId"]),
                 category=str(raw.get("category") or "unknown"),
+                event_subtype=(str(raw["eventSubtype"]) if raw.get("eventSubtype") else None),
                 interval=TimeRange(
                     start=_localize_naive(start_naive, source.timezone_id),
                     end=_localize_naive(end_naive, source.timezone_id),

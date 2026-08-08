@@ -33,6 +33,7 @@ from app.schemas import (
     RectificationConfirmationInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
+    RectificationLifeEventsResetInput,
     SkillBirthInput,
     SkillFeedbackInput,
     SkillRunInput,
@@ -375,6 +376,33 @@ async def record_rectification_life_events(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise _internal_server_error("rectification events", exc) from exc
+
+
+@app.post("/api/rectification-life-events/reset", response_model=SkillSessionResponse)
+async def reset_rectification_life_events(
+    input_data: RectificationLifeEventsResetInput,
+    current_user: AuthenticatedUser = Depends(resolve_session_user),
+) -> SkillSessionResponse:
+    try:
+        container = get_container()
+        account_user = await _sync_account_user(container, current_user)
+        await _claim_or_assert_session_access(
+            container,
+            input_data.session_id,
+            account_user,
+        )
+        return await container.skill_runtime.reset_rectification_life_events(
+            input_data,
+            owner_user_id=account_user.owner_user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _internal_server_error("rectification event reset", exc) from exc
 
 
 @app.post("/api/rectification-interview", response_model=SkillSessionResponse)

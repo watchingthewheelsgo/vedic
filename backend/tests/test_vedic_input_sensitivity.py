@@ -10,17 +10,20 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import pytz
 
 from app.schemas import (
     BirthInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
+    RectificationLifeEventsResetInput,
     SkillArtifact,
     SkillRunInput,
 )
 from app.services.place_service import ResolvedPlace
 from app.services.chart_rectification import ChartRectificationService
 from app.services.life_event_rectification import (
+    _localize_event_interval,
     candidate_event_period_fingerprint,
     parse_life_event_ledger,
     score_candidate_events,
@@ -1007,7 +1010,7 @@ def test_refined_state_boundaries_sync_to_typed_chart_record() -> None:
     )
 
 
-def test_life_event_ledger_reserves_latest_event_as_holdout() -> None:
+def test_life_event_ledger_reserves_third_submission_as_stable_holdout() -> None:
     ledger = parse_life_event_ledger("2012年9月 入学\n2018年10月 结婚\n2023年6月 跳槽")
 
     assert [event["role"] for event in ledger["events"]] == [
@@ -1016,6 +1019,13 @@ def test_life_event_ledger_reserves_latest_event_as_holdout() -> None:
         "holdout",
     ]
     assert ledger["events"][-1]["category"] == "career"
+
+    extended = parse_life_event_ledger(
+        "2012年9月 入学\n2018年10月 结婚\n2023年6月 跳槽\n2010年 搬家"
+    )
+    holdout = next(event for event in extended["events"] if event["role"] == "holdout")
+    assert holdout["category"] == "career"
+    assert holdout["intakeSequence"] == 3
 
 
 def test_life_event_ledger_requires_three_events_for_independent_holdout() -> None:
@@ -1034,16 +1044,19 @@ def test_structured_life_event_category_wins_over_description_keywords() -> None
                 {
                     "date": "2018-10",
                     "category": "health",
+                    "eventSubtype": "accident",
                     "description": "工作途中发生车祸并住院",
                 },
                 {
                     "date": "2020-06",
                     "category": "relocation",
+                    "eventSubtype": "moved_city",
                     "description": "因工作搬到上海",
                 },
                 {
                     "date": "2023-05",
                     "category": "relationship",
+                    "eventSubtype": "separation",
                     "description": "职业变化期间结束长期关系",
                 },
             ],
@@ -1059,10 +1072,74 @@ def test_structured_life_event_category_wins_over_description_keywords() -> None
     ]
 
 
+def test_structured_relationship_subtype_selects_specific_versioned_rule() -> None:
+    ledger = parse_life_event_ledger(
+        "2018-10 relationship: Got married",
+        semantic_evidence=[
+            {
+                "date": "2018-10",
+                "category": "relationship",
+                "eventSubtype": "marriage",
+                "description": "Got married",
+                "eventFacts": {},
+            }
+        ],
+    )
+
+    event = ledger["events"][0]
+    assert event["eventSubtype"] == "marriage"
+    assert event["rectificationRules"]["houses"] == [7, 2, 11]
+    assert event["rectificationRules"]["vargas"] == ["D9"]
+
+
+def test_directional_subtypes_change_rules_only_when_policy_defines_them() -> None:
+    ledger = parse_life_event_ledger(
+        "2018 career: Promoted\n2020 career: Lost job",
+        semantic_evidence=[
+            {
+                "date": "2018",
+                "category": "career",
+                "eventSubtype": "promotion",
+                "description": "Promoted",
+            },
+            {
+                "date": "2020",
+                "category": "career",
+                "eventSubtype": "job_loss",
+                "description": "Lost job",
+            },
+        ],
+    )
+
+    assert ledger["events"][0]["rectificationRules"]["houses"] == [2, 10, 11]
+    assert ledger["events"][1]["rectificationRules"]["houses"] == [6, 8, 10, 12]
+
+
+def test_event_identity_preserves_distinct_subtypes_with_same_text() -> None:
+    evidence = [
+        {
+            "date": "2018",
+            "category": "career",
+            "eventSubtype": event_subtype,
+            "description": "Role changed",
+        }
+        for event_subtype in ("promotion", "job_loss")
+    ]
+    ledger = parse_life_event_ledger(
+        "2018 career: Role changed\n2018 career: Role changed",
+        semantic_evidence=evidence,
+    )
+
+    assert [event["eventSubtype"] for event in ledger["events"]] == ["promotion", "job_loss"]
+    assert len({event["eventFingerprint"] for event in ledger["events"]}) == 2
+    assert len({event["eventId"] for event in ledger["events"]}) == 2
+
+
 def test_structured_life_event_input_rejects_duplicate_evidence() -> None:
     duplicate = {
         "date": "2018-10",
         "category": "career",
+        "eventSubtype": "first_job",
         "description": "Started my first full-time job",
     }
 
@@ -1859,6 +1936,7 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
                         "questionId": question["questionId"],
                         "date": f"{2011 + index}-06",
                         "category": question["category"],
+                        "eventSubtype": question["allowedSubtypes"][0],
                         "description": description,
                     }
                 ],
@@ -1925,6 +2003,28 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
             "rectification_answer_batch.json",
         ]:
             assert workspace.read_artifact_text(created.session_id, stale_path) is None
+
+        reset = await runtime.reset_rectification_life_events(
+            RectificationLifeEventsResetInput(
+                sessionId=created.session_id,
+                expectedChartRevision=record["revision"],
+            )
+        )
+        reset_context = json.loads(
+            workspace.read_artifact_text(created.session_id, "birth_input_context.json") or "{}"
+        )
+        reset_record = json.loads(
+            workspace.read_artifact_text(created.session_id, "chart_record.json") or "{}"
+        )
+        reset_state = json.loads(
+            workspace.read_artifact_text(created.session_id, "chart_rectification_state.json")
+            or "{}"
+        )
+        assert reset.stage == "reader_ready"
+        assert reset_context["lifeEvents"]["events"] == []
+        assert reset_context["lifeEventSemantics"] == []
+        assert reset_record["revision"] == record["revision"] + 1
+        assert reset_state["status"] == "collecting_evidence"
 
     asyncio.run(run())
 
@@ -3111,7 +3211,7 @@ def test_stable_interval_preserves_successful_reader_quality_gate() -> None:
     assert decision["timeConfidence"] == "medium"
 
 
-def test_tied_dated_events_stop_instead_of_forcing_agent_questions() -> None:
+def test_tied_dated_events_request_another_bounded_round_before_stopping() -> None:
     service = ChartRectificationService()
     event_one = "evt_1_201806_career"
     event_two = "evt_2_202009_marriage"
@@ -3140,7 +3240,8 @@ def test_tied_dated_events_stop_instead_of_forcing_agent_questions() -> None:
     )
 
     assert state["status"] == "underdetermined"
-    assert state["rectificationPlan"]["action"] == "rectification_inconclusive"
+    assert state["rectificationPlan"]["action"] == "collect_dated_life_events"
+    assert state["rectificationPlan"]["eventCollectionRequired"] is True
     assert state["reportGate"]["fullReportAllowed"] is False
 
 
@@ -3839,7 +3940,9 @@ def test_rectification_caps_correlated_matches_and_localizes_event_time(monkeypa
         observed_transit_times.append(as_of)
         return {"double_transit_houses": []}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
     ledger = parse_life_event_ledger("2018年10月 结婚")
 
@@ -3897,7 +4000,9 @@ def test_semantic_event_facts_remain_context_only_for_candidate_scoring(monkeypa
     def fake_transits(lagna_index, moon_index, *, as_of):
         return {"double_transit_houses": [7] if lagna_index == 1 else []}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
 
     def ledger_for(impact: str) -> dict[str, Any]:
@@ -3966,7 +4071,9 @@ def test_rectification_dasha_activation_includes_declared_graha_drishti(monkeypa
             {"mahadasha": "Mars", "antardasha": "Mars", "pratyantardasha": "Mars"} for _ in args[-1]
         ]
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr(
         "app.calculator.engine.calc_transits",
         lambda lagna_index, moon_index, *, as_of: {"double_transit_houses": []},
@@ -4007,7 +4114,9 @@ def test_rectification_dasha_uses_candidate_local_civil_time(monkeypatch) -> Non
             {"mahadasha": "Mars", "antardasha": "Moon", "pratyantardasha": "Ketu"} for _ in args[-1]
         ]
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr(
         "app.calculator.engine.calc_transits",
         lambda lagna_index, moon_index, *, as_of: {"double_transit_houses": []},
@@ -4039,14 +4148,21 @@ def test_rectification_withholds_dasha_level_that_changes_inside_reported_interv
 ) -> None:
     def fake_dasha(*args, **kwargs):
         return [
-            {"mahadasha": lord, "antardasha": "Jupiter", "pratyantardasha": "Moon"}
-            for lord in ("Venus", "Mars", "Venus")
+            {
+                "mahadasha": None,
+                "antardasha": None,
+                "pratyantardasha": None,
+                "unstableLevels": ["md", "ad", "pd"],
+            }
+            for _ in args[-1]
         ]
 
     def fake_transits(lagna_index, moon_index, *, as_of):
         return {"double_transit_houses": []}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
     result = score_candidate_events(
         candidate_id="candidate-a",
@@ -4075,7 +4191,8 @@ def test_rectification_withholds_dasha_level_that_changes_inside_reported_interv
     assert md_missing["details"] == {
         "level": "md",
         "reason": "period_changes_within_reported_date_range",
-        "sampledLords": ["Mars", "Venus"],
+        "exactBoundaryCheck": True,
+        "reportedDate": "2018-10-15" if "15" in event_text else "2018-10",
     }
     assert not any(
         item["observationId"].endswith(("md.activation", "md.activation_not_observed"))
@@ -4093,7 +4210,9 @@ def test_year_precision_cannot_create_transit_evidence(monkeypatch) -> None:
     def fake_transits(lagna_index, moon_index, *, as_of):
         return {"double_transit_houses": [7]}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
     result = score_candidate_events(
         candidate_id="candidate-a",
@@ -4133,7 +4252,9 @@ def test_month_precision_requires_stable_transit_activation(monkeypatch) -> None
         transit_calls += 1
         return {"double_transit_houses": [7] if transit_calls != 2 else []}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", unstable_transits)
     kwargs = {
         "candidate_id": "candidate-a",
@@ -4190,7 +4311,9 @@ def test_rectification_rejects_incomplete_dasha_hierarchy(monkeypatch) -> None:
     def fake_transits(lagna_index, moon_index, *, as_of):
         return {"double_transit_houses": []}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
 
     with pytest.raises(RuntimeError, match="incomplete hierarchy"):
@@ -4246,7 +4369,7 @@ def test_rectification_rejects_incomplete_candidate_signatures(
     monkeypatch, signature: dict[str, object], message: str
 ) -> None:
     monkeypatch.setattr(
-        "app.calculator.dasha_pyjhora.calculate_dasha_lords_at",
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals",
         lambda *args, **kwargs: [
             {"mahadasha": "Venus", "antardasha": "Moon", "pratyantardasha": "Moon"}
             for _ in args[-1]
@@ -4275,7 +4398,9 @@ def test_rectification_varga_score_uses_domain_house_structure(monkeypatch) -> N
     def fake_transits(lagna_index, moon_index, *, as_of):
         return {"double_transit_houses": []}
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", fake_transits)
     ledger = parse_life_event_ledger("2018年10月 跳槽")
     base_signature = {
@@ -4343,7 +4468,9 @@ def _kp_neutral_transits(lagna_index, moon_index, *, as_of):
 
 
 def test_rectification_kp_sub_lord_alone_is_suppressed(monkeypatch) -> None:
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", _kp_neutral_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     ledger = parse_life_event_ledger("2018年10月 结婚")
 
@@ -4388,7 +4515,9 @@ def test_rectification_kp_sub_lord_counts_when_corroborated(monkeypatch) -> None
             for _ in args[-1]
         ]
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     ledger = parse_life_event_ledger("2018年10月 结婚")
 
@@ -4432,7 +4561,9 @@ def test_rectification_kp_sub_lord_counts_when_corroborated(monkeypatch) -> None
 
 
 def test_rectification_kp_sub_lord_alone_is_suppressed_omits_kp_rule_id(monkeypatch) -> None:
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", _kp_neutral_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     ledger = parse_life_event_ledger("2018年10月 结婚")
 
@@ -4460,7 +4591,9 @@ def test_rectification_kp_sub_lord_alone_is_suppressed_omits_kp_rule_id(monkeypa
 
 
 def test_rectification_kp_sub_lord_not_matched_stays_missing(monkeypatch) -> None:
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", _kp_neutral_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     ledger = parse_life_event_ledger("2018年10月 结婚")
 
@@ -4508,7 +4641,9 @@ def test_rectification_chara_dasha_score_activates_on_matched_rasi(monkeypatch) 
     # Jaimini rasi drishti onto houses 2/11, is ruled by a marriage karaka
     # (Venus), and rules houses 2 and 7 -- all four dimensions fire at once for
     # every Chara Dasha level, so this is a clean "fully activated" fixture.
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", _kp_neutral_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     monkeypatch.setattr(
         "app.calculator.chara_dasha_pyjhora.calculate_chara_dasha_lords_at",
@@ -4544,7 +4679,9 @@ def test_rectification_chara_dasha_score_stays_zero_when_not_activated(monkeypat
     # Gemini (lord Mercury) from an Aries lagna occupies house 3, aspects
     # houses 6/9/12, and its lord Mercury is neither a marriage karaka nor a
     # ruler of houses 7/2/11 -- none of the four activation dimensions fire.
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", _kp_neutral_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     monkeypatch.setattr(
         "app.calculator.chara_dasha_pyjhora.calculate_chara_dasha_lords_at",
@@ -4584,7 +4721,9 @@ def test_rectification_chara_dasha_score_is_none_when_calculation_fails(monkeypa
     def _failing_chara_dasha(*args, **kwargs):
         raise RuntimeError("PyJHora Chara Dasha lookup failed")
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", _kp_neutral_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", _kp_neutral_dasha
+    )
     monkeypatch.setattr("app.calculator.engine.calc_transits", _kp_neutral_transits)
     monkeypatch.setattr(
         "app.calculator.chara_dasha_pyjhora.calculate_chara_dasha_lords_at",
@@ -4673,7 +4812,7 @@ def test_birth_input_context_includes_life_event_ledger() -> None:
     assert context["lifeEvents"]["events"][1]["category"] == "career"
 
 
-def test_time_source_sets_a_conservative_minimum_radius_without_directional_shift() -> None:
+def test_time_source_is_provenance_only_and_precision_controls_radius() -> None:
     calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
     payload = _birth_payload()
 
@@ -4682,11 +4821,12 @@ def test_time_source_sets_a_conservative_minimum_radius_without_directional_shif
     family_approximate = calculator._time_window(payload, "approximate", "家人大概回忆")
 
     assert documented["radiusMinutes"] == 2
-    assert family_clear["radiusMinutes"] == 10
-    assert family_approximate["radiusMinutes"] == 30
+    assert family_clear["radiusMinutes"] == 2
+    assert family_approximate["radiusMinutes"] == 15
     assert family_clear["sourcePolicy"]["directionalBiasApplied"] is False
-    assert family_approximate["start"] == "1990-01-01 08:00"
-    assert family_approximate["end"] == "1990-01-01 09:00"
+    assert family_clear["sourcePolicy"]["status"] == "recorded_provenance_only"
+    assert family_approximate["start"] == "1990-01-01 08:15"
+    assert family_approximate["end"] == "1990-01-01 08:45"
 
 
 def test_rectification_plan_uses_life_event_focus() -> None:
@@ -4730,35 +4870,37 @@ def test_rectification_plan_uses_life_event_focus() -> None:
     holdout = next(
         event for event in state["lifeEventLedger"]["events"] if event["role"] == "holdout"
     )
-    assert holdout["category"] == "marriage"
+    assert holdout["category"] == "career"
     assert state["lifeEventLedger"]["holdoutPolicyId"].startswith(
         "vedicdust-rectification-holdout/"
     )
-    assert plan["eventCollectionRequired"] is False
+    assert plan["eventCollectionRequired"] is True
     assert [focus["category"] for focus in plan["lifeEventFocus"]] == [
+        "marriage",
         "relocation",
-        "career",
     ]
-    assert plan["lifeEventFocus"][1]["fieldOverlap"] == ["d10Lagna"]
+    assert plan["lifeEventFocus"][0]["fieldOverlap"] == ["d9Lagna"]
     assert all(focus["eventId"] != holdout["eventId"] for focus in plan["lifeEventFocus"])
 
 
 def test_candidate_partition_fingerprint_excludes_reserved_holdout(monkeypatch) -> None:
-    observed_moments: list[list[datetime]] = []
+    observed_intervals: list[list[tuple[datetime, datetime]]] = []
 
     def fake_dasha(*_args: object, **kwargs: object) -> list[dict[str, str]]:
-        moments = list(kwargs.get("moments") or _args[8])
-        observed_moments.append(moments)
+        intervals = list(kwargs.get("event_intervals") or _args[8])
+        observed_intervals.append(intervals)
         return [
             {
-                "mahadasha": f"MD-{moment.year}",
-                "antardasha": f"AD-{moment.month}",
-                "pratyantardasha": f"PD-{moment.day}",
+                "mahadasha": f"MD-{interval[0].year}",
+                "antardasha": f"AD-{interval[0].month}",
+                "pratyantardasha": f"PD-{interval[0].day}",
             }
-            for moment in moments
+            for interval in intervals
         ]
 
-    monkeypatch.setattr("app.calculator.dasha_pyjhora.calculate_dasha_lords_at", fake_dasha)
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
+    )
     ledger = parse_life_event_ledger("2018年10月 结婚\n2021年6月 搬家\n2023年5月 跳槽")
     calibration_only = {
         **ledger,
@@ -4775,7 +4917,7 @@ def test_candidate_partition_fingerprint_excludes_reserved_holdout(monkeypatch) 
     calibration_result = candidate_event_period_fingerprint(ledger=calibration_only, **kwargs)
 
     assert complete_ledger_result == calibration_result
-    assert all(moment.year != 2023 for call in observed_moments for moment in call)
+    assert all(interval[0].year != 2023 for call in observed_intervals for interval in call)
 
 
 def test_equivalence_classes_ignore_reserved_holdout_scores() -> None:
@@ -4836,3 +4978,94 @@ def test_prevalidation_contract_rejects_visible_astrology_and_non_questions() ->
 
     assert any("direct question" in error for error in errors)
     assert any("astrology or candidate terminology" in error for error in errors)
+
+
+def test_event_interval_survives_a_historical_midnight_dst_gap() -> None:
+    timezone_value = pytz.timezone("America/Santiago")
+
+    start_utc, end_utc = _localize_event_interval(
+        datetime(2019, 9, 8),
+        datetime(2019, 9, 8, 23, 59, 59),
+        timezone_value,
+    )
+
+    assert start_utc == datetime(2019, 9, 8, 4, tzinfo=timezone.utc)
+    assert end_utc == datetime(2019, 9, 9, 2, 59, 59, tzinfo=timezone.utc)
+
+
+def test_rectification_round_records_answer_impact_and_next_decision() -> None:
+    service = ChartRectificationService()
+    previous_state = {
+        "candidates": [
+            {"candidateId": "A", "aggregateScore": 0.1},
+            {"candidateId": "B", "aggregateScore": 0.1},
+        ],
+        "rectificationRounds": [],
+    }
+    next_state = {
+        "status": "underdetermined",
+        "candidates": [
+            {
+                "candidateId": "A",
+                "aggregateScore": 0.1,
+                "evidenceScores": [{"eventId": "evt-career", "role": "calibration", "score": 0.1}],
+            },
+            {
+                "candidateId": "B",
+                "aggregateScore": 0.3,
+                "evidenceScores": [{"eventId": "evt-career", "role": "calibration", "score": 0.3}],
+            },
+        ],
+        "lifeEventLedger": {
+            "events": [
+                {
+                    "questionId": "rectify.r1.q1.career",
+                    "eventId": "evt-career",
+                    "eventFingerprint": "fingerprint-career",
+                    "category": "career",
+                    "eventSubtype": "promotion",
+                    "date": "2018-06",
+                    "datePrecision": "month",
+                    "role": "calibration",
+                }
+            ]
+        },
+        "selectionEvidence": {"blockers": ["insufficient_calibration_events"]},
+        "rectificationPlan": {"action": "collect_dated_life_events"},
+        "holdoutResult": "not_run",
+        "reportGate": {"reason": "More independent dated evidence is required."},
+    }
+
+    result = service.record_evidence_round(
+        previous_state,
+        next_state,
+        submitted_events=[
+            {
+                "questionId": "rectify.r1.q1.career",
+                "category": "career",
+                "eventSubtype": "promotion",
+                "date": "2018-06",
+            }
+        ],
+        chart_revision=2,
+    )
+
+    round_record = result["rectificationRounds"][0]
+    assert round_record["answeredQuestion"]["eventId"] == "evt-career"
+    assert round_record["evidenceImpact"]["scoreSpread"] == 0.2
+    assert round_record["evidenceImpact"]["discriminating"] is True
+    assert round_record["decision"]["outcome"] == "candidate_scores_separated"
+    assert round_record["decision"]["nextAction"] == "collect_dated_life_events"
+
+
+def test_round_candidate_metrics_do_not_pair_a_leader_with_another_candidates_score() -> None:
+    metrics = ChartRectificationService._round_candidate_metrics(
+        [
+            {"candidateId": "A", "aggregateScore": None},
+            {"candidateId": "B", "aggregateScore": -0.4},
+        ]
+    )
+
+    assert metrics["leaderCandidateId"] == "A"
+    assert metrics["leaderScore"] is None
+    assert metrics["leaderMargin"] is None
