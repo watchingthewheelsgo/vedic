@@ -165,6 +165,7 @@ export type RectificationInterviewInput = {
   currentQuestionId?: string;
   skippedCategory?: RectificationLifeEventCategory;
   resetSkipped?: boolean;
+  availableCategories?: RectificationLifeEventCategory[];
 };
 
 export type RectificationConfirmationAnswer = "accurate" | "partly" | "inaccurate";

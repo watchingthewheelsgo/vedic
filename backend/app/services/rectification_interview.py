@@ -8,7 +8,7 @@ from app.schemas import AppLocale
 from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_RULES
 
 
-INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.3.0"
+INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.4.0"
 MAX_RECTIFICATION_EVENTS = 5
 
 
@@ -166,6 +166,7 @@ def build_rectification_interview(
     locale: AppLocale,
     life_stage: str | None = None,
     skipped_categories: set[str] | None = None,
+    available_categories: set[str] | None = None,
 ) -> dict[str, Any]:
     plan = (
         state.get("rectificationPlan") if isinstance(state.get("rectificationPlan"), dict) else {}
@@ -186,6 +187,8 @@ def build_rectification_interview(
     )
     skipped = skipped_categories or set()
     categories = [category for category in categories if category not in skipped]
+    if available_categories is not None:
+        categories = [category for category in categories if category in available_categories]
     # One question is a complete interaction round. The answer is recalculated
     # before the next question is selected from the updated candidate state. The
     # Agent may choose from this bounded pool, but it cannot invent a category or
@@ -254,6 +257,7 @@ def build_rectification_interview(
             item for item in plan.get("lifeEventFocus", []) if isinstance(item, dict)
         ],
         "source": "deterministic_brief",
+        "availableCategories": sorted(available_categories or []),
         "stopReason": stop_reason,
     }
 

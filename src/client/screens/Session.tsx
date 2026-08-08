@@ -128,6 +128,7 @@ type RectificationState = {
   activeCandidateId?: string | null;
   selectedCandidateId?: string | null;
   equivalentCandidateIds?: string[];
+  availableRectificationCategories?: RectificationLifeEventCategory[];
   selectionConfidence?: string;
   selectionEvidence?: {
     calibrationEventCount?: number;
@@ -400,7 +401,7 @@ const VALIDATION_CHOICES: Array<{
 
 type LifeEventDraft = RectificationLifeEventInput & {
   category: RectificationLifeEventCategory | "";
-  datePrecision: "year" | "month";
+  datePrecision: "day" | "month" | "year";
   choiceId: string;
   note: string;
 };
@@ -829,10 +830,36 @@ const LIFE_EVENT_CATEGORY_ICONS: Record<RectificationLifeEventCategory, LucideIc
   spiritual: Sparkles
 };
 
+const PRIMARY_RECTIFICATION_CATEGORIES: RectificationLifeEventCategory[] = [
+  "relationship",
+  "child",
+  "health",
+  "relocation",
+  "career",
+  "education"
+];
+
+const SECONDARY_RECTIFICATION_CATEGORIES: RectificationLifeEventCategory[] = [
+  "property",
+  "loss",
+  "family",
+  "finance",
+  "legal",
+  "spiritual"
+];
+
+const YOUNG_PERSON_RECTIFICATION_CATEGORIES: RectificationLifeEventCategory[] = [
+  "education",
+  "relocation",
+  "family",
+  "health"
+];
+
 type RectificationInterviewAction = {
   currentQuestionId?: string;
   skippedCategory?: RectificationLifeEventCategory;
   resetSkipped?: boolean;
+  availableCategories?: RectificationLifeEventCategory[];
 };
 
 type RectificationInterviewQuestion = {
@@ -851,12 +878,14 @@ type RectificationInterview = {
     | "vedicdust-rectification-interview/1.0.0"
     | "vedicdust-rectification-interview/1.1.0"
     | "vedicdust-rectification-interview/1.2.0"
-    | "vedicdust-rectification-interview/1.3.0";
+    | "vedicdust-rectification-interview/1.3.0"
+    | "vedicdust-rectification-interview/1.4.0";
   title: string;
   intro: string;
   source: string;
   progress: { answered: number; target: number; maximumAccepted: number; label: string };
   questions: RectificationInterviewQuestion[];
+  availableCategories?: RectificationLifeEventCategory[];
   stopReason?: string | null;
 };
 
@@ -909,9 +938,14 @@ export function Session() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [baziRunning, setBaziRunning] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const sessionRef = useRef<SkillSessionResponse | null>(null);
   const coreStartedRef = useRef(false);
   const readerStartedRef = useRef(false);
   const baziStartedRef = useRef(false);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   const baziMode = useMemo(() => isBaziSession(session), [session]);
   const reportSections = useMemo(() => getReportSections(session), [session]);
@@ -995,7 +1029,8 @@ export function Session() {
         return;
       }
       if (
-        readingContinuationAction(options.sessionOverride ?? session) === "confirm_rectification"
+        readingContinuationAction(options.sessionOverride ?? sessionRef.current) ===
+        "confirm_rectification"
       ) {
         setSelectedStageId("reader");
         setError(t("session.rectification.conclusion.mustConfirm"));
@@ -1017,7 +1052,7 @@ export function Session() {
         setError(userFacingError(caught, t("session.error.startReading")));
       }
     },
-    [authLoaded, id, isSignedIn, locale, session, t]
+    [authLoaded, id, isSignedIn, locale, t]
   );
 
   const resumeCoreReport = useCallback(async () => {
@@ -1102,7 +1137,7 @@ export function Session() {
         const hasReader = Boolean(loadedReader);
         if (hasFeedback) {
           const nextStep = readingContinuationAction(loaded);
-          if (nextStep === "full_report") void startCoreReport();
+          if (nextStep === "full_report") void startCoreReport({ sessionOverride: loaded });
           else if (nextStep === "reader") void startReaderValidation({ force: true });
           else if (nextStep === "collect_events") setSelectedStageId("reader");
           else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
@@ -1241,7 +1276,7 @@ export function Session() {
       setSession(updated);
       readerStartedRef.current = false;
       const nextStep = readingContinuationAction(updated);
-      if (nextStep === "full_report") await startCoreReport();
+      if (nextStep === "full_report") await startCoreReport({ sessionOverride: updated });
       else if (nextStep === "reader") await startReaderValidation({ force: true });
       else if (nextStep === "collect_events") setSelectedStageId("reader");
       else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
@@ -1311,25 +1346,32 @@ export function Session() {
 
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden bg-cream-2">
-      <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-5 py-3 backdrop-blur-lg sm:px-8">
-        <button className="brand-logo mr-3 border-0 bg-transparent" onClick={() => navigate("/")}>
+      <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-3 py-3 backdrop-blur-lg sm:px-8">
+        <button
+          className="brand-logo mr-1 border-0 bg-transparent sm:mr-3"
+          onClick={() => navigate("/")}
+        >
           Vedic<span>Dust</span>
         </button>
         <Button
           variant="tab"
           size="sm"
           data-active={tab === "reading"}
+          aria-label={t("session.tab.reading")}
           onClick={() => setTab("reading")}
         >
-          <Workflow size={14} /> {t("session.tab.reading")}
+          <Workflow size={14} />
+          <span className="hidden sm:inline">{t("session.tab.reading")}</span>
         </Button>
         <Button
           variant="tab"
           size="sm"
           data-active={tab === "report"}
+          aria-label={t("session.tab.report")}
           onClick={() => setTab("report")}
         >
-          <BookOpen size={14} /> {t("session.tab.report")}
+          <BookOpen size={14} />
+          <span className="hidden sm:inline">{t("session.tab.report")}</span>
         </Button>
         <div className="flex-1" />
         <SessionAuthControls />
@@ -1794,7 +1836,7 @@ function SessionAuthControls() {
           {t("common.trialMode")}
         </span>
         <SignInButton mode="modal">
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
             {t("common.signIn")}
           </Button>
         </SignInButton>
@@ -2158,26 +2200,31 @@ function WorkshopDetailPanel({
     ? aggregateWorkshopStages(pipelineData.nodes, stages)[stage.id]
     : null;
   const status = stage.seed ? "done" : (stageAgg?.status ?? "pending");
+  const focusedCalibration = focused && stage.id === "reader";
 
   return (
     <aside
       className={cn(
         "relative bg-cream px-6 py-7",
         focused
-          ? "mx-auto w-full max-w-[720px] rounded-[20px] border border-gold/22 shadow-[0_30px_100px_rgba(0,0,0,0.32)] sm:px-9 sm:py-9"
+          ? "mx-auto w-full max-w-[820px] rounded-[20px] border border-gold/22 shadow-[0_30px_100px_rgba(0,0,0,0.32)] sm:px-9 sm:py-9"
           : "border-r border-gold/25 max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto"
       )}
     >
-      {!focused && (
+      {!focused && !focusedCalibration && (
         <StageInfoPopover stageLabel={stageLabel} copy={copy} className="absolute right-6 top-7" />
       )}
-      <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
-        {focused ? t("session.phase.calibration") : t("session.detail.eyebrow")}
-      </div>
-      <div className={cn("mb-5 flex items-start justify-between gap-3", !focused && "pr-9")}>
-        <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stageLabel}</h3>
-        <Badge variant={statusBadgeVariant(status)}>{t(`status.${status}`)}</Badge>
-      </div>
+      {!focusedCalibration && (
+        <>
+          <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
+            {focused ? t("session.phase.calibration") : t("session.detail.eyebrow")}
+          </div>
+          <div className={cn("mb-5 flex items-start justify-between gap-3", !focused && "pr-9")}>
+            <h3 className="min-w-0 text-lg font-semibold tracking-normal text-ink">{stageLabel}</h3>
+            <Badge variant={statusBadgeVariant(status)}>{t(`status.${status}`)}</Badge>
+          </div>
+        </>
+      )}
 
       {stage.id === "src" ? (
         <BirthDetail birthInfo={birthInfo} />
@@ -2696,9 +2743,238 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
   );
 }
 
+function RectificationWorkingState({
+  mode,
+  recordedCount
+}: {
+  mode: "question" | "comparison";
+  recordedCount: number;
+}) {
+  const { locale } = useI18n();
+  const copy =
+    locale === "zh"
+      ? mode === "comparison"
+        ? {
+            eyebrow: "正在重新计算",
+            title: "正在比较候选出生时间",
+            body: `第 ${recordedCount} 件经历已保存。系统正在重算候选盘，再决定下一步。`,
+            steps: ["保存这条经历", "重新比较候选时间", "选择下一道问题"]
+          }
+        : {
+            eyebrow: "正在准备下一题",
+            title: "正在寻找最有区分度的问题",
+            body: "系统只会从你选过的经历中提问，并优先选择能区分当前候选时间的一项。",
+            steps: ["读取当前候选", "比较可回答领域", "生成一张问题卡"]
+          }
+      : locale === "ja"
+        ? mode === "comparison"
+          ? {
+              eyebrow: "再計算中",
+              title: "出生時刻の候補を比較しています",
+              body: `${recordedCount} 件目の出来事を保存しました。候補を再計算して次の手順を決めます。`,
+              steps: ["出来事を保存", "候補時刻を再比較", "次の質問を選択"]
+            }
+          : {
+              eyebrow: "次の質問を準備中",
+              title: "最も区別しやすい質問を探しています",
+              body: "選択した出来事の範囲だけから、現在の候補を区別できる質問を一つ選びます。",
+              steps: ["候補を確認", "回答可能な領域を比較", "質問カードを作成"]
+            }
+        : mode === "comparison"
+          ? {
+              eyebrow: "Recalculating",
+              title: "Comparing the remaining birth times",
+              body: `Event ${recordedCount} is saved. The system is recalculating the candidates before deciding what comes next.`,
+              steps: ["Save this event", "Recompare candidate times", "Choose the next question"]
+            }
+          : {
+              eyebrow: "Preparing the next question",
+              title: "Finding the most useful question",
+              body: "The system asks only about the event areas you selected, prioritizing the one that can separate the current candidates.",
+              steps: [
+                "Read current candidates",
+                "Compare answerable areas",
+                "Build one question card"
+              ]
+            };
+
+  return (
+    <section
+      className="mt-5 flex min-h-[390px] flex-col items-center justify-center px-4 text-center"
+      aria-live="polite"
+    >
+      <div className="relative mb-7 grid size-24 place-items-center">
+        <span className="absolute inset-0 rounded-full border border-gold/20" />
+        <span className="absolute inset-2 animate-spin rounded-full border border-transparent border-t-gold/80 [animation-duration:2.2s]" />
+        <span className="absolute inset-5 animate-spin rounded-full border border-transparent border-b-gold-light/60 [animation-direction:reverse] [animation-duration:3s]" />
+        <Sparkles className="size-5 text-gold" />
+      </div>
+      <div className="text-[10px] font-semibold uppercase tracking-[2.4px] text-gold-dim">
+        {copy.eyebrow}
+      </div>
+      <h3 className="mb-0 mt-2 text-xl font-semibold tracking-normal text-ink">{copy.title}</h3>
+      <p className="mb-0 mt-3 max-w-[480px] text-[13px] leading-6 text-body">{copy.body}</p>
+      <div className="mt-7 grid w-full max-w-[520px] gap-2.5 sm:grid-cols-3">
+        {copy.steps.map((step, index) => (
+          <div
+            key={step}
+            className="flex min-h-12 items-center gap-2 rounded-lg border border-gold/18 bg-cream-2 px-3 text-left text-[11px] leading-4 text-muted"
+          >
+            {index === 0 && mode === "comparison" ? (
+              <CheckCircle2 className="size-3.5 shrink-0 text-gold" />
+            ) : (
+              <span className="grid size-4 shrink-0 place-items-center rounded-full border border-gold/35 text-[9px] text-gold-dim">
+                {index + 1}
+              </span>
+            )}
+            {step}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EventAvailabilityStep({
+  lifeStage,
+  initialCategories = [],
+  onContinue
+}: {
+  lifeStage: string;
+  initialCategories?: RectificationLifeEventCategory[];
+  onContinue: (categories: RectificationLifeEventCategory[]) => void;
+}) {
+  const { locale, t } = useI18n();
+  const [selected, setSelected] = useState<RectificationLifeEventCategory[]>(initialCategories);
+  const youngPerson = lifeStage === "child" || lifeStage === "teen";
+  const primary = youngPerson
+    ? YOUNG_PERSON_RECTIFICATION_CATEGORIES
+    : PRIMARY_RECTIFICATION_CATEGORIES;
+  const secondary = youngPerson ? [] : SECONDARY_RECTIFICATION_CATEGORIES;
+  const copy =
+    locale === "zh"
+      ? {
+          eyebrow: "出生时间校准",
+          title: "哪些经历，你记得发生时间？",
+          body: "先选你确实能回忆到年份或月份的经历。接下来每次只问一件，不需要写人生履历。",
+          hint: "建议选择 3 项以上；只有 1–2 项也可以继续，但最终可能保留较宽的时间范围。",
+          more: "更多可以核对的经历",
+          selected: (count: number) => `已选择 ${count} 项`,
+          continue: "开始逐条确认"
+        }
+      : locale === "ja"
+        ? {
+            eyebrow: "出生時刻の確認",
+            title: "時期を覚えている出来事はどれですか？",
+            body: "年や月を思い出せる出来事だけを選んでください。この後は一度に一件ずつ確認します。",
+            hint: "3項目以上がおすすめです。1–2項目でも続けられますが、時刻の範囲が広く残る場合があります。",
+            more: "その他の確認できる出来事",
+            selected: (count: number) => `${count} 項目を選択`,
+            continue: "一件ずつ確認する"
+          }
+        : {
+            eyebrow: "Birth-time calibration",
+            title: "Which events can you place in time?",
+            body: "Choose only events whose year or month you genuinely remember. We will ask about one event at a time next.",
+            hint: "Three or more are recommended. You can continue with one or two, but the final time range may remain wider.",
+            more: "More events you may remember",
+            selected: (count: number) => `${count} selected`,
+            continue: "Confirm them one by one"
+          };
+
+  function toggle(category: RectificationLifeEventCategory) {
+    setSelected((current) =>
+      current.includes(category)
+        ? current.filter((value) => value !== category)
+        : [...current, category]
+    );
+  }
+
+  function renderCategory(category: RectificationLifeEventCategory) {
+    const Icon = LIFE_EVENT_CATEGORY_ICONS[category];
+    const active = selected.includes(category);
+    const examples = LIFE_EVENT_CHOICES[category]
+      .filter((choice) => choice.id !== "other")
+      .slice(0, 2)
+      .map((choice) => choice.label[locale])
+      .join(" · ");
+    return (
+      <button
+        key={category}
+        type="button"
+        aria-pressed={active}
+        className={cn(
+          "group flex min-h-[92px] items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-[border-color,background,box-shadow]",
+          active
+            ? "border-gold bg-gold/10 shadow-[0_0_0_2px_rgba(201,169,110,0.11)]"
+            : "border-gold/20 bg-cream-2 hover:border-gold/55 hover:bg-gold/5"
+        )}
+        onClick={() => toggle(category)}
+      >
+        <span
+          className={cn(
+            "mt-0.5 grid size-8 shrink-0 place-items-center rounded-full border transition-colors",
+            active
+              ? "border-gold bg-gold text-white"
+              : "border-gold/30 bg-cream text-gold-dim group-hover:border-gold/60"
+          )}
+        >
+          {active ? <CheckCircle2 size={15} /> : <Icon size={15} />}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[13px] font-semibold leading-5 text-ink">
+            {t(`session.events.category.${category}`)}
+          </span>
+          <span className="mt-1 block text-[11px] leading-[1.55] text-muted">{examples}</span>
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <section className="mt-2 grid gap-5">
+      <header className="border-b border-gold/20 pb-5 text-center">
+        <div className="text-[10px] font-semibold uppercase tracking-[2.4px] text-gold-dim">
+          {copy.eyebrow}
+        </div>
+        <h2 className="mb-0 mt-2 text-[24px] font-semibold leading-tight tracking-normal text-ink sm:text-[28px]">
+          {copy.title}
+        </h2>
+        <p className="mx-auto mb-0 mt-3 max-w-[560px] text-[13px] leading-6 text-body">
+          {copy.body}
+        </p>
+      </header>
+
+      <div className="grid gap-2.5 sm:grid-cols-2">{primary.map(renderCategory)}</div>
+
+      {secondary.length > 0 && (
+        <details className="rounded-xl border border-gold/18 bg-cream-2 px-4 py-3">
+          <summary className="cursor-pointer select-none text-[12px] font-semibold text-body outline-none">
+            {copy.more}
+          </summary>
+          <div className="mt-3 grid gap-2.5 sm:grid-cols-2">{secondary.map(renderCategory)}</div>
+        </details>
+      )}
+
+      <div className="rounded-lg border border-gold/18 bg-gold/5 px-3.5 py-2.5 text-[11.5px] leading-5 text-muted">
+        <Info className="mr-1.5 inline size-3.5 text-gold-dim" />
+        {copy.hint}
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-gold/20 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-[12px] font-medium text-body">{copy.selected(selected.length)}</span>
+        <Button type="button" disabled={selected.length === 0} onClick={() => onContinue(selected)}>
+          {copy.continue} <ChevronRight size={15} />
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function LifeEventCollector({
   state,
   interviewContent,
+  lifeStage,
   preparing,
   onPrepare,
   submitting,
@@ -2708,6 +2984,7 @@ function LifeEventCollector({
 }: {
   state: RectificationState;
   interviewContent: string;
+  lifeStage: string;
   preparing: boolean;
   onPrepare: (action?: RectificationInterviewAction) => Promise<void>;
   submitting: boolean;
@@ -2730,13 +3007,14 @@ function LifeEventCollector({
           progress: (current: number, total: number) => `第 ${current} / ${total} 件`,
           recorded: (count: number, total: number) => `已记录 ${count} / ${total} 件`,
           chooseEvent: "哪一项最符合？",
-          dateTitle: "这件事大概在什么时候？",
-          dateHint: "不用精确到某一天。记得月份就选月份，不记得也没关系。",
+          dateTitle: "这件事发生在什么时候？",
+          dateHint: "按你真实记得的精度填写，不需要为了显得准确而猜日期。",
+          dayKnown: "记得具体日期",
           monthKnown: "记得大概月份",
           yearOnly: "只记得年份",
           yearPlaceholder: "年份",
           record: "记录这件事",
-          compare: "完成校准并比较",
+          compare: "提交并比较候选",
           skip: "没有这类经历，换一类",
           reset: "重新选择",
           optionalNote: "补充一句（可选）",
@@ -2761,13 +3039,13 @@ function LifeEventCollector({
             recorded: (count: number, total: number) => `${count} / ${total} 件を記録済み`,
             chooseEvent: "最も近いものはどれですか？",
             dateTitle: "この出来事はいつ頃でしたか？",
-            dateHint:
-              "日にちまでは不要です。月が分かれば月を、分からなければ年だけを選んでください。",
+            dateHint: "実際に覚えている精度で入力してください。日付を推測する必要はありません。",
+            dayKnown: "日付まで分かる",
             monthKnown: "月まで分かる",
             yearOnly: "年だけ分かる",
             yearPlaceholder: "年",
             record: "この出来事を記録",
-            compare: "確認を終えて比較",
+            compare: "送信して候補を比較",
             skip: "該当しないため別の種類へ",
             reset: "選び直す",
             optionalNote: "一言を追加（任意）",
@@ -2792,13 +3070,13 @@ function LifeEventCollector({
             recorded: (count: number, total: number) => `${count} / ${total} recorded`,
             chooseEvent: "Which one is closest?",
             dateTitle: "When did this happen?",
-            dateHint:
-              "The day is not needed. Choose the month if you remember it, or the year only.",
+            dateHint: "Use the precision you genuinely remember. Do not guess a day to look exact.",
+            dayKnown: "I know the date",
             monthKnown: "I remember the month",
             yearOnly: "I only know the year",
             yearPlaceholder: "Year",
             record: "Record this event",
-            compare: "Finish check and compare",
+            compare: "Submit and compare candidates",
             skip: "None of these, choose another type",
             reset: "Choose again",
             optionalNote: "Add one short note (optional)",
@@ -2831,6 +3109,7 @@ function LifeEventCollector({
     [state.lifeEventLedger?.events]
   );
   const [draft, setDraft] = useState<LifeEventDraft | null>(null);
+  const [editingAvailability, setEditingAvailability] = useState(false);
   const question = interview?.questions[0];
   const answer = question
     ? (draft ?? {
@@ -2856,6 +3135,9 @@ function LifeEventCollector({
   const currentStep = existingEvents.length + 1;
   const target = interview?.progress.target ?? 3;
   const CategoryIcon = question ? LIFE_EVENT_CATEGORY_ICONS[question.category] : Target;
+  const availableCategories = state.availableRectificationCategories ?? [];
+  const needsAvailabilityInventory =
+    !interview && existingEvents.length === 0 && availableCategories.length === 0;
 
   useEffect(() => {
     setDraft(null);
@@ -2898,12 +3180,26 @@ function LifeEventCollector({
     });
   }
 
-  if (preparing) {
+  if (submitting) {
     return (
-      <div className="mt-6 flex min-h-52 flex-col items-center justify-center gap-3 rounded-xl border border-gold/25 bg-cream-2 px-6 text-center">
-        <LoaderCircle className="size-5 animate-spin text-gold" />
-        <p className="m-0 text-sm text-body">{ui.preparing}</p>
-      </div>
+      <RectificationWorkingState mode="comparison" recordedCount={existingEvents.length + 1} />
+    );
+  }
+
+  if (preparing) {
+    return <RectificationWorkingState mode="question" recordedCount={existingEvents.length} />;
+  }
+
+  if (needsAvailabilityInventory || editingAvailability) {
+    return (
+      <EventAvailabilityStep
+        lifeStage={lifeStage}
+        initialCategories={availableCategories}
+        onContinue={(categories) => {
+          setEditingAvailability(false);
+          void onPrepare({ availableCategories: categories, resetSkipped: true });
+        }}
+      />
     );
   }
 
@@ -2930,7 +3226,7 @@ function LifeEventCollector({
           type="button"
           variant="outline"
           className="mt-4"
-          onClick={() => void onPrepare({ resetSkipped: true })}
+          onClick={() => setEditingAvailability(true)}
         >
           <RefreshCw size={15} /> {ui.reset}
         </Button>
@@ -3047,8 +3343,8 @@ function LifeEventCollector({
             </div>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)] sm:items-end">
               <div className="grid gap-2">
-                <div className="grid grid-cols-2 rounded-lg border border-gold/20 bg-cream p-1">
-                  {(["month", "year"] as const).map((precision) => (
+                <div className="grid grid-cols-3 rounded-lg border border-gold/20 bg-cream p-1">
+                  {(["day", "month", "year"] as const).map((precision) => (
                     <button
                       key={precision}
                       type="button"
@@ -3064,25 +3360,45 @@ function LifeEventCollector({
                           date:
                             precision === "year"
                               ? answer.date.slice(0, 4)
-                              : answer.date.length >= 7
+                              : precision === "month" && answer.date.length >= 7
                                 ? answer.date.slice(0, 7)
-                                : ""
+                                : precision === "day" && answer.date.length === 10
+                                  ? answer.date
+                                  : ""
                         })
                       }
                     >
-                      {precision === "month" ? ui.monthKnown : ui.yearOnly}
+                      {precision === "day"
+                        ? ui.dayKnown
+                        : precision === "month"
+                          ? ui.monthKnown
+                          : ui.yearOnly}
                     </button>
                   ))}
                 </div>
                 <input
                   required
                   aria-label={ui.dateTitle}
-                  type={answer.datePrecision === "year" ? "number" : "month"}
-                  min={answer.datePrecision === "year" ? 1900 : "1900-01"}
+                  type={
+                    answer.datePrecision === "year"
+                      ? "number"
+                      : answer.datePrecision === "month"
+                        ? "month"
+                        : "date"
+                  }
+                  min={
+                    answer.datePrecision === "year"
+                      ? 1900
+                      : answer.datePrecision === "month"
+                        ? "1900-01"
+                        : "1900-01-01"
+                  }
                   max={
                     answer.datePrecision === "year"
                       ? new Date().getFullYear()
-                      : new Date().toISOString().slice(0, 7)
+                      : answer.datePrecision === "month"
+                        ? new Date().toISOString().slice(0, 7)
+                        : new Date().toISOString().slice(0, 10)
                   }
                   value={answer.date}
                   placeholder={answer.datePrecision === "year" ? ui.yearPlaceholder : undefined}
@@ -3609,6 +3925,10 @@ function ReaderDetail({
       ),
     [session]
   );
+  const lifeStage = useMemo(() => {
+    const record = parseJsonArtifact(session, CHART_RECORD_JSON);
+    return String(objectValue(record, "subject")?.lifeStage ?? "adult");
+  }, [session]);
   const collectingLifeEvents = rectificationState?.status === "collecting_evidence";
   const continuingLifeEvents =
     rectificationState?.status === "underdetermined" &&
@@ -3617,6 +3937,10 @@ function ReaderDetail({
     rectificationState?.status === "rectification_confirmation_required" &&
     rectificationState.rectificationConclusion?.confirmation?.status === "pending";
   const interviewArtifact = findArtifact(session, "rectification_interview.json");
+  const collectedLifeEventCount = rectificationState?.lifeEventLedger?.events?.length ?? 0;
+  const needsAvailabilityInventory =
+    collectedLifeEventCount === 0 &&
+    (rectificationState?.availableRectificationCategories?.length ?? 0) === 0;
   const [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
   const [anchorFeedback, setAnchorFeedback] = useState<
     Record<number, { answer?: ValidationAnswer; note: string }>
@@ -3648,6 +3972,7 @@ function ReaderDetail({
     if (
       (collectingLifeEvents || continuingLifeEvents) &&
       !interviewArtifact &&
+      !needsAvailabilityInventory &&
       authLoaded &&
       !preparingRectificationInterview &&
       !interviewRequestedRef.current
@@ -3660,6 +3985,7 @@ function ReaderDetail({
     collectingLifeEvents,
     continuingLifeEvents,
     interviewArtifact,
+    needsAvailabilityInventory,
     onPrepareRectificationInterview,
     preparingRectificationInterview
   ]);
@@ -3707,6 +4033,7 @@ function ReaderDetail({
         <LifeEventCollector
           state={rectificationState}
           interviewContent={interviewArtifact?.content ?? ""}
+          lifeStage={lifeStage}
           preparing={preparingRectificationInterview}
           onPrepare={onPrepareRectificationInterview}
           submitting={submittingLifeEvents}
@@ -4914,7 +5241,8 @@ function parseRectificationInterview(content: string): RectificationInterview | 
         parsed.schemaVersion === "vedicdust-rectification-interview/1.0.0" ||
         parsed.schemaVersion === "vedicdust-rectification-interview/1.1.0" ||
         parsed.schemaVersion === "vedicdust-rectification-interview/1.2.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.3.0"
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.3.0" ||
+        parsed.schemaVersion === "vedicdust-rectification-interview/1.4.0"
       ) ||
       !Array.isArray(parsed.questions) ||
       !parsed.progress

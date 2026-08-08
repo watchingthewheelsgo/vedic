@@ -63,6 +63,71 @@ def test_question_categories_follow_candidate_discriminators() -> None:
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
 
 
+def test_user_available_categories_bound_the_candidate_driven_question_pool() -> None:
+    interview = build_rectification_interview(
+        _state(fields=["d10Lagna", "d4Structure"]),
+        session_id="session-test",
+        locale="zh",
+        available_categories={"relocation", "health"},
+    )
+
+    assert [question["category"] for question in interview["questions"]] == ["relocation"]
+    assert {question["category"] for question in interview["questionPool"]} <= {
+        "relocation",
+        "health",
+    }
+    assert interview["availableCategories"] == ["health", "relocation"]
+
+
+def test_agent_event_evidence_prompt_renders_nested_json_contract() -> None:
+    class FakeAgentRuntime:
+        def is_configured(self) -> bool:
+            return True
+
+        async def run_skill_prompt_task(self, _task: str, prompt: str, **_kwargs: object):
+            assert '"eventFacts": {' in prompt
+            assert '"dateConfidence": "year|month|day|unknown"' in prompt
+            return SimpleNamespace(
+                raw_text=json.dumps(
+                    {
+                        "results": [
+                            {
+                                "questionId": "q-education",
+                                "category": "education",
+                                "accepted": True,
+                                "reason": "Concrete dated event.",
+                                "eventFacts": {
+                                    "occurrence": "occurred",
+                                    "agency": "active",
+                                    "impact": "major",
+                                    "dateConfidence": "month",
+                                },
+                            }
+                        ]
+                    }
+                )
+            )
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    runtime.agent_runtime = FakeAgentRuntime()  # type: ignore[assignment]
+
+    result = asyncio.run(
+        runtime._validate_rectification_event_evidence(
+            [
+                {
+                    "questionId": "q-education",
+                    "category": "education",
+                    "date": "2012-09",
+                    "description": "Started university",
+                }
+            ]
+        )
+    )
+
+    assert result["source"] == "agent_semantic_validation"
+    assert result["results"][0]["eventFacts"]["dateConfidence"] == "month"
+
+
 def test_undertermined_round_offers_remaining_domains_but_targets_one_more_event() -> None:
     interview = build_rectification_interview(
         _state(

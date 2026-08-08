@@ -121,6 +121,20 @@ class RectificationInterviewInput(ApiModel):
     )
     skipped_category: LifeEventCategory | None = Field(default=None, alias="skippedCategory")
     reset_skipped: bool = Field(default=False, alias="resetSkipped")
+    available_categories: list[LifeEventCategory] | None = Field(
+        default=None,
+        alias="availableCategories",
+        min_length=1,
+        max_length=12,
+    )
+
+    @model_validator(mode="after")
+    def validate_available_categories(self) -> RectificationInterviewInput:
+        if self.available_categories is not None and len(self.available_categories) != len(
+            set(self.available_categories)
+        ):
+            raise ValueError("available rectification categories must be distinct")
+        return self
 
 
 RectificationConfirmationAnswer = Literal["accurate", "partly", "inaccurate"]

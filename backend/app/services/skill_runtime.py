@@ -598,6 +598,11 @@ class SkillRuntime:
             updated_state["skippedRectificationCategories"] = [
                 str(category) for category in skipped_categories if str(category).strip()
             ]
+        available_categories = state.get("availableRectificationCategories")
+        if isinstance(available_categories, list):
+            updated_state["availableRectificationCategories"] = [
+                str(category) for category in available_categories if str(category).strip()
+            ]
         prior_mutations = state.get("rectificationMutations")
         prior_mutations = prior_mutations if isinstance(prior_mutations, list) else []
         updated_state["rectificationMutations"] = [
@@ -1022,6 +1027,11 @@ Return JSON only:
             for category in (state.get("skippedRectificationCategories") or [])
             if str(category).strip()
         }
+        available_categories = {
+            str(category)
+            for category in (state.get("availableRectificationCategories") or [])
+            if str(category).strip()
+        }
         current_interview = self._json_dict(
             self.workspace.read_artifact_text(session_id, RECTIFICATION_INTERVIEW_JSON) or ""
         )
@@ -1044,7 +1054,15 @@ Return JSON only:
             if current_question.get("category") != input_data.skipped_category:
                 raise ValueError("skipped category does not match the current question")
             skipped_categories.add(input_data.skipped_category)
-        if input_data.reset_skipped or input_data.skipped_category:
+        if input_data.available_categories is not None:
+            available_categories = set(input_data.available_categories)
+            skipped_categories &= available_categories
+            state["availableRectificationCategories"] = sorted(available_categories)
+        if (
+            input_data.reset_skipped
+            or input_data.skipped_category
+            or input_data.available_categories is not None
+        ):
             state["skippedRectificationCategories"] = sorted(skipped_categories)
             state["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             self.workspace.write_artifact(
@@ -1068,6 +1086,7 @@ Return JSON only:
             locale=input_data.locale,
             life_stage=life_stage,
             skipped_categories=skipped_categories,
+            available_categories=available_categories or None,
         )
         if (
             interview.get("questions")
@@ -2398,12 +2417,12 @@ Return JSON only:
 	      "category": "exact submitted category",
 	      "accepted": true,
 	      "reason": "short user-facing reason",
-	      "eventFacts": {
+	      "eventFacts": {{
             "occurrence": "occurred|ongoing|uncertain",
 	        "agency": "active|passive|mixed|unknown",
 	        "impact": "major|moderate|minor|unknown",
 	        "dateConfidence": "year|month|day|unknown"
-	      }
+	      }}
 	    }}
   ]
 }}"""

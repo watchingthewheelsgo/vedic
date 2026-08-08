@@ -1824,7 +1824,13 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
             start=1,
         ):
             await runtime.prepare_rectification_interview(
-                RectificationInterviewInput(sessionId=created.session_id, locale="en"),
+                RectificationInterviewInput(
+                    sessionId=created.session_id,
+                    locale="en",
+                    availableCategories=["education", "career", "relationship"]
+                    if index == 1
+                    else None,
+                ),
                 use_agent=False,
             )
             interview = json.loads(
@@ -1895,6 +1901,11 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
         assert record["subject"]["readerRelationship"] == "parent"
         assert record["subject"]["consultationTopics"] == ["Career direction"]
         assert next_state["status"] != "collecting_evidence"
+        assert next_state["availableRectificationCategories"] == [
+            "career",
+            "education",
+            "relationship",
+        ]
         expected_contract_status = (
             "underdetermined"
             if next_state["status"] == "underdetermined"
