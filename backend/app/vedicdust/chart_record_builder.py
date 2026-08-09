@@ -50,6 +50,7 @@ from .models import (
 )
 from .profiles import parashari_lahiri_profile, varga_method_setting
 from .rectification_policy import (
+    RECTIFICATION_CONVERGENCE_COMPONENTS,
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_HOLDOUT_POLICY_ID,
     RECTIFICATION_METHOD_MATURITY,
@@ -2240,18 +2241,13 @@ def _candidate_evidence_score(score: Mapping[str, Any]) -> CandidateEvidenceScor
         payload["method_convergence_components"] = [
             str(value)
             for value in score.get("methodConvergenceComponents") or []
-            if value in {"dasha", "varga", "double_transit"}
+            if value in RECTIFICATION_CONVERGENCE_COMPONENTS
         ]
     if score.get("methodConvergenceLayers") is not None:
         payload["method_convergence_layers"] = [
             str(value)
             for value in score.get("methodConvergenceLayers") or []
-            if value
-            in {
-                "d1_period_activation",
-                "domain_varga_activation",
-                "double_transit",
-            }
+            if value in {"d1_period_activation", "domain_varga_activation"}
         ]
         if score.get("methodConvergenceCount") is not None:
             payload["method_convergence_count"] = score["methodConvergenceCount"]
@@ -2362,6 +2358,17 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                     str(raw["dashaSystemAgreement"])
                     if raw.get("dashaSystemAgreement") in {"agrees", "disagrees", "not_applicable"}
                     else "not_applicable"
+                ),
+                holdout_period_boundary_checked=bool(raw.get("holdoutPeriodBoundaryChecked")),
+                holdout_period_stable_within_interval=(
+                    bool(raw["holdoutPeriodStableWithinInterval"])
+                    if raw.get("holdoutPeriodStableWithinInterval") is not None
+                    else None
+                ),
+                holdout_period_audit_resolution_seconds=(
+                    int(raw["holdoutPeriodAuditResolutionSeconds"])
+                    if raw.get("holdoutPeriodAuditResolutionSeconds") is not None
+                    else None
                 ),
             )
         )

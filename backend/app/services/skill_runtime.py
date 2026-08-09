@@ -42,6 +42,7 @@ from app.services.rectification_interview import (
     validate_agent_question_wording,
     validate_rectification_event_bindings,
     validate_rectification_event_dates,
+    validate_rectification_episode_independence,
 )
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import ChartRecordIdentity, VedicCalculator
@@ -523,6 +524,12 @@ class SkillRuntime:
             submitted_events,
             state=state,
             interview=interview,
+        )
+        validate_rectification_episode_independence(
+            new_events,
+            existing_events=[
+                item for item in state_ledger.get("events", []) if isinstance(item, dict)
+            ],
         )
         evidence_validation = await self._validate_rectification_event_evidence(new_events)
         latest_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
@@ -1147,6 +1154,19 @@ class SkillRuntime:
             skipped_categories.add(input_data.skipped_category)
         if input_data.available_categories is not None:
             available_categories = set(input_data.available_categories)
+            ledger = state.get("lifeEventLedger")
+            ledger = ledger if isinstance(ledger, dict) else {}
+            existing_episode_count = int(ledger.get("independentEpisodeCount") or 0)
+            if existing_episode_count == 0:
+                existing_episode_count = sum(
+                    1
+                    for event in (ledger.get("events") or [])
+                    if isinstance(event, dict) and event.get("role") in {"calibration", "holdout"}
+                )
+            if existing_episode_count == 0 and len(available_categories) < 2:
+                raise ValueError(
+                    "birth-time rectification needs at least two available life-event domains"
+                )
             skipped_categories &= available_categories
             state["availableRectificationCategories"] = sorted(available_categories)
         if (
@@ -2494,10 +2514,12 @@ Return JSON only:
         self,
         events: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if self.agent_runtime is None or not self.agent_runtime.is_configured():
-            return {
+        def bound_event_result(
+            *, source: str, agent_failure: Exception | None = None
+        ) -> dict[str, Any]:
+            payload = {
                 "schemaVersion": "vedicdust-life-event-evidence-validation/1.0.0",
-                "source": "question_binding_only",
+                "source": source,
                 "results": [
                     {
                         "questionId": event["questionId"],
@@ -2506,7 +2528,7 @@ Return JSON only:
                         "date": event.get("date", ""),
                         "description": event.get("description", ""),
                         "accepted": True,
-                        "reason": "Backend-issued question and category binding validated.",
+                        "reason": "Backend-issued question, subtype, and category binding validated.",
                         "eventFacts": {
                             "occurrence": "occurred",
                             "agency": "unknown",
@@ -2517,13 +2539,19 @@ Return JSON only:
                     for event in events
                 ],
             }
+            if agent_failure is not None:
+                payload["agentFallbackReason"] = self._safe_agent_failure_reason(agent_failure)
+            return payload
 
-        prompt = f"""Validate whether each user statement is a concrete dated life event that
-matches the backend-assigned category and selected subtype. This is evidence intake, not astrology
-interpretation. Do not infer chart meaning, score candidates, rewrite the user's statement, or
-change a category or eventSubtype.
-Accept ordinary wording when it clearly describes a real event; reject personality descriptions,
-hypotheticals, wishes, unrelated trivia, and category mismatches. A year-only date is valid.
+        if self.agent_runtime is None or not self.agent_runtime.is_configured():
+            return bound_event_result(source="question_binding_only")
+
+        prompt = f"""Classify optional semantic context for each structured life event. The backend
+has already validated the current question, selected subtype, category, and date; you do not decide
+whether the event is accepted. This is evidence enrichment, not astrology interpretation. Do not
+infer chart meaning, score candidates, rewrite the user's statement, or change a category or
+eventSubtype. Use `unknown` whenever the submitted details do not support a semantic label. A
+year-only date is valid.
 
 SUBMITTED EVENTS
 {json.dumps(events, ensure_ascii=False, indent=2)}
@@ -2535,8 +2563,7 @@ Return JSON only:
       "questionId": "exact submitted questionId",
 	      "category": "exact submitted category",
 	      "eventSubtype": "exact submitted eventSubtype",
-	      "accepted": true,
-	      "reason": "short user-facing reason",
+	      "reason": "short audit note about available semantic detail",
 	      "eventFacts": {{
             "occurrence": "occurred|ongoing|uncertain",
 	        "agency": "active|passive|mixed|unknown",
@@ -2560,19 +2587,19 @@ Return JSON only:
                 validated = validate_agent_event_evidence(events, payload)
                 return {
                     "schemaVersion": "vedicdust-life-event-evidence-validation/1.0.0",
-                    "source": "agent_semantic_validation",
+                    "source": "agent_semantic_enrichment",
                     "results": validated,
                 }
             except ValueError as exc:
-                if str(exc).startswith("Please revise the life event:"):
-                    raise
                 last_error = exc
             except Exception as exc:
                 last_error = exc
-        raise ValueError(
-            "Could not verify these life-event descriptions. Please make each answer a short, "
-            "factual event and try again."
-        ) from last_error
+        if last_error is None:
+            last_error = RuntimeError("Agent evidence validation returned no usable result")
+        return bound_event_result(
+            source="question_binding_fallback",
+            agent_failure=last_error,
+        )
 
     def _consultation_question_prompt(
         self,
@@ -2840,6 +2867,12 @@ Return JSON only:
                 updated_state,
                 self._json_dict(artifacts.get("birth_input_context.json", "")),
             )
+            boundary_refinement = updated_state.get("boundaryRefinement")
+            if (
+                isinstance(boundary_refinement, dict)
+                and boundary_refinement.get("status") == "skipped"
+            ):
+                return self.rectification.reject_unresolved_boundary_selection(updated_state)
 
         if updated_state.get("status") == "needs_recalculation":
             rectified_input = self.rectification.rectified_birth_input(

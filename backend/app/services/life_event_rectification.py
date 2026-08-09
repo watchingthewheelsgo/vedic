@@ -16,6 +16,7 @@ from app.vedicdust.event_time import (
     event_utc_sample_envelope,
 )
 from app.vedicdust.rectification_policy import (
+    RECTIFICATION_CONVERGENCE_COMPONENTS,
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_EVENT_RULES,
     RECTIFICATION_HOLDOUT_POLICY_ID,
@@ -25,6 +26,7 @@ from app.vedicdust.rectification_policy import (
     RECTIFICATION_SELECTION_COMPONENTS,
     RECTIFICATION_SOURCE_IDS,
     RECTIFICATION_SCORING_POLICY,
+    rectification_outcome_polarity,
     rectification_rules_for,
 )
 
@@ -74,6 +76,11 @@ DATE_PATTERN = re.compile(
 )
 MAX_RECTIFICATION_EVENTS = 5
 MIN_RECTIFICATION_EVENTS = MINIMUM_RECTIFICATION_EVENTS
+TRANSIT_COVERAGE_STEP = timedelta(hours=12)
+TRANSIT_SIGN_BOUNDARY_GUARD_DEGREES = 1.0
+SUPPORTIVE_DIGNITIES = frozenset({"exalted", "own_sign", "great_friend", "friend"})
+CHALLENGING_DIGNITIES = frozenset({"debilitated", "great_enemy", "enemy"})
+CLASSICAL_GRAHAS = frozenset({"Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"})
 
 
 def parse_life_event_ledger(
@@ -216,6 +223,99 @@ def _apply_semantic_adjustment(
     return adjustment
 
 
+def _natal_promise_observation(
+    *,
+    candidate_id: str,
+    event_id: str,
+    lagna_index: int,
+    relevant_houses: set[int],
+    karakas: set[str],
+    outcome_polarity: str,
+    planet_dignities: Any,
+) -> dict[str, Any]:
+    """Corroborate event direction with bounded D1 capacity evidence.
+
+    This deliberately emits missing rather than contradiction when capacity is
+    unclear. Dignity alone cannot veto an event because cancellation, yogas, and
+    other contextual conditions are outside this narrow rectification rule.
+    """
+
+    if outcome_polarity not in {"constructive", "disruptive"}:
+        return _observation(
+            candidate_id,
+            event_id,
+            "natal_promise.direction_not_applicable",
+            component="natal_promise",
+            outcome="missing",
+            weight=0.0,
+            details={"reason": "event_subtype_has_no_directional_capacity_profile"},
+        )
+    if not isinstance(planet_dignities, dict):
+        return _observation(
+            candidate_id,
+            event_id,
+            "natal_promise.unavailable",
+            component="natal_promise",
+            outcome="missing",
+            weight=0.0,
+            details={"reason": "d1_dignity_evidence_unavailable"},
+        )
+
+    house_lords = {
+        SIGN_LORDS[(lagna_index + house - 1) % 12] for house in relevant_houses if 1 <= house <= 12
+    }
+    # Natural karakas do not change across adjacent birth-time candidates, so
+    # their dignity cannot discriminate one candidate from another. Preserve
+    # them as context, but score only mapped house lords that change with Lagna.
+    domain_grahas = sorted(house_lords & CLASSICAL_GRAHAS)
+    context_karakas = sorted(karakas & CLASSICAL_GRAHAS)
+    observed: dict[str, str] = {}
+    for graha in domain_grahas:
+        dignity = planet_dignities.get(graha)
+        if not isinstance(dignity, dict):
+            continue
+        effective = str(
+            dignity.get("effective") or dignity.get("special") or dignity.get("compound") or ""
+        )
+        if effective:
+            observed[graha] = effective
+
+    expected = SUPPORTIVE_DIGNITIES if outcome_polarity == "constructive" else CHALLENGING_DIGNITIES
+    matched = sorted(graha for graha, dignity in observed.items() if dignity in expected)
+    if matched:
+        return _observation(
+            candidate_id,
+            event_id,
+            "natal_promise.directional_capacity",
+            component="natal_promise",
+            outcome="support",
+            weight=RECTIFICATION_SCORING_POLICY.natal_promise_support_weight,
+            details={
+                "outcomePolarity": outcome_polarity,
+                "matchedGrahas": matched,
+                "houseLordGrahas": domain_grahas,
+                "contextKarakas": context_karakas,
+                "observedDignities": observed,
+                "interpretationLimit": "capacity_corroboration_only_not_event_proof",
+            },
+        )
+    return _observation(
+        candidate_id,
+        event_id,
+        "natal_promise.directional_capacity_not_observed",
+        component="natal_promise",
+        outcome="missing",
+        weight=0.0,
+        details={
+            "reason": "bounded_directional_capacity_rule_not_matched",
+            "outcomePolarity": outcome_polarity,
+            "houseLordGrahas": domain_grahas,
+            "contextKarakas": context_karakas,
+            "observedDignities": observed,
+        },
+    )
+
+
 def score_candidate_events(
     *,
     candidate_id: str,
@@ -225,6 +325,7 @@ def score_candidate_events(
     longitude: float,
     timezone_id: str,
     ledger: dict[str, Any],
+    include_diagnostic_chara_dasha: bool = False,
 ) -> dict[str, Any]:
     """Score dated events with explicit, inspectable Jyotish evidence gates.
 
@@ -253,8 +354,9 @@ def score_candidate_events(
     event_period_utc_intervals = [
         event_utc_envelope(start, end) for start, end in event_period_intervals
     ]
-    # Chara Dasha remains diagnostic-only and is sampled over broad user date
-    # ranges. Primary Vimshottari evidence uses exact interval boundaries below.
+    # When explicitly requested, Chara Dasha remains diagnostic-only and is
+    # sampled over broad user date ranges. Primary Vimshottari evidence uses
+    # exact interval boundaries below.
     event_period_samples = [_event_interval_samples(event) for event in events]
     event_period_sample_indices: list[tuple[int, int]] = []
     event_period_utc_moments: list[datetime] = []
@@ -284,28 +386,29 @@ def score_candidate_events(
         raise RuntimeError(
             "Vimshottari event lookup returned an incomplete event-interval result set"
         )
-    chara_dasha_periods: list[dict[str, Any]] | None
-    try:
-        chara_dasha_periods = calculate_chara_dasha_lords_at(
-            localized_birth.year,
-            localized_birth.month,
-            localized_birth.day,
-            localized_birth.hour,
-            localized_birth.minute,
-            latitude,
-            longitude,
-            localized_birth.utcoffset().total_seconds() / 3600.0,
-            event_period_utc_moments,
-            birth_second=localized_birth.second,
-        )
-        if len(chara_dasha_periods) != len(event_period_utc_moments):
-            raise RuntimeError(
-                "Chara Dasha event lookup returned an incomplete event-boundary result set"
+    chara_dasha_periods: list[dict[str, Any]] | None = None
+    if include_diagnostic_chara_dasha:
+        try:
+            chara_dasha_periods = calculate_chara_dasha_lords_at(
+                localized_birth.year,
+                localized_birth.month,
+                localized_birth.day,
+                localized_birth.hour,
+                localized_birth.minute,
+                latitude,
+                longitude,
+                localized_birth.utcoffset().total_seconds() / 3600.0,
+                event_period_utc_moments,
+                birth_second=localized_birth.second,
             )
-    except Exception:
-        # Chara Dasha is a diagnostic-only, non-additive signal (see below); a
-        # calculation failure must not break the primary Vimshottari-based score.
-        chara_dasha_periods = None
+            if len(chara_dasha_periods) != len(event_period_utc_moments):
+                raise RuntimeError(
+                    "Chara Dasha event lookup returned an incomplete event-boundary result set"
+                )
+        except Exception:
+            # Chara Dasha is diagnostic-only and cannot delay or alter adaptive
+            # candidate selection. Explicit audit calls may still request it.
+            chara_dasha_periods = None
     for event_index, period in enumerate(dasha_lords):
         unstable_levels = {str(level) for level in period.get("unstableLevels") or []}
         missing_levels = [
@@ -351,11 +454,24 @@ def score_candidate_events(
         relevant_houses = {int(value) for value in rules.get("houses") or []}
         karakas = {str(value) for value in rules.get("karakas") or []}
         relevant_vargas = [str(value) for value in rules.get("vargas") or []]
+        outcome_polarity = str(rules.get("outcomePolarity") or "neutral")
         observations: list[dict[str, Any]] = []
         support_score = 0.0
         contradiction_score = 0.0
         semantic_facts = event.get("semanticFacts")
         semantic_adjustment = None
+        natal_promise = _natal_promise_observation(
+            candidate_id=candidate_id,
+            event_id=event["eventId"],
+            lagna_index=lagna_index,
+            relevant_houses=relevant_houses,
+            karakas=karakas,
+            outcome_polarity=outcome_polarity,
+            planet_dignities=signature.get("planetDignities"),
+        )
+        observations.append(natal_promise)
+        if natal_promise["outcome"] == "support":
+            support_score += float(natal_promise["weight"])
         period_entries: list[tuple[str, str]] = []
         unstable_periods = {str(level) for level in event_period.get("unstableLevels") or []}
         for short_level, level in (
@@ -538,16 +654,18 @@ def score_candidate_events(
                     )
                 )
 
-        transit_samples: list[dict[str, Any]] = []
-        for transit_local in _event_transit_moments(event):
-            for transit_utc in event_utc_sample_envelope(transit_local):
-                transit_samples.append(
-                    calc_transits(
-                        lagna_index,
-                        moon_sign_index,
-                        as_of=transit_utc,
-                    )
-                )
+        transit_samples = [
+            calc_transits(
+                lagna_index,
+                moon_sign_index,
+                as_of=transit_utc,
+            )
+            for transit_utc in _event_transit_utc_grid(event)
+        ]
+        double_transit_coverage = _transit_grid_coverage(
+            transit_samples,
+            planets=("Jupiter", "Saturn"),
+        )
         transit_house_samples = [
             {int(house) for house in transit.get("double_transit_houses") or []}
             for transit in transit_samples
@@ -556,7 +674,11 @@ def score_candidate_events(
         stable_transit_houses = sorted(
             set.intersection(*transit_house_samples) if transit_house_samples else set()
         )
-        activated = relevant_houses & set(stable_transit_houses)
+        activated = (
+            relevant_houses & set(stable_transit_houses)
+            if double_transit_coverage["certified"]
+            else set()
+        )
         if event.get("datePrecision") == "year":
             observations.append(
                 _observation(
@@ -587,6 +709,7 @@ def score_candidate_events(
                         "activatedHouses": sorted(activated),
                         "stableAcrossReportedInterval": True,
                         "sampleCount": len(transit_house_samples),
+                        "intervalCoverage": double_transit_coverage,
                     },
                 )
             )
@@ -609,6 +732,7 @@ def score_candidate_events(
                         ),
                         "observedHouses": observed_transit_houses,
                         "stableHouses": stable_transit_houses,
+                        "intervalCoverage": double_transit_coverage,
                     },
                 )
             )
@@ -625,7 +749,15 @@ def score_candidate_events(
         stable_node_houses = sorted(
             set.intersection(*node_house_samples) if node_house_samples else set()
         )
-        node_activated = relevant_houses & set(stable_node_houses)
+        node_transit_coverage = _transit_grid_coverage(
+            transit_samples,
+            planets=("Rahu", "Ketu"),
+        )
+        node_activated = (
+            relevant_houses & set(stable_node_houses)
+            if node_transit_coverage["certified"]
+            else set()
+        )
         if event.get("datePrecision") == "year":
             observations.append(
                 _observation(
@@ -656,6 +788,7 @@ def score_candidate_events(
                         "activatedHouses": sorted(node_activated),
                         "stableAcrossReportedInterval": True,
                         "sampleCount": len(node_house_samples),
+                        "intervalCoverage": node_transit_coverage,
                     },
                 )
             )
@@ -678,6 +811,7 @@ def score_candidate_events(
                         ),
                         "observedHouses": observed_node_houses,
                         "stableHouses": stable_node_houses,
+                        "intervalCoverage": node_transit_coverage,
                     },
                 )
             )
@@ -687,6 +821,10 @@ def score_candidate_events(
             str(transit.get("sade_sati") or "inactive") for transit in transit_samples
         ]
         distinct_sade_sati_states = sorted(set(sade_sati_samples))
+        sade_sati_coverage = _transit_grid_coverage(
+            transit_samples,
+            planets=("Saturn",),
+        )
         if not sade_sati_relevant:
             observations.append(
                 _observation(
@@ -718,6 +856,7 @@ def score_candidate_events(
             sade_sati_samples
             and len(distinct_sade_sati_states) == 1
             and distinct_sade_sati_states[0] != "inactive"
+            and sade_sati_coverage["certified"]
         ):
             weight = RECTIFICATION_SCORING_POLICY.sade_sati_support_weight
             support_score += weight
@@ -733,6 +872,7 @@ def score_candidate_events(
                         "phase": distinct_sade_sati_states[0],
                         "stableAcrossReportedInterval": True,
                         "sampleCount": len(sade_sati_samples),
+                        "intervalCoverage": sade_sati_coverage,
                     },
                 )
             )
@@ -752,6 +892,7 @@ def score_candidate_events(
                             else "sade_sati_not_active"
                         ),
                         "observedStates": distinct_sade_sati_states,
+                        "intervalCoverage": sade_sati_coverage,
                     },
                 )
             )
@@ -878,72 +1019,75 @@ def score_candidate_events(
         # dasha system should not silently inflate the same additive score) and is
         # instead surfaced as a standalone per-candidate `charaDashaScore` used only
         # to compare which candidate each dasha system independently prefers.
-        chara_levels: list[dict[str, Any]] = []
-        for short_level, level in (
-            ("md", "mahaRasi"),
-            ("ad", "antarRasi"),
-            ("pd", "pratyantarRasi"),
-        ):
-            sampled_rasis = [str(period.get(level) or "") for period in chara_sample_periods]
-            distinct_rasis = sorted({rasi for rasi in sampled_rasis if rasi})
-            if not (sampled_rasis and all(sampled_rasis) and len(distinct_rasis) == 1):
+        if include_diagnostic_chara_dasha:
+            chara_levels: list[dict[str, Any]] = []
+            for short_level, level in (
+                ("md", "mahaRasi"),
+                ("ad", "antarRasi"),
+                ("pd", "pratyantarRasi"),
+            ):
+                sampled_rasis = [str(period.get(level) or "") for period in chara_sample_periods]
+                distinct_rasis = sorted({rasi for rasi in sampled_rasis if rasi})
+                if not (sampled_rasis and all(sampled_rasis) and len(distinct_rasis) == 1):
+                    chara_levels.append(
+                        {
+                            "level": short_level,
+                            "outcome": "unavailable",
+                            "reason": (
+                                "period_changes_within_reported_date_range"
+                                if len(distinct_rasis) > 1
+                                else "period_rasi_unavailable"
+                            ),
+                        }
+                    )
+                    continue
+                rasi_name = distinct_rasis[0]
+                rasi_index = SIGNS.index(rasi_name)
+                matched_dimensions: list[str] = []
+                occupied_house = (rasi_index - lagna_index) % 12 + 1
+                if occupied_house in relevant_houses:
+                    matched_dimensions.append("occupant")
+                aspected_relevant_houses = sorted(
+                    relevant_houses
+                    & {
+                        (aspected_rasi - lagna_index) % 12 + 1
+                        for aspected_rasi in rasi_drishti(rasi_index)
+                    }
+                )
+                if aspected_relevant_houses:
+                    matched_dimensions.append("rasi_drishti")
+                rasi_lord = SIGN_LORDS[rasi_index]
+                if rasi_lord in karakas:
+                    matched_dimensions.append("karaka")
+                ruled_houses = sorted(
+                    house
+                    for house in relevant_houses
+                    if SIGN_LORDS[(lagna_index + house - 1) % 12] == rasi_lord
+                )
+                if ruled_houses:
+                    matched_dimensions.append("lord")
+                weight = RECTIFICATION_SCORING_POLICY.chara_dasha_level_weights[short_level]
                 chara_levels.append(
                     {
                         "level": short_level,
-                        "outcome": "unavailable",
-                        "reason": (
-                            "period_changes_within_reported_date_range"
-                            if len(distinct_rasis) > 1
-                            else "period_rasi_unavailable"
-                        ),
+                        "rasi": rasi_name,
+                        "outcome": "support" if matched_dimensions else "not_observed",
+                        "weight": weight if matched_dimensions else 0.0,
+                        "matchedDimensions": matched_dimensions,
+                        "aspectedRelevantHouses": aspected_relevant_houses,
+                        "ruledHouses": ruled_houses,
                     }
                 )
-                continue
-            rasi_name = distinct_rasis[0]
-            rasi_index = SIGNS.index(rasi_name)
-            matched_dimensions: list[str] = []
-            occupied_house = (rasi_index - lagna_index) % 12 + 1
-            if occupied_house in relevant_houses:
-                matched_dimensions.append("occupant")
-            aspected_relevant_houses = sorted(
-                relevant_houses
-                & {
-                    (aspected_rasi - lagna_index) % 12 + 1
-                    for aspected_rasi in rasi_drishti(rasi_index)
-                }
-            )
-            if aspected_relevant_houses:
-                matched_dimensions.append("rasi_drishti")
-            rasi_lord = SIGN_LORDS[rasi_index]
-            if rasi_lord in karakas:
-                matched_dimensions.append("karaka")
-            ruled_houses = sorted(
-                house
-                for house in relevant_houses
-                if SIGN_LORDS[(lagna_index + house - 1) % 12] == rasi_lord
-            )
-            if ruled_houses:
-                matched_dimensions.append("lord")
-            weight = RECTIFICATION_SCORING_POLICY.chara_dasha_level_weights[short_level]
-            chara_levels.append(
+            chara_dasha_event_scores.append(
                 {
-                    "level": short_level,
-                    "rasi": rasi_name,
-                    "outcome": "support" if matched_dimensions else "not_observed",
-                    "weight": weight if matched_dimensions else 0.0,
-                    "matchedDimensions": matched_dimensions,
-                    "aspectedRelevantHouses": aspected_relevant_houses,
-                    "ruledHouses": ruled_houses,
+                    "eventId": event["eventId"],
+                    "role": event.get("role", "calibration"),
+                    "score": round(
+                        min(sum(item.get("weight", 0.0) for item in chara_levels), 1.0), 3
+                    ),
+                    "levels": chara_levels,
                 }
             )
-        chara_dasha_event_scores.append(
-            {
-                "eventId": event["eventId"],
-                "role": event.get("role", "calibration"),
-                "score": round(min(sum(item.get("weight", 0.0) for item in chara_levels), 1.0), 3),
-                "levels": chara_levels,
-            }
-        )
 
         semantic_adjustment = _apply_semantic_adjustment(event)
         support_score = round(
@@ -986,24 +1130,26 @@ def score_candidate_events(
             max(-1.0, min(1.0, selection_support_score - selection_contradiction_score)),
             3,
         )
-        primary_method_components = sorted(
+        selection_support_components = sorted(
             {
                 str(item["component"])
                 for item in observations
                 if item["outcome"] == "support"
-                and item["component"] in {"dasha", "varga", "double_transit"}
+                and item["component"] in RECTIFICATION_SELECTION_COMPONENTS
             }
         )
+        method_convergence_components = sorted(
+            set(selection_support_components) & RECTIFICATION_CONVERGENCE_COMPONENTS
+        )
         method_convergence_layers: list[str] = []
-        if "dasha" in primary_method_components:
+        if "dasha" in method_convergence_components:
             method_convergence_layers.append("d1_period_activation")
-        if "varga" in primary_method_components:
+        if "varga" in method_convergence_components:
             method_convergence_layers.append("domain_varga_activation")
-        if "double_transit" in primary_method_components:
-            method_convergence_layers.append("double_transit")
         method_convergence_count = len(method_convergence_layers)
         method_convergence_met = (
-            method_convergence_count
+            "dasha" in method_convergence_components
+            and method_convergence_count
             >= RECTIFICATION_SCORING_POLICY.minimum_evidence_layers_per_event
         )
         rule_ids = [RECTIFICATION_RULE_ID]
@@ -1027,7 +1173,7 @@ def score_candidate_events(
                 "selectionScore": selection_score,
                 "selectionSupportScore": selection_support_score,
                 "selectionContradictionScore": selection_contradiction_score,
-                "methodConvergenceComponents": primary_method_components,
+                "methodConvergenceComponents": method_convergence_components,
                 "methodConvergenceLayers": method_convergence_layers,
                 "methodConvergenceCount": method_convergence_count,
                 "methodConvergenceMet": method_convergence_met,
@@ -1038,14 +1184,20 @@ def score_candidate_events(
                 "eventMappingId": RECTIFICATION_EVENT_MAPPING_ID,
                 "eventTimezoneBasis": EVENT_TIMEZONE_BASIS,
                 "explanation": (
-                    f"{event.get('categoryLabel')}: Dasha lords {period_lords or ['unavailable']}; "
+                    f"{event.get('categoryLabel')}: outcome direction {outcome_polarity}; "
+                    f"Dasha lords {period_lords or ['unavailable']}; "
                     f"relevant vargas {relevant_vargas or ['none']}; "
                     "double-transit houses stable across the reported interval "
                     f"{stable_transit_houses}."
                     " Vimshottari eligibility checked against exact period boundaries;"
-                    " slow-transit and diagnostic Chara checks sampled across the "
-                    "unknown event-location UTC-offset envelope; "
-                    f"display midpoint {event_local.isoformat()}."
+                    " slow-transit eligibility checked on a boundary-guarded UTC grid;"
+                    + (
+                        " diagnostic Chara checks sampled across the unknown event-location "
+                        "UTC-offset envelope; "
+                        if include_diagnostic_chara_dasha
+                        else " diagnostic Chara checks deferred; "
+                    )
+                    + f"display midpoint {event_local.isoformat()}."
                 ),
             }
         )
@@ -1112,19 +1264,21 @@ def candidate_event_period_fingerprint(
     timezone_id: str,
     ledger: dict[str, Any],
     reference_moment: datetime | None = None,
+    event_roles: tuple[str, ...] = ("calibration",),
 ) -> dict[str, Any] | None:
-    """Return private Dasha partition keys for dated events and the report epoch.
+    """Return private Dasha partition keys for selected event roles and report epoch.
 
-    The key only prevents one candidate interval from spanning different
-    calibration-event period evidence or a current MD/AD boundary. Reserved
-    holdout evidence must not influence candidate construction; it is evaluated
-    only after calibration selects a candidate or equivalence class.
+    The default key only prevents one candidate interval from spanning different
+    calibration-event period evidence. A caller may request the reserved holdout
+    role only to carry a post-construction stability audit through the same minute
+    scan; holdout evidence must never influence candidate construction.
     """
 
+    allowed_roles = set(event_roles)
     events = [
         event
         for event in ledger.get("events") or []
-        if isinstance(event, dict) and event.get("role") == "calibration"
+        if isinstance(event, dict) and event.get("role") in allowed_roles
     ]
     if not events and reference_moment is None:
         return None
@@ -1171,6 +1325,11 @@ def candidate_event_period_fingerprint(
         )
         for period in periods
     ]
+    event_periods_by_role: dict[str, list[str]] = {}
+    for event, fingerprint in zip(events, event_fingerprint, strict=True):
+        role = str(event.get("role") or "")
+        if role:
+            event_periods_by_role.setdefault(role, []).append(fingerprint)
     current_dasha = None
     if current_moments:
         current_period = calculate_dasha_lords_at(
@@ -1183,6 +1342,9 @@ def candidate_event_period_fingerprint(
         )
     return {
         "eventPeriods": tuple(event_fingerprint),
+        "eventPeriodsByRole": {
+            role: tuple(fingerprints) for role, fingerprints in event_periods_by_role.items()
+        },
         "currentDasha": current_dasha,
     }
 
@@ -1320,10 +1482,67 @@ def _event_interval_samples(event: dict[str, Any]) -> list[datetime]:
     return [_event_midpoint(event)]
 
 
-def _event_transit_moments(event: dict[str, Any]) -> list[datetime]:
-    """Sample slow-planet activation without inventing an exact event date."""
+def _event_transit_utc_grid(event: dict[str, Any]) -> list[datetime]:
+    """Cover the complete possible UTC interval for slow-planet evidence."""
 
-    return _event_interval_samples(event)
+    if event.get("datePrecision") == "year":
+        return []
+    start_local, end_local = _event_interval_bounds(event)
+    start_utc, end_utc = event_utc_envelope(start_local, end_local)
+    moments = [start_utc]
+    while moments[-1] + TRANSIT_COVERAGE_STEP < end_utc:
+        moments.append(moments[-1] + TRANSIT_COVERAGE_STEP)
+    if moments[-1] != end_utc:
+        moments.append(end_utc)
+    return moments
+
+
+def _transit_grid_coverage(
+    transit_samples: list[dict[str, Any]],
+    *,
+    planets: tuple[str, ...],
+) -> dict[str, Any]:
+    """Certify a slow-planet grid only when every sample is boundary-safe.
+
+    The one-degree guard is deliberately wider than the expected motion of the
+    selected slow planets during a twelve-hour step. Near an ingress, evidence is
+    withheld instead of treating sparse agreement as continuous stability.
+    """
+
+    minimum_boundary_distance: float | None = None
+    complete = bool(transit_samples)
+    for transit in transit_samples:
+        for planet in planets:
+            position = transit.get(planet)
+            if not isinstance(position, dict):
+                complete = False
+                continue
+            try:
+                degree = float(position["degree"])
+            except (KeyError, TypeError, ValueError):
+                complete = False
+                continue
+            boundary_distance = min(degree, 30.0 - degree)
+            minimum_boundary_distance = (
+                boundary_distance
+                if minimum_boundary_distance is None
+                else min(minimum_boundary_distance, boundary_distance)
+            )
+    certified = bool(
+        complete
+        and minimum_boundary_distance is not None
+        and minimum_boundary_distance > TRANSIT_SIGN_BOUNDARY_GUARD_DEGREES
+    )
+    return {
+        "method": "utc_12_hour_grid_with_sign_boundary_guard",
+        "stepHours": int(TRANSIT_COVERAGE_STEP.total_seconds() / 3600),
+        "boundaryGuardDegrees": TRANSIT_SIGN_BOUNDARY_GUARD_DEGREES,
+        "sampleCount": len(transit_samples),
+        "minimumBoundaryDistanceDegrees": (
+            round(minimum_boundary_distance, 6) if minimum_boundary_distance is not None else None
+        ),
+        "certified": certified,
+    }
 
 
 def build_life_event_focus(
@@ -1432,6 +1651,7 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
             "karakas": rules["karakas"],
             "fields": rules["fields"],
             "sadeSatiRelevant": bool(rules.get("sadeSatiRelevant")),
+            "outcomePolarity": rectification_outcome_polarity(category),
         },
     }
 
@@ -1445,6 +1665,10 @@ def _apply_event_rules(event: dict[str, Any], *, event_subtype: str | None) -> N
         "karakas": rules["karakas"],
         "fields": rules["fields"],
         "sadeSatiRelevant": bool(rules.get("sadeSatiRelevant")),
+        "outcomePolarity": rectification_outcome_polarity(
+            str(event.get("category") or "unknown"),
+            event_subtype,
+        ),
     }
 
 

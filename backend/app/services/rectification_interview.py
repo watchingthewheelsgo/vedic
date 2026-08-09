@@ -16,7 +16,7 @@ from app.vedicdust.rectification_policy import (
 )
 
 
-INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.7.0"
+INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.8.0"
 
 
 _FIELD_CATEGORY_PRIORITY: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -30,7 +30,6 @@ _FIELD_CATEGORY_PRIORITY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("d30", ("health",)),
     ("d20", ("spiritual",)),
     ("lagnasign", ("relocation", "family")),
-    ("currentdasha", ("career", "education", "relocation")),
 )
 
 _DEFAULT_PRIORITY = (
@@ -392,24 +391,82 @@ def validate_rectification_event_dates(
     current = today or date.today()
     for event in events:
         value = str(event.get("date") or "")
-        parts = value.split("-")
         try:
-            year = int(parts[0])
-            month = int(parts[1]) if len(parts) >= 2 else None
-            day = int(parts[2]) if len(parts) == 3 else None
-            if month is None:
-                start, end = date(year, 1, 1), date(year, 12, 31)
-            elif day is None:
-                start = date(year, month, 1)
-                end = date(year, month, monthrange(year, month)[1])
-            else:
-                start = end = date(year, month, day)
+            start, end = _rectification_event_date_bounds(value)
         except (TypeError, ValueError, IndexError) as exc:
             raise ValueError(f"life event has an invalid calendar date: {value}") from exc
         if end < born:
             raise ValueError(f"life event cannot be before the birth date: {value}")
         if start > current:
             raise ValueError(f"life event cannot be in the future: {value}")
+        if end > current:
+            raise ValueError(
+                "A partial life-event date cannot include future days. Add the remembered "
+                "month or exact date."
+            )
+
+
+def validate_rectification_episode_independence(
+    events: list[dict[str, Any]],
+    *,
+    existing_events: list[dict[str, Any]],
+) -> None:
+    """Require each adaptive answer to add a genuinely new dated episode.
+
+    A partial year or month represents its complete civil interval. If that
+    interval overlaps an existing scored episode, accepting it would advance an
+    interaction round without adding independent evidence. Ask for a narrower
+    date or a different period instead of creating a no-progress loop.
+    """
+
+    existing_intervals: list[tuple[date, date, str]] = []
+    for existing in existing_events:
+        if not isinstance(existing, dict):
+            continue
+        if str(existing.get("category") or "") == "unknown":
+            continue
+        if str(existing.get("role") or "") == "context_only":
+            continue
+        value = str(existing.get("date") or "")
+        try:
+            start, end = _rectification_event_date_bounds(value)
+        except ValueError as exc:
+            raise ValueError("stored rectification evidence has an invalid date") from exc
+        existing_intervals.append((start, end, value))
+
+    for event in events:
+        value = str(event.get("date") or "")
+        start, end = _rectification_event_date_bounds(value)
+        overlap = next(
+            (
+                existing_value
+                for existing_start, existing_end, existing_value in existing_intervals
+                if start <= existing_end and end >= existing_start
+            ),
+            None,
+        )
+        if overlap is not None:
+            raise ValueError(
+                "This event overlaps a previously submitted life period "
+                f"({overlap}). Add a more precise month or day, or choose an event "
+                "from a different period."
+            )
+
+
+def _rectification_event_date_bounds(value: str) -> tuple[date, date]:
+    if re.fullmatch(r"(?:19|20)\d{2}", value):
+        year = int(value)
+        return date(year, 1, 1), date(year, 12, 31)
+    if re.fullmatch(r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])", value):
+        year, month = (int(part) for part in value.split("-"))
+        return date(year, month, 1), date(year, month, monthrange(year, month)[1])
+    if re.fullmatch(
+        r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])",
+        value,
+    ):
+        exact = date.fromisoformat(value)
+        return exact, exact
+    raise ValueError("unsupported partial event date")
 
 
 def validate_rectification_event_bindings(
@@ -452,7 +509,7 @@ def validate_agent_event_evidence(
     expected_events: list[dict[str, Any]],
     payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Accept an Agent audit only when it accounts for every submitted event exactly once."""
+    """Apply optional Agent semantics without delegating event acceptance to the model."""
 
     raw_results = payload.get("results")
     if not isinstance(raw_results, list):
@@ -479,16 +536,10 @@ def validate_agent_event_evidence(
         observed[question_id] = item
     if set(observed) != set(expected):
         raise ValueError("life event evidence audit omitted a submitted event")
-    rejected = [
-        str(item.get("reason") or "event description does not match the requested event type")
-        for item in observed.values()
-        if item.get("accepted") is not True
-    ]
-    if rejected:
-        raise ValueError("Please revise the life event: " + "; ".join(rejected[:2]))
     normalized: list[dict[str, Any]] = []
     for question_id, item in observed.items():
         expected_event = expected_by_question[question_id]
+        agent_rejected = item.get("accepted") is False
         normalized.append(
             {
                 "questionId": question_id,
@@ -497,8 +548,14 @@ def validate_agent_event_evidence(
                 "date": str(expected_event.get("date") or ""),
                 "description": str(expected_event.get("description") or ""),
                 "accepted": True,
-                "reason": str(item.get("reason") or "Concrete dated life event."),
-                "eventFacts": _normalize_event_facts(item.get("eventFacts")),
+                "reason": "Backend-issued question, subtype, and category binding validated.",
+                "eventFacts": _normalize_event_facts(
+                    None if agent_rejected else item.get("eventFacts")
+                ),
+                "semanticAssessment": (
+                    "agent_advisory_ignored" if agent_rejected else "agent_semantics_applied"
+                ),
+                "agentReason": str(item.get("reason") or "")[:500],
             }
         )
     return normalized

@@ -227,20 +227,27 @@ dated-event policy can test. D3/D5/D16/D27, D60, strengths, special points,
 Chara Karaka ordering, and other interpretive states still mark facts unstable,
 but cannot split a candidate when no current question and scoring rule can
 distinguish that split.
+The report-epoch `currentDasha` is likewise a report-stability field, not a
+candidate-partition or question-ranking field. Historical MD/AD/PD periods are
+computed separately for each submitted event interval and remain authorized
+selection evidence.
 
 An event date is an uncertainty interval unless an event time was supplied.
 When the event location is unknown, the calculator expands the full civil interval
 to the UTC envelope spanning UTC-12 through UTC+14 rather than assuming the birth
 place. Vimshottari eligibility is checked against exact PyJHora MD/AD/PD
-boundaries; slow-transit and diagnostic Chara Dasha evidence may still sample
-the interval. These transparent ranking features use
-`vedicdust-rectification-event-ranking/1.20.0`: correlated matches within one
+boundaries. Slow-transit evidence covers the complete possible UTC envelope on
+a twelve-hour grid and is withheld within one degree of a sign ingress.
+Diagnostic Chara Dasha is deferred during the adaptive interview and can be
+requested separately for audit, but remains non-selecting. These
+transparent ranking features use
+`vedicdust-rectification-event-ranking/1.25.0`: correlated matches within one
 Dasha level contribute that level's weight once, and overlapping reported date
 intervals form one independently counted Life Episode. Varga-domain selection
 uses `vedicdust-varga-domain-policy/1.0.0`, pinned to P.V.R. Narasimha Rao's
 _Vedic Astrology: An Integrated Approach_ (first published 2000; author update
 2010, PDF pp. 71-73). The backend-bound event subtype is part of the event
-identity and selects the versioned `vedicdust-rectification-event-map/1.6.0`
+identity and selects the versioned `vedicdust-rectification-event-map/1.8.0`
 mapping for every concrete user-facing subtype; `other` deliberately retains the
 category rule. Free text and Agent output cannot change it. Event-house and karaka mappings and all numerical weights
 remain VedicDust product hypotheses. An unmatched
@@ -250,32 +257,53 @@ exact half-open period covers the user's complete reported date interval,
 including the whole day when no event time was supplied, are eligible.
 A period level crossed by the reported interval is withheld. A provider response
 that omits a level without reporting such a boundary fails candidate scoring.
-Year-only events cannot add
-double-transit evidence; month- and day-level transit support must remain active
-at every interval sample rather than appearing at one convenient instant. Each
+Only subtypes whose wording states an unambiguous constructive or disruptive
+outcome receive direction. Value-ambiguous milestones such as marriage,
+pregnancy, moves, purchases, examinations, and settlements remain neutral. For
+directional events, D1 dignity of mapped house lords may add bounded
+natal-promise corroboration when its direction matches. Natural-karaka dignity
+is retained as interpretation context but cannot distinguish adjacent birth-time
+candidates. This narrow D1 rule never vetoes an event, and one dignity condition
+never becomes contradiction evidence because cancellation and wider yoga context
+are outside its scope. A convergent event must include both Vimshottari
+activation and event-relevant Varga activation. D1 directional capacity and
+boundary-safe Jupiter/Saturn double transit remain auxiliary and cannot satisfy
+the convergence gate.
+The score-blind holdout does not define candidate boundaries. After candidate
+construction, the backend separately verifies its Vimshottari hierarchy at every
+point of the same complete minute grid, including each candidate's overlapping
+transition band. The recorded one-minute audit resolution is explicit; it is not
+second-level proof. Any observed change makes the holdout inconclusive and cannot
+release a rectified result.
+Year-only events cannot add double-transit evidence. Month- and day-level
+transit support must remain active across the full UTC grid, with a conservative
+sign-boundary guard, rather than appearing at one convenient instant. Each
 event retains a complete observational score, including auxiliary Rahu/Ketu,
 Sade Sati, and corroborated KP signals, plus a separate candidate-selection
-score. Only Vimshottari Dasha, the event-relevant Varga, and stable
-Jupiter/Saturn double transit enter the selection score, calibration aggregate,
-event-discrimination test, or hidden holdout result. Auxiliary signals remain
+score. Only Vimshottari Dasha and the event-relevant Varga enter the selection
+score, calibration aggregate, event-discrimination test, or hidden holdout
+result. D1 directional capacity, stable Jupiter/Saturn double transit, and the
+other auxiliary signals remain
 auditable but cannot break a tie or reverse a candidate ranking. The selection score ranks candidates;
 it is not a probability or proof that an event was astrologically caused.
 The candidate margin is `0.05`, aligned with the policy's smallest repeatedly
 actionable pattern: two `0.08` event-relevant Varga differences across three
-calibration episodes produce an aggregate lead of about `0.053`. One isolated
-Varga difference produces only about `0.027` and remains insufficient. This is
-a versioned product threshold, not a classical constant or statistical confidence.
+calibration episodes produce an aggregate lead of about `0.053`. In addition,
+at least two convergent events must each favor the leader over every alternative
+class by `0.05`; unrelated convergent events cannot lend authority to a separate
+single-layer score difference. These are versioned product thresholds, not
+classical constants or statistical confidence.
 
 Candidate selection uses deterministic calibration-event scores only. Reader
 feedback, personality testimony, appearance, preferences, and repeated wording of
 an event cannot alter candidate rank, break a tie, or raise rectification confidence.
 The release gate requires three calibration events across at least two mapped life
-domains. D1 Vimshottari activation, activation of the same period lords in the
-event-relevant Varga, and stable Jupiter/Saturn double transit are distinct
-analysis layers, not statistically independent votes. At least two calibration
-events, and the reserved holdout event, must each receive support from at least
-two layers. This permits D1 period activation plus the relevant Varga without
-making double transit a universal requirement for every event. Chara Dasha
+domains. D1 Vimshottari activation and activation of the same period lords in the
+event-relevant Varga are complementary analysis layers, not statistically
+independent votes. At least two calibration events, and the reserved holdout
+event, must each receive support from both layers. The holdout must support every
+interval in the selected equivalence class, not only its representative point.
+Double transit remains an auxiliary cross-check. Chara Dasha
 agreement remains a non-authoritative diagnostic. Agreement, disagreement,
 unavailability, or a tie cannot rank, eliminate, or block a candidate until this
 cross-check earns source-blind and professional validation.

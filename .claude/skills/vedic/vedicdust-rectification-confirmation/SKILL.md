@@ -24,7 +24,7 @@ The backend owns the conclusion schema. Its visible check contains only:
 {
   "correctedBirthTime": {"localDate": "YYYY-MM-DD", "localTime": "HH:MM"},
   "selectedInterval": {"start": "local datetime", "end": "local datetime"},
-  "evidenceSummary": {"calibrationEventCount": 2, "holdoutEventCount": 1},
+  "evidenceSummary": {"calibrationEventCount": 3, "holdoutEventCount": 1},
   "evidenceHighlights": [{"role": "calibration|holdout", "usedForSelection": true}],
   "confirmation": {"status": "pending", "responses": []}
 }

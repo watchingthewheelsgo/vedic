@@ -414,7 +414,7 @@
         },
         "methodConvergenceComponents": {
           "items": {
-            "enum": ["dasha", "varga", "double_transit"],
+            "enum": ["dasha", "varga"],
             "type": "string"
           },
           "title": "Methodconvergencecomponents",
@@ -422,7 +422,7 @@
         },
         "methodConvergenceLayers": {
           "items": {
-            "enum": ["d1_period_activation", "domain_varga_activation", "double_transit"],
+            "enum": ["d1_period_activation", "domain_varga_activation"],
             "type": "string"
           },
           "title": "Methodconvergencelayers",
@@ -430,7 +430,7 @@
         },
         "methodConvergenceCount": {
           "default": 0,
-          "maximum": 3,
+          "maximum": 2,
           "minimum": 0,
           "title": "Methodconvergencecount",
           "type": "integer"
@@ -635,6 +635,36 @@
           "enum": ["agrees", "disagrees", "not_applicable"],
           "title": "Dashasystemagreement",
           "type": "string"
+        },
+        "holdoutPeriodBoundaryChecked": {
+          "default": false,
+          "title": "Holdoutperiodboundarychecked",
+          "type": "boolean"
+        },
+        "holdoutPeriodStableWithinInterval": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holdoutperiodstablewithininterval"
+        },
+        "holdoutPeriodAuditResolutionSeconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holdoutperiodauditresolutionseconds"
         }
       },
       "required": ["candidateId", "interval", "representativeMoment", "fingerprint"],
@@ -1281,7 +1311,15 @@
           "type": "string"
         },
         "component": {
-          "enum": ["dasha", "varga", "double_transit", "node_transit", "sade_sati", "kp_sub_lord"],
+          "enum": [
+            "natal_promise",
+            "dasha",
+            "varga",
+            "double_transit",
+            "node_transit",
+            "sade_sati",
+            "kp_sub_lord"
+          ],
           "title": "Component",
           "type": "string"
         },
@@ -2407,8 +2445,8 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-chart-record/1.5.0",
-      "default": "vedicdust-chart-record/1.5.0",
+      "const": "vedicdust-chart-record/1.6.0",
+      "default": "vedicdust-chart-record/1.6.0",
       "title": "Schemaversion",
       "type": "string"
     },

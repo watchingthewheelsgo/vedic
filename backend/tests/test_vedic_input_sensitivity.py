@@ -28,6 +28,7 @@ from app.services.life_event_rectification import (
     parse_life_event_ledger,
     score_candidate_events,
 )
+from app.services.rectification_confirmation import build_rectification_conclusion
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
@@ -84,6 +85,27 @@ def _rectification_ledger() -> dict[str, object]:
     }
 
 
+def _selection_evidence(
+    event_id: str,
+    role: str,
+    score: float,
+    *,
+    convergent: bool = True,
+) -> dict[str, Any]:
+    observations = [{"component": "dasha", "outcome": "support"}]
+    if convergent:
+        observations.append({"component": "varga", "outcome": "support"})
+    return {
+        "eventId": event_id,
+        "role": role,
+        "score": score,
+        "selectionScore": score,
+        "methodConvergenceComponents": [observation["component"] for observation in observations],
+        "methodConvergenceMet": convergent,
+        "observations": observations,
+    }
+
+
 def _birth_payload() -> dict[str, Any]:
     return {
         "year": 1990,
@@ -111,6 +133,74 @@ def _birth_input(place: str = "Shanghai, Shanghai, China") -> BirthInput:
         lifeEvents="",
         locale="zh",
     )
+
+
+def test_rectification_conclusion_highlight_ignores_auxiliary_only_score() -> None:
+    state = {
+        "selectedCandidateId": "candidate-a",
+        "selectionConfidence": "medium",
+        "holdoutResult": "passed",
+        "lifeEventLedger": {
+            "events": [
+                {
+                    "eventId": "event-canonical",
+                    "date": "2018-06",
+                    "datePrecision": "month",
+                    "category": "career",
+                    "eventSubtype": "promotion",
+                    "role": "calibration",
+                    "intakeSequence": 1,
+                },
+                {
+                    "eventId": "event-auxiliary",
+                    "date": "2020-09",
+                    "datePrecision": "month",
+                    "category": "relocation",
+                    "eventSubtype": "international_move",
+                    "role": "calibration",
+                    "intakeSequence": 2,
+                },
+            ]
+        },
+        "candidates": [
+            {
+                "candidateId": "candidate-a",
+                "equivalenceClassId": "class-a",
+                "interval": {
+                    "start": "1990-01-01 08:29:00",
+                    "end": "1990-01-01 08:31:00",
+                },
+                "evidenceScores": [
+                    {
+                        "eventId": "event-canonical",
+                        "selectionScore": 0.4,
+                        "score": 0.4,
+                    },
+                    {"eventId": "event-auxiliary", "score": 1.0},
+                ],
+            },
+            {
+                "candidateId": "candidate-b",
+                "equivalenceClassId": "class-b",
+                "evidenceScores": [
+                    {
+                        "eventId": "event-canonical",
+                        "selectionScore": 0.1,
+                        "score": 0.1,
+                    },
+                    {"eventId": "event-auxiliary", "score": 0.0},
+                ],
+            },
+        ],
+    }
+
+    conclusion = build_rectification_conclusion(
+        state,
+        rectified_input=_birth_input(),
+        chart_revision=2,
+    )
+
+    assert conclusion["evidenceHighlights"][0]["category"] == "career"
 
 
 def test_timing_boundary_sampling_recalculates_declared_window_endpoints(
@@ -429,6 +519,26 @@ def test_incomplete_candidate_scoring_blocks_rectification_questions() -> None:
     assert state["status"] == "calculation_failed"
     assert state["reportGate"]["nextStep"] == "retry_deterministic_calculation"
     assert state["rectificationPlan"]["action"] == "retry_deterministic_calculation"
+
+
+def test_explicit_empty_candidate_scan_fails_closed() -> None:
+    state = ChartRectificationService().initial_state(
+        {
+            "time": {"window": {"start": "1990-01-01 08:15", "end": "1990-01-01 08:45"}},
+            "place": {"accuracy": "coordinate", "radiusKm": 0.25},
+            "lifeEvents": _rectification_ledger(),
+        },
+        {
+            "summary": {"riskLevel": "high", "changedFields": ["d9Lagna"]},
+            "reportReadiness": {"mode": "rectification_required"},
+            "candidateGroups": [],
+        },
+    )
+
+    assert state["status"] == "calculation_failed"
+    assert state["candidates"] == []
+    assert state["reportGate"]["fullReportAllowed"] is False
+    assert state["reportGate"]["nextStep"] == "retry_deterministic_calculation"
 
 
 def test_place_scan_does_not_silently_inherit_timezone_when_lookup_fails() -> None:
@@ -914,6 +1024,74 @@ def test_dasha_only_transition_is_not_given_false_sub_minute_precision() -> None
     assert refined["candidates"][0]["boundaryResolutionSeconds"] == 60
 
 
+def test_calibration_dasha_only_transition_is_refined_to_bounded_seconds() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    stable_signature = calculator._chart_signature(_base_chart())
+    observed_roles: list[tuple[str, ...]] = []
+
+    def period_fingerprint(*, birth_moment, event_roles, **_kwargs):
+        observed_roles.append(event_roles)
+        changed = birth_moment.minute > 30 or (
+            birth_moment.minute == 30 and birth_moment.second >= 37
+        )
+        return {
+            "eventPeriodsByRole": {
+                "calibration": ("Saturn/Venus/Ketu" if changed else "Saturn/Venus/Mercury",)
+            }
+        }
+
+    state = {
+        "selectedCandidateId": "B",
+        "lifeEventLedger": {
+            "events": [{"eventId": "evt_1", "role": "calibration"}],
+        },
+        "candidates": [
+            {
+                "candidateId": "B",
+                "signature": stable_signature,
+                "interval": {
+                    "start": "1990-01-01 08:30",
+                    "end": "1990-01-01 08:33",
+                },
+                "boundaryResolutionSeconds": 60,
+                "leftBoundaryUncertainty": {
+                    "start": "1990-01-01 08:30",
+                    "end": "1990-01-01 08:31",
+                },
+                "eventPeriodStableWithinInterval": False,
+                "members": [],
+            }
+        ],
+    }
+
+    refined = calculator.refine_selected_time_boundary(
+        state,
+        {
+            "place": {
+                "coordinates": {"lat": 31.2304, "lon": 121.4737},
+                "timezone": "Asia/Shanghai",
+            }
+        },
+        calculate_signature=lambda *_args, **_kwargs: dict(stable_signature),
+        calculate_event_period_fingerprint=period_fingerprint,
+    )
+
+    selected = refined["candidates"][0]
+    uncertainty = selected["leftBoundaryUncertainty"]
+    lower = datetime.fromisoformat(uncertainty["startUtc"])
+    upper = datetime.fromisoformat(uncertainty["endUtc"])
+    transition = datetime(1990, 1, 1, 0, 30, 37, tzinfo=timezone.utc)
+    assert refined["boundaryRefinement"]["status"] == "refined"
+    assert (
+        "calibrationEventPeriods" in refined["boundaryRefinement"]["boundaries"][0]["changedFields"]
+    )
+    assert selected["boundaryResolutionSeconds"] <= 5
+    assert lower < transition <= upper
+    assert (upper - lower).total_seconds() <= 5
+    assert selected["eventPeriodStableWithinInterval"] is False
+    assert observed_roles and set(observed_roles) == {("calibration",)}
+
+
 def test_selected_first_interval_refines_its_right_transition_band() -> None:
     calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
     before_signature = calculator._chart_signature(_base_chart())
@@ -1185,6 +1363,7 @@ def test_structured_relationship_subtype_selects_specific_versioned_rule() -> No
     assert event["eventSubtype"] == "marriage"
     assert event["rectificationRules"]["houses"] == [7, 2, 11]
     assert event["rectificationRules"]["vargas"] == ["D9"]
+    assert event["rectificationRules"]["outcomePolarity"] == "neutral"
 
 
 def test_directional_subtypes_select_distinct_versioned_rules() -> None:
@@ -1208,6 +1387,8 @@ def test_directional_subtypes_select_distinct_versioned_rules() -> None:
 
     assert ledger["events"][0]["rectificationRules"]["houses"] == [2, 10, 11]
     assert ledger["events"][1]["rectificationRules"]["houses"] == [6, 8, 10, 12]
+    assert ledger["events"][0]["rectificationRules"]["outcomePolarity"] == "constructive"
+    assert ledger["events"][1]["rectificationRules"]["outcomePolarity"] == "disruptive"
 
 
 def test_user_facing_subtypes_are_executable_not_description_only() -> None:
@@ -1276,56 +1457,144 @@ def test_structured_life_event_input_rejects_duplicate_evidence() -> None:
 
 def test_holdout_failure_blocks_selected_candidate() -> None:
     service = ChartRectificationService()
+
+    def boundary_checked(candidate: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **candidate,
+            "holdoutPeriodBoundaryChecked": True,
+            "holdoutPeriodStableWithinInterval": True,
+        }
+
     candidates = [
-        {
-            "candidateId": "A",
-            "holdoutScore": 0.25,
-            "evidenceScores": [{"role": "holdout", "methodConvergenceMet": True}],
-        },
-        {
-            "candidateId": "B",
-            "holdoutScore": 0.7,
-            "evidenceScores": [{"role": "holdout", "methodConvergenceMet": True}],
-        },
+        boundary_checked(
+            {
+                "candidateId": "A",
+                "holdoutScore": 0.25,
+                "evidenceScores": [_selection_evidence("holdout", "holdout", 0.25)],
+            }
+        ),
+        boundary_checked(
+            {
+                "candidateId": "B",
+                "holdoutScore": 0.7,
+                "evidenceScores": [_selection_evidence("holdout", "holdout", 0.7)],
+            }
+        ),
     ]
 
     assert service._holdout_result(candidates[0], candidates) == "failed"
     assert service._holdout_result(candidates[1], candidates) == "passed"
 
     tied = [
-        {
-            "candidateId": "A",
-            "holdoutScore": 0.7,
-            "evidenceScores": [{"role": "holdout", "methodConvergenceMet": True}],
-        },
-        {"candidateId": "B", "holdoutScore": 0.68},
+        boundary_checked(
+            {
+                "candidateId": "A",
+                "holdoutScore": 0.7,
+                "evidenceScores": [_selection_evidence("holdout", "holdout", 0.7)],
+            }
+        ),
+        boundary_checked({"candidateId": "B", "holdoutScore": 0.68}),
     ]
     weak = [
-        {
-            "candidateId": "A",
-            "holdoutScore": 0.04,
-            "evidenceScores": [{"role": "holdout", "methodConvergenceMet": True}],
-        }
+        boundary_checked(
+            {
+                "candidateId": "A",
+                "holdoutScore": 0.04,
+                "evidenceScores": [_selection_evidence("holdout", "holdout", 0.04)],
+            }
+        )
     ]
     assert service._holdout_result(tied[0], tied) == "inconclusive"
     assert service._holdout_result(weak[0], weak) == "inconclusive"
     incomplete_alternative = [
-        {
-            "candidateId": "A",
-            "holdoutScore": 0.8,
-            "evidenceScores": [{"role": "holdout", "methodConvergenceMet": True}],
-        },
-        {"candidateId": "B", "holdoutScore": None, "evidenceScores": []},
+        boundary_checked(
+            {
+                "candidateId": "A",
+                "holdoutScore": 0.8,
+                "evidenceScores": [_selection_evidence("holdout", "holdout", 0.8)],
+            }
+        ),
+        boundary_checked({"candidateId": "B", "holdoutScore": None, "evidenceScores": []}),
     ]
     assert (
         service._holdout_result(incomplete_alternative[0], incomplete_alternative) == "inconclusive"
     )
-    unconverged = {
-        "candidateId": "A",
-        "holdoutScore": 0.8,
-        "evidenceScores": [{"role": "holdout", "methodConvergenceMet": False}],
-    }
+    unconverged = boundary_checked(
+        {
+            "candidateId": "A",
+            "holdoutScore": 0.8,
+            "evidenceScores": [_selection_evidence("holdout", "holdout", 0.8, convergent=False)],
+        }
+    )
     assert service._holdout_result(unconverged, [unconverged]) == "inconclusive"
+
+    unstable = {
+        **boundary_checked(candidates[1]),
+        "holdoutPeriodStableWithinInterval": False,
+    }
+    assert service._holdout_result(unstable, [unstable]) == "inconclusive"
+
+
+def test_holdout_must_support_every_member_of_selected_equivalence_class() -> None:
+    service = ChartRectificationService()
+
+    def candidate(candidate_id: str, class_id: str, score: float) -> dict[str, Any]:
+        return {
+            "candidateId": candidate_id,
+            "equivalenceClassId": class_id,
+            "holdoutScore": score,
+            "holdoutPeriodBoundaryChecked": True,
+            "holdoutPeriodStableWithinInterval": True,
+            "evidenceScores": [_selection_evidence("reserved", "holdout", score)],
+        }
+
+    candidates = [
+        candidate("A", "selected-class", 0.8),
+        candidate("B", "selected-class", 0.04),
+        candidate("C", "alternative-class", 0.1),
+    ]
+
+    assert (
+        service._holdout_result(
+            candidates[0],
+            candidates,
+            selected_candidate_ids=["A", "B"],
+        )
+        == "inconclusive"
+    )
+
+
+def test_service_recomputes_legacy_method_convergence_from_supported_components() -> None:
+    legacy_d1_and_dasha = {
+        "methodConvergenceMet": True,
+        "methodConvergenceComponents": ["natal_promise", "dasha"],
+        "observations": [
+            {"component": "natal_promise", "outcome": "support"},
+            {"component": "dasha", "outcome": "support"},
+        ],
+    }
+    independent_methods = {
+        "methodConvergenceMet": False,
+        "methodConvergenceComponents": ["dasha", "varga"],
+        "observations": [
+            {"component": "dasha", "outcome": "support"},
+            {"component": "varga", "outcome": "support"},
+        ],
+    }
+    stale_declared_component = {
+        "methodConvergenceMet": True,
+        "methodConvergenceComponents": ["dasha", "varga"],
+        "observations": [
+            {"component": "dasha", "outcome": "support"},
+            {"component": "varga", "outcome": "missing"},
+        ],
+    }
+
+    assert ChartRectificationService._event_method_convergence_met(legacy_d1_and_dasha) is False
+    assert ChartRectificationService._event_method_convergence_met(independent_methods) is True
+    assert (
+        ChartRectificationService._event_method_convergence_met(stale_declared_component) is False
+    )
 
 
 def test_report_readiness_restricts_advanced_vargas_without_blocking_d1() -> None:
@@ -1359,6 +1628,47 @@ def test_report_readiness_restricts_advanced_vargas_without_blocking_d1() -> Non
     assert "lagnaSign" in allowed
     assert "d60Lagna" in restricted
     assert "D60" not in allowed
+
+
+def test_one_selection_fingerprint_with_report_only_changes_skips_rectification() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    place = ResolvedPlace(
+        label="manual",
+        lat=31.2304,
+        lon=121.4737,
+        timezone="Asia/Shanghai",
+        source="manual",
+        accuracy="coordinate",
+        radius_km=0.25,
+        confidence="high",
+    )
+    summary = {
+        "riskLevel": "high",
+        "changedFields": ["d16Lagna", "d27Lagna", "d60Lagna"],
+        "scanErrors": [],
+        "candidateScoringErrors": [],
+    }
+    stability = {
+        "unstableFields": [
+            {"field": "d16Lagna"},
+            {"field": "d27Lagna"},
+            {"field": "d60Lagna"},
+        ],
+        "lowConfidenceDivisions": ["D16", "D27", "D60"],
+    }
+
+    readiness = calculator._report_readiness(
+        summary,
+        stability,
+        [{"candidateId": "A"}],
+        "approximate",
+        place,
+    )
+
+    assert readiness["stableBoundedWindow"] is True
+    assert readiness["mode"] == "guarded_after_strong_prevalidation"
+    assert readiness["coreAllowedWithoutRectification"] is True
+    assert readiness["scope"] == "guarded_full_report"
 
 
 def test_birth_input_context_locks_precise_place_rectification() -> None:
@@ -1751,6 +2061,37 @@ def test_rectification_rejects_selected_candidate_without_materializable_input()
     assert updated["reportGate"]["fullReportAllowed"] is False
     assert updated["reportGate"]["nextStep"] == "provide_more_precise_or_additional_event_evidence"
     assert updated["rectificationPlan"]["action"] == "rectification_inconclusive"
+
+
+def test_rectification_fails_closed_when_selected_boundary_cannot_be_refined() -> None:
+    service = ChartRectificationService()
+    state = {
+        "revision": 3,
+        "status": "needs_recalculation",
+        "selectedCandidateId": "candidate-b",
+        "selectionConfidence": "medium",
+        "candidates": [{"candidateId": "candidate-b"}],
+        "boundaryRefinement": {
+            "status": "skipped",
+            "boundaries": [{"side": "left", "status": "skipped"}],
+        },
+    }
+
+    updated = service.reject_unresolved_boundary_selection(state)
+
+    assert updated["revision"] == 4
+    assert updated["status"] == "calculation_failed"
+    assert updated["selectedCandidateId"] is None
+    assert updated["selectionConfidence"] == "none"
+    assert updated["reportGate"] == {
+        "fullReportAllowed": False,
+        "reason": (
+            "The provisional interval touches an unresolved chart or Dasha boundary. "
+            "The deterministic sub-minute check did not complete, so no corrected chart "
+            "was materialized."
+        ),
+        "nextStep": "retry_deterministic_calculation",
+    }
 
 
 def test_chart_rectification_sync_preserves_original_time_certainty(tmp_path: Path) -> None:
@@ -3355,7 +3696,10 @@ def test_single_stable_candidate_does_not_start_fake_boundary_rectification() ->
             "lifeEvents": _rectification_ledger(),
         },
         {
-            "summary": {"riskLevel": "high", "changedFields": []},
+            "summary": {
+                "riskLevel": "high",
+                "changedFields": ["d16Lagna", "d60Lagna"],
+            },
             "reportReadiness": {"mode": "rectification_required"},
             "candidateGroups": [
                 {
@@ -3373,7 +3717,8 @@ def test_single_stable_candidate_does_not_start_fake_boundary_rectification() ->
     assert state["status"] == "not_required"
     assert state["rectificationPlan"]["action"] == "full_report"
     assert state["reportGate"]["fullReportAllowed"] is True
-    assert "one stable chart fingerprint" in state["reportGate"]["reason"]
+    assert "one evidence-addressable chart fingerprint" in state["reportGate"]["reason"]
+    assert "questions that cannot distinguish another candidate" in state["reportGate"]["reason"]
 
     decision = service.apply_prevalidation_decision(
         {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
@@ -3480,31 +3825,13 @@ def test_deterministic_calibration_selects_candidate_before_any_reader_question(
                     "isBase": True,
                     "aggregateScore": 0.1,
                     "holdoutScore": 0.2,
+                    "holdoutPeriodBoundaryChecked": True,
+                    "holdoutPeriodStableWithinInterval": True,
                     "evidenceScores": [
-                        {
-                            "eventId": event_one,
-                            "role": "calibration",
-                            "score": 0.1,
-                            "methodConvergenceMet": True,
-                        },
-                        {
-                            "eventId": event_two,
-                            "role": "calibration",
-                            "score": 0.1,
-                            "methodConvergenceMet": True,
-                        },
-                        {
-                            "eventId": event_three,
-                            "role": "calibration",
-                            "score": 0.1,
-                            "methodConvergenceMet": True,
-                        },
-                        {
-                            "eventId": holdout,
-                            "role": "holdout",
-                            "score": 0.2,
-                            "methodConvergenceMet": True,
-                        },
+                        _selection_evidence(event_one, "calibration", 0.1),
+                        _selection_evidence(event_two, "calibration", 0.1),
+                        _selection_evidence(event_three, "calibration", 0.1),
+                        _selection_evidence(holdout, "holdout", 0.2),
                     ],
                 },
                 {
@@ -3512,33 +3839,15 @@ def test_deterministic_calibration_selects_candidate_before_any_reader_question(
                     "isBase": False,
                     "aggregateScore": 0.45,
                     "holdoutScore": 0.7,
+                    "holdoutPeriodBoundaryChecked": True,
+                    "holdoutPeriodStableWithinInterval": True,
                     "changedFromBase": ["d9Lagna"],
                     "members": [{"axis": "time", "datetime": "1990-01-01 08:45"}],
                     "evidenceScores": [
-                        {
-                            "eventId": event_one,
-                            "role": "calibration",
-                            "score": 0.5,
-                            "methodConvergenceMet": True,
-                        },
-                        {
-                            "eventId": event_two,
-                            "role": "calibration",
-                            "score": 0.4,
-                            "methodConvergenceMet": True,
-                        },
-                        {
-                            "eventId": event_three,
-                            "role": "calibration",
-                            "score": 0.45,
-                            "methodConvergenceMet": True,
-                        },
-                        {
-                            "eventId": holdout,
-                            "role": "holdout",
-                            "score": 0.7,
-                            "methodConvergenceMet": True,
-                        },
+                        _selection_evidence(event_one, "calibration", 0.5),
+                        _selection_evidence(event_two, "calibration", 0.4),
+                        _selection_evidence(event_three, "calibration", 0.45),
+                        _selection_evidence(holdout, "holdout", 0.7),
                     ],
                 },
             ],
@@ -3572,13 +3881,14 @@ def test_equivalent_candidates_end_with_a_stable_intersection_report() -> None:
                 },
                 "aggregateScore": score,
                 "holdoutScore": holdout_score,
+                "holdoutPeriodBoundaryChecked": True,
+                "holdoutPeriodStableWithinInterval": True,
                 "evidenceScores": [
-                    {
-                        "eventId": event["eventId"],
-                        "role": event["role"],
-                        "score": holdout_score if event["role"] == "holdout" else score,
-                        "methodConvergenceMet": True,
-                    }
+                    _selection_evidence(
+                        str(event["eventId"]),
+                        str(event["role"]),
+                        holdout_score if event["role"] == "holdout" else score,
+                    )
                     for event in ledger["events"]
                 ],
             }
@@ -3828,6 +4138,57 @@ def test_place_candidate_event_scoring_uses_candidate_coordinates(monkeypatch) -
     }
 
 
+def test_holdout_period_boundary_check_is_post_construction_and_conservative(monkeypatch) -> None:
+    observed_roles: list[tuple[str, ...]] = []
+
+    def fake_period_fingerprint(*, birth_moment, event_roles, **_kwargs):
+        observed_roles.append(event_roles)
+        period = "Saturn/Venus/Ketu" if birth_moment.minute == 24 else "Saturn/Venus/Mercury"
+        return {"eventPeriods": (period,), "currentDasha": None}
+
+    monkeypatch.setattr(
+        "app.services.vedic_calculator.candidate_event_period_fingerprint",
+        fake_period_fingerprint,
+    )
+    ledger = {"events": [{"eventId": "holdout", "role": "holdout"}]}
+    unstable = VedicCalculator._holdout_period_boundary_check(
+        {
+            "interval": {
+                "startUtc": "1990-01-01T00:20:00+00:00",
+                "endUtc": "1990-01-01T00:30:00+00:00",
+            }
+        },
+        latitude=31.2,
+        longitude=121.5,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )
+    stable = VedicCalculator._holdout_period_boundary_check(
+        {
+            "interval": {
+                "startUtc": "1990-01-01T00:10:00+00:00",
+                "endUtc": "1990-01-01T00:20:00+00:00",
+            }
+        },
+        latitude=31.2,
+        longitude=121.5,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )
+
+    assert unstable == {
+        "holdoutPeriodBoundaryChecked": True,
+        "holdoutPeriodStableWithinInterval": False,
+        "holdoutPeriodAuditResolutionSeconds": 60,
+    }
+    assert stable == {
+        "holdoutPeriodBoundaryChecked": True,
+        "holdoutPeriodStableWithinInterval": True,
+        "holdoutPeriodAuditResolutionSeconds": 60,
+    }
+    assert observed_roles == [("holdout",)] * 22
+
+
 def test_time_scan_splits_equal_chart_signatures_at_event_period_boundary() -> None:
     calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
     base_signature = calculator._chart_signature(_base_chart())
@@ -3855,6 +4216,91 @@ def test_time_scan_splits_equal_chart_signatures_at_event_period_boundary() -> N
         {"start": "1990-01-01 08:29", "end": "1990-01-01 08:41"},
     ]
     assert all(item["eventPeriodBoundaryChecked"] for item in variants)
+    assert not any(item["eventPeriodStableWithinInterval"] for item in variants)
+
+
+def test_time_scan_audits_holdout_without_using_it_to_partition_candidates() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    base_signature = calculator._chart_signature(_base_chart())
+    observed_roles: list[tuple[str, ...]] = []
+
+    def same_signature(*_args, **_kwargs):
+        return dict(base_signature)
+
+    def event_period_fingerprint(*, birth_moment, event_roles, **_kwargs):
+        observed_roles.append(event_roles)
+        holdout = "Saturn/Venus/Mercury" if birth_moment.minute < 30 else "Saturn/Venus/Ketu"
+        return {
+            "eventPeriods": ("Jupiter/Saturn/Mercury", holdout),
+            "eventPeriodsByRole": {
+                "calibration": ("Jupiter/Saturn/Mercury",),
+                "holdout": (holdout,),
+            },
+            "currentDasha": None,
+        }
+
+    variants = calculator._time_scan_variants(
+        lambda *_args: _base_chart(),
+        _base_chart(),
+        base_signature,
+        _birth_payload(),
+        "exact",
+        "birth certificate",
+        calculate_signature=same_signature,
+        life_event_ledger={
+            "events": [
+                {"eventId": "calibration", "role": "calibration"},
+                {"eventId": "holdout", "role": "holdout"},
+            ]
+        },
+        calculate_event_period_fingerprint=event_period_fingerprint,
+    )
+
+    assert len(variants) == 1
+    assert variants[0]["eventPeriodBoundaryChecked"] is True
+    assert variants[0]["holdoutPeriodBoundaryChecked"] is True
+    assert variants[0]["holdoutPeriodStableWithinInterval"] is False
+    assert variants[0]["holdoutPeriodAuditResolutionSeconds"] == 60
+    assert set(observed_roles) == {("calibration", "holdout")}
+
+
+def test_time_scan_reuses_immutable_chart_signatures_between_event_rounds() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    base_signature = calculator._chart_signature(_base_chart())
+    calls = 0
+
+    def counted_signature(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return dict(base_signature)
+
+    kwargs = {
+        "calculate_signature": counted_signature,
+        "calculate_event_period_fingerprint": None,
+    }
+    first = calculator._time_scan_variants(
+        lambda *_args: _base_chart(),
+        _base_chart(),
+        base_signature,
+        _birth_payload(),
+        "exact",
+        "birth certificate",
+        **kwargs,
+    )
+    first_round_calls = calls
+    second = calculator._time_scan_variants(
+        lambda *_args: _base_chart(),
+        _base_chart(),
+        base_signature,
+        _birth_payload(),
+        "exact",
+        "family memory",
+        **kwargs,
+    )
+
+    assert first_round_calls > 0
+    assert calls == first_round_calls
+    assert second == first
 
 
 def test_unknown_time_scan_covers_both_folds_of_a_dst_fallback_day() -> None:
@@ -3896,7 +4342,7 @@ def test_unknown_time_scan_covers_both_folds_of_a_dst_fallback_day() -> None:
     assert all(item["eventPeriodStableWithinInterval"] for item in variants)
 
 
-def test_time_scan_splits_at_current_dasha_boundary_without_life_events() -> None:
+def test_current_dasha_boundary_is_report_instability_not_candidate_split() -> None:
     calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
     base_signature = calculator._chart_signature(_base_chart())
     base_signature["currentDasha"] = "Saturn-Sun"
@@ -3921,11 +4367,10 @@ def test_time_scan_splits_at_current_dasha_boundary_without_life_events() -> Non
         reference_moment=datetime(2026, 8, 1, tzinfo=timezone.utc),
     )
 
-    assert [variant["signature"]["currentDasha"] for variant in variants] == [
-        "Saturn-Venus",
-        "Saturn-Sun",
-    ]
+    assert len(variants) == 1
+    assert variants[0]["signature"]["currentDasha"] == "Saturn-Venus"
     assert "currentDasha" in variants[0]["changed"]
+    assert variants[0]["eventPeriodBoundaryChecked"] is False
 
 
 def test_rectified_place_candidate_ignored_for_precise_place() -> None:
@@ -4212,11 +4657,7 @@ def test_life_event_ledger_parses_dated_major_events() -> None:
     ]
     assert events[0]["date"] == "2018-10"
     assert events[0]["rectificationRules"]["vargas"] == ["D9"]
-    assert events[2]["rectificationRules"]["fields"] == [
-        "d10Lagna",
-        "d10Structure",
-        "currentDasha",
-    ]
+    assert events[2]["rectificationRules"]["fields"] == ["d10Lagna", "d10Structure"]
     assert events[3]["rectificationRules"]["fields"][0] == "d7Lagna"
 
 
@@ -4310,14 +4751,16 @@ def test_rectification_caps_correlated_matches_and_uses_event_timezone_envelope(
             datetime(2018, 11, 1, 11, 59, 59, tzinfo=timezone.utc),
         )
     ]
-    assert observed_transit_times == [
-        datetime(2018, 9, 30, 22, tzinfo=timezone.utc),
-        datetime(2018, 10, 2, 0, tzinfo=timezone.utc),
-        datetime(2018, 10, 14, 22, tzinfo=timezone.utc),
-        datetime(2018, 10, 16, 0, tzinfo=timezone.utc),
-        datetime(2018, 10, 30, 22, tzinfo=timezone.utc),
-        datetime(2018, 11, 1, 0, tzinfo=timezone.utc),
-    ]
+    assert len(observed_transit_times) == 66
+    assert observed_transit_times[0] == datetime(2018, 9, 30, 10, tzinfo=timezone.utc)
+    assert observed_transit_times[-1] == datetime(2018, 11, 1, 11, 59, 59, tzinfo=timezone.utc)
+    assert all(
+        current - previous <= timedelta(hours=12)
+        for previous, current in zip(
+            observed_transit_times,
+            observed_transit_times[1:],
+        )
+    )
     assert result["scoringPolicy"] == RECTIFICATION_SCORING_POLICY_ID
     assert score["ruleIds"] == [RECTIFICATION_RULE_ID]
     assert score["sourceIds"] == [
@@ -4326,6 +4769,121 @@ def test_rectification_caps_correlated_matches_and_uses_event_timezone_envelope(
     ]
     assert score["eventMappingId"] == RECTIFICATION_EVENT_MAPPING_ID
     assert score["eventTimezoneBasis"] == "unknown_event_location_utc_offset_envelope"
+
+
+def test_directional_d1_capacity_corroborates_but_never_vetoes_event(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals",
+        lambda *args, **kwargs: [
+            {"mahadasha": "Venus", "antardasha": "Venus", "pratyantardasha": "Venus"}
+            for _ in args[-1]
+        ],
+    )
+    monkeypatch.setattr(
+        "app.calculator.engine.calc_transits",
+        lambda lagna_index, moon_index, *, as_of: {"double_transit_houses": []},
+    )
+    ledger = parse_life_event_ledger(
+        "2018-10 career: Promoted",
+        semantic_evidence=[
+            {
+                "date": "2018-10",
+                "category": "career",
+                "eventSubtype": "promotion",
+                "description": "Promoted",
+            }
+        ],
+    )
+    common_signature = {
+        "lagnaSign": "Aries",
+        "planetSignIndices": {"Venus": 6, "Jupiter": 8, "Saturn": 9, "Moon": 0},
+        "d10Lagna": "Aries",
+        "vargaPlanetSignIndices": {"D10": {"Venus": 6, "Jupiter": 8, "Saturn": 9}},
+    }
+
+    supported = score_candidate_events(
+        candidate_id="candidate-supported",
+        signature={
+            **common_signature,
+            "planetDignities": {
+                "Venus": {"effective": "exalted"},
+                "Jupiter": {"effective": "neutral"},
+                "Saturn": {"effective": "friend"},
+                "Mercury": {"effective": "neutral"},
+            },
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+    promise = next(
+        item
+        for item in supported["observations"]
+        if item["observationId"].endswith("natal_promise.directional_capacity")
+    )
+    assert promise["outcome"] == "support"
+    assert promise["details"]["matchedGrahas"] == ["Saturn", "Venus"]
+    assert promise["details"]["houseLordGrahas"] == ["Saturn", "Venus"]
+    assert promise["details"]["contextKarakas"] == ["Jupiter", "Saturn", "Sun"]
+    assert supported["supportScore"] == pytest.approx(0.56)
+    assert supported["selectionSupportScore"] == pytest.approx(0.46)
+    assert supported["selectionScore"] == pytest.approx(0.46)
+    assert supported["methodConvergenceComponents"] == ["dasha", "varga"]
+    assert supported["methodConvergenceLayers"] == [
+        "d1_period_activation",
+        "domain_varga_activation",
+    ]
+    assert supported["methodConvergenceMet"] is True
+
+    d1_and_dasha_only = score_candidate_events(
+        candidate_id="candidate-d1-dasha-only",
+        signature={
+            "lagnaSign": "Aries",
+            "planetSignIndices": common_signature["planetSignIndices"],
+            "planetDignities": {
+                "Venus": {"effective": "exalted"},
+                "Saturn": {"effective": "friend"},
+            },
+            "d10Lagna": "Gemini",
+            "vargaPlanetSignIndices": {"D10": {"Venus": 6}},
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+    assert d1_and_dasha_only["methodConvergenceComponents"] == ["dasha"]
+    assert d1_and_dasha_only["methodConvergenceMet"] is False
+
+    not_observed = score_candidate_events(
+        candidate_id="candidate-not-observed",
+        signature={
+            **common_signature,
+            "planetDignities": {
+                "Venus": {"effective": "enemy"},
+                # A stable natural-karaka dignity is context, not a candidate vote.
+                "Jupiter": {"effective": "exalted"},
+                "Saturn": {"effective": "enemy"},
+                "Mercury": {"effective": "great_enemy"},
+            },
+        },
+        representative_moment=datetime(1990, 1, 1, 8, 30),
+        latitude=31.2304,
+        longitude=121.4737,
+        timezone_id="Asia/Shanghai",
+        ledger=ledger,
+    )["evidenceScores"][0]
+    withheld = next(
+        item
+        for item in not_observed["observations"]
+        if item["observationId"].endswith("natal_promise.directional_capacity_not_observed")
+    )
+    assert withheld["outcome"] == "missing"
+    assert not_observed["contradictionScore"] == 0.0
+    assert not_observed["selectionSupportScore"] == pytest.approx(0.46)
 
 
 def test_semantic_event_facts_remain_context_only_for_candidate_scoring(monkeypatch) -> None:
@@ -4588,7 +5146,11 @@ def test_month_precision_requires_stable_transit_activation(monkeypatch) -> None
     def unstable_transits(lagna_index, moon_index, *, as_of):
         nonlocal transit_calls
         transit_calls += 1
-        return {"double_transit_houses": [7] if transit_calls != 2 else []}
+        return {
+            "double_transit_houses": [7] if transit_calls != 2 else [],
+            "Jupiter": {"degree": 15.0},
+            "Saturn": {"degree": 15.0},
+        }
 
     monkeypatch.setattr(
         "app.calculator.dasha_pyjhora.calculate_dasha_lords_for_intervals", fake_dasha
@@ -4616,15 +5178,20 @@ def test_month_precision_requires_stable_transit_activation(monkeypatch) -> None
         for item in unstable["observations"]
         if item["observationId"].endswith("double_transit.activation_not_observed")
     )
-    assert unstable_observation["details"] == {
-        "reason": "activation_not_stable_across_reported_interval",
-        "observedHouses": [7],
-        "stableHouses": [],
-    }
+    assert unstable_observation["details"]["reason"] == (
+        "activation_not_stable_across_reported_interval"
+    )
+    assert unstable_observation["details"]["observedHouses"] == [7]
+    assert unstable_observation["details"]["stableHouses"] == []
+    assert unstable_observation["details"]["intervalCoverage"]["certified"] is True
 
     monkeypatch.setattr(
         "app.calculator.engine.calc_transits",
-        lambda lagna_index, moon_index, *, as_of: {"double_transit_houses": [7]},
+        lambda lagna_index, moon_index, *, as_of: {
+            "double_transit_houses": [7],
+            "Jupiter": {"degree": 15.0},
+            "Saturn": {"degree": 15.0},
+        },
     )
     stable = score_candidate_events(**kwargs)["evidenceScores"][0]
     assert stable["supportScore"] == RECTIFICATION_SCORING_POLICY.double_transit_support_weight
@@ -4633,13 +5200,38 @@ def test_month_precision_requires_stable_transit_activation(monkeypatch) -> None
         for item in stable["observations"]
         if item["observationId"].endswith("double_transit.activation")
     )
-    assert stable_observation["details"] == {
-        "activatedHouses": [7],
-        "stableAcrossReportedInterval": True,
-        "sampleCount": 6,
+    assert stable_observation["details"]["activatedHouses"] == [7]
+    assert stable_observation["details"]["stableAcrossReportedInterval"] is True
+    assert stable_observation["details"]["sampleCount"] == 66
+    assert stable_observation["details"]["intervalCoverage"] == {
+        "method": "utc_12_hour_grid_with_sign_boundary_guard",
+        "stepHours": 12,
+        "boundaryGuardDegrees": 1.0,
+        "sampleCount": 66,
+        "minimumBoundaryDistanceDegrees": 15.0,
+        "certified": True,
     }
-    assert stable["methodConvergenceLayers"] == ["double_transit"]
+    assert stable["selectionScore"] == 0.0
+    assert stable["methodConvergenceLayers"] == []
     assert stable["methodConvergenceMet"] is False
+
+    monkeypatch.setattr(
+        "app.calculator.engine.calc_transits",
+        lambda lagna_index, moon_index, *, as_of: {
+            "double_transit_houses": [7],
+            "Jupiter": {"degree": 0.2},
+            "Saturn": {"degree": 15.0},
+        },
+    )
+    boundary_sensitive = score_candidate_events(**kwargs)["evidenceScores"][0]
+    assert boundary_sensitive["supportScore"] == 0.0
+    withheld = next(
+        item
+        for item in boundary_sensitive["observations"]
+        if item["observationId"].endswith("double_transit.activation_not_observed")
+    )
+    assert withheld["details"]["intervalCoverage"]["certified"] is False
+    assert withheld["details"]["intervalCoverage"]["minimumBoundaryDistanceDegrees"] == 0.2
 
 
 def test_rectification_rejects_incomplete_dasha_hierarchy(monkeypatch) -> None:
@@ -4920,8 +5512,10 @@ def test_auxiliary_transits_cannot_rank_a_candidate_without_primary_support(monk
         "app.calculator.engine.calc_transits",
         lambda lagna_index, moon_index, *, as_of: {
             "double_transit_houses": [],
-            "Rahu": {"house": 10},
-            "Ketu": {"house": 4},
+            "Jupiter": {"degree": 15.0},
+            "Saturn": {"degree": 15.0},
+            "Rahu": {"house": 10, "degree": 15.0},
+            "Ketu": {"house": 4, "degree": 15.0},
             "sade_sati": "phase2_peak",
         },
     )
@@ -5055,6 +5649,7 @@ def test_rectification_chara_dasha_score_activates_on_matched_rasi(monkeypatch) 
         longitude=121.4737,
         timezone_id="Asia/Shanghai",
         ledger=ledger,
+        include_diagnostic_chara_dasha=True,
     )
 
     assert result["charaDashaScore"] == pytest.approx(0.24)
@@ -5093,6 +5688,7 @@ def test_rectification_chara_dasha_score_stays_zero_when_not_activated(monkeypat
         longitude=121.4737,
         timezone_id="Asia/Shanghai",
         ledger=ledger,
+        include_diagnostic_chara_dasha=True,
     )
 
     assert result["charaDashaScore"] == 0.0
@@ -5135,6 +5731,7 @@ def test_rectification_chara_dasha_score_is_none_when_calculation_fails(monkeypa
         longitude=121.4737,
         timezone_id="Asia/Shanghai",
         ledger=ledger,
+        include_diagnostic_chara_dasha=True,
     )
 
     assert result["charaDashaScore"] is None
@@ -5289,21 +5886,21 @@ def test_candidate_selection_requires_convergent_evidence_layers() -> None:
             "aggregateScore": score,
             "holdoutScore": score,
             "evidenceScores": [
-                {
-                    "eventId": event_id,
-                    "role": "calibration",
-                    "score": score,
-                    "methodConvergenceMet": convergent,
-                }
+                _selection_evidence(
+                    event_id,
+                    "calibration",
+                    score,
+                    convergent=convergent,
+                )
                 for event_id in calibration_ids
             ]
             + [
-                {
-                    "eventId": holdout_id,
-                    "role": "holdout",
-                    "score": score,
-                    "methodConvergenceMet": convergent,
-                }
+                _selection_evidence(
+                    holdout_id,
+                    "holdout",
+                    score,
+                    convergent=convergent,
+                )
             ],
         }
 
@@ -5323,6 +5920,34 @@ def test_candidate_selection_requires_convergent_evidence_layers() -> None:
     assert service._select_deterministic_event_candidate(candidates)["candidateId"] == "B"
 
 
+def test_nonconvergent_event_cannot_borrow_authority_from_other_events() -> None:
+    service = ChartRectificationService()
+
+    def candidate(candidate_id: str, scores: list[tuple[float, bool]]) -> dict[str, Any]:
+        aggregate = round(sum(score for score, _ in scores) / len(scores), 3)
+        return {
+            "candidateId": candidate_id,
+            "deterministicScore": aggregate,
+            "aggregateScore": aggregate,
+            "evidenceScores": [
+                _selection_evidence(
+                    f"event-{index}",
+                    "calibration",
+                    score,
+                    convergent=convergent,
+                )
+                for index, (score, convergent) in enumerate(scores)
+            ],
+        }
+
+    leader = candidate("A", [(0.3, True), (0.3, True), (0.7, False)])
+    alternative = candidate("B", [(0.3, True), (0.3, True), (0.0, False)])
+
+    assert service._convergent_calibration_event_count(leader) == 2
+    assert service._leader_discriminating_convergent_events([leader, alternative]) == []
+    assert service._select_deterministic_event_candidate([leader, alternative]) is None
+
+
 def test_candidate_selection_records_global_dasha_disagreement_without_granting_authority() -> None:
     service = ChartRectificationService()
     candidates = [
@@ -5334,13 +5959,7 @@ def test_candidate_selection_records_global_dasha_disagreement_without_granting_
             "vimshottariDashaScore": 0.2,
             "charaDashaScore": 0.6,
             "evidenceScores": [
-                {
-                    "eventId": f"event-{index}",
-                    "role": "calibration",
-                    "score": 0.8,
-                    "methodConvergenceMet": True,
-                }
-                for index in range(3)
+                _selection_evidence(f"event-{index}", "calibration", 0.8) for index in range(3)
             ],
         },
         {
@@ -5351,13 +5970,7 @@ def test_candidate_selection_records_global_dasha_disagreement_without_granting_
             "vimshottariDashaScore": 0.6,
             "charaDashaScore": 0.2,
             "evidenceScores": [
-                {
-                    "eventId": f"event-{index}",
-                    "role": "calibration",
-                    "score": 0.6,
-                    "methodConvergenceMet": True,
-                }
-                for index in range(3)
+                _selection_evidence(f"event-{index}", "calibration", 0.6) for index in range(3)
             ],
         },
     ]
@@ -5378,13 +5991,7 @@ def test_candidate_margin_matches_divisional_evidence_resolution() -> None:
             "deterministicScore": aggregate,
             "aggregateScore": aggregate,
             "evidenceScores": [
-                {
-                    "eventId": f"event-{index}",
-                    "role": "calibration",
-                    "selectionScore": score,
-                    "score": score,
-                    "methodConvergenceMet": True,
-                }
+                _selection_evidence(f"event-{index}", "calibration", score)
                 for index, score in enumerate(event_scores)
             ],
         }
@@ -5563,6 +6170,61 @@ def test_equivalence_classes_ignore_reserved_holdout_scores() -> None:
     assert candidates[0]["equivalentCandidateIds"] == ["A", "B"]
 
 
+def test_equivalence_classes_ignore_auxiliary_calibration_evidence() -> None:
+    signature = {"lagnaSign": "Aries", "moonSign": "Taurus"}
+    primary = {
+        "eventId": "evt-calibration",
+        "role": "calibration",
+        "selectionScore": 0.4,
+        "selectionSupportScore": 0.4,
+        "selectionContradictionScore": 0.0,
+        "observations": [
+            {"component": "dasha", "outcome": "support", "weight": 0.2},
+            {"component": "varga", "outcome": "support", "weight": 0.2},
+        ],
+    }
+    candidates = [
+        {
+            "candidateId": "A",
+            "signature": signature,
+            "evidenceScores": [
+                {
+                    **primary,
+                    "score": 0.8,
+                    "supportScore": 0.8,
+                    "observations": [
+                        *primary["observations"],
+                        {"component": "double_transit", "outcome": "support", "weight": 0.4},
+                    ],
+                }
+            ],
+        },
+        {
+            "candidateId": "B",
+            "signature": signature,
+            "evidenceScores": [
+                {
+                    **primary,
+                    "score": 0.4,
+                    "supportScore": 0.4,
+                    "observations": [
+                        *primary["observations"],
+                        {
+                            "component": "double_transit",
+                            "outcome": "not_observed",
+                            "weight": 0.0,
+                        },
+                    ],
+                }
+            ],
+        },
+    ]
+
+    VedicCalculator._assign_equivalence_classes(candidates)
+
+    assert candidates[0]["equivalenceClassId"] == candidates[1]["equivalenceClassId"]
+
+
 def test_prevalidation_contract_rejects_visible_astrology_and_non_questions() -> None:
     service = ChartRectificationService()
 
@@ -5616,12 +6278,26 @@ def test_rectification_round_records_answer_impact_and_next_decision() -> None:
             {
                 "candidateId": "A",
                 "aggregateScore": 0.1,
-                "evidenceScores": [{"eventId": "evt-career", "role": "calibration", "score": 0.1}],
+                "evidenceScores": [
+                    {
+                        "eventId": "evt-career",
+                        "role": "calibration",
+                        "score": 0.1,
+                        "selectionScore": 0.1,
+                    }
+                ],
             },
             {
                 "candidateId": "B",
                 "aggregateScore": 0.3,
-                "evidenceScores": [{"eventId": "evt-career", "role": "calibration", "score": 0.3}],
+                "evidenceScores": [
+                    {
+                        "eventId": "evt-career",
+                        "role": "calibration",
+                        "score": 0.3,
+                        "selectionScore": 0.3,
+                    }
+                ],
             },
         ],
         "lifeEventLedger": {
@@ -5664,6 +6340,66 @@ def test_rectification_round_records_answer_impact_and_next_decision() -> None:
     assert round_record["evidenceImpact"]["discriminating"] is True
     assert round_record["decision"]["outcome"] == "candidate_scores_separated"
     assert round_record["decision"]["nextAction"] == "collect_dated_life_events"
+
+
+def test_rectification_round_does_not_call_auxiliary_score_discriminating() -> None:
+    service = ChartRectificationService()
+    result = service.record_evidence_round(
+        {"candidates": [], "rectificationRounds": []},
+        {
+            "status": "underdetermined",
+            "candidates": [
+                {
+                    "candidateId": "A",
+                    "aggregateScore": 0.1,
+                    "evidenceScores": [
+                        {"eventId": "evt-career", "role": "calibration", "score": 0.1}
+                    ],
+                },
+                {
+                    "candidateId": "B",
+                    "aggregateScore": 0.4,
+                    "evidenceScores": [
+                        {"eventId": "evt-career", "role": "calibration", "score": 0.4}
+                    ],
+                },
+            ],
+            "lifeEventLedger": {
+                "events": [
+                    {
+                        "questionId": "rectify.r1.q1.career",
+                        "eventId": "evt-career",
+                        "category": "career",
+                        "eventSubtype": "promotion",
+                        "date": "2018-06",
+                        "datePrecision": "month",
+                        "role": "calibration",
+                    }
+                ]
+            },
+            "selectionEvidence": {"blockers": ["incomplete_selection_scores"]},
+            "rectificationPlan": {"action": "collect_dated_life_events"},
+            "holdoutResult": "not_run",
+            "reportGate": {"reason": "Canonical selection scores are unavailable."},
+        },
+        submitted_events=[
+            {
+                "questionId": "rectify.r1.q1.career",
+                "category": "career",
+                "eventSubtype": "promotion",
+                "date": "2018-06",
+            }
+        ],
+        chart_revision=2,
+    )
+
+    impact = result["rectificationRounds"][0]["evidenceImpact"]
+    assert impact["scoredCandidateClasses"] == 0
+    assert impact["scoreSpread"] is None
+    assert impact["discriminating"] is False
+    assert result["rectificationRounds"][0]["decision"]["outcome"] == (
+        "evidence_recorded_without_required_margin"
+    )
 
 
 def test_round_candidate_metrics_do_not_pair_a_leader_with_another_candidates_score() -> None:

@@ -13,6 +13,7 @@ from app.services.life_event_rectification import (
 )
 from app.services.rectification_confirmation import build_rectification_conclusion
 from app.vedicdust.rectification_policy import (
+    RECTIFICATION_CONVERGENCE_COMPONENTS,
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_HOLDOUT_POLICY_ID,
     RECTIFICATION_METHOD_MATURITY,
@@ -77,6 +78,22 @@ class ChartRectificationService:
                 "deterministic calculation before asking rectification questions."
             )
             full_report_allowed = False
+        elif mode == "rectification_required" and not candidates:
+            status = "calculation_failed"
+            gate_reason = (
+                "The sensitivity scan did not produce an auditable chart candidate. Retry the "
+                "deterministic calculation before asking rectification questions."
+            )
+            full_report_allowed = False
+        elif mode == "rectification_required" and len(candidates) == 1:
+            status = "not_required"
+            gate_reason = (
+                "The bounded sensitivity scan found one evidence-addressable chart fingerprint "
+                "across the reported time window. Report-only fields may still vary, so retain "
+                "the interval and use only scan-stable evidence instead of asking questions that "
+                "cannot distinguish another candidate."
+            )
+            full_report_allowed = True
         elif mode == "rectification_required" and (
             not life_event_ledger_supplied
             or life_event_ledger.get("eventCollectionRequired") is True
@@ -94,14 +111,6 @@ class ChartRectificationService:
                 "reserved-event check. Reader testimony cannot select a candidate."
             )
             full_report_allowed = False
-        elif mode == "rectification_required":
-            status = "not_required"
-            gate_reason = (
-                "The bounded sensitivity scan found one stable chart fingerprint across the "
-                "reported time and place window. The exact birth moment remains uncertain, so "
-                "the report must retain that interval and use only scan-stable evidence."
-            )
-            full_report_allowed = True
         else:
             status = "not_required"
             gate_reason = "Sensitivity scan does not require candidate rectification."
@@ -513,11 +522,9 @@ class ChartRectificationService:
             for item in candidate.get("evidenceScores") or []:
                 if not isinstance(item, dict) or str(item.get("eventId") or "") != event_id:
                     continue
-                selection_score = item.get("selectionScore")
-                if selection_score is None:
-                    selection_score = item.get("score")
+                selection_score = ChartRectificationService._selection_score(item)
                 if selection_score is not None:
-                    scores.append(float(selection_score))
+                    scores.append(selection_score)
                     role = str(item.get("role") or "") or role
                 break
         if not scores:
@@ -611,7 +618,8 @@ class ChartRectificationService:
             blockers.append("insufficient_calibration_category_diversity")
         if holdout_count != 1:
             blockers.append("missing_single_holdout_event")
-        if len(candidates) < 2:
+        representatives = ChartRectificationService._candidate_representatives(candidates)
+        if len(representatives) < 2:
             blockers.append("insufficient_candidate_classes")
         discriminating_events = ChartRectificationService._calibration_event_discrimination(
             candidates
@@ -621,7 +629,6 @@ class ChartRectificationService:
             for item in discriminating_events
         ):
             blockers.append("no_discriminating_calibration_event")
-        representatives = ChartRectificationService._candidate_representatives(candidates)
         if representatives:
             leader = representatives[0]
             if (
@@ -629,6 +636,11 @@ class ChartRectificationService:
                 < RECTIFICATION_SCORING_POLICY.minimum_convergent_calibration_events
             ):
                 blockers.append("insufficient_primary_method_convergence")
+            if (
+                len(ChartRectificationService._leader_discriminating_convergent_events(candidates))
+                < RECTIFICATION_SCORING_POLICY.minimum_discriminating_convergent_events
+            ):
+                blockers.append("insufficient_discriminating_method_convergence")
         return blockers
 
     @staticmethod
@@ -681,6 +693,14 @@ class ChartRectificationService:
             "minimumConvergentCalibrationEvents": (
                 RECTIFICATION_SCORING_POLICY.minimum_convergent_calibration_events
             ),
+            "minimumDiscriminatingConvergentEvents": (
+                RECTIFICATION_SCORING_POLICY.minimum_discriminating_convergent_events
+            ),
+            "leaderDiscriminatingConvergentEvents": (
+                ChartRectificationService._leader_discriminating_convergent_events(
+                    ChartRectificationService._candidate_score_state(state.get("candidates"))
+                )
+            ),
             "calibrationEventDiscrimination": (
                 ChartRectificationService._calibration_event_discrimination(
                     ChartRectificationService._candidate_score_state(state.get("candidates"))
@@ -706,9 +726,7 @@ class ChartRectificationService:
                 if not isinstance(item, dict) or item.get("role") != "calibration":
                     continue
                 event_id = str(item.get("eventId") or "")
-                selection_score = item.get("selectionScore")
-                if selection_score is None:
-                    selection_score = item.get("score")
+                selection_score = ChartRectificationService._selection_score(item)
                 if event_id and selection_score is not None:
                     scores_by_event.setdefault(event_id, []).append(float(selection_score))
         result = []
@@ -724,6 +742,81 @@ class ChartRectificationService:
                 }
             )
         return result
+
+    @staticmethod
+    def _leader_discriminating_convergent_events(
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Return strong events that individually favor the aggregate leader.
+
+        Global convergence and global score separation are not interchangeable:
+        unrelated convergent events must not lend authority to a different,
+        single-layer event that happens to create the final margin.
+        """
+
+        representatives = ChartRectificationService._candidate_representatives(candidates)
+        if len(representatives) < 2:
+            return []
+        leader, *alternatives = representatives
+        result: list[dict[str, Any]] = []
+        for evidence in leader.get("evidenceScores") or []:
+            if (
+                not isinstance(evidence, dict)
+                or evidence.get("role") != "calibration"
+                or not ChartRectificationService._event_method_convergence_met(evidence)
+            ):
+                continue
+            event_id = str(evidence.get("eventId") or "")
+            leader_score = ChartRectificationService._selection_score(evidence)
+            if not event_id or leader_score is None:
+                continue
+            alternative_scores: list[float] = []
+            complete = True
+            for candidate in alternatives:
+                alternative = next(
+                    (
+                        item
+                        for item in candidate.get("evidenceScores") or []
+                        if isinstance(item, dict)
+                        and item.get("role") == "calibration"
+                        and str(item.get("eventId") or "") == event_id
+                    ),
+                    None,
+                )
+                score = (
+                    ChartRectificationService._selection_score(alternative)
+                    if isinstance(alternative, dict)
+                    else None
+                )
+                if score is None:
+                    complete = False
+                    break
+                alternative_scores.append(score)
+            if not complete or not alternative_scores:
+                continue
+            advantage = round(leader_score - max(alternative_scores), 3)
+            if advantage >= RECTIFICATION_SCORING_POLICY.event_discrimination_min_margin:
+                result.append(
+                    {
+                        "eventId": event_id,
+                        "leaderScore": round(leader_score, 3),
+                        "bestAlternativeScore": round(max(alternative_scores), 3),
+                        "margin": advantage,
+                    }
+                )
+        return result
+
+    @staticmethod
+    def _selection_score(evidence: dict[str, Any]) -> float | None:
+        """Return only the policy-authorized score used for candidate selection.
+
+        A legacy total ``score`` can contain auxiliary methods. Falling back to
+        it would silently give those methods ranking authority, so malformed or
+        pre-policy evidence fails closed here.
+        """
+
+        value = evidence.get("selectionScore")
+        return float(value) if value is not None else None
 
     @staticmethod
     def _select_deterministic_event_candidate(
@@ -771,6 +864,11 @@ class ChartRectificationService:
             < RECTIFICATION_SCORING_POLICY.minimum_convergent_calibration_events
         ):
             return None
+        if (
+            len(ChartRectificationService._leader_discriminating_convergent_events(candidates))
+            < RECTIFICATION_SCORING_POLICY.minimum_discriminating_convergent_events
+        ):
+            return None
         top_score = float(top.get("deterministicScore") or 0.0)
         if top_score < RECTIFICATION_SCORING_POLICY.candidate_selection_min_score:
             return None
@@ -790,40 +888,74 @@ class ChartRectificationService:
         *,
         selected_candidate_ids: list[str] | None = None,
     ) -> str:
-        if selected is None or selected.get("holdoutScore") is None:
+        if selected is None:
             return "not_run"
-        holdout_evidence = next(
-            (
-                item
-                for item in selected.get("evidenceScores") or []
-                if isinstance(item, dict) and item.get("role") == "holdout"
-            ),
-            None,
-        )
-        if not isinstance(
-            holdout_evidence, dict
-        ) or not ChartRectificationService._event_method_convergence_met(holdout_evidence):
+        if any(
+            candidate.get("holdoutPeriodBoundaryChecked") is not True
+            or candidate.get("holdoutPeriodStableWithinInterval") is not True
+            for candidate in candidates
+        ):
             return "inconclusive"
         selected_ids = set(selected_candidate_ids or [])
         selected_ids.add(str(selected.get("candidateId") or ""))
-        alternative_classes: dict[str, dict[str, Any]] = {}
+        selected_class_id = str(selected.get("equivalenceClassId") or "")
+        if selected_class_id:
+            selected_ids.update(
+                str(candidate.get("candidateId") or "")
+                for candidate in candidates
+                if str(candidate.get("equivalenceClassId") or "") == selected_class_id
+            )
+
+        selected_members = [
+            candidate
+            for candidate in candidates
+            if str(candidate.get("candidateId") or "") in selected_ids
+        ]
+        if not selected_members:
+            selected_members = [selected]
+
+        selected_scores: list[float] = []
+        for candidate in selected_members:
+            evidence = ChartRectificationService._holdout_evidence(candidate)
+            score = (
+                ChartRectificationService._selection_score(evidence)
+                if isinstance(evidence, dict)
+                else None
+            )
+            if (
+                score is None
+                or candidate.get("holdoutScore") is None
+                or round(float(candidate["holdoutScore"]), 3) != round(score, 3)
+                or not ChartRectificationService._event_method_convergence_met(evidence)
+            ):
+                return "inconclusive"
+            selected_scores.append(score)
+
+        alternative_scores: list[float] = []
         for candidate in candidates:
             candidate_id = str(candidate.get("candidateId") or "")
             if candidate_id in selected_ids:
                 continue
-            class_id = str(candidate.get("equivalenceClassId") or candidate_id)
-            alternative_classes.setdefault(class_id, candidate)
-        if any(candidate.get("holdoutScore") is None for candidate in alternative_classes.values()):
-            return "inconclusive"
-        alternatives = [
-            float(candidate["holdoutScore"]) for candidate in alternative_classes.values()
-        ]
-        selected_score = float(selected["holdoutScore"])
+            evidence = ChartRectificationService._holdout_evidence(candidate)
+            score = (
+                ChartRectificationService._selection_score(evidence)
+                if isinstance(evidence, dict)
+                else None
+            )
+            if (
+                score is None
+                or candidate.get("holdoutScore") is None
+                or round(float(candidate["holdoutScore"]), 3) != round(score, 3)
+            ):
+                return "inconclusive"
+            alternative_scores.append(score)
+
+        selected_score = min(selected_scores)
         if selected_score < RECTIFICATION_SCORING_POLICY.holdout_min_score:
             return "inconclusive"
-        if not alternatives:
+        if not alternative_scores:
             return "passed"
-        best_alternative = max(alternatives)
+        best_alternative = max(alternative_scores)
         margin = selected_score - best_alternative
         if margin >= RECTIFICATION_SCORING_POLICY.holdout_pass_margin:
             return "passed"
@@ -832,18 +964,40 @@ class ChartRectificationService:
         return "inconclusive"
 
     @staticmethod
+    def _holdout_evidence(candidate: dict[str, Any]) -> dict[str, Any] | None:
+        evidence = [
+            item
+            for item in candidate.get("evidenceScores") or []
+            if isinstance(item, dict) and item.get("role") == "holdout"
+        ]
+        return evidence[0] if len(evidence) == 1 else None
+
+    @staticmethod
     def _event_method_convergence_met(evidence: dict[str, Any]) -> bool:
-        explicit = evidence.get("methodConvergenceMet")
-        if isinstance(explicit, bool):
-            return explicit
-        components = {
+        observations = [
+            item for item in evidence.get("observations") or [] if isinstance(item, dict)
+        ]
+        observed_components = {
             str(item.get("component") or "")
-            for item in evidence.get("observations") or []
-            if isinstance(item, dict)
-            and item.get("outcome") == "support"
-            and item.get("component") in {"dasha", "varga", "double_transit"}
+            for item in observations
+            if item.get("outcome") == "support"
+            and item.get("component") in RECTIFICATION_CONVERGENCE_COMPONENTS
         }
-        return len(components) >= RECTIFICATION_SCORING_POLICY.minimum_evidence_layers_per_event
+        if observations:
+            components = observed_components
+        else:
+            declared_components = evidence.get("methodConvergenceComponents")
+            components = {
+                str(component)
+                for component in declared_components or []
+                if component in RECTIFICATION_CONVERGENCE_COMPONENTS
+            }
+        if not components:
+            return False
+        return (
+            "dasha" in components
+            and len(components) >= RECTIFICATION_SCORING_POLICY.minimum_evidence_layers_per_event
+        )
 
     @staticmethod
     def _convergent_calibration_event_count(candidate: dict[str, Any]) -> int:
@@ -1089,8 +1243,8 @@ class ChartRectificationService:
                     "fullReportAllowed": False,
                     "reason": (
                         "Calibration events selected a bounded candidate, the reserved event "
-                        "validated it, and the chart was recalculated. Review the corrected time "
-                        "and the post-selection retrospective checks before the full report."
+                        "validated it, and the chart was recalculated. Review the bounded interval "
+                        "and submitted-evidence summary before the full report."
                     ),
                     "nextStep": "confirm_rectification_result",
                 },
@@ -1129,6 +1283,31 @@ class ChartRectificationService:
                         "candidate set instead of asking the Reader to choose a chart."
                     ),
                     "nextStep": "provide_more_precise_or_additional_event_evidence",
+                },
+            }
+        )
+        next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
+        return next_state
+
+    def reject_unresolved_boundary_selection(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Fail closed when a selected minute-grid transition cannot be refined."""
+
+        next_state = copy.deepcopy(state)
+        next_state.update(
+            {
+                "revision": int(next_state.get("revision") or 0) + 1,
+                "updatedAt": self._now(),
+                "status": "calculation_failed",
+                "selectedCandidateId": None,
+                "selectionConfidence": "none",
+                "reportGate": {
+                    "fullReportAllowed": False,
+                    "reason": (
+                        "The provisional interval touches an unresolved chart or Dasha boundary. "
+                        "The deterministic sub-minute check did not complete, so no corrected chart "
+                        "was materialized."
+                    ),
+                    "nextStep": "retry_deterministic_calculation",
                 },
             }
         )
@@ -1314,7 +1493,9 @@ class ChartRectificationService:
 
     def _candidate_groups(self, sensitivity_scan: dict[str, Any]) -> list[dict[str, Any]]:
         groups = sensitivity_scan.get("candidateGroups")
-        if isinstance(groups, list) and groups:
+        if "candidateGroups" in sensitivity_scan:
+            if not isinstance(groups, list):
+                return []
             return [copy.deepcopy(item) for item in groups if isinstance(item, dict)]
         base = sensitivity_scan.get("base")
         return [
@@ -1520,8 +1701,10 @@ class ChartRectificationService:
             "eventCollectionRequired": event_collection_required,
             "eventQuestionStrategy": (
                 "Collect genuinely new structured dated events when evidence is insufficient. "
-                "Never restate an existing event to create another vote. D16/D20/D24/D27/D30 "
-                "remain corroborative and D60 remains final-confirmation-only."
+                "Never restate an existing event to create another vote. D2/D4/D7/D9/D10/D12/"
+                "D20/D24/D30 may contribute only when the event-domain policy assigns them; "
+                "D3/D5/D16/D27 remain report-stability context, and D60 remains "
+                "final-confirmation-only."
             ),
             "directive": directive,
             "gateReason": gate.get("reason"),
@@ -1650,7 +1833,7 @@ class ChartRectificationService:
                 signature = candidate.get("signature")
                 signature = signature if isinstance(signature, dict) else {}
                 value_key = json.dumps(
-                    signature.get(field),
+                    ChartRectificationService._signature_field_value(signature, field),
                     ensure_ascii=True,
                     sort_keys=True,
                     separators=(",", ":"),
@@ -1665,6 +1848,27 @@ class ChartRectificationService:
             }
         return result
 
+    @staticmethod
+    def _signature_field_value(signature: dict[str, Any], field: str) -> Any:
+        """Resolve both stored and synthetic signature-difference field names."""
+
+        if field == "d1Structure":
+            return signature.get("planetSignIndices")
+        structure_match = re.fullmatch(r"d(\d+)Structure", field)
+        if structure_match:
+            structures = signature.get("vargaPlanetSignIndices")
+            structures = structures if isinstance(structures, dict) else {}
+            return structures.get(f"D{structure_match.group(1)}")
+        if re.fullmatch(r"d\d+LagnaDegree", field):
+            degrees = signature.get("vargaLagnaDegrees")
+            degrees = degrees if isinstance(degrees, dict) else {}
+            return degrees.get(field)
+        if field.startswith("planetLongitude:"):
+            longitudes = signature.get("planetLongitudes")
+            longitudes = longitudes if isinstance(longitudes, dict) else {}
+            return longitudes.get(field.partition(":")[2])
+        return signature.get(field)
+
     def _discriminating_fields(
         self,
         candidates: list[dict[str, Any]],
@@ -1677,7 +1881,7 @@ class ChartRectificationService:
                     fields.append(field)
         if fields:
             return fields
-        return ["lagnaSign", "moonNakshatra", "d9Lagna", "d10Lagna", "currentDasha"]
+        return ["lagnaSign", "moonNakshatra", "d9Lagna", "d10Lagna"]
 
     @staticmethod
     def _rectification_axes(_state: dict[str, Any]) -> list[str]:

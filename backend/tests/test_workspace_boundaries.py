@@ -92,7 +92,7 @@ def test_chart_record_is_the_public_calculation_contract(tmp_path: Path) -> None
     workspace.write_artifact(
         session_id,
         "chart_record.json",
-        '{"schemaVersion":"vedicdust-chart-record/1.5.0","chartRecordId":"chart-1"}\n',
+        '{"schemaVersion":"vedicdust-chart-record/1.6.0","chartRecordId":"chart-1"}\n',
     )
     workspace.write_artifact(session_id, "obsolete_artifact.md", "# ignored\n")
 

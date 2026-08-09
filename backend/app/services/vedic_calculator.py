@@ -4,11 +4,13 @@ import json
 import hashlib
 import math
 import sys
+from collections import OrderedDict
 from copy import deepcopy
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import pytz
@@ -37,6 +39,7 @@ from app.vedicdust.chart_record_builder import ChartRecordBuildInput, build_char
 from app.vedicdust.independent_reference import find_independent_reference
 from app.vedicdust.models import TimeRange
 from app.vedicdust.profiles import PARASHARI_LAHIRI_PROFILE_ID
+from app.vedicdust.rectification_policy import RECTIFICATION_SELECTION_COMPONENTS
 from app.vedicdust.varga_policy import (
     SUPPORTED_VARGA_FACTORS,
     VARGA_DOMAIN_POLICY_ID,
@@ -60,6 +63,7 @@ DIVISIONAL_FACTORS = list(SUPPORTED_VARGA_FACTORS)
 DIVISIONAL_FINGERPRINT_FACTORS = [2, 4, 7, 9, 10, 12, 20, 24, 30]
 CALCULATION_VERSION = f"vedicdust-{PARASHARI_LAHIRI_PROFILE_ID}"
 SUB_MINUTE_BOUNDARY_TARGET_SECONDS = 5
+RECTIFICATION_SIGNATURE_CACHE_SIZE = 4096
 HIGH_RISK_CHANGED_FIELDS = {
     "lagnaSign",
     "d1Structure",
@@ -106,6 +110,10 @@ class VedicCalculator:
     def __init__(self, settings: Settings, place_service: PlaceService) -> None:
         self.settings = settings
         self.place_service = place_service
+        self._rectification_signature_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = (
+            OrderedDict()
+        )
+        self._rectification_signature_cache_lock = RLock()
 
     def calculate(
         self,
@@ -644,6 +652,19 @@ class VedicCalculator:
                     "eventPeriodStableWithinInterval": bool(
                         variant.get("eventPeriodStableWithinInterval")
                     ),
+                    "holdoutPeriodBoundaryChecked": bool(
+                        variant.get("holdoutPeriodBoundaryChecked")
+                    ),
+                    "holdoutPeriodStableWithinInterval": (
+                        bool(variant["holdoutPeriodStableWithinInterval"])
+                        if variant.get("holdoutPeriodStableWithinInterval") is not None
+                        else None
+                    ),
+                    "holdoutPeriodAuditResolutionSeconds": (
+                        int(variant["holdoutPeriodAuditResolutionSeconds"])
+                        if variant.get("holdoutPeriodAuditResolutionSeconds") is not None
+                        else None
+                    ),
                     "members": [
                         {
                             "axis": "time",
@@ -788,6 +809,15 @@ class VedicCalculator:
                     ledger=life_event_ledger,
                 )
                 candidate.update(result)
+                candidate.update(
+                    VedicCalculator._holdout_period_boundary_check(
+                        candidate,
+                        latitude=candidate_latitude,
+                        longitude=candidate_longitude,
+                        timezone_id=candidate_timezone,
+                        ledger=life_event_ledger,
+                    )
+                )
             except Exception as exc:
                 candidate.update(
                     {
@@ -797,6 +827,100 @@ class VedicCalculator:
                         "scoringError": str(exc),
                     }
                 )
+
+    @staticmethod
+    def _holdout_period_boundary_check(
+        candidate: dict[str, Any],
+        *,
+        latitude: float,
+        longitude: float,
+        timezone_id: str,
+        ledger: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Audit holdout Dasha stability without using it to build candidates.
+
+        New scans carry the reserved-event fingerprint beside every minute point,
+        while candidate partitioning reads only calibration fingerprints. Legacy
+        candidates are re-probed on the same complete minute grid here.
+        """
+
+        if candidate.get("holdoutPeriodBoundaryChecked") is True and isinstance(
+            candidate.get("holdoutPeriodStableWithinInterval"), bool
+        ):
+            return {
+                "holdoutPeriodBoundaryChecked": True,
+                "holdoutPeriodStableWithinInterval": candidate["holdoutPeriodStableWithinInterval"],
+                "holdoutPeriodAuditResolutionSeconds": int(
+                    candidate.get("holdoutPeriodAuditResolutionSeconds") or 60
+                ),
+            }
+
+        holdout_events = [
+            event
+            for event in ledger.get("events") or []
+            if isinstance(event, dict) and event.get("role") == "holdout"
+        ]
+        if len(holdout_events) != 1:
+            return {
+                "holdoutPeriodBoundaryChecked": False,
+                "holdoutPeriodStableWithinInterval": None,
+                "holdoutPeriodAuditResolutionSeconds": None,
+            }
+        interval = candidate.get("interval")
+        if not isinstance(interval, dict):
+            return {
+                "holdoutPeriodBoundaryChecked": False,
+                "holdoutPeriodStableWithinInterval": None,
+                "holdoutPeriodAuditResolutionSeconds": None,
+            }
+        start = VedicCalculator._interval_bound(interval, "start", timezone_id)
+        end = VedicCalculator._interval_bound(interval, "end", timezone_id)
+        if start is None or end is None or start >= end:
+            return {
+                "holdoutPeriodBoundaryChecked": False,
+                "holdoutPeriodStableWithinInterval": None,
+                "holdoutPeriodAuditResolutionSeconds": None,
+            }
+        probes: list[datetime] = []
+        probe = start
+        end_utc = end.astimezone(pytz.utc)
+        while probe.astimezone(pytz.utc) < end_utc:
+            probes.append(probe)
+            next_utc = probe.astimezone(pytz.utc) + timedelta(minutes=1)
+            if next_utc >= end_utc:
+                break
+            probe = next_utc.astimezone(start.tzinfo)
+        final_probe = max(start, end - timedelta(seconds=1))
+        if not probes or probes[-1].astimezone(pytz.utc) != final_probe.astimezone(pytz.utc):
+            probes.append(final_probe)
+        fingerprints = [
+            candidate_event_period_fingerprint(
+                birth_moment=moment,
+                latitude=latitude,
+                longitude=longitude,
+                timezone_id=timezone_id,
+                ledger=ledger,
+                event_roles=("holdout",),
+            )
+            for moment in probes
+        ]
+        event_periods = [
+            (
+                VedicCalculator._holdout_period_partition_key(fingerprint)
+                or tuple(fingerprint.get("eventPeriods") or ())
+                if isinstance(fingerprint, dict)
+                else ()
+            )
+            for fingerprint in fingerprints
+        ]
+        checked = all(len(periods) == 1 for periods in event_periods)
+        return {
+            "holdoutPeriodBoundaryChecked": checked,
+            "holdoutPeriodStableWithinInterval": (
+                len(set(event_periods)) == 1 if checked else None
+            ),
+            "holdoutPeriodAuditResolutionSeconds": 60 if checked else None,
+        }
 
     @staticmethod
     def _apply_dasha_system_agreement(candidates: list[dict[str, Any]]) -> None:
@@ -917,9 +1041,6 @@ class VedicCalculator:
                 {
                     "eventId": score.get("eventId"),
                     "role": score.get("role"),
-                    "score": score.get("score"),
-                    "supportScore": score.get("supportScore"),
-                    "contradictionScore": score.get("contradictionScore"),
                     "selectionScore": score.get("selectionScore"),
                     "selectionSupportScore": score.get("selectionSupportScore"),
                     "selectionContradictionScore": score.get("selectionContradictionScore"),
@@ -932,6 +1053,7 @@ class VedicCalculator:
                         }
                         for observation in score.get("observations") or []
                         if isinstance(observation, dict)
+                        and observation.get("component") in RECTIFICATION_SELECTION_COMPONENTS
                     ],
                 }
                 for score in candidate.get("evidenceScores") or []
@@ -972,7 +1094,6 @@ class VedicCalculator:
             "moonSign",
             "moonNakshatra",
             "moonPada",
-            "currentDasha",
         ]
         values = [str(signature.get(key)) for key in stable_keys]
         d1_structure = signature.get("planetSignIndices")
@@ -985,6 +1106,40 @@ class VedicCalculator:
             )
             values.append(json.dumps(structure, sort_keys=True, separators=(",", ":")))
         return "|".join(values)
+
+    @staticmethod
+    def _event_period_partition_key(value: Any) -> tuple[str, ...] | None:
+        """Return only historical calibration-period evidence used to split candidates.
+
+        ``currentDasha`` is evaluated at the report epoch. It remains a sensitivity
+        field, but it must not change candidate topology or adaptive question order.
+        Legacy tests and adapters may still return the period tuple directly.
+        """
+
+        raw_periods = value
+        if isinstance(value, dict):
+            periods_by_role = value.get("eventPeriodsByRole")
+            if isinstance(periods_by_role, dict):
+                raw_periods = periods_by_role.get("calibration")
+            else:
+                raw_periods = value.get("eventPeriods")
+        if not isinstance(raw_periods, (list, tuple)) or not raw_periods:
+            return None
+        return tuple(str(period) for period in raw_periods)
+
+    @staticmethod
+    def _holdout_period_partition_key(value: Any) -> tuple[str, ...] | None:
+        """Return reserved-event periods without granting them partition authority."""
+
+        if not isinstance(value, dict):
+            return None
+        periods_by_role = value.get("eventPeriodsByRole")
+        if not isinstance(periods_by_role, dict):
+            return None
+        raw_periods = periods_by_role.get("holdout")
+        if not isinstance(raw_periods, (list, tuple)) or not raw_periods:
+            return None
+        return tuple(str(period) for period in raw_periods)
 
     @staticmethod
     def _divisional_key(factor: int) -> str:
@@ -1146,7 +1301,6 @@ class VedicCalculator:
         candidate_count = len(candidate_groups)
         stable_bounded_window = (
             candidate_count == 1
-            and not summary.get("changedFields")
             and not summary.get("scanErrors")
             and not summary.get("candidateScoringErrors")
         )
@@ -1364,6 +1518,16 @@ class VedicCalculator:
         timezone_value = pytz.timezone(str(payload["timezone"]))
         start = datetime.fromisoformat(str(window["startUtc"])).astimezone(timezone_value)
         end = datetime.fromisoformat(str(window["endUtc"])).astimezone(timezone_value)
+        ledger_events = [
+            event
+            for event in (life_event_ledger or {}).get("events") or []
+            if isinstance(event, dict)
+        ]
+        fingerprint_roles = (
+            ("calibration", "holdout")
+            if any(event.get("role") == "holdout" for event in ledger_events)
+            else ("calibration",)
+        )
 
         points: list[dict[str, Any]] = []
         sample = start
@@ -1375,18 +1539,10 @@ class VedicCalculator:
                 ):
                     signature = dict(base_signature)
                 elif calculate_signature is not None:
-                    offset_kwargs = self._ambiguous_offset_kwargs(sample, str(payload["timezone"]))
-                    signature = calculate_signature(
-                        sample.year,
-                        sample.month,
-                        sample.day,
-                        sample.hour,
-                        sample.minute,
-                        float(payload["lat"]),
-                        float(payload["lon"]),
-                        str(payload["timezone"]),
-                        second=sample.second,
-                        **offset_kwargs,
+                    signature = self._cached_rectification_signature(
+                        calculate_signature,
+                        sample,
+                        payload,
                     )
                     signature["currentDasha"] = base_signature.get("currentDasha")
                 else:
@@ -1415,6 +1571,7 @@ class VedicCalculator:
                         timezone_id=str(payload["timezone"]),
                         ledger=life_event_ledger or {},
                         reference_moment=reference_moment,
+                        event_roles=fingerprint_roles,
                     )
                     if isinstance(event_period_fingerprint, dict) and event_period_fingerprint.get(
                         "currentDasha"
@@ -1437,21 +1594,74 @@ class VedicCalculator:
             sample = self._shift_absolute(sample, 1)
         return self._coalesce_time_points(points, base_dt, base_signature)
 
+    def _cached_rectification_signature(
+        self,
+        calculate_signature: Any,
+        sample: datetime,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Reuse only immutable chart structure between adaptive interview rounds."""
+
+        timezone_id = str(payload["timezone"])
+        offset_kwargs = self._ambiguous_offset_kwargs(sample, timezone_id)
+        try:
+            hash(calculate_signature)
+            provider_key: Any = calculate_signature
+        except TypeError:
+            provider_key = id(calculate_signature)
+        cache_key = (
+            CALCULATION_VERSION,
+            provider_key,
+            sample.astimezone(pytz.utc).isoformat(),
+            float(payload["lat"]),
+            float(payload["lon"]),
+            timezone_id,
+            offset_kwargs.get("utc_offset_seconds"),
+        )
+        with self._rectification_signature_cache_lock:
+            cached = self._rectification_signature_cache.get(cache_key)
+            if cached is not None:
+                self._rectification_signature_cache.move_to_end(cache_key)
+                return dict(cached)
+
+        signature = calculate_signature(
+            sample.year,
+            sample.month,
+            sample.day,
+            sample.hour,
+            sample.minute,
+            float(payload["lat"]),
+            float(payload["lon"]),
+            timezone_id,
+            second=sample.second,
+            **offset_kwargs,
+        )
+        if not isinstance(signature, dict):
+            raise RuntimeError("rectification signature provider returned an invalid payload")
+        with self._rectification_signature_cache_lock:
+            self._rectification_signature_cache[cache_key] = deepcopy(signature)
+            self._rectification_signature_cache.move_to_end(cache_key)
+            while len(self._rectification_signature_cache) > RECTIFICATION_SIGNATURE_CACHE_SIZE:
+                self._rectification_signature_cache.popitem(last=False)
+        return dict(signature)
+
     def refine_selected_time_boundary(
         self,
         state: dict[str, Any],
         birth_input_context: dict[str, Any],
         *,
         calculate_signature: Any | None = None,
+        calculate_event_period_fingerprint: Any | None = candidate_event_period_fingerprint,
         target_resolution_seconds: int = SUB_MINUTE_BOUNDARY_TARGET_SECONDS,
     ) -> dict[str, Any]:
-        """Refine every minute-grid transition touching the selected interval."""
+        """Refine every chart or calibration-period transition touching the selection."""
 
         selected_id = str(state.get("selectedCandidateId") or "")
         working = self._refine_selected_left_time_boundary(
             state,
             birth_input_context,
             calculate_signature=calculate_signature,
+            calculate_event_period_fingerprint=calculate_event_period_fingerprint,
             target_resolution_seconds=target_resolution_seconds,
         )
         results = [{"side": "left", **dict(working.get("boundaryRefinement") or {})}]
@@ -1517,6 +1727,7 @@ class VedicCalculator:
                     right_state,
                     birth_input_context,
                     calculate_signature=calculate_signature,
+                    calculate_event_period_fingerprint=calculate_event_period_fingerprint,
                     target_resolution_seconds=target_resolution_seconds,
                 )
                 right_result = dict(right_state.get("boundaryRefinement") or {})
@@ -1528,7 +1739,9 @@ class VedicCalculator:
         working["selectedCandidateId"] = selected_id or None
         statuses = {str(result.get("status") or "") for result in results}
         aggregate_status = (
-            "refined"
+            "skipped"
+            if "skipped" in statuses
+            else "refined"
             if "refined" in statuses
             else "already_refined"
             if "already_refined" in statuses
@@ -1559,13 +1772,15 @@ class VedicCalculator:
         birth_input_context: dict[str, Any],
         *,
         calculate_signature: Any | None = None,
+        calculate_event_period_fingerprint: Any | None = candidate_event_period_fingerprint,
         target_resolution_seconds: int = SUB_MINUTE_BOUNDARY_TARGET_SECONDS,
     ) -> dict[str, Any]:
-        """Narrow one selected chart-transition band without claiming an exact second.
+        """Narrow one selected evidence-transition band without claiming an exact second.
 
         The minute scan remains the exhaustive search. This method runs only after
         evidence has selected a candidate and only inside its typed left-boundary
-        uncertainty interval. D60 and Dasha-only changes are intentionally excluded.
+        uncertainty interval. D60 remains excluded; calibration-event Dasha changes
+        are refined because they have candidate-selection authority.
         """
 
         next_state = deepcopy(state)
@@ -1649,6 +1864,14 @@ class VedicCalculator:
             calculate_signature = calculate_rectification_signature
 
         factors = [1, *DIVISIONAL_FINGERPRINT_FACTORS]
+        ledger = next_state.get("lifeEventLedger")
+        if not isinstance(ledger, dict):
+            ledger = {}
+        calibration_events = [
+            event
+            for event in ledger.get("events") or []
+            if isinstance(event, dict) and event.get("role") == "calibration"
+        ]
 
         def signature_at(value: datetime) -> dict[str, Any]:
             local_value = value.astimezone(pytz.timezone(timezone_id))
@@ -1669,9 +1892,30 @@ class VedicCalculator:
             signature["currentDasha"] = None
             return signature
 
+        def event_period_key_at(value: datetime) -> tuple[str, ...] | None:
+            if not calibration_events or calculate_event_period_fingerprint is None:
+                return None
+            fingerprint = calculate_event_period_fingerprint(
+                birth_moment=value,
+                latitude=float(latitude),
+                longitude=float(longitude),
+                timezone_id=timezone_id,
+                ledger=ledger,
+                event_roles=("calibration",),
+            )
+            return self._event_period_partition_key(fingerprint)
+
+        def evidence_key(
+            signature: dict[str, Any],
+            event_period_key: tuple[str, ...] | None,
+        ) -> tuple[str, tuple[str, ...] | None]:
+            return self._signature_fingerprint(signature), event_period_key
+
         try:
             before_signature = signature_at(lower)
             after_signature = signature_at(upper)
+            before_event_period_key = event_period_key_at(lower)
+            after_event_period_key = event_period_key_at(upper)
             target_signature = dict(selected.get("signature") or {})
             target_signature["currentDasha"] = None
             before_fingerprint = self._signature_fingerprint(before_signature)
@@ -1682,10 +1926,12 @@ class VedicCalculator:
                     "skipped",
                     "The selected candidate does not match the deterministic upper-bound chart.",
                 )
-            if before_fingerprint == after_fingerprint:
+            before_evidence_key = evidence_key(before_signature, before_event_period_key)
+            after_evidence_key = evidence_key(after_signature, after_event_period_key)
+            if before_evidence_key == after_evidence_key:
                 return finish(
                     "not_applicable",
-                    "The minute boundary is Dasha-only or otherwise absent from stable chart structure.",
+                    "The minute band contains no chart or calibration-period transition.",
                 )
 
             while (
@@ -1699,15 +1945,19 @@ class VedicCalculator:
                 )
                 midpoint = midpoint_utc.astimezone(lower.tzinfo)
                 midpoint_signature = signature_at(midpoint)
-                midpoint_fingerprint = self._signature_fingerprint(midpoint_signature)
-                if midpoint_fingerprint == before_fingerprint:
+                midpoint_event_period_key = event_period_key_at(midpoint)
+                midpoint_evidence_key = evidence_key(
+                    midpoint_signature,
+                    midpoint_event_period_key,
+                )
+                if midpoint_evidence_key == before_evidence_key:
                     lower = midpoint
-                elif midpoint_fingerprint == after_fingerprint:
+                elif midpoint_evidence_key == after_evidence_key:
                     upper = midpoint
                 else:
                     return finish(
                         "skipped",
-                        "A third chart fingerprint exists inside the minute; preserve the original band.",
+                        "A third evidence fingerprint exists inside the minute; preserve the original band.",
                     )
         except Exception as exc:
             return finish("skipped", f"Deterministic boundary refinement failed: {exc}")
@@ -1760,13 +2010,18 @@ class VedicCalculator:
             if candidate_start is not None:
                 candidate["interval"] = self._interval_payload(candidate_start, upper)
 
+        changed_fields = self._signature_changes(before_signature, after_signature)
+        if before_event_period_key != after_event_period_key:
+            changed_fields = sorted({*changed_fields, "calibrationEventPeriods"})
+            selected["eventPeriodStableWithinInterval"] = False
+
         return finish(
             "refined",
-            "The selected chart-transition band was narrowed without choosing an exact second.",
+            "The selected evidence-transition band was narrowed without choosing an exact second.",
             originalResolutionSeconds=current_resolution,
             resolutionSeconds=refined_resolution,
             uncertainty=refined_uncertainty,
-            changedFields=self._signature_changes(before_signature, after_signature),
+            changedFields=changed_fields,
         )
 
     def _joint_time_place_variants(
@@ -1984,8 +2239,9 @@ class VedicCalculator:
         variants: list[dict[str, Any]] = []
         run: list[dict[str, Any]] = []
         run_has_left_boundary = False
+        run_left_boundary_point: dict[str, Any] | None = None
 
-        def flush() -> None:
+        def flush(right_boundary_point: dict[str, Any] | None = None) -> None:
             if not run:
                 return
             first = run[0]
@@ -2041,6 +2297,29 @@ class VedicCalculator:
                 set(self._signature_changes(base_signature, signature))
                 | set(internal_changed_fields)
             )
+            boundary_audit_points = [
+                *([run_left_boundary_point] if run_left_boundary_point is not None else []),
+                *run,
+                *([right_boundary_point] if right_boundary_point is not None else []),
+            ]
+            event_period_keys = [
+                self._event_period_partition_key(point.get("eventPeriodFingerprint"))
+                for point in boundary_audit_points
+            ]
+            event_period_checked = bool(event_period_keys) and all(
+                key is not None for key in event_period_keys
+            )
+            event_period_stable = len(set(event_period_keys)) == 1 if event_period_checked else True
+            holdout_period_keys = [
+                self._holdout_period_partition_key(point.get("eventPeriodFingerprint"))
+                for point in boundary_audit_points
+            ]
+            holdout_period_checked = bool(holdout_period_keys) and all(
+                key is not None for key in holdout_period_keys
+            )
+            holdout_period_stable = (
+                len(set(holdout_period_keys)) == 1 if holdout_period_checked else None
+            )
             variants.append(
                 {
                     "label": (
@@ -2057,8 +2336,11 @@ class VedicCalculator:
                         if self._is_aware(sampled_start) and self._is_aware(base_dt)
                         else sampled_start <= base_dt < sampled_end
                     ),
-                    "eventPeriodBoundaryChecked": first.get("eventPeriodFingerprint") is not None,
-                    "eventPeriodStableWithinInterval": True,
+                    "eventPeriodBoundaryChecked": event_period_checked,
+                    "eventPeriodStableWithinInterval": event_period_stable,
+                    "holdoutPeriodBoundaryChecked": holdout_period_checked,
+                    "holdoutPeriodStableWithinInterval": holdout_period_stable,
+                    "holdoutPeriodAuditResolutionSeconds": (60 if holdout_period_checked else None),
                     "internalChangedFields": internal_changed_fields,
                     "changed": changed_fields,
                     "signature": signature,
@@ -2078,7 +2360,8 @@ class VedicCalculator:
                 and isinstance(current_signature, dict)
                 and self._signature_fingerprint(previous_signature)
                 == self._signature_fingerprint(current_signature)
-                and previous.get("eventPeriodFingerprint") == point.get("eventPeriodFingerprint")
+                and self._event_period_partition_key(previous.get("eventPeriodFingerprint"))
+                == self._event_period_partition_key(point.get("eventPeriodFingerprint"))
             ) or (
                 not isinstance(previous_signature, dict)
                 and not isinstance(current_signature, dict)
@@ -2087,9 +2370,11 @@ class VedicCalculator:
             if same:
                 run.append(point)
                 continue
-            flush()
+            left_boundary_point = previous
+            flush(right_boundary_point=point)
             run = [point]
             run_has_left_boundary = True
+            run_left_boundary_point = left_boundary_point
         flush()
         return variants
 

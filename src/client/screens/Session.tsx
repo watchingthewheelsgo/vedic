@@ -125,6 +125,7 @@ type RectificationState = {
   status?: string;
   riskLevel?: string;
   reportReadinessMode?: string;
+  scanChangedFields?: string[];
   activeCandidateId?: string | null;
   selectedCandidateId?: string | null;
   equivalentCandidateIds?: string[];
@@ -1313,6 +1314,10 @@ export function Session() {
       setError("正在确认会话，请稍后再试。");
       return;
     }
+    if (!isSignedIn) {
+      setError("请先登录，再继续出生时间校准。");
+      return;
+    }
     setError("");
     setSubmittingLifeEvents(true);
     try {
@@ -1341,6 +1346,10 @@ export function Session() {
   async function onResetLifeEvents() {
     if (!authLoaded) {
       setError("正在确认会话，请稍后再试。");
+      return;
+    }
+    if (!isSignedIn) {
+      setError("请先登录，再重新开始出生时间校准。");
       return;
     }
     setError("");
@@ -1402,6 +1411,10 @@ export function Session() {
   const prepareRectificationInterview = useCallback(
     async (action: RectificationInterviewAction = {}) => {
       if (!authLoaded || preparingRectificationInterview) return;
+      if (!isSignedIn) {
+        setError("请先登录，再继续出生时间校准。");
+        return;
+      }
       setError("");
       setPreparingRectificationInterview(true);
       try {
@@ -1417,7 +1430,7 @@ export function Session() {
         setPreparingRectificationInterview(false);
       }
     },
-    [authLoaded, id, locale, preparingRectificationInterview]
+    [authLoaded, id, isSignedIn, locale, preparingRectificationInterview]
   );
 
   return (
@@ -2528,12 +2541,16 @@ function ChartFactsDetail({
   const chartRecord = useMemo(() => parseJsonArtifact(session, CHART_RECORD_JSON), [session]);
   const inputContext = findArtifact(session, "birth_input_context.json");
   const sensitivityScan = findArtifact(session, "sensitivity_scan.json");
+  const activeSensitivityScan = findArtifact(session, "active_chart_sensitivity.json");
   const rectificationArtifact = findArtifact(session, "chart_rectification_state.json");
   const rectificationState = useMemo(
     () => parseRectificationState(rectificationArtifact?.content ?? ""),
     [rectificationArtifact?.content]
   );
   const sections = useMemo(() => chartRecordSections(chartRecord), [chartRecord]);
+  const publicationMode = chartDetailPublicationMode(rectificationState);
+  const showReferenceNotice =
+    publicationMode === "representative" && rectificationState?.status === "corrected_chart_ready";
 
   return (
     <>
@@ -2562,6 +2579,7 @@ function ChartFactsDetail({
             chartRecordArtifact?.path,
             inputContext?.path,
             sensitivityScan?.path,
+            activeSensitivityScan?.path,
             rectificationArtifact?.path
           ]
             .filter((path): path is string => Boolean(path))
@@ -2578,9 +2596,14 @@ function ChartFactsDetail({
 
       {rectificationState && <ChartRectificationSummary state={rectificationState} />}
 
-      {sections.length > 0 ? (
+      {publicationMode === "representative" && sections.length > 0 ? (
         <section className="my-5 border-t border-gold/25 pt-4">
           <DetailSubtitle>{t("session.chart.sections")}</DetailSubtitle>
+          {showReferenceNotice && (
+            <p className="mb-3 mt-0 rounded-xl border border-gold/20 bg-gold/8 px-3.5 py-3 text-[12.5px] leading-[1.65] text-body">
+              {t("session.chart.details.reference")}
+            </p>
+          )}
           <div className="grid gap-3">
             {sections.map((section, index) => (
               <article
@@ -2602,10 +2625,47 @@ function ChartFactsDetail({
             ))}
           </div>
         </section>
+      ) : publicationMode === "stable_intersection" ? (
+        <ChartDetailNotice
+          title={t("session.chart.details.stableTitle")}
+          body={t("session.chart.details.stableBody")}
+        />
+      ) : publicationMode === "withheld" ? (
+        <ChartDetailNotice
+          title={t("session.chart.details.withheldTitle")}
+          body={t("session.chart.details.withheldBody")}
+        />
       ) : (
         <EmptyResultState status={status} copy={copy} progress="" />
       )}
     </>
+  );
+}
+
+type ChartDetailPublicationMode = "representative" | "stable_intersection" | "withheld";
+
+function chartDetailPublicationMode(state: RectificationState | null): ChartDetailPublicationMode {
+  if (!state) return "representative";
+  if (state.status === "multiple_equivalent" && state.reportGate?.fullReportAllowed === true) {
+    return "stable_intersection";
+  }
+  if (
+    state.reportGate?.fullReportAllowed === true &&
+    (state.status === "not_required" || state.status === "corrected_chart_ready")
+  ) {
+    return "representative";
+  }
+  return "withheld";
+}
+
+function ChartDetailNotice({ title, body }: { title: string; body: string }) {
+  return (
+    <section className="my-5 border-t border-gold/25 pt-4">
+      <div className="rounded-xl border border-gold/25 bg-cream-2 px-4 py-3">
+        <h4 className="m-0 text-sm font-semibold leading-snug text-ink">{title}</h4>
+        <p className="mb-0 mt-1.5 text-[12.5px] leading-[1.7] text-body">{body}</p>
+      </div>
+    </section>
   );
 }
 
@@ -2631,7 +2691,17 @@ function ChartConfirmationCard({
     : t("session.chart.location.placeRecorded");
   const timeMode = birthInfo.timePrecision || t("session.chart.time.recorded");
   const gateAllowed = rectificationState?.reportGate?.fullReportAllowed === true;
-  const chartReady = hasChartFacts && (gateAllowed || !rectificationState);
+  const chartReady =
+    hasChartFacts &&
+    (!rectificationState ||
+      (gateAllowed &&
+        ["not_required", "corrected_chart_ready", "multiple_equivalent"].includes(
+          rectificationState.status ?? ""
+        )));
+  const representativeTime =
+    rectificationState?.status === "corrected_chart_ready"
+      ? rectificationState.rectificationConclusion?.correctedBirthTime?.localTime
+      : undefined;
   const statusLabel = chartReady
     ? t("session.chart.readiness.ready")
     : hasChartFacts
@@ -2643,16 +2713,17 @@ function ChartConfirmationCard({
     <section className="my-5 overflow-hidden rounded-[16px] border border-gold/30 bg-[linear-gradient(135deg,rgba(201,169,110,0.14),rgba(255,255,255,0.035))] shadow-[0_18px_48px_rgba(44,31,15,0.08)]">
       <div className="border-b border-gold/18 px-4 py-3">
         <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.7px] text-gold">
-          <MapPinned className="size-4" /> {t("session.chart.confirmed.title")}
+          <MapPinned className="size-4" />{" "}
+          {t(chartReady ? "session.chart.confirmed.title" : "session.chart.review.title")}
         </div>
         <p className="m-0 text-[13px] leading-[1.65] text-body">
-          {t("session.chart.confirmed.body")}
+          {t(chartReady ? "session.chart.confirmed.body" : "session.chart.review.body")}
         </p>
       </div>
       <div className="grid gap-2 p-4">
         <ChartConfirmationRow
           label={t("session.chart.confirmed.time")}
-          value={birthInfo.time || "—"}
+          value={representativeTime || birthInfo.time || "—"}
           detail={timeMode}
         />
         <ChartConfirmationRow
@@ -2686,8 +2757,13 @@ function rectificationNextStepLabel(state: RectificationState | null, t: Transla
   if (state.status === "multiple_equivalent" && state.reportGate?.fullReportAllowed === true) {
     return t("session.rectification.stableReport");
   }
-  if (state.status === "collecting_evidence" || state.status === "underdetermined") {
+  if (state.status === "collecting_evidence") {
     return t("session.rectification.continueCheck");
+  }
+  if (state.status === "underdetermined") {
+    return state.rectificationPlan?.eventCollectionRequired === true
+      ? t("session.rectification.continueCheck")
+      : t("session.rectification.reviewBirthWindow");
   }
   if (state.status === "input_resolution_required") {
     return t("session.rectification.inputResolution");
@@ -2901,10 +2977,12 @@ function RectificationWorkingState({
 function EventAvailabilityStep({
   lifeStage,
   initialCategories = [],
+  disabled = false,
   onContinue
 }: {
   lifeStage: string;
   initialCategories?: RectificationLifeEventCategory[];
+  disabled?: boolean;
   onContinue: (categories: RectificationLifeEventCategory[]) => void;
 }) {
   const { locale, t } = useI18n();
@@ -2919,8 +2997,8 @@ function EventAvailabilityStep({
       ? {
           eyebrow: "出生时间校准",
           title: "哪些经历，你记得发生时间？",
-          body: "先选你确实能回忆到年份或月份的经历。接下来每次只问一件，不需要写人生履历。",
-          hint: "建议选择 3 项以上；只有 1–2 项也可以继续，但最终可能保留较宽的时间范围。",
+          body: "只选你确实记得年份或月份的经历。接下来一次只确认一件。",
+          hint: "至少选择 2 类。系统通常会核对 4 件互不重叠的具体事件，不需要写人生履历。",
           more: "更多可以核对的经历",
           selected: (count: number) => `已选择 ${count} 项`,
           continue: "开始逐条确认"
@@ -2929,8 +3007,8 @@ function EventAvailabilityStep({
         ? {
             eyebrow: "出生時刻の確認",
             title: "時期を覚えている出来事はどれですか？",
-            body: "年や月を思い出せる出来事だけを選んでください。この後は一度に一件ずつ確認します。",
-            hint: "3項目以上がおすすめです。1–2項目でも続けられますが、時刻の範囲が広く残る場合があります。",
+            body: "年または月を覚えている出来事だけを選んでください。この後は一度に一件ずつ確認します。",
+            hint: "2分野以上を選択してください。通常は、重ならない4件の具体的な出来事を順番に確認します。",
             more: "その他の確認できる出来事",
             selected: (count: number) => `${count} 項目を選択`,
             continue: "一件ずつ確認する"
@@ -2938,8 +3016,8 @@ function EventAvailabilityStep({
         : {
             eyebrow: "Birth-time calibration",
             title: "Which events can you place in time?",
-            body: "Choose only events whose year or month you genuinely remember. We will ask about one event at a time next.",
-            hint: "Three or more are recommended. You can continue with one or two, but the final time range may remain wider.",
+            body: "Choose only events whose year or month you genuinely remember. We will confirm one at a time.",
+            hint: "Choose at least two areas. The check usually compares four distinct events; no life-history essay is needed.",
             more: "More events you may remember",
             selected: (count: number) => `${count} selected`,
             continue: "Confirm them one by one"
@@ -2965,6 +3043,7 @@ function EventAvailabilityStep({
       <button
         key={category}
         type="button"
+        disabled={disabled}
         aria-pressed={active}
         className={cn(
           "group flex min-h-[92px] items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-[border-color,background,box-shadow]",
@@ -3026,7 +3105,11 @@ function EventAvailabilityStep({
 
       <div className="flex flex-col gap-3 border-t border-gold/20 pt-4 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-[12px] font-medium text-body">{copy.selected(selected.length)}</span>
-        <Button type="button" disabled={selected.length === 0} onClick={() => onContinue(selected)}>
+        <Button
+          type="button"
+          disabled={disabled || selected.length < 2}
+          onClick={() => onContinue(selected)}
+        >
           {copy.continue} <ChevronRight size={15} />
         </Button>
       </div>
@@ -3034,10 +3117,31 @@ function EventAvailabilityStep({
   );
 }
 
+function partialLifeEventDateRange(value: string): { start: string; end: string } | null {
+  if (/^\d{4}$/.test(value)) {
+    return { start: `${value}-01-01`, end: `${value}-12-31` };
+  }
+  if (/^\d{4}-\d{2}$/.test(value)) {
+    const [yearValue, monthValue] = value.split("-");
+    const year = Number(yearValue);
+    const month = Number(monthValue);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return {
+      start: `${value}-01`,
+      end: `${value}-${String(lastDay).padStart(2, "0")}`
+    };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return { start: value, end: value };
+  }
+  return null;
+}
+
 function LifeEventCollector({
   state,
   interviewContent,
   lifeStage,
+  birthDate,
   preparing,
   onPrepare,
   submitting,
@@ -3049,6 +3153,7 @@ function LifeEventCollector({
   state: RectificationState;
   interviewContent: string;
   lifeStage: string;
+  birthDate: string;
   preparing: boolean;
   onPrepare: (action?: RectificationInterviewAction) => Promise<void>;
   submitting: boolean;
@@ -3089,7 +3194,10 @@ function LifeEventCollector({
           why: "为什么问这个？",
           selected: "已选择",
           saved: "已记录的经历",
-          restart: "清空并重新填写"
+          restart: "清空并重新填写",
+          overlap: (date: string) =>
+            `这个时间范围与已记录的 ${date} 重叠。请补充到更准确的月份/日期，或选择另一个时期的经历。`,
+          futureRange: "这个模糊范围包含尚未发生的日期，请补充到已经发生的月份或具体日期。"
         }
       : locale === "ja"
         ? {
@@ -3121,7 +3229,11 @@ function LifeEventCollector({
             why: "なぜ聞くのですか？",
             selected: "選択済み",
             saved: "記録した出来事",
-            restart: "消去してやり直す"
+            restart: "消去してやり直す",
+            overlap: (date: string) =>
+              `この期間は記録済みの ${date} と重なります。月・日を詳しくするか、別の時期の出来事を選んでください。`,
+            futureRange:
+              "この曖昧な範囲には未来の日付が含まれます。過去の月または日付まで絞ってください。"
           }
         : {
             preparing: "Preparing the next question...",
@@ -3153,7 +3265,11 @@ function LifeEventCollector({
             why: "Why are we asking this?",
             selected: "Selected",
             saved: "Events already recorded",
-            restart: "Clear and start again"
+            restart: "Clear and start again",
+            overlap: (date: string) =>
+              `This range overlaps the event recorded for ${date}. Add a more precise month or day, or choose another period.`,
+            futureRange:
+              "This approximate range includes future dates. Narrow it to a past month or exact date."
           };
   const interview = useMemo(
     () => parseRectificationInterview(interviewContent),
@@ -3167,7 +3283,9 @@ function LifeEventCollector({
             event
           ): event is Required<
             Pick<RectificationLifeEventInput, "date" | "category" | "description">
-          > => Boolean(event.date && event.category && event.description)
+          > =>
+            Boolean(event.date && event.category && event.description) &&
+            event.role !== "context_only"
         )
         .map((event) => ({
           date: event.date,
@@ -3196,7 +3314,26 @@ function LifeEventCollector({
           !question.allowedSubtypes?.length || question.allowedSubtypes.includes(choice.id)
       )
     : [];
+  const todayDate = useMemo(() => {
+    const now = new Date();
+    const year = String(now.getFullYear()).padStart(4, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }, []);
   const selectedChoice = choices.find((choice) => choice.id === answer?.choiceId);
+  const answerRange = answer?.date ? partialLifeEventDateRange(answer.date) : null;
+  const overlappingEvent = answerRange
+    ? existingEvents.find((event) => {
+        const existingRange = partialLifeEventDateRange(event.date);
+        return Boolean(
+          existingRange &&
+          answerRange.start <= existingRange.end &&
+          answerRange.end >= existingRange.start
+        );
+      })
+    : undefined;
+  const partialRangeIncludesFuture = Boolean(answerRange && answerRange.end > todayDate);
   const confirmedEventCount =
     interview?.progress.answered ??
     state.lifeEventLedger?.independentEpisodeCount ??
@@ -3206,6 +3343,8 @@ function LifeEventCollector({
   const answerComplete = Boolean(
     answer?.date &&
     selectedChoice &&
+    !overlappingEvent &&
+    !partialRangeIncludesFuture &&
     (!selectedChoice.requiresNote || answer.note.trim().length >= 3)
   );
   const reachesTarget = Boolean(interview && confirmedEventCount + 1 >= interview.progress.target);
@@ -3215,6 +3354,7 @@ function LifeEventCollector({
   const availableCategories = state.availableRectificationCategories ?? [];
   const needsAvailabilityInventory =
     !interview && existingEvents.length === 0 && availableCategories.length === 0;
+  const minimumEventDate = /^\d{4}-\d{2}-\d{2}$/.test(birthDate) ? birthDate : "1900-01-01";
 
   useEffect(() => {
     setDraft(null);
@@ -3238,7 +3378,7 @@ function LifeEventCollector({
   }
 
   function submitCurrent(currentAnswer: LifeEventDraft, choice: LifeEventChoice) {
-    if (!interview || !question) return;
+    if (!interview || !question || !isSignedIn) return;
     void onSubmit([
       {
         questionId: currentAnswer.questionId,
@@ -3251,7 +3391,7 @@ function LifeEventCollector({
   }
 
   function skipQuestion() {
-    if (!question || !interview) return;
+    if (!question || !interview || !isSignedIn) return;
     void onPrepare({
       currentQuestionId: question.questionId,
       skippedCategory: question.category
@@ -3268,14 +3408,18 @@ function LifeEventCollector({
 
   if (needsAvailabilityInventory || editingAvailability) {
     return (
-      <EventAvailabilityStep
-        lifeStage={lifeStage}
-        initialCategories={availableCategories}
-        onContinue={(categories) => {
-          setEditingAvailability(false);
-          void onPrepare({ availableCategories: categories, resetSkipped: true });
-        }}
-      />
+      <>
+        <EventAvailabilityStep
+          lifeStage={lifeStage}
+          initialCategories={availableCategories}
+          disabled={!authLoaded || !isSignedIn}
+          onContinue={(categories) => {
+            setEditingAvailability(false);
+            void onPrepare({ availableCategories: categories, resetSkipped: true });
+          }}
+        />
+        {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
+      </>
     );
   }
 
@@ -3284,9 +3428,15 @@ function LifeEventCollector({
       <div className="mt-6 flex min-h-52 flex-col items-center justify-center gap-4 rounded-xl border border-gold/25 bg-cream-2 px-6 text-center">
         <CircleHelp className="size-5 text-gold" />
         <p className="m-0 text-sm text-body">{ui.notReady}</p>
-        <Button type="button" variant="outline" onClick={() => void onPrepare()}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={!authLoaded || !isSignedIn}
+          onClick={() => void onPrepare()}
+        >
           <RefreshCw size={15} /> {ui.prepare}
         </Button>
+        {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
       </div>
     );
   }
@@ -3302,6 +3452,7 @@ function LifeEventCollector({
           type="button"
           variant="outline"
           className="mt-4"
+          disabled={!authLoaded || !isSignedIn}
           onClick={() => setEditingAvailability(true)}
         >
           <RefreshCw size={15} /> {ui.reset}
@@ -3353,6 +3504,7 @@ function LifeEventCollector({
             </div>
             <button
               type="button"
+              disabled={!authLoaded || !isSignedIn}
               className="inline-flex items-center gap-1.5 text-[11px] text-muted transition-colors hover:text-ink"
               onClick={() => void onReset()}
             >
@@ -3474,23 +3626,33 @@ function LifeEventCollector({
                   }
                   min={
                     answer.datePrecision === "year"
-                      ? 1900
+                      ? Number(minimumEventDate.slice(0, 4))
                       : answer.datePrecision === "month"
-                        ? "1900-01"
-                        : "1900-01-01"
+                        ? minimumEventDate.slice(0, 7)
+                        : minimumEventDate
                   }
                   max={
                     answer.datePrecision === "year"
-                      ? new Date().getFullYear()
+                      ? Number(todayDate.slice(0, 4))
                       : answer.datePrecision === "month"
-                        ? new Date().toISOString().slice(0, 7)
-                        : new Date().toISOString().slice(0, 10)
+                        ? todayDate.slice(0, 7)
+                        : todayDate
                   }
                   value={answer.date}
                   placeholder={answer.datePrecision === "year" ? ui.yearPlaceholder : undefined}
                   className="h-11 rounded-lg border border-gold/25 bg-cream px-3 text-[13px] text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
                   onChange={(event) => updateAnswer({ date: event.target.value })}
                 />
+                {overlappingEvent && (
+                  <p className="m-0 text-[11.5px] leading-5 text-red" role="alert">
+                    {ui.overlap(overlappingEvent.date)}
+                  </p>
+                )}
+                {!overlappingEvent && partialRangeIncludesFuture && (
+                  <p className="m-0 text-[11.5px] leading-5 text-red" role="alert">
+                    {ui.futureRange}
+                  </p>
+                )}
               </div>
 
               {selectedChoice.requiresNote ? (
@@ -3535,10 +3697,15 @@ function LifeEventCollector({
       </section>
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Button type="button" variant="ghost" onClick={skipQuestion} disabled={submitting}>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={skipQuestion}
+          disabled={submitting || !authLoaded || !isSignedIn}
+        >
           {ui.skip}
         </Button>
-        <Button disabled={!answerComplete || submitting || !authLoaded}>
+        <Button disabled={!answerComplete || submitting || !authLoaded || !isSignedIn}>
           {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
           {reachesTarget ? ui.compare : ui.record}
           {!reachesTarget && <ChevronRight size={15} />}
@@ -4121,10 +4288,12 @@ function ReaderDetail({
       ),
     [session]
   );
+  const chartRecord = useMemo(() => parseJsonArtifact(session, CHART_RECORD_JSON), [session]);
+  const birthAssertion = objectValue(chartRecord, "birthAssertion");
+  const birthDate = String(birthAssertion?.localDate ?? "");
   const lifeStage = useMemo(() => {
-    const record = parseJsonArtifact(session, CHART_RECORD_JSON);
-    return String(objectValue(record, "subject")?.lifeStage ?? "adult");
-  }, [session]);
+    return String(objectValue(chartRecord, "subject")?.lifeStage ?? "adult");
+  }, [chartRecord]);
   const collectingLifeEvents = rectificationState?.status === "collecting_evidence";
   const continuingLifeEvents =
     rectificationState?.status === "underdetermined" &&
@@ -4174,6 +4343,7 @@ function ReaderDetail({
       !interviewArtifact &&
       !needsAvailabilityInventory &&
       authLoaded &&
+      isSignedIn &&
       !preparingRectificationInterview &&
       !interviewRequestedRef.current
     ) {
@@ -4185,6 +4355,7 @@ function ReaderDetail({
     collectingLifeEvents,
     continuingLifeEvents,
     interviewArtifact,
+    isSignedIn,
     needsAvailabilityInventory,
     onPrepareRectificationInterview,
     preparingRectificationInterview
@@ -4234,6 +4405,7 @@ function ReaderDetail({
           state={rectificationState}
           interviewContent={interviewArtifact?.content ?? ""}
           lifeStage={lifeStage}
+          birthDate={birthDate}
           preparing={preparingRectificationInterview}
           onPrepare={onPrepareRectificationInterview}
           submitting={submittingLifeEvents}

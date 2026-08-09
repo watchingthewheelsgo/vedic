@@ -167,8 +167,6 @@ def _event_score_spread(candidates: list[dict[str, Any]], event_id: str) -> floa
 
 def _selection_score(evidence: dict[str, Any], default: float | None = None) -> float | None:
     value = evidence.get("selectionScore")
-    if value is None:
-        value = evidence.get("score")
     return float(value) if value is not None else default
 
 

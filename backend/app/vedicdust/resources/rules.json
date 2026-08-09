@@ -1,6 +1,6 @@
 {
   "schemaVersion": "vedicdust-rule-catalog/1.0.0",
-  "catalogVersion": "1.36.0",
+  "catalogVersion": "1.37.0",
   "rules": [
     {
       "ruleId": "derive.astronomy.sidereal-position",
@@ -952,7 +952,7 @@
     },
     {
       "ruleId": "rectify.event-evidence-ranking",
-      "ruleVersion": "1.7.0",
+      "ruleVersion": "1.12.0",
       "title": "Rank birth-time candidates against dated life-event evidence",
       "ruleKind": "judgement",
       "methodProfileIds": ["parashari-lahiri-1.0.0", "parashari-lahiri-1.1.0"],
@@ -977,12 +977,16 @@
         "Varga domain selection follows the edition-pinned source; event-house and karaka mappings plus component weights remain explicit product hypotheses, not a universal classical formula.",
         "A stable period lord may activate a mapped D1 house by ownership, occupancy, declared Parashari graha drishti, or natural-karaka role; correlated dimensions still contribute only one level weight.",
         "A relevant varga contributes once only when a dated event's period lord owns or occupies one of that varga's mapped domain houses.",
+        "Only event subtypes whose user-facing meaning states an unambiguous constructive or disruptive outcome receive direction; value-ambiguous milestones such as marriage, pregnancy, moves, purchases, examinations, and settlements remain neutral. D1 dignity of mapped house lords may add bounded audit corroboration; stable natural-karaka dignity is context only because it cannot distinguish adjacent birth-time candidates. This narrow rule never ranks or vetoes an event and never creates contradiction evidence by itself.",
+        "Candidate selection and method convergence require both Vimshottari activation and event-relevant Varga activation. Boundary-safe Jupiter/Saturn double transit and bounded D1 directional capacity remain non-selecting corroboration until source-blind and professional validation grants their concrete implementations ranking authority.",
         "The score ranks candidate intervals and cannot prove a birth time or prove that astrology caused an event.",
-        "Year-only and month-only events remain uncertainty intervals. Only Dasha levels stable across the sampled start, midpoint, and end may contribute; no sampled instant is treated as the event time.",
-        "Year-only events cannot contribute double-transit support. Month- and day-level events contribute only when the mapped activation remains present at every interval sample.",
+        "Year-only and month-only events remain uncertainty intervals. Vimshottari MD/AD/PD eligibility is checked against the exact full UTC envelope represented by the reported civil interval; a level crossed anywhere in that interval is withheld.",
+        "Year-only events cannot contribute double-transit support. Month- and day-level slow-transit evidence covers the complete UTC-12 through UTC+14 envelope on a twelve-hour grid and is withheld whenever Jupiter, Saturn, Rahu, or Ketu approaches within one degree of a sign boundary.",
         "Every event sample must resolve a complete MD/AD/PD hierarchy; a partial provider result fails candidate scoring instead of silently weakening one candidate.",
         "Candidate ranking uses calibration events only. One score-blind reserved event tests the selected candidate or equivalence class; Agent-authored testimony cannot change candidate rank.",
-        "Automatic selection requires at least two calibration events from at least two distinct mapped life domains. Repeated events from one domain may remain context but cannot manufacture independent breadth.",
+        "The reserved event never partitions or ranks candidates. Its Vimshottari hierarchy is carried beside every point in the complete minute scan and must remain stable across every candidate interval, including an overlapping transition band; the audit resolution is recorded explicitly. Both Vimshottari and event-relevant Varga support must hold for every member of the selected equivalence class; an unchecked, boundary-crossing, or internally inconsistent class is inconclusive.",
+        "Automatic selection requires three calibration events from at least two distinct mapped life domains plus one score-blind reserved event. At least two calibration events must each have both Vimshottari and event-relevant Varga support and must individually favor the aggregate leader over every alternative class by the declared event margin. Repeated events from one domain may remain context but cannot manufacture independent breadth.",
+        "Diagnostic Chara Dasha is deferred during the adaptive interview and has no candidate-selection authority. It may be requested separately for audit without changing the released interval.",
         "Rahu/Ketu transit house activation and Sade Sati phase are secondary, lower-weighted evidence: both reuse the double-transit sampling and stability gates, and Sade Sati only applies to event categories the map marks sadeSatiRelevant since a ~7.5-year window has weak discriminating power for most life domains."
       ]
     },

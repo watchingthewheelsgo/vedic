@@ -61,7 +61,7 @@ reports and separate career/love report generators are intentionally excluded.
   Vargottama, Moon boundaries suppress Moon/Sade-Sati evidence, and unstable
   Nakshatra/Pada suppresses Vimshottari timing rather than only the Moon fact.
 - Preserve sensitivity at fact granularity and Vimshottari boundary-envelope
-  granularity in `vedicdust-chart-record/1.5.0`.
+  granularity in `vedicdust-chart-record/1.6.0`.
   Each fact now declares canonical dependency fields; the validator recomputes the
   grade, stable D1 graha facts survive Lagna-only boundaries, and interpretive-state
   changes in moon phase, combustion, Shadbala classification, Digbala, Arudha/Upapada,
@@ -275,6 +275,10 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
       derives and selects the next question from aggregate candidate partitions.
       The Agent may rewrite only that selected item; it cannot switch to a lower-ranked
       pool item, invent a domain, inspect chart values, score, or stop the candidate set.
+      Nested D1/Varga structure and degree fields are resolved from their actual
+      signature paths for information-gain ranking. A newly answered event must add a
+      non-overlapping Life Episode, otherwise the backend asks for a narrower date or a
+      different period before invoking the Agent or calculator.
 - [x] Make one-answer rectification mutations concurrency-safe. Each session now
       uses an in-process and Unix file lock, checks the client-observed chart
       revision, records an idempotency fingerprint, and returns the saved session

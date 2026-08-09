@@ -24,6 +24,9 @@ by the user is not independent evidence and cannot change a chart score.
 3. Coalesce contiguous equal, evidence-addressable fingerprints into bounded
    candidate intervals. Only fields with an active dated-event rule can split a
    candidate; every other chart change remains in the report-stability scan.
+   The report-epoch `currentDasha` therefore cannot split candidates or rank the
+   next historical-event question. Each submitted event's historical MD/AD/PD
+   fingerprint is calculated separately and can still partition candidates.
 4. If one fingerprint is stable across the full window, retain the complete
    reported interval. The state is `not_required`; an optional Reader pass may
    ask 1-5 neutral reading-quality questions using only scan-stable facts.
@@ -32,35 +35,52 @@ by the user is not independent evidence and cannot change a chart score.
    each accepted answer the backend recalculates the bounded candidate state and
    issues the next deterministic question. Each round records the answered event,
    score spread across candidate classes, before/after leader margin, remaining
-   blockers, and the backend-owned next action. Consultation focus is never evidence.
+   blockers, and the backend-owned next action. A new adaptive answer whose full
+   reported year/month/day interval overlaps an existing episode is rejected before
+   Agent processing or recalculation; the user must narrow its date or choose another
+   period. This prevents an accepted answer from advancing the interview without
+   adding independent evidence. Consultation focus is never evidence.
 6. Split eligible events without looking at candidate scores. The first event fixes a
-   Life Episode's primary interval; later events overlapping that primary remain
-   corroborating context, so one real-world period cannot vote twice or retroactively
-   move calibration and holdout roles.
+   Life Episode's primary interval. The ledger parser still groups overlapping data
+   from imported or historical records as corroborating context, so one real-world
+   period cannot vote twice or retroactively move calibration and holdout roles; the
+   active one-question intake does not accept such overlaps as a completed round.
    As soon as the third independent episode exists it is reserved as a stable blind
    holdout; release still requires three other calibration episodes. The interview
    prefers a third life domain when the user has one and permits a repeated domain
    only when that is the available factual evidence. Later answers cannot
-   retroactively move an event from calibration into holdout. The Agent
-   never receives holdout content, candidate identities, scores, or chart values.
+   retroactively move an event from calibration into holdout. Backend-issued question,
+   subtype, category, and date validation own event acceptance. The intake Agent may
+   see the submitted statement only to classify bounded optional semantic context; it
+   cannot reject the structured answer and never receives the event's holdout role,
+   candidate identities, scores, chart values, or a favored answer. Its semantic labels
+   cannot change deterministic scores.
    The backend selects the next category from its private discrimination ranking.
    The Agent may rewrite only that one selected question and cannot switch to a
    lower-ranked pool item.
-7. Score each candidate from calibration events only. The current versioned
-   policy records Dasha activation, relevant Varga domain activation, and stable
-   Jupiter/Saturn double-transit support. Missing positive support is neutral,
-   not fabricated contradiction evidence.
+7. Score each candidate from calibration events only. The complete audit score
+   records bounded D1 directional capacity, Dasha activation, relevant Varga
+   domain activation, and stable Jupiter/Saturn double-transit support. Only
+   Vimshottari Dasha plus the event-relevant Varga enter the selection score;
+   D1 capacity and transit signals remain non-selecting corroboration. Missing
+   positive support is neutral, not fabricated contradiction evidence.
 8. Select only when every candidate has the same calibration episode set, at least
    three calibration episodes cover at least two mapped life domains, at least two
-   calibration episodes each have support from two of Dasha, relevant Varga, and
-   double-transit methods, and the leader clears the declared score and margin.
-   A material disagreement from the independent Chara Dasha comparison blocks selection.
-   This comparison uses a Vimshottari-only calibration score against diagnostic
-   Chara Dasha across distinct candidate equivalence classes; the aggregate
-   varga/transit score is excluded from the independence check. Its scan-level result
-   is copied to every candidate so the release gate cannot inspect a different leader.
+   calibration episodes each have both Vimshottari and relevant-Varga support,
+   those same episodes each favor the aggregate leader over every alternative
+   class by the declared event margin, and the leader clears the aggregate score
+   and margin. Chara Dasha is deferred during the adaptive interview and remains
+   a non-authoritative diagnostic when separately requested: agreement,
+   disagreement, unavailability, or a tie cannot rank, eliminate, or block a
+   candidate until source-blind and professional validation grants that authority.
 9. Evaluate the selected candidate or equivalence class against the reserved
-   event. The holdout must itself converge across at least two primary methods.
+   event. The holdout must itself have Vimshottari plus relevant-Varga support
+   for every interval in the selected equivalence class, and its Vimshottari
+   hierarchy must remain stable at every point of the complete minute scan across
+   every candidate interval used in the comparison, including the overlapping
+   transition band. The recorded audit resolution remains one minute; it is not
+   presented as second-level proof. The holdout never partitions or ranks the
+   candidates; an unchecked or boundary-crossing interval is inconclusive.
    A failed or inconclusive holdout returns `underdetermined`.
 10. Every passed candidate is recalculated once at its bounded representative
     time and the user-confirmed place and enters `rectification_confirmation_required`, including when
@@ -180,18 +200,16 @@ interval rather than an exact second.
 - Event records distinguish the complete observational score from the
   candidate-selection score. Rahu/Ketu transits, Sade Sati, corroborated KP, and
   diagnostic Chara Dasha stay visible as auxiliary cross-checks but cannot rank,
-  eliminate, or validate a birth-time candidate. Only Vimshottari Dasha, the
-  event-relevant Varga, and stable Jupiter/Saturn double transit have selection
-  authority in the current policy.
+  eliminate, or validate a birth-time candidate. Only Vimshottari Dasha and the
+  event-relevant Varga have selection authority in the current policy.
 - Chara Dasha agreement is retained as a diagnostic comparison only. It cannot
   rank, eliminate, or veto a candidate before independent validation establishes
   a chart- and event-specific use policy.
 - Method convergence is counted by analysis layer rather than raw observations.
-  D1 Vimshottari activation, use of the same MD/AD/PD lords in the event-relevant
-  Varga, and stable Jupiter/Saturn double transit are distinct layers, not claims
-  of statistical independence. Two layers are required for a convergent event;
-  double transit is corroboration when the event interval can support it, not a
-  universal prerequisite.
+  D1 Vimshottari activation and use of the same MD/AD/PD lords in the
+  event-relevant Varga are complementary layers, not claims of statistical
+  independence. Both are required for a convergent event. Double transit remains
+  auditable corroboration when the event interval can support it.
 - The contradiction channel is intentionally unused until contrary rules have
   edition-pinned sources and professional review fixtures.
 - Independent JHora desktop golden cases, source-blind rectification benchmark

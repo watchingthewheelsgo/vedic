@@ -504,6 +504,17 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.chart.confirmed.title": "Confirmed chart base",
     "session.chart.confirmed.body":
       "This is the deterministic chart base produced from the birth time, place, timezone, and coordinate resolution.",
+    "session.chart.review.title": "Chart input under review",
+    "session.chart.review.body":
+      "The system has calculated bounded chart candidates, but it has not yet accepted one as the reading basis.",
+    "session.chart.details.reference":
+      "These values use one calculation reference minute inside the accepted range. The interpretation uses only facts that stay stable across that range.",
+    "session.chart.details.stableTitle": "Shared chart details only",
+    "session.chart.details.stableBody":
+      "Several equivalent time ranges remain. A single representative chart is withheld here; the report is limited to conclusions shared by every remaining range.",
+    "session.chart.details.withheldTitle": "Chart details are not final yet",
+    "session.chart.details.withheldBody":
+      "Complete or review the birth-time check before a candidate chart is shown as the basis for interpretation.",
     "session.chart.confirmed.time": "Birth time",
     "session.chart.confirmed.place": "Birth place",
     "session.chart.confirmed.coordinates": "Coordinates",
@@ -559,6 +570,7 @@ export const messages: Record<LocaleCode, Dict> = {
       "This event was recorded, but another independently dated event is still needed.",
     "session.rectification.preparingNext": "Preparing next card...",
     "session.rectification.continueCheck": "Continue time check",
+    "session.rectification.reviewBirthWindow": "Review the reported birth-time range",
     "session.rectification.stableReport": "View the stable shared reading",
     "session.rectification.advanced": "Advanced chart candidates",
     "session.rectification.baseCandidate": "base",
@@ -1275,6 +1287,17 @@ const zhOverrides: Dict = {
   "session.chart.confirmed.title": "已确认的基本盘",
   "session.chart.confirmed.body":
     "这是系统根据出生时间、地点、时区和经纬度解析生成的确定性盘面基础。",
+  "session.chart.review.title": "盘面输入仍在校验",
+  "session.chart.review.body":
+    "系统已经计算出有限范围内的候选盘，但尚未确认其中任何一个作为正式解读基础。",
+  "session.chart.details.reference":
+    "以下数值以已接受时间范围内的一个参考分钟计算；正式解读只会使用该范围内保持稳定的事实。",
+  "session.chart.details.stableTitle": "仅保留共享稳定盘面",
+  "session.chart.details.stableBody":
+    "目前仍有多个等价时间范围，因此这里不会展示某一张代表盘；后续报告只使用所有范围共同稳定的结论。",
+  "session.chart.details.withheldTitle": "盘面详情尚未定稿",
+  "session.chart.details.withheldBody":
+    "请先完成或复核生时校验，系统不会把计算中的候选盘当作正式解读基础展示。",
   "session.chart.confirmed.time": "出生时间",
   "session.chart.confirmed.place": "出生地点",
   "session.chart.confirmed.coordinates": "经纬度",
@@ -1327,6 +1350,7 @@ const zhOverrides: Dict = {
     "这条经历已记录，但仍需要另一条可独立确认日期的经历。",
   "session.rectification.preparingNext": "正在准备下一张卡片...",
   "session.rectification.continueCheck": "继续生时校验",
+  "session.rectification.reviewBirthWindow": "重新确认申报的出生时间范围",
   "session.rectification.stableReport": "查看共享稳定解读",
   "session.rectification.advanced": "高级候选盘",
   "session.rectification.baseCandidate": "基础盘",
@@ -1973,6 +1997,17 @@ const jaOverrides: Dict = {
   "session.chart.confirmed.title": "確認済みチャート基礎",
   "session.chart.confirmed.body":
     "出生時刻、場所、タイムゾーン、座標解決から生成された確定的なチャート基礎です。",
+  "session.chart.review.title": "チャート入力を確認中",
+  "session.chart.review.body":
+    "限られた範囲の候補チャートは計算済みですが、解釈の基礎となる一つの候補はまだ確定していません。",
+  "session.chart.details.reference":
+    "以下の値は承認された範囲内の一つの参照時刻で計算されています。解釈には、その範囲全体で安定する事実だけを使用します。",
+  "session.chart.details.stableTitle": "共通して安定するチャートのみ",
+  "session.chart.details.stableBody":
+    "同等の時刻範囲が複数残っているため、一つの代表チャートは表示しません。レポートはすべての範囲に共通する結論だけに限定されます。",
+  "session.chart.details.withheldTitle": "チャート詳細はまだ確定していません",
+  "session.chart.details.withheldBody":
+    "出生時刻確認を完了または見直すまで、計算途中の候補を正式な解釈チャートとして表示しません。",
   "session.chart.confirmed.time": "出生時刻",
   "session.chart.confirmed.place": "出生地",
   "session.chart.confirmed.coordinates": "座標",
@@ -2026,6 +2061,7 @@ const jaOverrides: Dict = {
     "この出来事は記録されましたが、日付を独立して確認できる別の出来事が必要です。",
   "session.rectification.preparingNext": "次のカードを準備中...",
   "session.rectification.continueCheck": "時刻確認を続ける",
+  "session.rectification.reviewBirthWindow": "申告した出生時刻の範囲を見直す",
   "session.rectification.stableReport": "共通して安定した解釈を見る",
   "session.rectification.advanced": "高度な候補チャート",
   "session.rectification.baseCandidate": "基準",

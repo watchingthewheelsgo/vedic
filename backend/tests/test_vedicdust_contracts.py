@@ -390,7 +390,7 @@ def test_chart_record_migrates_supported_rectification_contract_versions() -> No
 
     migrated = ChartRecord.model_validate(payload)
 
-    assert migrated.schema_version == "vedicdust-chart-record/1.5.0"
+    assert migrated.schema_version == "vedicdust-chart-record/1.6.0"
     assert migrated.rectification is not None
     assert migrated.rectification.schema_version == "vedicdust-rectification/1.7.0"
     assert migrated.rectification.life_events[0].episode_id == "event-1"
@@ -420,9 +420,9 @@ def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
     assert rectification is not None
     assert rectification.decision.status == "input_resolution_required"
     assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
-    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.20.0"
-    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.6.0"
-    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.2.0"
+    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.25.0"
+    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.8.0"
+    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.5.0"
     assert rectification.method_maturity == "product_hypothesis"
     assert rectification.validation_status == "internal_regression_only"
     assert rectification.source_ids == [
@@ -715,7 +715,7 @@ def test_candidate_evidence_migrates_legacy_family_contract_without_changing_obs
         "ruleIds": ["rectification.test"],
         "sourceIds": ["source.test"],
         "scoringPolicyId": "vedicdust-rectification-event-ranking/1.19.0",
-        "eventMappingId": "vedicdust-rectification-event-map/1.6.0",
+        "eventMappingId": "vedicdust-rectification-event-map/1.7.0",
         "eventTimezoneBasis": "unknown_event_location_utc_offset_envelope",
         "explanation": "Legacy evidence record.",
     }
@@ -733,6 +733,95 @@ def test_candidate_evidence_migrates_legacy_family_contract_without_changing_obs
     assert score.method_convergence_met is True
     assert score.support_score == pytest.approx(0.57)
     assert rebuilt_score == score
+
+
+def test_candidate_evidence_never_treats_d1_capacity_as_method_convergence() -> None:
+    payload = {
+        "eventId": "event-1",
+        "episodeId": "episode-1",
+        "role": "calibration",
+        "score": 0.38,
+        "supportScore": 0.38,
+        "contradictionScore": 0.0,
+        "methodConvergenceComponents": ["natal_promise", "dasha"],
+        "methodConvergenceLayers": ["d1_directional_capacity", "d1_period_activation"],
+        "methodConvergenceCount": 2,
+        "methodConvergenceMet": True,
+        "observations": [
+            {
+                "observationId": "event-1.natal",
+                "component": "natal_promise",
+                "outcome": "support",
+                "weight": 0.1,
+            },
+            {
+                "observationId": "event-1.dasha",
+                "component": "dasha",
+                "outcome": "support",
+                "weight": 0.28,
+            },
+        ],
+        "ruleIds": ["rectification.test"],
+        "sourceIds": ["source.test"],
+        "scoringPolicyId": "vedicdust-rectification-event-ranking/1.23.0",
+        "eventMappingId": "vedicdust-rectification-event-map/1.7.0",
+        "eventTimezoneBasis": "unknown_event_location_utc_offset_envelope",
+        "explanation": "Legacy evidence with an over-authoritative D1 convergence flag.",
+    }
+
+    score = CandidateEvidenceScore.model_validate(payload)
+
+    assert score.method_convergence_components == ["dasha"]
+    assert score.method_convergence_layers == ["d1_period_activation"]
+    assert score.method_convergence_count == 1
+    assert score.method_convergence_met is False
+    assert score.selection_support_score == pytest.approx(0.28)
+    assert score.selection_score == pytest.approx(0.28)
+
+
+def test_candidate_evidence_rebuilds_declared_convergence_from_observations() -> None:
+    payload = {
+        "eventId": "event-1",
+        "episodeId": "episode-1",
+        "role": "calibration",
+        "score": 0.28,
+        "supportScore": 0.28,
+        "contradictionScore": 0.0,
+        "selectionScore": 0.28,
+        "selectionSupportScore": 0.28,
+        "selectionContradictionScore": 0.0,
+        "methodConvergenceComponents": ["dasha", "varga"],
+        "methodConvergenceLayers": ["d1_period_activation", "domain_varga_activation"],
+        "methodConvergenceCount": 2,
+        "methodConvergenceMet": True,
+        "observations": [
+            {
+                "observationId": "event-1.dasha",
+                "component": "dasha",
+                "outcome": "support",
+                "weight": 0.28,
+            },
+            {
+                "observationId": "event-1.varga",
+                "component": "varga",
+                "outcome": "missing",
+                "weight": 0.0,
+            },
+        ],
+        "ruleIds": ["rectification.test"],
+        "sourceIds": ["source.test"],
+        "scoringPolicyId": "vedicdust-rectification-event-ranking/1.23.0",
+        "eventMappingId": "vedicdust-rectification-event-map/1.7.0",
+        "eventTimezoneBasis": "unknown_event_location_utc_offset_envelope",
+        "explanation": "Legacy evidence with a stale declared Varga component.",
+    }
+
+    score = CandidateEvidenceScore.model_validate(payload)
+
+    assert score.method_convergence_components == ["dasha"]
+    assert score.method_convergence_layers == ["d1_period_activation"]
+    assert score.method_convergence_count == 1
+    assert score.method_convergence_met is False
 
 
 def test_public_vedic_skill_api_has_one_report_pipeline() -> None:
@@ -1000,7 +1089,7 @@ def test_rule_catalog_is_unique_and_uses_registered_sources() -> None:
     catalog = load_rule_catalog()
     validate_rule_catalog_sources(catalog)
 
-    assert catalog.catalog_version == "1.36.0"
+    assert catalog.catalog_version == "1.37.0"
     rule_ids = {rule.rule_id for rule in catalog.rules}
     assert {
         "sop.promise-before-varga",

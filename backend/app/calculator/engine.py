@@ -20,6 +20,7 @@ except ImportError as e:  # 用错python时给可执行纠正,不再含糊报错
     )
     raise
 from datetime import datetime, timezone
+from functools import lru_cache
 import pytz
 import json
 
@@ -545,6 +546,23 @@ def calc_special_points(lagna, planets):
     }
 
 
+@lru_cache(maxsize=16384)
+def _slow_transit_positions(jd_now):
+    """Cache immutable ephemeris positions shared by every candidate Lagna."""
+
+    configure_lahiri_swisseph()
+    flags = canonical_planet_flags()
+    positions = []
+    for name, pid in (("Saturn", swe.SATURN), ("Jupiter", swe.JUPITER)):
+        result = swe.calc_ut(jd_now, pid, flags)
+        require_canonical_ephemeris_result(result, object_name=f"transit {name}")
+        positions.append((name, float(result[0][0]), float(result[0][3])))
+    result = swe.calc_ut(jd_now, swe.MEAN_NODE, flags)
+    require_canonical_ephemeris_result(result, object_name="transit mean lunar node")
+    positions.append(("Rahu", float(result[0][0]), float(result[0][3])))
+    return tuple(positions)
+
+
 @serialized_provider_call
 def calc_transits(lagna_sign_idx, moon_sign_idx, *, as_of=None):
     """Calculate current transit positions for slow planets.
@@ -560,17 +578,12 @@ def calc_transits(lagna_sign_idx, moon_sign_idx, *, as_of=None):
         now.day,
         now.hour + now.minute / 60 + now.second / 3600,
     )
-    configure_lahiri_swisseph()
-    flags = canonical_planet_flags()
-
     transits = {}
-    # Slow planets: Saturn, Jupiter, Rahu, Ketu
-    slow_planets = {"Saturn": swe.SATURN, "Jupiter": swe.JUPITER}
-    for name, pid in slow_planets.items():
-        result = swe.calc_ut(jd_now, pid, flags)
-        require_canonical_ephemeris_result(result, object_name=f"transit {name}")
-        lon = result[0][0]
-        speed = result[0][3]
+    # Ephemeris longitudes are instant-specific but independent of the candidate
+    # Lagna and Moon. Houses and Sade Sati are derived afresh below.
+    positions = dict((name, (lon, speed)) for name, lon, speed in _slow_transit_positions(jd_now))
+    for name in ("Saturn", "Jupiter"):
+        lon, speed = positions[name]
         sign_idx = int(lon / 30)
         house = get_house(sign_idx, lagna_sign_idx)
         transits[name] = {
@@ -584,10 +597,7 @@ def calc_transits(lagna_sign_idx, moon_sign_idx, *, as_of=None):
         }
 
     # Rahu (Mean Node)
-    result = swe.calc_ut(jd_now, swe.MEAN_NODE, flags)
-    require_canonical_ephemeris_result(result, object_name="transit mean lunar node")
-    rahu_lon = result[0][0]
-    rahu_speed = result[0][3]
+    rahu_lon, rahu_speed = positions["Rahu"]
     rahu_idx = int(rahu_lon / 30)
     transits["Rahu"] = {
         "longitude": rahu_lon,
@@ -942,6 +952,7 @@ def calculate_rectification_signature(
     moon = planets["Moon"]
     moon_nakshatra = get_nakshatra(moon["longitude"])
     chara_karakas = calc_chara_karakas_7k8k(planets)
+    dignity_data = derive_dignities(planets)
     timezone_info = pytz.timezone(tz_str)
     localized = _localize_strict(
         timezone_info,
@@ -992,6 +1003,7 @@ def calculate_rectification_signature(
         "planetSignIndices": {
             name: int(position["sign_idx"]) for name, position in planets.items()
         },
+        "planetDignities": dignity_data,
         "vargaPlanetSignIndices": {},
     }
     for factor in factors:

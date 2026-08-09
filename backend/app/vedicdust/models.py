@@ -7,6 +7,11 @@ from typing import Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .fact_catalog import FactType, validate_fact_payload
+from .rectification_policy import (
+    RECTIFICATION_CONVERGENCE_COMPONENTS,
+    RECTIFICATION_SCORING_POLICY,
+    RECTIFICATION_SELECTION_COMPONENTS,
+)
 from .varga_policy import INDEPENDENT_REFERENCE_VARGA_IDS
 
 
@@ -716,6 +721,7 @@ class LifeEvent(ContractModel):
 class RectificationEvidenceObservation(ContractModel):
     observation_id: str
     component: Literal[
+        "natal_promise",
         "dasha",
         "varga",
         "double_transit",
@@ -765,13 +771,11 @@ class CandidateEvidenceScore(ContractModel):
     selection_score: float = Field(ge=-1, le=1)
     selection_support_score: float = Field(ge=0, le=1)
     selection_contradiction_score: float = Field(ge=0, le=1)
-    method_convergence_components: list[Literal["dasha", "varga", "double_transit"]] = Field(
-        default_factory=list
+    method_convergence_components: list[Literal["dasha", "varga"]] = Field(default_factory=list)
+    method_convergence_layers: list[Literal["d1_period_activation", "domain_varga_activation"]] = (
+        Field(default_factory=list)
     )
-    method_convergence_layers: list[
-        Literal["d1_period_activation", "domain_varga_activation", "double_transit"]
-    ] = Field(default_factory=list)
-    method_convergence_count: int = Field(default=0, ge=0, le=3)
+    method_convergence_count: int = Field(default=0, ge=0, le=2)
     method_convergence_met: bool = False
     observations: list[RectificationEvidenceObservation] = Field(min_length=1)
     rule_ids: list[str] = Field(min_length=1)
@@ -798,7 +802,7 @@ class CandidateEvidenceScore(ContractModel):
                 return item.get(camel_name)
             return getattr(item, snake_name, None)
 
-        primary_components = {"dasha", "varga", "double_transit"}
+        primary_components = RECTIFICATION_SELECTION_COMPONENTS
         if "selectionScore" not in data and "selection_score" not in data:
             support = round(
                 min(
@@ -833,43 +837,45 @@ class CandidateEvidenceScore(ContractModel):
             if "methodConvergenceComponents" in data
             else "method_convergence_components"
         )
-        if component_key not in data:
-            data["method_convergence_components"] = [
+        if observations:
+            raw_components = [
                 component
-                for component in ("dasha", "varga", "double_transit")
+                for component in ("dasha", "varga")
                 if any(
                     observation_value(item, "outcome", "outcome") == "support"
                     and observation_value(item, "component", "component") == component
                     for item in observations
                 )
             ]
-            component_key = "method_convergence_components"
-        components = list(data.get(component_key) or [])
+        elif component_key in data:
+            supplied_components = {str(component) for component in data.get(component_key) or []}
+            raw_components = [
+                component for component in ("dasha", "varga") if component in supplied_components
+            ]
+        else:
+            raw_components = []
+        components = raw_components
         layers = [
             layer
             for component, layer in (
                 ("dasha", "d1_period_activation"),
                 ("varga", "domain_varga_activation"),
-                ("double_transit", "double_transit"),
             )
             if component in components
         ]
-        had_legacy_families = (
-            "methodConvergenceFamilies" in data or "method_convergence_families" in data
-        )
         data.pop("methodConvergenceFamilies", None)
         data.pop("method_convergence_families", None)
-        if had_legacy_families:
-            data.pop("methodConvergenceCount", None)
-            data.pop("method_convergence_count", None)
-            data.pop("methodConvergenceMet", None)
-            data.pop("method_convergence_met", None)
-        if "methodConvergenceLayers" not in data and "method_convergence_layers" not in data:
-            data["method_convergence_layers"] = layers
-        if "methodConvergenceCount" not in data and "method_convergence_count" not in data:
-            data["method_convergence_count"] = len(layers)
-        if "methodConvergenceMet" not in data and "method_convergence_met" not in data:
-            data["method_convergence_met"] = len(layers) >= 2
+        data.pop("methodConvergenceComponents", None)
+        data.pop("methodConvergenceLayers", None)
+        data.pop("methodConvergenceCount", None)
+        data.pop("methodConvergenceMet", None)
+        data["method_convergence_components"] = components
+        data["method_convergence_layers"] = layers
+        data["method_convergence_count"] = len(layers)
+        data["method_convergence_met"] = (
+            "dasha" in components
+            and len(layers) >= RECTIFICATION_SCORING_POLICY.minimum_evidence_layers_per_event
+        )
         return data
 
     @model_validator(mode="after")
@@ -895,7 +901,7 @@ class CandidateEvidenceScore(ContractModel):
             raise ValueError("rectification contradiction score does not match observations")
         if self.score != expected_score:
             raise ValueError("rectification net score does not match observations")
-        selection_components = {"dasha", "varga", "double_transit"}
+        selection_components = RECTIFICATION_SELECTION_COMPONENTS
         selection_support = round(
             min(
                 sum(
@@ -939,13 +945,16 @@ class CandidateEvidenceScore(ContractModel):
             expected_layers.append("d1_period_activation")
         if "varga" in self.method_convergence_components:
             expected_layers.append("domain_varga_activation")
-        if "double_transit" in self.method_convergence_components:
-            expected_layers.append("double_transit")
         if self.method_convergence_layers != expected_layers:
             raise ValueError("rectification method convergence layers do not match components")
         if self.method_convergence_count != len(self.method_convergence_layers):
             raise ValueError("rectification method convergence count does not match layers")
-        if self.method_convergence_met != (self.method_convergence_count >= 2):
+        expected_convergence = (
+            "dasha" in self.method_convergence_components
+            and self.method_convergence_count
+            >= RECTIFICATION_SCORING_POLICY.minimum_evidence_layers_per_event
+        )
+        if self.method_convergence_met != expected_convergence:
             raise ValueError("rectification method convergence flag does not match count")
         return self
 
@@ -975,6 +984,9 @@ class CandidateInterval(ContractModel):
     vimshottari_dasha_score: float | None = None
     chara_dasha_score: float | None = None
     dasha_system_agreement: Literal["agrees", "disagrees", "not_applicable"] = "not_applicable"
+    holdout_period_boundary_checked: bool = False
+    holdout_period_stable_within_interval: bool | None = None
+    holdout_period_audit_resolution_seconds: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_representative_moment(self) -> CandidateInterval:
@@ -986,6 +998,11 @@ class CandidateInterval(ContractModel):
             raise ValueError("place-axis candidate requires a place hypothesis")
         if self.place_hypothesis is not None and "place" not in self.hypothesis_axes:
             raise ValueError("place hypothesis requires the place axis")
+        if (
+            self.holdout_period_boundary_checked
+            and self.holdout_period_stable_within_interval is None
+        ):
+            raise ValueError("checked holdout period boundary requires a stability result")
         return self
 
 
@@ -1238,7 +1255,7 @@ class RectificationRecord(ContractModel):
 
 
 class ChartRecord(ContractModel):
-    schema_version: Literal["vedicdust-chart-record/1.5.0"] = "vedicdust-chart-record/1.5.0"
+    schema_version: Literal["vedicdust-chart-record/1.6.0"] = "vedicdust-chart-record/1.6.0"
     chart_record_id: str
     reading_session_id: str
     revision: int = Field(ge=1)
@@ -1274,8 +1291,9 @@ class ChartRecord(ContractModel):
         if payload.get("schemaVersion") in {
             "vedicdust-chart-record/1.3.0",
             "vedicdust-chart-record/1.4.0",
+            "vedicdust-chart-record/1.5.0",
         }:
-            payload["schemaVersion"] = "vedicdust-chart-record/1.5.0"
+            payload["schemaVersion"] = "vedicdust-chart-record/1.6.0"
         rectification = payload.get("rectification")
         if isinstance(rectification, dict) and rectification.get("schemaVersion") in {
             "vedicdust-rectification/1.1.0",

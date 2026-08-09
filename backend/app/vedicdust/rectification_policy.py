@@ -7,9 +7,9 @@ from typing import Any, Mapping
 
 RECTIFICATION_RULE_ID = "rectify.event-evidence-ranking"
 RECTIFICATION_KP_RULE_ID = "rectify.kp-sub-lord-corroboration"
-RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.20.0"
-RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.6.0"
-RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.2.0"
+RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.25.0"
+RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.8.0"
+RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.5.0"
 RECTIFICATION_METHOD_MATURITY = "product_hypothesis"
 RECTIFICATION_VALIDATION_STATUS = "internal_regression_only"
 MINIMUM_RECTIFICATION_EVENTS = 4
@@ -20,10 +20,16 @@ RECTIFICATION_SOURCE_IDS = (
 
 # Only these analysis components may rank or eliminate a birth-time candidate.
 # They are complementary Jyotish layers, not statistically independent votes.
-# Node transits, Sade Sati, KP, and Chara Dasha remain visible as auxiliary
-# cross-checks until source-blind and professional validation grants them
-# candidate-selection authority.
-RECTIFICATION_SELECTION_COMPONENTS = frozenset({"dasha", "varga", "double_transit"})
+# Bounded D1 capacity, double transit, node transits, Sade Sati, KP, and Chara
+# Dasha remain visible as auxiliary cross-checks until source-blind and
+# professional validation grants their concrete implementations candidate-
+# selection authority. The pinned rectification workflow directly supports
+# event-period Dasha read through the event-relevant divisional chart.
+RECTIFICATION_SELECTION_COMPONENTS = frozenset({"dasha", "varga"})
+
+# A release-grade event needs both timing and its chart-specific domain layer.
+# These are complementary Jyotish layers, not statistically independent votes.
+RECTIFICATION_CONVERGENCE_COMPONENTS = frozenset({"dasha", "varga"})
 
 
 # Event subtypes are user-selected backend facts. They are versioned beside the
@@ -47,10 +53,59 @@ RECTIFICATION_EVENT_SUBTYPES: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 
 
+# Direction is attached only when the subtype itself states an unambiguous
+# constructive or disruptive outcome. A marriage, pregnancy, move, purchase,
+# examination, or settlement does not reveal its quality and therefore remains
+# neutral. Direction controls only bounded D1 capacity corroboration; it never
+# turns one dignity condition into a deterministic life prediction.
+RECTIFICATION_EVENT_OUTCOME_POLARITY: Mapping[tuple[str, str], str] = MappingProxyType(
+    {
+        ("education", "admission"): "constructive",
+        ("education", "graduation"): "constructive",
+        ("education", "exam"): "neutral",
+        ("education", "study_abroad"): "neutral",
+        ("career", "first_job"): "constructive",
+        ("career", "promotion"): "constructive",
+        ("career", "job_change"): "neutral",
+        ("career", "job_loss"): "disruptive",
+        ("relationship", "started_relationship"): "neutral",
+        ("relationship", "marriage"): "neutral",
+        ("relationship", "separation"): "disruptive",
+        ("relocation", "moved_city"): "neutral",
+        ("relocation", "moved_country"): "neutral",
+        ("relocation", "first_home"): "neutral",
+        ("child", "pregnancy"): "neutral",
+        ("child", "birth"): "neutral",
+        ("child", "child_major"): "neutral",
+        ("health", "surgery"): "disruptive",
+        ("health", "diagnosis"): "disruptive",
+        ("health", "accident"): "disruptive",
+        ("family", "family_structure"): "neutral",
+        ("family", "parent_change"): "neutral",
+        ("family", "caregiving"): "neutral",
+        ("finance", "major_gain"): "constructive",
+        ("finance", "major_loss"): "disruptive",
+        ("finance", "financial_independence"): "constructive",
+        ("property", "purchase"): "neutral",
+        ("property", "sale"): "neutral",
+        ("property", "move_home"): "neutral",
+        ("legal", "lawsuit"): "disruptive",
+        ("legal", "settlement"): "neutral",
+        ("legal", "documents"): "neutral",
+        ("loss", "bereavement"): "disruptive",
+        ("loss", "sudden_loss"): "disruptive",
+        ("spiritual", "practice"): "neutral",
+        ("spiritual", "belief_change"): "neutral",
+        ("spiritual", "community"): "neutral",
+    }
+)
+
+
 @dataclass(frozen=True)
 class RectificationScoringPolicy:
     policy_id: str
     dasha_level_weights: Mapping[str, float]
+    natal_promise_support_weight: float
     varga_lagna_lord_support_weight: float
     double_transit_support_weight: float
     node_transit_support_weight: float
@@ -61,6 +116,7 @@ class RectificationScoringPolicy:
     minimum_calibration_categories: int
     minimum_evidence_layers_per_event: int
     minimum_convergent_calibration_events: int
+    minimum_discriminating_convergent_events: int
     event_discrimination_min_margin: float
     candidate_selection_min_score: float
     candidate_selection_min_margin: float
@@ -71,6 +127,7 @@ class RectificationScoringPolicy:
 RECTIFICATION_SCORING_POLICY = RectificationScoringPolicy(
     policy_id=RECTIFICATION_SCORING_POLICY_ID,
     dasha_level_weights=MappingProxyType({"md": 0.12, "ad": 0.16, "pd": 0.10}),
+    natal_promise_support_weight=0.10,
     varga_lagna_lord_support_weight=0.08,
     double_transit_support_weight=0.22,
     node_transit_support_weight=0.11,
@@ -81,6 +138,7 @@ RECTIFICATION_SCORING_POLICY = RectificationScoringPolicy(
     minimum_calibration_categories=2,
     minimum_evidence_layers_per_event=2,
     minimum_convergent_calibration_events=2,
+    minimum_discriminating_convergent_events=2,
     event_discrimination_min_margin=0.05,
     candidate_selection_min_score=0.15,
     candidate_selection_min_margin=0.05,
@@ -98,21 +156,21 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "houses": [7, 2, 11],
             "vargas": ["D9"],
             "karakas": ["Venus", "Jupiter"],
-            "fields": ["d9Lagna", "d9Structure", "currentDasha"],
+            "fields": ["d9Lagna", "d9Structure"],
         },
         "relationship": {
             "label": "relationship change",
             "houses": [5, 7, 12],
             "vargas": ["D9"],
             "karakas": ["Venus", "Mars"],
-            "fields": ["d9Lagna", "d9Structure", "currentDasha"],
+            "fields": ["d9Lagna", "d9Structure"],
         },
         "career": {
             "label": "career change",
             "houses": [10, 6, 11],
             "vargas": ["D10"],
             "karakas": ["Sun", "Saturn", "Mercury"],
-            "fields": ["d10Lagna", "d10Structure", "currentDasha"],
+            "fields": ["d10Lagna", "d10Structure"],
             "sadeSatiRelevant": True,
         },
         "education": {
@@ -120,43 +178,35 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "houses": [4, 5, 9],
             "vargas": ["D24"],
             "karakas": ["Mercury", "Jupiter"],
-            "fields": [
-                "d24Lagna",
-                "d24Structure",
-                "currentDasha",
-            ],
+            "fields": ["d24Lagna", "d24Structure"],
         },
         "relocation": {
             "label": "relocation / migration",
             "houses": [4, 9, 12],
             "vargas": ["D4"],
             "karakas": ["Moon", "Rahu"],
-            "fields": ["d4Lagna", "d4Structure", "currentDasha"],
+            "fields": ["d4Lagna", "d4Structure"],
         },
         "property": {
             "label": "home / property",
             "houses": [4, 11, 12],
             "vargas": ["D4"],
             "karakas": ["Mars", "Moon"],
-            "fields": ["d4Lagna", "d4Structure", "currentDasha"],
+            "fields": ["d4Lagna", "d4Structure"],
         },
         "child": {
             "label": "childbirth / child event",
             "houses": [5, 2, 9],
             "vargas": ["D7"],
             "karakas": ["Jupiter"],
-            "fields": [
-                "d7Lagna",
-                "d7Structure",
-                "currentDasha",
-            ],
+            "fields": ["d7Lagna", "d7Structure"],
         },
         "health": {
             "label": "health / surgery",
             "houses": [1, 6, 8, 12],
             "vargas": ["D30"],
             "karakas": ["Mars", "Saturn"],
-            "fields": ["d30Lagna", "d30Structure", "lagnaSign", "currentDasha"],
+            "fields": ["d30Lagna", "d30Structure", "lagnaSign"],
             "sadeSatiRelevant": True,
         },
         "family": {
@@ -164,7 +214,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "houses": [2, 4, 8],
             "vargas": ["D12"],
             "karakas": ["Moon", "Sun"],
-            "fields": ["d12Lagna", "d12Structure", "lagnaSign", "currentDasha"],
+            "fields": ["d12Lagna", "d12Structure", "lagnaSign"],
             "sadeSatiRelevant": True,
         },
         "finance": {
@@ -172,7 +222,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "houses": [2, 6, 8, 11],
             "vargas": ["D2"],
             "karakas": ["Jupiter", "Venus", "Saturn"],
-            "fields": ["d2Lagna", "d2Structure", "currentDasha", "lagnaSign"],
+            "fields": ["d2Lagna", "d2Structure", "lagnaSign"],
             "sadeSatiRelevant": True,
         },
         "legal": {
@@ -180,7 +230,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "houses": [6, 8, 12],
             "vargas": ["D30"],
             "karakas": ["Mars", "Saturn", "Rahu"],
-            "fields": ["d30Lagna", "d30Structure", "lagnaSign", "currentDasha"],
+            "fields": ["d30Lagna", "d30Structure", "lagnaSign"],
         },
         "loss": {
             "label": "bereavement / major loss",
@@ -193,7 +243,6 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
                 "d30Lagna",
                 "d30Structure",
                 "lagnaSign",
-                "currentDasha",
             ],
             "sadeSatiRelevant": True,
         },
@@ -207,7 +256,6 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
                 "d20Structure",
                 "d9Lagna",
                 "d9Structure",
-                "currentDasha",
             ],
         },
         "unknown": {
@@ -215,7 +263,7 @@ RECTIFICATION_EVENT_RULES: Mapping[str, Mapping[str, Any]] = MappingProxyType(
             "houses": [],
             "vargas": [],
             "karakas": [],
-            "fields": ["currentDasha"],
+            "fields": [],
         },
     }
 )
@@ -230,7 +278,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [7, 8, 12],
                 "vargas": ["D9"],
                 "karakas": ["Venus", "Mars", "Saturn"],
-                "fields": ["d9Lagna", "d9Structure", "currentDasha"],
+                "fields": ["d9Lagna", "d9Structure"],
                 "sadeSatiRelevant": True,
             }
         ),
@@ -240,7 +288,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [2, 10, 11],
                 "vargas": ["D10"],
                 "karakas": ["Sun", "Jupiter", "Saturn"],
-                "fields": ["d10Lagna", "d10Structure", "currentDasha"],
+                "fields": ["d10Lagna", "d10Structure"],
             }
         ),
         ("career", "job_loss"): MappingProxyType(
@@ -249,7 +297,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [6, 8, 10, 12],
                 "vargas": ["D10"],
                 "karakas": ["Saturn", "Mars", "Rahu"],
-                "fields": ["d10Lagna", "d10Structure", "currentDasha"],
+                "fields": ["d10Lagna", "d10Structure"],
                 "sadeSatiRelevant": True,
             }
         ),
@@ -259,7 +307,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [2, 9, 11],
                 "vargas": ["D2"],
                 "karakas": ["Jupiter", "Venus"],
-                "fields": ["d2Lagna", "d2Structure", "currentDasha", "lagnaSign"],
+                "fields": ["d2Lagna", "d2Structure", "lagnaSign"],
             }
         ),
         ("finance", "major_loss"): MappingProxyType(
@@ -273,7 +321,6 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                     "d2Structure",
                     "d30Lagna",
                     "d30Structure",
-                    "currentDasha",
                     "lagnaSign",
                 ],
                 "sadeSatiRelevant": True,
@@ -285,7 +332,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [2, 4, 11],
                 "vargas": ["D4"],
                 "karakas": ["Mars", "Moon", "Jupiter"],
-                "fields": ["d4Lagna", "d4Structure", "currentDasha"],
+                "fields": ["d4Lagna", "d4Structure"],
             }
         ),
         ("property", "sale"): MappingProxyType(
@@ -294,7 +341,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [4, 8, 12],
                 "vargas": ["D4"],
                 "karakas": ["Mars", "Saturn"],
-                "fields": ["d4Lagna", "d4Structure", "currentDasha"],
+                "fields": ["d4Lagna", "d4Structure"],
             }
         ),
         ("health", "surgery"): MappingProxyType(
@@ -303,7 +350,7 @@ RECTIFICATION_EVENT_SUBTYPE_RULES: Mapping[tuple[str, str], Mapping[str, Any]] =
                 "houses": [1, 6, 8, 12],
                 "vargas": ["D30"],
                 "karakas": ["Mars", "Saturn", "Ketu"],
-                "fields": ["d30Lagna", "d30Structure", "lagnaSign", "currentDasha"],
+                "fields": ["d30Lagna", "d30Structure", "lagnaSign"],
                 "sadeSatiRelevant": True,
             }
         ),
@@ -349,7 +396,6 @@ RECTIFICATION_EVENT_SUBTYPE_REFINEMENTS: Mapping[tuple[str, str], Mapping[str, A
                         "d24Structure",
                         "d4Lagna",
                         "d4Structure",
-                        "currentDasha",
                     ],
                 }
             ),
@@ -464,7 +510,6 @@ RECTIFICATION_EVENT_SUBTYPE_REFINEMENTS: Mapping[tuple[str, str], Mapping[str, A
                         "d2Structure",
                         "d10Lagna",
                         "d10Structure",
-                        "currentDasha",
                         "lagnaSign",
                     ],
                 }
@@ -546,3 +591,10 @@ def rectification_rules_for(category: str, event_subtype: str | None = None) -> 
     if refinement is None:
         return base
     return MappingProxyType({**dict(base), **dict(refinement)})
+
+
+def rectification_outcome_polarity(category: str, event_subtype: str | None = None) -> str:
+    """Return a bounded event direction for D1 promise corroboration."""
+
+    subtype = str(event_subtype or "").strip().casefold()
+    return RECTIFICATION_EVENT_OUTCOME_POLARITY.get((category, subtype), "neutral")

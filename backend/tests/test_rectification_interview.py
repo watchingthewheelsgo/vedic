@@ -20,6 +20,7 @@ from app.services.rectification_interview import (
     validate_agent_question_wording,
     validate_rectification_event_bindings,
     validate_rectification_event_dates,
+    validate_rectification_episode_independence,
 )
 from app.services.skill_runtime import SkillRuntime
 from app.services.life_event_rectification import parse_life_event_ledger
@@ -152,6 +153,48 @@ def test_question_ranking_prefers_the_field_with_better_candidate_partition() ->
     assert interview["questions"][0]["questionValue"]["partitionCount"] == 3
 
 
+def test_question_discrimination_resolves_nested_signature_fields() -> None:
+    candidates = [
+        {
+            "signature": {
+                "vargaPlanetSignIndices": {"D10": {"Sun": 1, "Moon": 2}},
+                "vargaLagnaDegrees": {"d10LagnaDegree": 3.0},
+                "planetLongitudes": {"Moon": 42.0},
+            }
+        },
+        {
+            "signature": {
+                "vargaPlanetSignIndices": {"D10": {"Sun": 2, "Moon": 2}},
+                "vargaLagnaDegrees": {"d10LagnaDegree": 4.0},
+                "planetLongitudes": {"Moon": 43.0},
+            }
+        },
+    ]
+
+    discrimination = ChartRectificationService._question_discrimination(
+        candidates,
+        ["d10Structure", "d10LagnaDegree", "planetLongitude:Moon"],
+    )
+
+    assert discrimination == {
+        "d10Structure": {
+            "candidateCount": 2,
+            "partitionCount": 2,
+            "largestPartitionSize": 1,
+        },
+        "d10LagnaDegree": {
+            "candidateCount": 2,
+            "partitionCount": 2,
+            "largestPartitionSize": 1,
+        },
+        "planetLongitude:Moon": {
+            "candidateCount": 2,
+            "partitionCount": 2,
+            "largestPartitionSize": 1,
+        },
+    }
+
+
 def test_user_available_categories_bound_the_candidate_driven_question_pool() -> None:
     interview = build_rectification_interview(
         _state(fields=["d10Lagna", "d4Structure"]),
@@ -215,9 +258,46 @@ def test_agent_event_evidence_prompt_renders_nested_json_contract() -> None:
         )
     )
 
-    assert result["source"] == "agent_semantic_validation"
+    assert result["source"] == "agent_semantic_enrichment"
     assert result["results"][0]["eventSubtype"] == "graduation"
     assert result["results"][0]["eventFacts"]["dateConfidence"] == "month"
+
+
+def test_agent_event_evidence_failure_falls_back_to_backend_binding() -> None:
+    class FailingAgentRuntime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def is_configured(self) -> bool:
+            return True
+
+        async def run_skill_prompt_task(self, *_args: object, **_kwargs: object):
+            self.calls += 1
+            raise RuntimeError("temporary model outage")
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    agent = FailingAgentRuntime()
+    runtime.agent_runtime = agent  # type: ignore[assignment]
+
+    result = asyncio.run(
+        runtime._validate_rectification_event_evidence(
+            [
+                {
+                    "questionId": "q-education",
+                    "category": "education",
+                    "eventSubtype": "graduation",
+                    "date": "2012-09",
+                    "description": "Graduated from university",
+                }
+            ]
+        )
+    )
+
+    assert agent.calls == 2
+    assert result["source"] == "question_binding_fallback"
+    assert result["results"][0]["accepted"] is True
+    assert result["results"][0]["eventFacts"]["impact"] == "unknown"
+    assert result["agentFallbackReason"] == "temporary model outage"
 
 
 def test_underdetermined_state_requests_round_four_until_maximum_evidence() -> None:
@@ -469,6 +549,34 @@ def test_runtime_allows_round_four_when_recalculation_requests_more_evidence(tmp
         assert response.stage == "reader_ready"
         assert interview["round"] == 4
         assert interview["questions"][0]["category"] == "health"
+
+    asyncio.run(run())
+
+
+def test_runtime_rejects_single_domain_before_rectification_starts(tmp_path) -> None:
+    async def run() -> None:
+        workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+        session_id = workspace.create_session("single-domain")
+        workspace.write_artifact(
+            session_id,
+            "chart_rectification_state.json",
+            json.dumps(_state(fields=["d10Lagna"])),
+        )
+        runtime = SkillRuntime(
+            calculator=object(),  # type: ignore[arg-type]
+            workspace=workspace,
+            agent_runtime=None,  # type: ignore[arg-type]
+        )
+
+        with pytest.raises(ValueError, match="at least two available life-event domains"):
+            await runtime.prepare_rectification_interview(
+                RectificationInterviewInput(
+                    sessionId=session_id,
+                    locale="en",
+                    availableCategories=["career"],
+                ),
+                use_agent=False,
+            )
 
     asyncio.run(run())
 
@@ -826,6 +934,49 @@ def test_rectification_event_dates_accept_year_precision_and_reject_impossible_r
             birth_date="1990-01-01",
             today=date(2026, 8, 3),
         )
+    with pytest.raises(ValueError, match="cannot include future days"):
+        validate_rectification_event_dates(
+            [{"date": "2026"}],
+            birth_date="1990-01-01",
+            today=date(2026, 8, 3),
+        )
+    with pytest.raises(ValueError, match="cannot include future days"):
+        validate_rectification_event_dates(
+            [{"date": "2026-08"}],
+            birth_date="1990-01-01",
+            today=date(2026, 8, 3),
+        )
+
+
+def test_rectification_answer_must_add_an_independent_life_episode() -> None:
+    existing = [
+        {
+            "date": "2018",
+            "category": "education",
+            "role": "calibration",
+        },
+        {
+            "date": "2021-04",
+            "category": "career",
+            "role": "calibration_context",
+        },
+    ]
+
+    with pytest.raises(ValueError, match="more precise month or day"):
+        validate_rectification_episode_independence(
+            [{"date": "2018-06", "category": "career"}],
+            existing_events=existing,
+        )
+    with pytest.raises(ValueError, match="different period"):
+        validate_rectification_episode_independence(
+            [{"date": "2021-04-19", "category": "relocation"}],
+            existing_events=existing,
+        )
+
+    validate_rectification_episode_independence(
+        [{"date": "2019-02", "category": "career"}],
+        existing_events=existing,
+    )
 
 
 def test_rectification_event_must_match_backend_question_category() -> None:
@@ -920,7 +1071,7 @@ def test_agent_cannot_duplicate_the_single_backend_question() -> None:
         validate_agent_question_wording(brief, {"questions": [wording, wording]})
 
 
-def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:
+def test_agent_event_audit_must_account_for_every_event_without_owning_acceptance() -> None:
     events = [
         {
             "questionId": "rectify.r1.q1.career",
@@ -950,20 +1101,33 @@ def test_agent_event_audit_must_account_for_and_accept_every_event() -> None:
         "dateConfidence": "unknown",
     }
 
-    with pytest.raises(ValueError, match="Please revise"):
-        validate_agent_event_evidence(
-            events,
-            {
-                "results": [
-                    {
-                        "questionId": "rectify.r1.q1.career",
-                        "category": "career",
-                        "accepted": False,
-                        "reason": "This describes an unrelated purchase.",
-                    }
-                ]
-            },
-        )
+    advisory_rejection = validate_agent_event_evidence(
+        events,
+        {
+            "results": [
+                {
+                    "questionId": "rectify.r1.q1.career",
+                    "category": "career",
+                    "accepted": False,
+                    "reason": "This describes an unrelated purchase.",
+                    "eventFacts": {
+                        "occurrence": "uncertain",
+                        "agency": "active",
+                        "impact": "major",
+                        "dateConfidence": "year",
+                    },
+                }
+            ]
+        },
+    )
+    assert advisory_rejection[0]["accepted"] is True
+    assert advisory_rejection[0]["semanticAssessment"] == "agent_advisory_ignored"
+    assert advisory_rejection[0]["eventFacts"] == {
+        "occurrence": "occurred",
+        "agency": "unknown",
+        "impact": "unknown",
+        "dateConfidence": "unknown",
+    }
 
 
 def test_semantic_event_facts_are_attached_to_the_deterministic_ledger() -> None:
