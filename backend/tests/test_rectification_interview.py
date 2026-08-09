@@ -10,6 +10,7 @@ import pytest
 
 from app.schemas import (
     ConsultationAnswerResponse,
+    RectificationConfirmationInput,
     RectificationInterviewInput,
     RectificationLifeEventInput,
 )
@@ -24,6 +25,13 @@ from app.services.skill_runtime import SkillRuntime
 from app.services.life_event_rectification import parse_life_event_ledger
 from app.services.chart_rectification import ChartRectificationService
 from app.services.skill_workspace import SkillWorkspace
+from app.vedicdust.models import (
+    BirthAssertion,
+    ChartRecord,
+    RectificationRoundRecord,
+    SubjectContext,
+)
+from app.vedicdust.profiles import parashari_lahiri_profile
 
 
 def _state(
@@ -61,13 +69,63 @@ def test_question_categories_follow_candidate_discriminators() -> None:
 
     assert [question["category"] for question in interview["questions"]] == ["career"]
     assert len(interview["questions"]) == 1
-    assert interview["progress"]["target"] == 3
+    assert interview["progress"]["target"] == 4
     assert interview["source"] == "deterministic_brief"
     assert interview["questions"][0]["questionValue"]["tier"] == "discriminating"
     assert interview["questions"][0]["questionValue"]["matchedFields"] == ["d10Lagna"]
     assert len(interview["questionPool"]) >= 2
     assert interview["questions"][0]["questionId"] == interview["questionPool"][0]["questionId"]
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
+
+
+def test_context_only_events_do_not_consume_interview_progress_or_limit() -> None:
+    state = _state(fields=["d10Lagna"], categories=["career", "relocation"])
+    state["lifeEventLedger"]["events"].extend(
+        {
+            "eventId": f"context-{index}",
+            "date": f"202{index}-01",
+            "category": "unknown",
+            "description": "unmapped context",
+            "role": "context_only",
+        }
+        for index in range(3)
+    )
+
+    interview = build_rectification_interview(
+        state,
+        session_id="session-test",
+        locale="en",
+    )
+
+    assert interview["status"] == "collecting"
+    assert interview["progress"]["answered"] == 2
+    assert interview["progress"]["target"] == 4
+    assert interview["round"] == 3
+
+
+def test_correlated_event_advances_interaction_round_without_advancing_evidence_progress() -> None:
+    state = _state(fields=["d10Lagna"], categories=["career"])
+    state["lifeEventLedger"]["events"].append(
+        {
+            "eventId": "evt-context",
+            "questionId": "rectify.r2.q1.education",
+            "date": "2010-01",
+            "category": "education",
+            "description": "same episode",
+            "role": "calibration_context",
+        }
+    )
+    state["rectificationRounds"] = [{"round": 1}, {"round": 2}]
+
+    interview = build_rectification_interview(
+        state,
+        session_id="session-test",
+        locale="en",
+    )
+
+    assert interview["progress"]["answered"] == 1
+    assert interview["round"] == 3
+    assert interview["questions"][0]["questionId"].startswith("rectify.r3.")
 
 
 def test_question_ranking_prefers_the_field_with_better_candidate_partition() -> None:
@@ -196,10 +254,109 @@ def test_underdetermined_state_requests_round_four_until_maximum_evidence() -> N
     assert updated["rectificationPlan"]["action"] == "collect_dated_life_events"
 
     updated["lifeEventLedger"]["eligibleEventCount"] = 5
+    updated["lifeEventLedger"]["independentEpisodeCount"] = 5
     service._set_additional_event_request(updated)
     updated["rectificationPlan"] = service._build_rectification_plan(updated)
     assert updated["lifeEventLedger"]["eventCollectionRequired"] is False
     assert updated["rectificationPlan"]["action"] == "rectification_inconclusive"
+
+
+def test_correlated_episode_round_is_recorded_without_an_independent_vote() -> None:
+    service = ChartRectificationService()
+    question_id = "rectify.r2.q1.relocation"
+    accepted_event = {
+        "questionId": question_id,
+        "eventId": "evt-correlated",
+        "episodeId": "episode-primary",
+        "episodeRelation": "corroborating",
+        "date": "2018-10",
+        "datePrecision": "month",
+        "category": "relocation",
+        "eventSubtype": "moved_city",
+        "role": "calibration_context",
+    }
+    previous = {"candidates": [], "rectificationRounds": []}
+    next_state = {
+        "status": "underdetermined",
+        "candidates": [],
+        "lifeEventLedger": {"events": [accepted_event]},
+        "rectificationPlan": {"action": "collect_dated_life_events"},
+        "selectionEvidence": {"blockers": ["insufficient_calibration_events"]},
+        "reportGate": {"fullReportAllowed": False},
+    }
+
+    result = service.record_evidence_round(
+        previous,
+        next_state,
+        submitted_events=[{"questionId": question_id}],
+        chart_revision=2,
+    )
+
+    round_record = result["rectificationRounds"][0]
+    RectificationRoundRecord.model_validate(round_record)
+    assert round_record["decision"]["outcome"] == "correlated_episode_recorded"
+    assert round_record["answeredQuestion"]["episodeId"] == "episode-primary"
+    assert "does not add another independent vote" in round_record["decision"]["reason"]
+
+
+def test_rectification_round_history_is_append_only_and_round_ids_remain_unique() -> None:
+    service = ChartRectificationService()
+    history = [
+        {
+            "schemaVersion": "rectification-round-decision/v1",
+            "round": round_number,
+            "chartRevision": round_number,
+            "answeredQuestion": {},
+            "candidateState": {
+                "before": {"candidateIntervalCount": 0, "equivalenceClassCount": 0},
+                "after": {"candidateIntervalCount": 0, "equivalenceClassCount": 0},
+            },
+            "evidenceImpact": {
+                "eventId": None,
+                "role": None,
+                "scoreSpread": None,
+                "supportingCandidateCount": 0,
+                "challengingCandidateCount": 0,
+                "discriminating": False,
+            },
+            "decision": {
+                "outcome": "evidence_recorded_without_required_margin",
+                "status": "underdetermined",
+                "nextAction": "collect_dated_life_events",
+                "selectionBlockers": [],
+                "holdoutResult": "not_run",
+                "selectedCandidateId": None,
+                "equivalentCandidateIds": [],
+            },
+        }
+        for round_number in range(1, 7)
+    ]
+    accepted_event = {
+        "questionId": "rectify.r7.q1.career",
+        "eventId": "evt-seven",
+        "episodeId": "episode-seven",
+        "episodeRelation": "corroborating",
+        "date": "2024-01",
+        "datePrecision": "month",
+        "category": "career",
+        "eventSubtype": "job_change",
+        "role": "calibration_context",
+    }
+    result = service.record_evidence_round(
+        {"candidates": [], "rectificationRounds": history},
+        {
+            "status": "underdetermined",
+            "candidates": [],
+            "lifeEventLedger": {"events": [accepted_event]},
+            "rectificationPlan": {"action": "collect_dated_life_events"},
+            "selectionEvidence": {"blockers": []},
+            "reportGate": {"fullReportAllowed": False},
+        },
+        submitted_events=[{"questionId": accepted_event["questionId"]}],
+        chart_revision=7,
+    )
+
+    assert [item["round"] for item in result["rectificationRounds"]] == list(range(1, 8))
 
 
 def test_underdetermined_round_can_reuse_best_domain_after_breadth_requirement() -> None:
@@ -250,6 +407,32 @@ def test_third_reserved_event_may_repeat_when_only_two_domains_are_available() -
     assert interview["questions"][0]["category"] in {"career", "relocation"}
 
 
+def test_agent_wording_prompt_excludes_private_candidate_discrimination(tmp_path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    runtime = SkillRuntime(
+        calculator=object(),  # type: ignore[arg-type]
+        workspace=workspace,
+        agent_runtime=None,  # type: ignore[arg-type]
+    )
+    interview = build_rectification_interview(
+        _state(
+            status="collecting_evidence",
+            fields=["d10Lagna"],
+            categories=["career"],
+        ),
+        session_id="session-test",
+        locale="en",
+    )
+
+    prompt = runtime._rectification_interview_prompt(interview, "en")
+
+    assert "d10Lagna" not in prompt
+    assert "matchedFields" not in prompt
+    assert "partitionCount" not in prompt
+    assert "questionValue" not in prompt
+    assert interview["questions"][0]["questionId"] in prompt
+
+
 def test_runtime_allows_round_four_when_recalculation_requests_more_evidence(tmp_path) -> None:
     async def run() -> None:
         workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
@@ -286,6 +469,172 @@ def test_runtime_allows_round_four_when_recalculation_requests_more_evidence(tmp
         assert response.stage == "reader_ready"
         assert interview["round"] == 4
         assert interview["questions"][0]["category"] == "health"
+
+    asyncio.run(run())
+
+
+def test_rejected_confirmation_discards_stale_interview_before_next_round(tmp_path) -> None:
+    async def run() -> None:
+        workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+        session_id = workspace.create_session("confirmation-rejected")
+        record = ChartRecord(
+            chartRecordId="chart-confirmation",
+            readingSessionId=session_id,
+            revision=1,
+            createdAt="2026-08-09T00:00:00Z",
+            subject=SubjectContext(subjectId="subject-confirmation"),
+            birthAssertion=BirthAssertion(
+                localDate="1990-01-01",
+                reportedLocalTime="08:00",
+                reportedPlace="Test City",
+                timeCertainty="approximate",
+                evidence=[
+                    {
+                        "evidenceId": "birth-source",
+                        "evidenceClass": "user_testimony",
+                        "sourceLabel": "user",
+                        "observedValue": "1990-01-01 08:00",
+                        "confidence": "provisional",
+                    }
+                ],
+            ),
+            calculationProfile=parashari_lahiri_profile(),
+            status="intake",
+        )
+        state = {
+            "status": "rectification_confirmation_required",
+            "revision": 1,
+            "selectedCandidateId": "candidate-a",
+            "activeChartRevision": {"revision": 1},
+            "lifeEventLedger": {
+                "independentEpisodeCount": 4,
+                "eligibleEventCount": 4,
+                "eventCollectionRequired": False,
+                "events": [],
+            },
+            "rectificationConclusion": {
+                "status": "pending",
+                "chartRevision": 1,
+                "generation": {"source": "deterministic_input_review"},
+                "confirmation": {"status": "pending"},
+                "examples": [{"exampleId": "example-1"}],
+            },
+        }
+        workspace.write_artifact(
+            session_id, "chart_record.json", record.model_dump_json(by_alias=True)
+        )
+        workspace.write_artifact(session_id, "chart_rectification_state.json", json.dumps(state))
+        workspace.write_artifact(
+            session_id,
+            "rectification_interview.json",
+            json.dumps({"questions": [{"questionId": "rectify.r4.q1.career"}]}),
+        )
+        runtime = SkillRuntime(
+            calculator=object(),  # type: ignore[arg-type]
+            workspace=workspace,
+            agent_runtime=None,  # type: ignore[arg-type]
+        )
+        runtime._sync_chart_record_rectification = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+        async def no_sync(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        runtime._sync_metadata = no_sync  # type: ignore[method-assign]
+        response = await runtime.confirm_rectification_result(
+            RectificationConfirmationInput(
+                sessionId=session_id,
+                expectedChartRevision=1,
+                responses=[{"exampleId": "example-1", "answer": "inaccurate"}],
+            )
+        )
+        updated = json.loads(
+            workspace.read_artifact_text(session_id, "chart_rectification_state.json") or "{}"
+        )
+
+        assert response.stage == "reader_ready"
+        assert updated["status"] == "underdetermined"
+        assert updated["lifeEventLedger"]["eventCollectionRequired"] is True
+        assert workspace.read_artifact_text(session_id, "rectification_interview.json") is None
+
+    asyncio.run(run())
+
+
+def test_rejected_confirmation_respects_maximum_independent_event_limit(tmp_path) -> None:
+    async def run() -> None:
+        workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+        session_id = workspace.create_session("confirmation-max-evidence")
+        record = ChartRecord(
+            chartRecordId="chart-confirmation-max",
+            readingSessionId=session_id,
+            revision=1,
+            createdAt="2026-08-09T00:00:00Z",
+            subject=SubjectContext(subjectId="subject-confirmation-max"),
+            birthAssertion=BirthAssertion(
+                localDate="1990-01-01",
+                reportedLocalTime="08:00",
+                reportedPlace="Test City",
+                timeCertainty="approximate",
+                evidence=[
+                    {
+                        "evidenceId": "birth-source",
+                        "evidenceClass": "user_testimony",
+                        "sourceLabel": "user",
+                        "observedValue": "1990-01-01 08:00",
+                        "confidence": "provisional",
+                    }
+                ],
+            ),
+            calculationProfile=parashari_lahiri_profile(),
+            status="intake",
+        )
+        state = {
+            "status": "rectification_confirmation_required",
+            "revision": 1,
+            "selectedCandidateId": "candidate-a",
+            "activeChartRevision": {"revision": 1},
+            "lifeEventLedger": {
+                "independentEpisodeCount": 5,
+                "eligibleEventCount": 5,
+                "eventCollectionRequired": False,
+                "events": [],
+            },
+            "rectificationConclusion": {
+                "status": "pending",
+                "chartRevision": 1,
+                "generation": {"source": "deterministic_input_review"},
+                "confirmation": {"status": "pending"},
+                "examples": [{"exampleId": "example-1"}],
+            },
+        }
+        workspace.write_artifact(
+            session_id, "chart_record.json", record.model_dump_json(by_alias=True)
+        )
+        workspace.write_artifact(session_id, "chart_rectification_state.json", json.dumps(state))
+        runtime = SkillRuntime(
+            calculator=object(),  # type: ignore[arg-type]
+            workspace=workspace,
+            agent_runtime=None,  # type: ignore[arg-type]
+        )
+        runtime._sync_chart_record_rectification = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+        async def no_sync(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        runtime._sync_metadata = no_sync  # type: ignore[method-assign]
+        response = await runtime.confirm_rectification_result(
+            RectificationConfirmationInput(
+                sessionId=session_id,
+                expectedChartRevision=1,
+                responses=[{"exampleId": "example-1", "answer": "inaccurate"}],
+            )
+        )
+        updated = json.loads(
+            workspace.read_artifact_text(session_id, "chart_rectification_state.json") or "{}"
+        )
+
+        assert updated["lifeEventLedger"]["eventCollectionRequired"] is False
+        assert updated["rectificationPlan"]["action"] == "rectification_inconclusive"
+        assert "maximum independent evidence set" in response.chat_message
 
     asyncio.run(run())
 

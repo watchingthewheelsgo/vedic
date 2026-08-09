@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from .models import (
     ValidationFixtureRegistry,
 )
 from .professional_review import validate_professional_review_fixture
+from .rectification_benchmark import validate_rectification_benchmark_fixture
 
 
 def load_source_registry() -> dict[str, SourceReference]:
@@ -39,6 +41,7 @@ def load_rule_catalog() -> RuleCatalog:
     return catalog
 
 
+@lru_cache(maxsize=8)
 def load_validation_fixture_registry(
     registry_path: Path | None = None,
 ) -> dict[str, ValidationFixtureReference]:
@@ -52,7 +55,11 @@ def load_validation_fixture_registry(
         resource_dir = resolved.parent
     payload = ValidationFixtureRegistry.model_validate_json(payload_text)
     for fixture in payload.fixtures:
-        if fixture.fixture_kind not in {"independent_external", "professional_review"}:
+        if fixture.fixture_kind not in {
+            "independent_external",
+            "professional_review",
+            "rectification_benchmark",
+        }:
             continue
         artifact_path = Path(str(fixture.evidence_artifact_path)).expanduser()
         if not artifact_path.is_absolute():
@@ -67,6 +74,8 @@ def load_validation_fixture_registry(
             raise ValueError(f"validation evidence artifact hash mismatch for {fixture.fixture_id}")
         if fixture.fixture_kind == "professional_review":
             validate_professional_review_fixture(fixture, artifact_path)
+        elif fixture.fixture_kind == "rectification_benchmark":
+            validate_rectification_benchmark_fixture(fixture, artifact_path)
     return {fixture.fixture_id: fixture for fixture in payload.fixtures}
 
 

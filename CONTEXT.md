@@ -81,6 +81,14 @@ A dated user testimony used as rectification evidence. A Life Event is marked
 either calibration or holdout; holdout events cannot influence candidate
 selection.
 
+## Life Episode
+
+One independent dated evidence unit used during rectification. The first Life Event
+fixes an episode's primary interval. A later event whose reported civil-date interval
+overlaps that primary is retained as corroborating context and cannot move the
+episode's calibration or holdout role. This prevents one real-world period from
+contributing multiple votes while retaining what the user reported.
+
 ## Rectification Decision
 
 The auditable result of comparing every Candidate Interval against the same

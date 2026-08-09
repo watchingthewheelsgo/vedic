@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "vedicdust-validation-fixtures/1.0.0",
+  "schemaVersion": "vedicdust-validation-fixtures/1.1.0",
   "fixtures": [
     {
       "fixtureId": "calculator.combustion-boundaries",
@@ -111,10 +111,10 @@
       "fixtureKind": "contract",
       "testNodes": [
         "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_alone_is_suppressed",
-        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_counts_when_corroborated",
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_is_audited_but_cannot_change_selection",
         "backend/tests/test_vedic_input_sensitivity.py::test_rectification_kp_sub_lord_not_matched_stays_missing"
       ],
-      "description": "Checks that KP cuspal sub-lord activation cannot support an event alone and only counts once corroborated by Dasha, varga, or double-transit evidence."
+      "description": "Checks that KP cuspal sub-lord activation is suppressed without corroboration and remains auditable without entering the candidate-selection score when corroborated."
     },
     {
       "fixtureId": "calculator.rectification-chara-dasha-system-agreement",
@@ -122,9 +122,10 @@
       "testNodes": [
         "backend/tests/test_vedic_input_sensitivity.py::test_rectification_chara_dasha_score_activates_on_matched_rasi",
         "backend/tests/test_vedic_input_sensitivity.py::test_rectification_chara_dasha_score_stays_zero_when_not_activated",
-        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_dasha_system_agreement_flags_preferred_candidate"
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_dasha_system_agreement_flags_preferred_candidate",
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_dasha_system_agreement_compares_equivalence_classes"
       ],
-      "description": "Checks that Jaimini Chara Dasha activation is scored independently of the main additive score and that dashaSystemAgreement correctly flags whether Vimshottari and Chara Dasha prefer the same candidate."
+      "description": "Checks that Jaimini Chara Dasha is independent of the additive score and that the scan-level agreement compares distinct candidate equivalence classes."
     },
     {
       "fixtureId": "calculator.sade-sati-sign-phase",
@@ -211,9 +212,10 @@
       "fixtureId": "contract.rectification.event-evidence-ranking",
       "fixtureKind": "contract",
       "testNodes": [
-        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_caps_correlated_matches_and_localizes_event_time"
+        "backend/tests/test_vedic_input_sensitivity.py::test_rectification_caps_correlated_matches_and_uses_event_timezone_envelope",
+        "backend/tests/test_vedic_input_sensitivity.py::test_life_event_ledger_counts_overlapping_dates_as_one_episode"
       ],
-      "description": "Checks event-bound scoring, correlated-match caps, and localized event intervals."
+      "description": "Checks event-bound scoring, unknown-location UTC envelopes, and one-vote grouping for overlapping life episodes."
     },
     {
       "fixtureId": "contract.transit.whole-sign-house",
@@ -227,7 +229,7 @@
       "fixtureId": "contract.workflow.d60-eligibility",
       "fixtureKind": "contract",
       "testNodes": [
-        "backend/tests/test_vedic_input_sensitivity.py::test_candidate_groups_use_rectification_vargas_but_not_d60_noise"
+        "backend/tests/test_vedic_input_sensitivity.py::test_candidate_groups_use_evidence_addressable_vargas_only"
       ],
       "description": "Checks that D60 cannot split broad rectification candidates or act as primary early evidence."
     },

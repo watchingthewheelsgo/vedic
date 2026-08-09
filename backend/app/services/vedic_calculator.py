@@ -54,9 +54,10 @@ PRECISION_STATUS: dict[str, str] = {
 
 DIVISIONAL_FACTORS = list(SUPPORTED_VARGA_FACTORS)
 
-# D2-D30 can distinguish rectification candidates. D60 is deliberately excluded:
-# its minute-level volatility is evidence for uncertainty, not an initial split key.
-DIVISIONAL_FINGERPRINT_FACTORS = [2, 3, 4, 5, 7, 9, 10, 12, 16, 20, 24, 27, 30]
+# A divisional chart may split birth-time candidates only when the active
+# rectification policy has a dated-event evidence channel for that chart.
+# Other vargas still participate in the full sensitivity scan and report gate.
+DIVISIONAL_FINGERPRINT_FACTORS = [2, 4, 7, 9, 10, 12, 20, 24, 30]
 CALCULATION_VERSION = f"vedicdust-{PARASHARI_LAHIRI_PROFILE_ID}"
 SUB_MINUTE_BOUNDARY_TARGET_SECONDS = 5
 HIGH_RISK_CHANGED_FIELDS = {
@@ -321,6 +322,22 @@ class VedicCalculator:
             key = instant.astimezone(pytz.utc).isoformat()
             moments.setdefault(key, {"instant": instant, "roles": []})["roles"].append(role)
 
+        if len(moments) == 1:
+            return {
+                "schemaVersion": "vedicdust-timing-boundary-sampling/1.0.0",
+                "methodId": "vedicdust-vimshottari-boundary-envelope/1.0.0",
+                "status": "not_run",
+                "coverage": "canonical_only",
+                "successfulSampleCount": 0,
+                "requestedSampleCount": 1,
+                "samples": [],
+                "errors": [],
+                "limitation": (
+                    "The declared birth-time window contains only the canonical instant, "
+                    "so no separate boundary hypotheses exist to sample."
+                ),
+            }
+
         timezone_id = str(payload["timezone"])
         timezone_value = pytz.timezone(timezone_id)
         base_utc = base_moment.astimezone(pytz.utc)
@@ -397,7 +414,7 @@ class VedicCalculator:
     ) -> dict[str, Any]:
         time_window = self._time_window(payload, intake.birth_time_precision, intake.time_source)
         place_radius = round(float(place.radius_km), 3)
-        place_rectification_allowed = self._place_rectification_allowed(place)
+        place_sensitivity_scan_allowed = self._place_sensitivity_scan_allowed(place)
         raw_semantic_evidence = str(payload.get("life_event_facts") or "").strip()
         try:
             parsed_semantic_evidence = (
@@ -440,7 +457,8 @@ class VedicCalculator:
                 "radiusKm": place_radius,
                 "confidence": place.confidence,
                 "matched": place.matched,
-                "rectificationAllowed": place_rectification_allowed,
+                "rectificationAllowed": False,
+                "sensitivityScanAllowed": place_sensitivity_scan_allowed,
                 "rectificationPolicy": self._place_rectification_policy(place),
             },
             "readingFocus": intake.reading_focus,
@@ -455,8 +473,9 @@ class VedicCalculator:
             "constraints": {
                 "timeSearchMustStayWithinReportedWindow": True,
                 "placeSearchMustStayWithinRadiusKm": place_radius,
-                "placeRectificationAllowed": place_rectification_allowed,
-                "rectificationAxes": self._rectification_axes(place),
+                "placeRectificationAllowed": False,
+                "placeSensitivityScanAllowed": place_sensitivity_scan_allowed,
+                "rectificationAxes": ["time"],
                 "rejectRectificationOutsideUserFacts": True,
             },
         }
@@ -492,7 +511,7 @@ class VedicCalculator:
             payload,
             place,
         )
-        place_rectification_allowed = self._place_rectification_allowed(place)
+        place_sensitivity_scan_allowed = self._place_sensitivity_scan_allowed(place)
         joint_variants = self._joint_time_place_variants(
             calculate_full_chart,
             calculate_signature,
@@ -501,7 +520,7 @@ class VedicCalculator:
             payload,
             intake.birth_time_precision,
             intake.time_source,
-            place_variants if place_rectification_allowed else [],
+            place_variants if place_sensitivity_scan_allowed else [],
             life_event_ledger=life_event_ledger or {},
             reference_moment=reference_moment,
         )
@@ -509,14 +528,15 @@ class VedicCalculator:
         summary = self._scan_summary(
             intake.birth_time_precision,
             place,
-            [*time_variants, *joint_variants],
+            time_variants,
             place_variants,
             boundary_flags,
+            joint_variants=joint_variants,
         )
         candidate_groups = self._candidate_groups(
             base_signature,
-            [*time_variants, *joint_variants],
-            (place_variants if place_rectification_allowed and not joint_variants else []),
+            time_variants,
+            [],
         )
         self._score_candidate_groups(
             candidate_groups,
@@ -538,6 +558,7 @@ class VedicCalculator:
                 f"candidate_scoring_errors:{len(scoring_errors)}"
             )
         self._assign_equivalence_classes(candidate_groups)
+        self._apply_dasha_system_agreement(candidate_groups)
         stability = self._stability_map(
             set(summary["changedFields"]),
             summary["divisionalConfidence"],
@@ -776,36 +797,81 @@ class VedicCalculator:
                         "scoringError": str(exc),
                     }
                 )
-        VedicCalculator._apply_dasha_system_agreement(candidates)
 
     @staticmethod
     def _apply_dasha_system_agreement(candidates: list[dict[str, Any]]) -> None:
-        """Flag whether Vimshottari and Jaimini Chara Dasha prefer the same candidate.
+        """Record one scan-level comparison between Vimshottari and Chara Dasha.
 
         Chara Dasha is a second, independent dasha system; two systems agreeing on
-        the same candidate is a stronger signal than either alone, but the plan
+        the same equivalence class is a stronger signal than either alone, but the plan
         explicitly keeps this comparison out of the additive support/contradiction
-        score (it's a cross-check, not more evidence for a single hypothesis).
+        score (it's a cross-check, not more evidence for a single hypothesis). The
+        result is copied to every candidate for an auditable scan-level diagnostic.
+        Until this cross-check has source-blind and professional validation it has no
+        authority to rank, eliminate, or block a candidate.
         """
-        main_scored = [
-            candidate
-            for candidate in candidates
-            if isinstance(candidate.get("aggregateScore"), (int, float))
-        ]
-        chara_scored = [
-            candidate
-            for candidate in candidates
-            if isinstance(candidate.get("charaDashaScore"), (int, float))
-        ]
-        if not main_scored or not chara_scored:
+        for candidate in candidates:
+            candidate["dashaSystemAgreement"] = "not_applicable"
+
+        class_scores: dict[str, dict[str, list[float]]] = {}
+        for candidate in candidates:
+            class_id = str(
+                candidate.get("equivalenceClassId") or candidate.get("candidateId") or ""
+            )
+            if not class_id:
+                continue
+            score_bucket = class_scores.setdefault(class_id, {"vimshottari": [], "chara": []})
+            vimshottari_score = candidate.get("vimshottariDashaScore")
+            chara_score = candidate.get("charaDashaScore")
+            if isinstance(vimshottari_score, (int, float)):
+                score_bucket["vimshottari"].append(float(vimshottari_score))
+            if isinstance(chara_score, (int, float)):
+                score_bucket["chara"].append(float(chara_score))
+
+        if any(
+            not scores["vimshottari"] or not scores["chara"] for scores in class_scores.values()
+        ):
             return
-        main_preferred = max(main_scored, key=lambda candidate: candidate["aggregateScore"])
-        chara_preferred = max(chara_scored, key=lambda candidate: candidate["charaDashaScore"])
-        main_preferred["dashaSystemAgreement"] = (
+
+        comparable = [
+            {
+                "classId": class_id,
+                "vimshottariDashaScore": sum(scores["vimshottari"]) / len(scores["vimshottari"]),
+                "charaDashaScore": sum(scores["chara"]) / len(scores["chara"]),
+            }
+            for class_id, scores in class_scores.items()
+            if scores["vimshottari"] and scores["chara"]
+        ]
+        if len(comparable) < 2:
+            return
+        vimshottari_order = sorted(
+            comparable,
+            key=lambda candidate: float(candidate["vimshottariDashaScore"]),
+            reverse=True,
+        )
+        chara_order = sorted(
+            comparable,
+            key=lambda candidate: float(candidate["charaDashaScore"]),
+            reverse=True,
+        )
+        comparison_margin = 0.05
+        if (
+            float(vimshottari_order[0]["vimshottariDashaScore"])
+            - float(vimshottari_order[1]["vimshottariDashaScore"])
+            < comparison_margin
+            or float(chara_order[0]["charaDashaScore"]) - float(chara_order[1]["charaDashaScore"])
+            < comparison_margin
+        ):
+            return
+        vimshottari_preferred = vimshottari_order[0]
+        chara_preferred = chara_order[0]
+        agreement = (
             "agrees"
-            if main_preferred.get("candidateId") == chara_preferred.get("candidateId")
+            if vimshottari_preferred["classId"] == chara_preferred["classId"]
             else "disagrees"
         )
+        for candidate in candidates:
+            candidate["dashaSystemAgreement"] = agreement
 
     @staticmethod
     def _ayanamsa_risk_from_signature(signature: dict[str, Any]) -> str:
@@ -854,6 +920,9 @@ class VedicCalculator:
                     "score": score.get("score"),
                     "supportScore": score.get("supportScore"),
                     "contradictionScore": score.get("contradictionScore"),
+                    "selectionScore": score.get("selectionScore"),
+                    "selectionSupportScore": score.get("selectionSupportScore"),
+                    "selectionContradictionScore": score.get("selectionContradictionScore"),
                     "observations": [
                         {
                             "component": observation.get("component"),
@@ -890,30 +959,22 @@ class VedicCalculator:
 
     @staticmethod
     def _signature_fingerprint(signature: dict[str, Any]) -> str:
+        """Return the evidence-addressable birth-time candidate fingerprint.
+
+        Interpretive states such as Chara Karaka order, strengths, special
+        points, and unsupported vargas remain report-stability inputs. They do
+        not create a candidate that the current dated-event interview cannot
+        distinguish.
+        """
+
         stable_keys = [
             "lagnaSign",
             "moonSign",
             "moonNakshatra",
             "moonPada",
             "currentDasha",
-            "moonPhase",
         ]
         values = [str(signature.get(key)) for key in stable_keys]
-        for key in (
-            "charaKaraka7k",
-            "combustionStatus",
-            "shadbalaClassification",
-            "digbalaStatus",
-            "specialPointSigns",
-            "specialLagnaSigns",
-        ):
-            values.append(
-                json.dumps(
-                    signature.get(key),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            )
         d1_structure = signature.get("planetSignIndices")
         values.append(json.dumps(d1_structure, sort_keys=True, separators=(",", ":")))
         varga_structures = signature.get("vargaPlanetSignIndices")
@@ -1203,6 +1264,37 @@ class VedicCalculator:
                     "windowOverride": "selected_rectification_candidate",
                 },
             }
+        reported_window = payload.get("reported_time_window")
+        if isinstance(reported_window, dict):
+            minutes_before = int(reported_window.get("minutes_before") or 0)
+            minutes_after = int(reported_window.get("minutes_after") or 0)
+            if minutes_before < 0 or minutes_after < 0:
+                raise ValueError("reported birth-time window cannot have negative bounds")
+            if minutes_before + minutes_after > 1439:
+                raise ValueError("reported birth-time window cannot exceed one civil day")
+            start = self._shift_absolute(base, -minutes_before)
+            end = self._shift_absolute(base, minutes_after)
+            end_exclusive = self._shift_absolute(end, 1)
+            return {
+                "start": start.strftime("%Y-%m-%d %H:%M"),
+                "end": end.strftime("%Y-%m-%d %H:%M"),
+                "endExclusive": end_exclusive.strftime("%Y-%m-%d %H:%M"),
+                "startUtc": start.astimezone(pytz.utc).isoformat(),
+                "endUtc": end.astimezone(pytz.utc).isoformat(),
+                "endExclusiveUtc": end_exclusive.astimezone(pytz.utc).isoformat(),
+                "reportedUtc": base.astimezone(pytz.utc).isoformat(),
+                "selectedUtcOffsetSeconds": int(base.utcoffset().total_seconds()),
+                "radiusMinutes": max(minutes_before, minutes_after),
+                "minutesBefore": minutes_before,
+                "minutesAfter": minutes_after,
+                "scanMode": "continuous_minute_grid",
+                "resolutionMinutes": 1,
+                "windowBasis": str(reported_window.get("basis") or "user_certainty_choice"),
+                "sourcePolicy": {
+                    **self._time_source_policy(time_source),
+                    "windowSource": "explicit_reported_time_window",
+                },
+            }
         if precision == "unknown":
             local_date = base.date()
             start = resolve_civil_time(
@@ -1233,7 +1325,7 @@ class VedicCalculator:
                 ),
                 "sourcePolicy": self._time_source_policy(time_source),
             }
-        radius = self._time_radius_minutes(precision, time_source)
+        radius = self._time_radius_minutes(precision)
         start = self._shift_absolute(base, -radius)
         end = self._shift_absolute(base, radius)
         end_exclusive = self._shift_absolute(base, radius + 1)
@@ -1528,15 +1620,6 @@ class VedicCalculator:
         latitude = coordinates.get("lat")
         longitude = coordinates.get("lon")
         timezone_id = str(place_context.get("timezone") or "").strip()
-        for member in selected.get("members") or []:
-            if not isinstance(member, dict) or member.get("axis") != "place":
-                continue
-            member_coordinates = member.get("coordinates")
-            if isinstance(member_coordinates, dict):
-                latitude = member_coordinates.get("lat", latitude)
-                longitude = member_coordinates.get("lon", longitude)
-            timezone_id = str(member.get("timezone") or timezone_id).strip()
-            break
         if latitude is None or longitude is None or not timezone_id:
             return finish(
                 "skipped",
@@ -1763,10 +1846,10 @@ class VedicCalculator:
         return variants
 
     @staticmethod
-    def _time_radius_minutes(precision: str, time_source: str) -> int:
+    def _time_radius_minutes(precision: str) -> int:
         if precision == "unknown":
             return 720
-        return {"exact": 2, "approximate": 15, "part_of_day": 120}.get(precision, 15)
+        return {"exact": 10, "approximate": 30, "part_of_day": 360}.get(precision, 30)
 
     @staticmethod
     def _time_source_policy(time_source: str) -> dict[str, Any]:
@@ -2019,19 +2102,20 @@ class VedicCalculator:
         place: ResolvedPlace,
     ) -> list[dict[str, Any]]:
         radius_km = float(place.radius_km)
-        if not self._place_rectification_allowed(place) or radius_km < 1.0:
+        if not self._place_sensitivity_scan_allowed(place) or radius_km < 1.0:
             return [
                 {
                     "label": "base",
                     "radiusKm": round(radius_km, 3),
-                    "rectificationAllowed": self._place_rectification_allowed(place),
+                    "rectificationAllowed": False,
+                    "sensitivityScanAllowed": self._place_sensitivity_scan_allowed(place),
                     "rectificationPolicy": self._place_rectification_policy(place),
                     "changed": [],
                     "signature": base_signature,
                 }
             ]
         # radiusKm is the declared uncertainty envelope, not a display hint.
-        # Clipping it would exclude valid coordinate hypotheses from rectification.
+        # Clipping it would hide valid place sensitivity inside the declared envelope.
         scan_radius = radius_km
         lat = float(payload["lat"])
         lon = float(payload["lon"])
@@ -2396,20 +2480,26 @@ class VedicCalculator:
         time_variants: list[dict[str, Any]],
         place_variants: list[dict[str, Any]],
         boundary_flags: list[dict[str, Any]],
+        *,
+        joint_variants: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        joint_variants = joint_variants or []
         scan_errors = [
             {
                 "label": variant.get("label"),
                 "interval": variant.get("interval"),
                 "error": str(variant.get("error")),
             }
-            for variant in [*time_variants, *place_variants]
+            for variant in [*time_variants, *place_variants, *joint_variants]
             if variant.get("error")
         ]
         changed = {
             change
-            for variant in [*time_variants, *place_variants]
+            for variant in [*time_variants, *place_variants, *joint_variants]
             for change in variant.get("changed", [])
+        }
+        place_changed = {
+            change for variant in place_variants for change in variant.get("changed", [])
         }
         risk_factors = []
         if precision in {"part_of_day", "unknown"}:
@@ -2433,7 +2523,15 @@ class VedicCalculator:
         # blocker. Missing/invalid values are still represented as changes and are
         # rejected by the deterministic position-integrity checks.
         blocking_changed = sorted(changed & HIGH_RISK_CHANGED_FIELDS)
+        place_blocking_changed = sorted(place_changed & HIGH_RISK_CHANGED_FIELDS)
+        joint_place_boundary_changed = self._joint_place_boundary_changed(
+            time_variants,
+            joint_variants,
+        )
+        if joint_place_boundary_changed:
+            place_blocking_changed.append("jointTimePlaceCandidateBoundaries")
         unresolved_place = place.accuracy in {"city", "district"}
+        place_sensitivity_requires_input = bool(unresolved_place and place_blocking_changed)
         if (
             precision in {"part_of_day", "unknown"}
             or blocking_changed
@@ -2452,18 +2550,60 @@ class VedicCalculator:
             "riskFactors": risk_factors,
             "scanErrors": scan_errors,
             "blockingChangedFields": blocking_changed,
+            "placeBlockingChangedFields": place_blocking_changed,
+            "placeSensitivityRequiresInput": place_sensitivity_requires_input,
             "changedFields": sorted(changed),
             "divisionalConfidence": divisional_confidence,
             "divisionalSensitivity": self._divisional_sensitivity(divisional_confidence),
             "advancedVargaPolicy": self._advanced_varga_policy(divisional_confidence),
             "recommendedAction": self._recommended_action(
                 risk_level,
-                place_rectification_allowed=self._place_rectification_allowed(place),
+                place_rectification_allowed=False,
             ),
-            "rectificationAxes": self._rectification_axes(place),
-            "placeRectificationAllowed": self._place_rectification_allowed(place),
+            "rectificationAxes": ["time"],
+            "placeRectificationAllowed": False,
+            "placeSensitivityScanAllowed": self._place_sensitivity_scan_allowed(place),
             "placeRectificationPolicy": self._place_rectification_policy(place),
         }
+
+    def _joint_place_boundary_changed(
+        self,
+        time_variants: list[dict[str, Any]],
+        joint_variants: list[dict[str, Any]],
+    ) -> bool:
+        """Detect whether uncertain coordinates alter the time-candidate partition."""
+
+        baseline = self._time_variant_profile(time_variants)
+        if not baseline or not joint_variants:
+            return False
+        by_place: dict[str, list[dict[str, Any]]] = {}
+        for variant in joint_variants:
+            place_member = variant.get("placeMember")
+            if not isinstance(place_member, dict):
+                continue
+            coordinates = place_member.get("coordinates")
+            place_key = json.dumps(coordinates, sort_keys=True, separators=(",", ":"))
+            by_place.setdefault(place_key, []).append(variant)
+        return any(
+            self._time_variant_profile(variants) != baseline for variants in by_place.values()
+        )
+
+    def _time_variant_profile(
+        self,
+        variants: list[dict[str, Any]],
+    ) -> tuple[tuple[str, str, str], ...]:
+        profile: list[tuple[str, str, str]] = []
+        for variant in variants:
+            if variant.get("error"):
+                continue
+            interval = variant.get("interval")
+            interval = interval if isinstance(interval, dict) else {}
+            start = str(interval.get("startUtc") or interval.get("start") or "")
+            end = str(interval.get("endUtc") or interval.get("end") or "")
+            signature = variant.get("signature")
+            signature = signature if isinstance(signature, dict) else {}
+            profile.append((start, end, self._signature_fingerprint(signature)))
+        return tuple(sorted(profile))
 
     @staticmethod
     def _divisional_confidence(precision: str, changed: set[str]) -> dict[str, dict[str, Any]]:
@@ -2530,9 +2670,9 @@ class VedicCalculator:
 
     @staticmethod
     def _precision_radius_minutes(precision: str) -> int:
-        return {"exact": 2, "approximate": 15, "part_of_day": 120, "unknown": 720}.get(
+        return {"exact": 10, "approximate": 30, "part_of_day": 360, "unknown": 720}.get(
             precision,
-            15,
+            30,
         )
 
     @staticmethod
@@ -2640,7 +2780,7 @@ class VedicCalculator:
         if risk_level == "high":
             if not place_rectification_allowed:
                 return "Run prevalidation as time rectification: shrink time candidates before core synthesis; keep detailed place coordinates locked."
-            return "Run prevalidation as rectification: shrink time/place candidates before core synthesis."
+            return "Resolve material place sensitivity from user-confirmed location data before shrinking time candidates."
         if risk_level == "medium":
             if not place_rectification_allowed:
                 return "Run targeted prevalidation and avoid deterministic claims from changed or boundary-sensitive factors; do not move the locked place."
@@ -2650,27 +2790,24 @@ class VedicCalculator:
         )
 
     @staticmethod
-    def _place_rectification_allowed(place: ResolvedPlace) -> bool:
+    def _place_sensitivity_scan_allowed(place: ResolvedPlace) -> bool:
         return place.accuracy in {"city", "district"}
 
-    def _rectification_axes(self, place: ResolvedPlace) -> list[str]:
-        return ["time", "place"] if self._place_rectification_allowed(place) else ["time"]
-
     def _place_rectification_policy(self, place: ResolvedPlace) -> str:
-        if self._place_rectification_allowed(place):
-            return "scan_within_reported_radius"
+        if self._place_sensitivity_scan_allowed(place):
+            return "sensitivity_scan_then_require_user_place_resolution"
         return "locked_precise_coordinates"
 
     def _rectification_guardrails(self, place: ResolvedPlace) -> dict[str, str]:
-        if self._place_rectification_allowed(place):
+        if self._place_sensitivity_scan_allowed(place):
             place_rule = (
-                "City/district coordinates are approximate; place candidates may vary "
-                "only inside the reported radius and must stay consistent with the "
-                "user-selected city or district."
+                "City/district coordinates are sampled only to measure chart sensitivity. "
+                "If that envelope changes material chart fields, ask the user for a more "
+                "precise place; life events must never select a synthetic coordinate."
             )
             feedback_rule = (
-                "If prevalidation misses, shrink time/place candidates before writing "
-                "a deterministic report."
+                "Resolve material place sensitivity from a user-confirmed address or coordinate, "
+                "then shrink time candidates before writing a deterministic report."
             )
         else:
             place_rule = (
@@ -2795,6 +2932,11 @@ class VedicCalculator:
             "place_coordinate_system": place.coordinate_system,
             "time_precision": self._precision_label(intake.birth_time_precision),
             "time_source": intake.time_source,
+            "reported_time_window": (
+                intake.reported_time_window.model_dump()
+                if intake.reported_time_window is not None
+                else None
+            ),
             "reading_focus": intake.reading_focus,
             "life_events": intake.life_events,
             "life_event_facts": intake.life_event_facts,

@@ -5,8 +5,9 @@ reported civil time and place have been canonicalized.
 
 ## Release principle
 
-Rectification may narrow only the user's reported time window and permitted
-place radius. It returns a bounded interval, equivalent intervals, or an
+Rectification may narrow only the user's explicit reported time window. A
+city/district envelope is sampled only to detect place sensitivity; life events
+cannot select a coordinate. The workflow returns a bounded interval, equivalent intervals, or an
 explicit underdetermined result. It never publishes an invented exact second.
 
 The Reader Agent does not rank candidates. Confirming an event already supplied
@@ -18,19 +19,26 @@ by the user is not independent evidence and cannot change a chart score.
    resolve the place to WGS84 coordinates.
 2. Calculate the base Chart Record and scan every minute of the complete allowed
    time window. Scan the place axis only when the location remains city-level or
-   otherwise uncertain.
-3. Coalesce contiguous equal fingerprints into bounded candidate intervals.
+   otherwise uncertain. Joint time/place probes measure whether geographic
+   uncertainty moves a chart boundary; they never enter candidate ranking.
+3. Coalesce contiguous equal, evidence-addressable fingerprints into bounded
+   candidate intervals. Only fields with an active dated-event rule can split a
+   candidate; every other chart change remains in the report-stability scan.
 4. If one fingerprint is stable across the full window, retain the complete
    reported interval. The state is `not_required`; an optional Reader pass may
    ask 1-5 neutral reading-quality questions using only scan-stable facts.
 5. If multiple material candidates remain, stop report synthesis and collect
-   3-5 structured, dated life events. The UI asks for one event per round; after
+   4-5 independent, dated life episodes. The UI asks for one event per round; after
    each accepted answer the backend recalculates the bounded candidate state and
    issues the next deterministic question. Each round records the answered event,
    score spread across candidate classes, before/after leader margin, remaining
    blockers, and the backend-owned next action. Consultation focus is never evidence.
-6. Split eligible events without looking at candidate scores. The third eligible
-   submission is reserved immediately as a stable blind holdout. The interview
+6. Split eligible events without looking at candidate scores. The first event fixes a
+   Life Episode's primary interval; later events overlapping that primary remain
+   corroborating context, so one real-world period cannot vote twice or retroactively
+   move calibration and holdout roles.
+   As soon as the third independent episode exists it is reserved as a stable blind
+   holdout; release still requires three other calibration episodes. The interview
    prefers a third life domain when the user has one and permits a repeated domain
    only when that is the available factual evidence. Later answers cannot
    retroactively move an event from calibration into holdout. The Agent
@@ -42,13 +50,20 @@ by the user is not independent evidence and cannot change a chart score.
    policy records Dasha activation, relevant Varga domain activation, and stable
    Jupiter/Saturn double-transit support. Missing positive support is neutral,
    not fabricated contradiction evidence.
-8. Select only when every candidate has the same calibration event set, at least
-   two calibration events cover at least two mapped life domains, and the leader
-   clears the declared absolute score and margin.
+8. Select only when every candidate has the same calibration episode set, at least
+   three calibration episodes cover at least two mapped life domains, at least two
+   calibration episodes each have support from two of Dasha, relevant Varga, and
+   double-transit methods, and the leader clears the declared score and margin.
+   A material disagreement from the independent Chara Dasha comparison blocks selection.
+   This comparison uses a Vimshottari-only calibration score against diagnostic
+   Chara Dasha across distinct candidate equivalence classes; the aggregate
+   varga/transit score is excluded from the independence check. Its scan-level result
+   is copied to every candidate so the release gate cannot inspect a different leader.
 9. Evaluate the selected candidate or equivalence class against the reserved
-   event. A failed or inconclusive holdout returns `underdetermined`.
+   event. The holdout must itself converge across at least two primary methods.
+   A failed or inconclusive holdout returns `underdetermined`.
 10. Every passed candidate is recalculated once at its bounded representative
-    time/place and enters `rectification_confirmation_required`, including when
+    time and the user-confirmed place and enters `rectification_confirmation_required`, including when
     the selected interval contains the user's reported time. The system shows
     the remaining bounded interval first, the representative local time only as
     its calculation reference, and the submitted-evidence summary. The summary
@@ -70,19 +85,23 @@ the calculator again. A stale answer is rejected and must be refreshed. The
 same lock also protects the current interview while a skip or reset is being
 prepared.
 
-The event date is interpreted as a civil interval in the event location's IANA
-timezone. DST folds include both real instants; a midnight DST gap advances to
-the first valid instant rather than dropping the event. A civil date with no
-valid instant is rejected explicitly.
+The current intake does not infer an event location. A reported event date is therefore
+expanded to the UTC envelope covering every currently valid civil offset from UTC-12
+through UTC+14. Dasha or slow-transit evidence contributes only when it remains stable
+across that envelope. A boundary-sensitive level is marked unavailable instead of
+silently assuming that the event happened in the birth-place timezone.
 
 ## Outcomes
 
-- `collecting_evidence`: fewer than three recognized dated events.
+- `collecting_evidence`: fewer than four independent dated episodes.
 - `underdetermined`: insufficient domain breadth, no clear calibration margin,
   or failed/inconclusive holdout.
 - `multiple_equivalent`: after the maximum five-event set, several bounded
   candidates remain indistinguishable. With remaining event capacity, the state
   stays `underdetermined` and asks another candidate-discriminating question.
+  After capacity is exhausted, questioning stops and a scoped report may use
+  only facts stable across the complete reported time window. The result retains
+  every equivalent interval and never claims one corrected instant.
 - `needs_recalculation`: a bounded interval passed calibration and holdout but has
   not yet been materialized as the active chart.
 - `rectification_confirmation_required`: the selected bounded interval passed,
@@ -94,9 +113,9 @@ valid instant is rejected explicitly.
 - `input_resolution_required` / `calculation_failed`: civil-time/place or
   deterministic provider failure must be fixed before astrological questioning.
 
-Only `corrected_chart_ready` with a passed holdout and an
-open report gate may bypass Reader prevalidation. Stable `not_required` charts
-still use the ordinary pre-reading quality check.
+`corrected_chart_ready` and terminal `multiple_equivalent` states with a passed
+holdout and an open scoped report gate may bypass Reader prevalidation. Stable
+`not_required` charts still use the ordinary pre-reading quality check.
 
 ## Evidence contracts
 
@@ -120,6 +139,9 @@ still use the ordinary pre-reading quality check.
   `impact`, and `dateConfidence`) extracted by the evidence-intake Agent. These
   facts are provenance/context for downstream interpretation; they do not
   override the deterministic astrological score.
+- `vedicdust-rectification-benchmark.json`: offline, source-blind known-time
+  evaluation corpus. It is not a per-user runtime artifact and never enters the
+  Agent context.
 - `reader_prevalidation.md` / `prevalidation_result.json`: stable-chart reading
   quality checks only; they have no candidate-selection authority.
 
@@ -133,11 +155,13 @@ The engine tracks `D1, D2, D3, D4, D5, D7, D9, D10, D12, D16, D20, D24,
 D27, D30, D60` from the same canonical instant and calculation profile.
 
 - D1 remains foundational.
-- D2/D3/D4/D5/D7/D9/D10/D12 may split candidates when their declared
-  rectification fields change.
-- D16/D20/D24/D27/D30 are corroborative at narrower time windows.
-- D60 is final-confirmation-only and cannot create first-pass candidates or
-  independently select a birth time.
+- D2/D4/D7/D9/D10/D12/D20/D24/D30 may split candidates because the active
+  event policy has an executable dated-event channel for those domains.
+- D3/D5/D16/D27 are report-stability and corroboration inputs in the current
+  policy. They cannot manufacture a candidate that no issued question can test.
+- D60 cannot create first-pass candidates or independently select a birth time.
+  It is final-confirmation-only only after the narrowed window gives it adequate
+  stability; otherwise it is restricted to rectification context or omitted.
 
 The backend uses computed transitions rather than assuming a fixed minutes-per-
 division sensitivity. Optional sub-minute refinement searches only the selected
@@ -153,14 +177,34 @@ interval rather than an exact second.
   policy IDs, and source IDs. Until independent professional blind-review
   fixtures exist, the contract remains `product_hypothesis` /
   `internal_regression_only`, and reports retain that limitation explicitly.
+- Event records distinguish the complete observational score from the
+  candidate-selection score. Rahu/Ketu transits, Sade Sati, corroborated KP, and
+  diagnostic Chara Dasha stay visible as auxiliary cross-checks but cannot rank,
+  eliminate, or validate a birth-time candidate. Only Vimshottari Dasha, the
+  event-relevant Varga, and stable Jupiter/Saturn double transit have selection
+  authority in the current policy.
+- Chara Dasha agreement is retained as a diagnostic comparison only. It cannot
+  rank, eliminate, or veto a candidate before independent validation establishes
+  a chart- and event-specific use policy.
+- Method convergence is counted by analysis layer rather than raw observations.
+  D1 Vimshottari activation, use of the same MD/AD/PD lords in the event-relevant
+  Varga, and stable Jupiter/Saturn double transit are distinct layers, not claims
+  of statistical independence. Two layers are required for a convergent event;
+  double transit is corroboration when the event interval can support it, not a
+  universal prerequisite.
 - The contradiction channel is intentionally unused until contrary rules have
   edition-pinned sources and professional review fixtures.
-- Independent JHora desktop golden cases and professional end-to-end review
-  fixtures are not yet populated, so release certification is incomplete.
+- Independent JHora desktop golden cases, source-blind rectification benchmark
+  cases, and professional end-to-end review fixtures are not yet populated, so
+  release certification is incomplete.
 - A Rectification Record cannot promote itself by changing maturity labels. Any
-  `professionally_validated` result must reference a registered
-  `professional_review` fixture whose retained artifact, hash, blind-review
-  protocol, reviewer independence, and reviewed cases pass the fixture gate.
+  `professionally_validated` result must reference both a registered
+  `professional_review` fixture and a registered `rectification_benchmark`
+  fixture. The first checks method fidelity, uncertainty, and communication with
+  an independent practitioner. The second checks source-blind coverage of retained
+  AA known-time intervals and penalizes false exclusion, invalid outcomes, low
+  decisiveness, trivial no-narrowing output, target-leaking time windows, and a
+  benchmark corpus that lacks both direct-subject and deterministic-mask cases.
 - One reserved event is a guard against direct fitting, not statistical proof.
   Sparse or same-domain histories correctly remain underdetermined.
 - The product collects one structured dated event per interaction round. Each accepted

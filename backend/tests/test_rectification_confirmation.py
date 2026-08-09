@@ -25,9 +25,13 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
                         "end": "1990-01-01 08:25",
                     },
                     "evidenceScores": [
-                        {"eventId": "event-calibration", "score": 0.4},
-                        {"eventId": "event-generic", "score": 0.8},
-                        {"eventId": "event-holdout", "score": 0.3},
+                        {
+                            "eventId": "event-calibration",
+                            "score": 0.4,
+                            "selectionScore": 0.4,
+                        },
+                        {"eventId": "event-generic", "score": 1.0, "selectionScore": 0.3},
+                        {"eventId": "event-holdout", "score": 0.3, "selectionScore": 0.3},
                     ],
                 },
                 {
@@ -37,9 +41,13 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
                         "end": "1990-01-01 08:30",
                     },
                     "evidenceScores": [
-                        {"eventId": "event-calibration", "score": 0.0},
-                        {"eventId": "event-generic", "score": 0.8},
-                        {"eventId": "event-holdout", "score": 0.1},
+                        {
+                            "eventId": "event-calibration",
+                            "score": 0.0,
+                            "selectionScore": 0.0,
+                        },
+                        {"eventId": "event-generic", "score": 0.0, "selectionScore": 0.3},
+                        {"eventId": "event-holdout", "score": 0.1, "selectionScore": 0.1},
                     ],
                 },
             ],
@@ -76,6 +84,8 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
             },
             "selectionEvidence": {},
             "holdoutResult": "passed",
+            "methodMaturity": "product_hypothesis",
+            "validationStatus": "internal_regression_only",
         },
         rectified_input=BirthInput(
             birthDate="1990-01-01",
@@ -91,6 +101,13 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
     assert conclusion["examples"][0]["usedForSelection"] is False
     assert "Submitted marriage event" not in conclusion["examples"][0]["prompt"]
     assert conclusion["generation"]["usedForSelection"] is False
+    assert conclusion["selectedInterval"]["boundarySemantics"] == ("start_inclusive_end_exclusive")
+    assert "to before 1990-01-01 08:25" in conclusion["examples"][0]["prompt"]
+    assert conclusion["methodAssurance"] == {
+        "methodMaturity": "product_hypothesis",
+        "validationStatus": "internal_regression_only",
+        "independentProfessionalReviewCompleted": False,
+    }
     assert conclusion["evidenceHighlights"] == [
         {
             "date": "2018",

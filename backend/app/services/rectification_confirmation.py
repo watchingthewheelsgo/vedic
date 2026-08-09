@@ -36,6 +36,8 @@ def build_rectification_conclusion(
     evidence_highlights = _evidence_highlights(state, candidate)
     evidence = state.get("selectionEvidence")
     evidence = evidence if isinstance(evidence, dict) else {}
+    method_maturity = str(state.get("methodMaturity") or "product_hypothesis")
+    validation_status = str(state.get("validationStatus") or "internal_regression_only")
     return {
         "schemaVersion": CONFIRMATION_SCHEMA_VERSION,
         "status": "ready_for_confirmation",
@@ -49,11 +51,31 @@ def build_rectification_conclusion(
             "utcOffsetSeconds": rectified_input.utc_offset_seconds,
             "displayPrecision": "representative_minute_with_bounded_interval",
         },
-        "selectedInterval": interval,
+        "selectedInterval": {
+            **interval,
+            "boundarySemantics": "start_inclusive_end_exclusive",
+        },
+        "methodAssurance": {
+            "methodMaturity": method_maturity,
+            "validationStatus": validation_status,
+            "independentProfessionalReviewCompleted": (
+                method_maturity == "professionally_validated"
+                and validation_status == "independent_professional_review"
+            ),
+        },
         "evidenceSummary": {
             "calibrationEventCount": int(evidence.get("calibrationEventCount") or 0),
+            "calibrationEpisodeCount": int(
+                evidence.get("calibrationEpisodeCount")
+                or evidence.get("calibrationEventCount")
+                or 0
+            ),
             "calibrationCategoryCount": int(evidence.get("calibrationCategoryCount") or 0),
             "holdoutEventCount": int(evidence.get("holdoutEventCount") or 0),
+            "holdoutEpisodeCount": int(
+                evidence.get("holdoutEpisodeCount") or evidence.get("holdoutEventCount") or 0
+            ),
+            "correlatedEventCount": int(evidence.get("correlatedEventCount") or 0),
             "holdoutResult": str(state.get("holdoutResult") or "not_run"),
             "selectionPolicyId": state.get("selectionPolicyId"),
             "method": "dated_life_events_plus_reserved_holdout",
@@ -93,7 +115,7 @@ def _evidence_highlights(
     calibration.sort(
         key=lambda event: (
             _event_score_spread(candidates, str(event.get("eventId") or "")),
-            float(score_by_event.get(str(event.get("eventId") or ""), {}).get("score") or -1),
+            _selection_score(score_by_event.get(str(event.get("eventId") or ""), {}), -1.0),
             -int(event.get("intakeSequence") or 0),
         ),
         reverse=True,
@@ -132,7 +154,7 @@ def _event_score_spread(candidates: list[dict[str, Any]], event_id: str) -> floa
         seen_classes.add(class_id)
         score = next(
             (
-                item.get("score")
+                _selection_score(item)
                 for item in candidate.get("evidenceScores") or []
                 if isinstance(item, dict) and str(item.get("eventId") or "") == event_id
             ),
@@ -143,6 +165,13 @@ def _event_score_spread(candidates: list[dict[str, Any]], event_id: str) -> floa
     return max(scores) - min(scores) if len(scores) > 1 else 0.0
 
 
+def _selection_score(evidence: dict[str, Any], default: float | None = None) -> float | None:
+    value = evidence.get("selectionScore")
+    if value is None:
+        value = evidence.get("score")
+    return float(value) if value is not None else default
+
+
 def _input_review_example(
     rectified_input: BirthInput,
     interval: dict[str, Any],
@@ -150,7 +179,7 @@ def _input_review_example(
     locale = rectified_input.locale
     start = str(interval.get("start") or "")
     end = str(interval.get("end") or "")
-    bounded = f"{start} - {end}" if start and end else rectified_input.birth_time
+    bounded = _bounded_interval_text(locale, start, end, rectified_input.birth_time)
     prompt = (
         f"请确认系统保留的出生时间范围是否可以接受：{bounded}。这只是结果确认，不是新的验前事。"
         if locale == "zh"
@@ -171,6 +200,16 @@ def _input_review_example(
         "source": "deterministic_input_review",
         "usedForSelection": False,
     }
+
+
+def _bounded_interval_text(locale: str, start: str, end: str, fallback: str) -> str:
+    if not start or not end:
+        return fallback
+    if locale == "zh":
+        return f"{start} 至 {end} 前"
+    if locale == "ja":
+        return f"{start} 以上、{end} 未満"
+    return f"{start} to before {end}"
 
 
 def _timezone_id(candidate: dict[str, Any]) -> str | None:

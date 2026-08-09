@@ -1,4 +1,9 @@
 export type BirthTimePrecision = "exact" | "approximate" | "part_of_day" | "unknown";
+export type ReportedTimeWindow = {
+  minutesBefore: number;
+  minutesAfter: number;
+  basis: "user_certainty_choice" | "user_custom_range";
+};
 export type AppLocale = "zh" | "en" | "ja";
 
 export type PlaceSearchLevel = "country" | "region" | "city";
@@ -119,6 +124,7 @@ export type BirthInput = {
   birthTime: string;
   birthPlace: string;
   birthTimePrecision: BirthTimePrecision;
+  reportedTimeWindow?: ReportedTimeWindow;
   gender: string;
   relationship: string;
   timeSource: string;

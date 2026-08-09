@@ -61,11 +61,12 @@ reports and separate career/love report generators are intentionally excluded.
   Vargottama, Moon boundaries suppress Moon/Sade-Sati evidence, and unstable
   Nakshatra/Pada suppresses Vimshottari timing rather than only the Moon fact.
 - Preserve sensitivity at fact granularity and Vimshottari boundary-envelope
-  granularity in `vedicdust-chart-record/1.3.0`.
+  granularity in `vedicdust-chart-record/1.5.0`.
   Each fact now declares canonical dependency fields; the validator recomputes the
   grade, stable D1 graha facts survive Lagna-only boundaries, and interpretive-state
   changes in moon phase, combustion, Shadbala classification, Digbala, Arudha/Upapada,
-  and special Lagnas split candidates and restrict only their dependent fact families.
+  and special Lagnas restrict only their dependent fact families. They remain full-report
+  stability inputs without creating candidates that the dated-event interview cannot test.
 - Carry birth-input stability into every Vimshottari period and recompute timing
   Claim confidence from the lower of Dasha-provider assurance and Moon/Dasha input
   stability. `d1Structure` is now a blocking rectification field rather than a
@@ -104,8 +105,8 @@ reports and separate career/love report generators are intentionally excluded.
 - Remove unsourced 5/7/12-degree qualitative strength labels from same-sign and
   graha-drishti facts. The engine retains the exact sign contact and numerical
   degree separation without importing an undeclared orb policy.
-- Include the primary 7K Chara Karaka role map in both full-chart and lightweight
-  rectification fingerprints. A role change now creates an explicit unstable field
+- Include the primary 7K Chara Karaka role map in full-chart and lightweight
+  sensitivity signatures. A role change creates an explicit unstable field
   and suppresses every dependent `karaka.chara` fact before LLM judgement.
 - Withhold Chara Karaka roles that are tied at the Chart Record's six-decimal
   evidence precision, and expose the ambiguity as a calculation warning instead of
@@ -165,7 +166,18 @@ reports and separate career/love report generators are intentionally excluded.
   are backend projections; the Agent may only arrange approved Claims.
 - Make rectification professional maturity evidence-backed. A record cannot claim
   independent professional validation without registered, hash-verified
-  `professional_review` fixtures; internal records cannot carry those fixture IDs.
+  `professional_review` and `rectification_benchmark` fixtures; internal records
+  cannot carry those fixture IDs. Rectification promotion additionally requires a
+  rectification/end-to-end review scope, at least five blind publish/withhold cases,
+  retained state artifacts, and explicit workflow-dimension assessments.
+- Add the source-blind known-time rectification benchmark contract, evaluator,
+  machine-readable report, schema export, and release thresholds. The evaluator
+  distinguishes hits, partial exclusions, misses, abstentions, and invalid runs;
+  excludes non-AA or unblinded cases from primary metrics; and prevents retaining
+  the complete reported window from being counted as a successful rectification.
+  Protocol 1.1 additionally requires a retained target-free input package and a
+  machine-generated receipt binding it to the terminal Chart Record, clean Git
+  revision, engine-source digest, operator, timestamps, and exact policy versions.
 
 ## P0: correctness and reproducibility
 
@@ -346,6 +358,16 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
   Claim Graph -> Consultation Dossier outputs, including explicit disagreement
   cases and underdetermined outcomes. The executable artifact contract is implemented;
   real independent astrologer reviews and retained case artifacts are still absent.
+- Populate at least 30 consented or lawfully reusable source-blind AA rectification
+  cases with hidden truth commitments, four independently collected dated episodes,
+  retained blind-input packages, terminal Chart Records, runtime receipts, and auditable
+  run/reveal timestamps. The corpus must include
+  at least 10 independently recalled windows, 10 deterministic-mask challenge windows,
+  and 10 end-to-end cases combining independent recall with direct subject-interview
+  histories; public documentary cases alone cannot
+  certify the product interaction. The evaluator and release gate exist; no real case
+  corpus is bundled, so rectification must remain `product_hypothesis` /
+  `internal_regression_only`.
 - Populate a version-controlled representative JHora desktop golden corpus and run
   it as a release/CI certification gate. The loader and strict per-chart comparator
   now require D1 plus all fourteen supported non-D1 vargas, SAV, Shadbala, and

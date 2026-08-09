@@ -22,6 +22,12 @@ from app.vedicdust.independent_reference import (
     IndependentReferenceRegistry,
 )
 from app.vedicdust.professional_review import ProfessionalReviewArtifact
+from app.vedicdust.rectification_benchmark import (
+    RectificationBenchmarkArtifact,
+    RectificationBenchmarkBlindInput,
+    RectificationBenchmarkReport,
+    RectificationBenchmarkRunReceipt,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +44,10 @@ SCHEMAS = {
     "vedicdust-rule-catalog.schema.json": RuleCatalog,
     "vedicdust-validation-fixtures.schema.json": ValidationFixtureRegistry,
     "vedicdust-professional-review.schema.json": ProfessionalReviewArtifact,
+    "vedicdust-rectification-benchmark.schema.json": RectificationBenchmarkArtifact,
+    "vedicdust-rectification-benchmark-report.schema.json": RectificationBenchmarkReport,
+    "vedicdust-rectification-blind-input.schema.json": RectificationBenchmarkBlindInput,
+    "vedicdust-rectification-run-receipt.schema.json": RectificationBenchmarkRunReceipt,
     "vedicdust-independent-reference-registry.schema.json": IndependentReferenceRegistry,
     "vedicdust-independent-reference-certification.schema.json": (
         IndependentReferenceCertificationReport

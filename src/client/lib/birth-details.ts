@@ -1,6 +1,7 @@
 import type { BirthTimePrecision } from "../../shared/domain";
 
-export type BirthDetailsErrorKey = "birthDate" | "birthTime" | "timeSource" | "place" | "gender";
+export type BirthDetailsErrorKey =
+  "birthDate" | "birthTime" | "timePrecision" | "timeSource" | "place" | "gender";
 
 export type BirthDetailsErrors = Partial<Record<BirthDetailsErrorKey, string>>;
 

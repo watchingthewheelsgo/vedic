@@ -14,7 +14,8 @@
             "invariant",
             "same_provider_regression",
             "independent_external",
-            "professional_review"
+            "professional_review",
+            "rectification_benchmark"
           ],
           "title": "Fixturekind",
           "type": "string"
@@ -103,6 +104,19 @@
           },
           "title": "Reviewedcaseids",
           "type": "array"
+        },
+        "reviewScope": {
+          "anyOf": [
+            {
+              "enum": ["calculation_and_judgement", "rectification", "end_to_end"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewscope"
         }
       },
       "required": ["fixtureId", "fixtureKind", "testNodes", "description"],
@@ -113,8 +127,8 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-validation-fixtures/1.0.0",
-      "default": "vedicdust-validation-fixtures/1.0.0",
+      "const": "vedicdust-validation-fixtures/1.2.0",
+      "default": "vedicdust-validation-fixtures/1.2.0",
       "title": "Schemaversion",
       "type": "string"
     },

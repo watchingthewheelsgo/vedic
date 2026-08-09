@@ -34,6 +34,7 @@ from app.schemas import (
     SynastryBirthInput,
 )
 from app.services.chart_rectification import ChartRectificationService
+from app.services.life_event_rectification import MAX_RECTIFICATION_EVENTS
 from app.services.metadata_store import MetadataStore
 from app.services.rectification_interview import (
     build_rectification_interview,
@@ -497,6 +498,15 @@ class SkillRuntime:
         plan = plan if isinstance(plan, dict) else {}
         if plan.get("eventCollectionRequired") is not True:
             raise ValueError("this rectification session does not require more life events")
+        state_ledger = state.get("lifeEventLedger")
+        state_ledger = state_ledger if isinstance(state_ledger, dict) else {}
+        independent_episode_count = int(
+            state_ledger.get("independentEpisodeCount")
+            or state_ledger.get("eligibleEventCount")
+            or 0
+        )
+        if independent_episode_count >= MAX_RECTIFICATION_EVENTS:
+            raise ValueError("this rectification session has reached its independent event limit")
 
         raw_time_context = context.get("time")
         time_context = (
@@ -563,9 +573,14 @@ class SkillRuntime:
         event_ledger = updated_context.get("lifeEvents")
         if (
             not isinstance(event_ledger, dict)
-            or int(event_ledger.get("eligibleEventCount") or 0) < 1
+            or int(
+                event_ledger.get("independentEpisodeCount")
+                or event_ledger.get("eligibleEventCount")
+                or 0
+            )
+            < 1
         ):
-            raise ValueError("at least one dated, recognized life event is required")
+            raise ValueError("at least one independent, dated life episode is required")
 
         self._archive_current_chart_artifacts(session_id, current_record.revision, artifacts)
         session_dir = self.workspace.require_session_dir(session_id)
@@ -919,8 +934,9 @@ class SkillRuntime:
             if has_inaccurate:
                 ledger = next_state.get("lifeEventLedger")
                 ledger = ledger if isinstance(ledger, dict) else {}
-                ledger["eventCollectionRequired"] = True
                 next_state["lifeEventLedger"] = ledger
+                self.rectification._set_additional_event_request(next_state)
+                can_collect_more = ledger.get("eventCollectionRequired") is True
                 next_state.update(
                     {
                         "revision": int(next_state.get("revision") or 0) + 1,
@@ -935,14 +951,27 @@ class SkillRuntime:
                                 "The user did not accept the corrected time interval. The system will "
                                 "not force the chart; provide one new dated event or review the "
                                 "reported birth time."
+                                if can_collect_more
+                                else "The user did not accept the corrected time interval and the "
+                                "maximum independent evidence set has already been reached. The "
+                                "system will preserve an inconclusive result until the reported "
+                                "birth window is reviewed."
                             ),
-                            "nextStep": "provide_more_precise_or_additional_event_evidence",
+                            "nextStep": (
+                                "provide_more_precise_or_additional_event_evidence"
+                                if can_collect_more
+                                else "review_reported_birth_window_or_stop"
+                            ),
                         },
                     }
                 )
                 message = (
                     "Thanks for checking. The corrected interval was not accepted, so the chart will "
                     "not be forced. Add one new dated event to continue the birth-time check."
+                    if can_collect_more
+                    else "The corrected interval was not accepted and the maximum independent "
+                    "evidence set has been reached. Review the reported birth window before "
+                    "continuing."
                 )
             else:
                 report_reason = (
@@ -995,6 +1024,8 @@ class SkillRuntime:
         message: str,
         owner_user_id: str | None,
     ) -> SkillSessionResponse:
+        session_dir = self.workspace.require_session_dir(session_id)
+        (session_dir / RECTIFICATION_INTERVIEW_JSON).unlink(missing_ok=True)
         self.workspace.write_artifact(
             session_id,
             "chart_rectification_state.json",
@@ -1746,6 +1777,15 @@ class SkillRuntime:
             if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
                 self._prepare_judgement_context(session_id, user_message)
             return
+        if (
+            state_status == "multiple_equivalent"
+            and state.get("holdoutResult") == "passed"
+            and state_gate.get("fullReportAllowed") is True
+            and state_gate.get("reportScope") == "stable_intersection_only"
+        ):
+            if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
+                self._prepare_judgement_context(session_id, user_message)
+            return
         result_path = session_dir / "prevalidation_result.json"
         if not result_path.exists():
             raise ValueError(
@@ -2403,6 +2443,24 @@ class SkillRuntime:
         brief: dict[str, Any],
         locale: str,
     ) -> str:
+        public_questions = []
+        for item in brief.get("questions", []):
+            if not isinstance(item, dict):
+                continue
+            public_questions.append(
+                {
+                    key: item[key]
+                    for key in (
+                        "questionId",
+                        "category",
+                        "title",
+                        "prompt",
+                        "whyWeAsk",
+                        "detailsPlaceholder",
+                    )
+                    if key in item
+                }
+            )
         return f"""Rewrite the backend-selected birth-time verification question for a calm,
 clear consumer product.
 
@@ -2411,13 +2469,12 @@ clear consumer product.
 The backend has already selected exactly one question for this round. Rewrite only that question.
 The backend will recalculate candidates after the answer and select the next question. You may
 improve title, prompt, whyWeAsk, and detailsPlaceholder, but you must not invent or switch a
-questionId or category. `questionValue` is private ranking context and must never appear
-in visible wording. Do not mention candidate charts,
+questionId or category. Candidate-ranking context is not included in this prompt. Do not mention candidate charts,
 scores, houses, planets, vargas, D1-D60, or imply that an answer is expected. Keep every
 question factual and non-leading. Never add personality or physical-trait questions.
 
 BACKEND QUESTION BRIEF
-{json.dumps({"questions": brief.get("questions", [])}, ensure_ascii=False, indent=2)}
+{json.dumps({"questions": public_questions}, ensure_ascii=False, indent=2)}
 
 Return JSON only:
 {{
@@ -3144,6 +3201,16 @@ Return JSON only:
         record.rectification.source_ids = [
             str(source_id) for source_id in (state.get("sourceIds") or []) if source_id
         ]
+        record.rectification.professional_review_fixture_ids = [
+            str(fixture_id)
+            for fixture_id in (state.get("professionalReviewFixtureIds") or [])
+            if fixture_id
+        ]
+        record.rectification.rectification_benchmark_fixture_ids = [
+            str(fixture_id)
+            for fixture_id in (state.get("rectificationBenchmarkFixtureIds") or [])
+            if fixture_id
+        ]
         record.rectification.rounds = [
             RectificationRoundRecord.model_validate(item)
             for item in (state.get("rectificationRounds") or [])
@@ -3272,7 +3339,7 @@ Return JSON only:
             ]
             record.rectification.decision.resulting_intervals = []
         elif decision_status == "multiple_equivalent":
-            record.status = "rectification_required"
+            record.status = "ready_for_judgement"
             record.rectification.decision.resulting_interval = None
             candidates_by_id = {
                 candidate.candidate_id: candidate for candidate in record.rectification.candidates
@@ -3291,13 +3358,14 @@ Return JSON only:
                 candidates_by_id[candidate_id].interval for candidate_id in equivalent_ids
             ]
             record.rectification.decision.unresolved_questions = [
-                "Equivalent bounded hypotheses remain; calculate their shared stable-fact "
-                "intersection before releasing a scoped report."
+                "Equivalent bounded birth-time ranges remain. This report uses only facts "
+                "stable across the complete reported time window and does not claim one exact time."
             ]
         else:
             record.status = "rectification_required"
             record.rectification.decision.resulting_interval = None
             record.rectification.decision.resulting_intervals = []
+        record = ChartRecord.model_validate(record.model_dump(by_alias=True, mode="json"))
         updated = record.model_dump_json(by_alias=True, indent=2) + "\n"
         self.workspace.write_artifact(session_id, CHART_RECORD_JSON, updated)
         self.workspace.mark_artifact_checkpoint(
@@ -3424,14 +3492,16 @@ Return JSON only:
             "reader_ready": "chart_ready",
             "reader_validation": (
                 "ready_for_judgement"
-                if rectification_status in {"not_required", "bounded_interval"}
+                if rectification_status
+                in {"not_required", "bounded_interval", "multiple_equivalent"}
                 else "rectification"
             ),
             "core_in_progress": "report_in_progress",
             "core_complete": "report_ready",
             "rectifier_complete": (
                 "ready_for_judgement"
-                if rectification_status in {"not_required", "bounded_interval"}
+                if rectification_status
+                in {"not_required", "bounded_interval", "multiple_equivalent"}
                 else "rectification"
             ),
             "qa_complete": "report_ready",
@@ -4024,7 +4094,9 @@ Return JSON only:
             return [
                 cls._without_holdout_evidence(item)
                 for item in value
-                if not (isinstance(item, dict) and item.get("role") == "holdout")
+                if not (
+                    isinstance(item, dict) and str(item.get("role") or "").startswith("holdout")
+                )
             ]
         if isinstance(value, dict):
             is_life_event_ledger = value.get("schemaVersion") == "life-event-ledger/v1"
@@ -4032,6 +4104,10 @@ Return JSON only:
                 "raw",
                 "categoryCounts",
                 "eligibleEventCount",
+                "independentEpisodeCount",
+                "correlatedEventCount",
+                "calibrationEpisodeCount",
+                "holdoutEpisodeCount",
                 "eventCollectionRequired",
                 "recommendedMinimumEvents",
                 "recommendedRectificationUse",
@@ -4147,6 +4223,9 @@ Hard contract:
 - releaseStatus may be approved only when chart_audit permits judgement, all
   released Claims are accounted for, and dossier qualityChecks pass. Otherwise
   block and explain unresolvedQuestions.
+- When rectification status is multiple_equivalent, retain every interval as valid.
+  Use only non-restricted, scan-stable Claims and never imply that the calculation
+  reference moment is the uniquely corrected birth time.
 
 User request:
 {user_line}""",
@@ -4218,7 +4297,34 @@ User request:
     def _judgement_sensitivity(self, session_id: str) -> dict[str, object]:
         active = self.workspace.read_artifact_text(session_id, ACTIVE_CHART_SENSITIVITY_JSON)
         original = self.workspace.read_artifact_text(session_id, "sensitivity_scan.json")
-        return self._json_dict(active or original or "")
+        sensitivity = self._json_dict(active or original or "")
+        state = self._json_dict(
+            self.workspace.read_artifact_text(session_id, "chart_rectification_state.json") or ""
+        )
+        intersection = state.get("equivalentCandidateIntersection")
+        if state.get("status") != "multiple_equivalent" or not isinstance(intersection, dict):
+            return sensitivity
+
+        unstable = {str(field) for field in (intersection.get("unstableFields") or []) if field}
+        summary = sensitivity.get("summary")
+        summary = dict(summary) if isinstance(summary, dict) else {}
+        summary["changedFields"] = sorted(
+            unstable | {str(field) for field in (summary.get("changedFields") or []) if field}
+        )
+        sensitivity["summary"] = summary
+
+        readiness = sensitivity.get("reportReadiness")
+        readiness = dict(readiness) if isinstance(readiness, dict) else {}
+        contract = readiness.get("llmContract")
+        contract = dict(contract) if isinstance(contract, dict) else {}
+        contract["mustNotUseAsPrimaryEvidence"] = sorted(
+            unstable
+            | {str(field) for field in (contract.get("mustNotUseAsPrimaryEvidence") or []) if field}
+        )
+        readiness["llmContract"] = contract
+        readiness["scope"] = "stable_intersection_only"
+        sensitivity["reportReadiness"] = readiness
+        return sensitivity
 
     @staticmethod
     def _restricted_judgement_evidence(

@@ -53,7 +53,7 @@ type SelectOption<T extends string = string> = {
   labelKey: string;
 };
 
-type FieldKey = "birthDate" | "birthTime" | "place" | "submit";
+type FieldKey = "birthDate" | "birthTime" | "timePrecision" | "place" | "submit";
 type FormErrors = Partial<Record<FieldKey, string>>;
 type AmbiguousTimeChoice = {
   utcOffsetSeconds: number;
@@ -85,7 +85,7 @@ export function Intake() {
   const [gender, setGender] = useState("");
   const [relationship, setRelationship] = useState("");
   const [readingFocus, setReadingFocus] = useState("");
-  const [timePrecision, setTimePrecision] = useState<BirthTimePrecision>("exact");
+  const [timePrecision, setTimePrecision] = useState<BirthTimePrecision | "">("");
   const [timeSource, setTimeSource] = useState("");
   const [utcOffsetSeconds, setUtcOffsetSeconds] = useState<number | null>(null);
   const [ambiguousTime, setAmbiguousTime] = useState<AmbiguousTimeDetail | null>(null);
@@ -123,7 +123,8 @@ export function Intake() {
       utcOffsetSeconds
     ]
   );
-  const birthTimeReady = timePrecision === "unknown" || Boolean(birthTime);
+  const birthTimeReady =
+    Boolean(timePrecision) && (timePrecision === "unknown" || Boolean(birthTime));
   const birthMomentReady = Boolean(birthDate) && birthTimeReady;
   const locationReady = Boolean(place) && locationConfirmed;
   const optionalProfileTouched = Boolean(name || gender || relationship || readingFocus.trim());
@@ -132,12 +133,14 @@ export function Intake() {
     ? `${formatDate(birthDate, { year: "numeric", month: "short", day: "numeric" })} · ${
         timePrecision === "unknown"
           ? t("intake.precision.unknown.label")
-          : formatBirthTime(birthTime, timePrecision)
+          : timePrecision
+            ? formatBirthTime(birthTime, timePrecision)
+            : ""
       }`
     : "";
   const timeSourceOption = TIME_SOURCE_OPTIONS.find((option) => option.value === timeSource);
   const birthMomentDetail = [
-    t(`intake.precision.${timePrecision}.label`),
+    timePrecision ? t(`intake.precision.${timePrecision}.label`) : "",
     timeSourceOption?.labelKey ? t(timeSourceOption.labelKey) : ""
   ]
     .filter(Boolean)
@@ -153,7 +156,8 @@ export function Intake() {
     const nextErrors: FormErrors = {};
 
     if (!birthDate) nextErrors.birthDate = t("intake.error.birthDate");
-    if (timePrecision !== "unknown" && !birthTime) {
+    if (!timePrecision) nextErrors.timePrecision = t("intake.error.timePrecision");
+    if (timePrecision && timePrecision !== "unknown" && !birthTime) {
       nextErrors.birthTime =
         timePrecision === "part_of_day" ? t("intake.error.birthHour") : t("intake.error.birthTime");
     }
@@ -217,7 +221,7 @@ export function Intake() {
           embedded
           birthDate={visualTimeReady ? birthDate : null}
           birthTime={birthTime}
-          timePrecision={timePrecision}
+          timePrecision={timePrecision || "approximate"}
           location={visualLocation}
           timeTitle={t("intake.step.birth")}
           locationTitle={t("intake.step.location")}
@@ -241,7 +245,7 @@ export function Intake() {
           <BirthDateTimeFields
             birthDate={birthDate}
             birthTime={birthTime}
-            timePrecision={timePrecision}
+            timePrecision={timePrecision || "approximate"}
             errors={errors}
             onBirthDateChange={(date) => {
               setBirthDate(date);
@@ -259,6 +263,7 @@ export function Intake() {
 
           <BirthTimePrecisionField
             value={timePrecision}
+            error={errors.timePrecision}
             onChange={(next) => {
               setTimePrecision(next);
               setUtcOffsetSeconds(null);
@@ -268,6 +273,7 @@ export function Intake() {
                 setTimeSource("");
                 clearError(setErrors, "birthTime");
               }
+              clearError(setErrors, "timePrecision");
             }}
           />
 
@@ -579,7 +585,7 @@ function buildBirthInput({
   birthDate: Date | null;
   birthTime: Date | null;
   place: string;
-  timePrecision: BirthTimePrecision;
+  timePrecision: BirthTimePrecision | "";
   gender: string;
   relationship: string;
   readingFocus: string;
@@ -589,12 +595,16 @@ function buildBirthInput({
 }): BirthInput | null {
   if (!birthDate) return null;
   if (!place) return null;
+  if (!timePrecision) return null;
   if (timePrecision !== "unknown" && !birthTime) return null;
   return {
     birthDate: formatBirthDate(birthDate),
     birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
     birthPlace: place,
     birthTimePrecision: timePrecision,
+    ...(timePrecision !== "unknown"
+      ? { reportedTimeWindow: reportedTimeWindowFor(timePrecision) }
+      : {}),
     gender: gender || "未提供",
     relationship: relationship || "未提供",
     readingFocus: readingFocus.trim(),
@@ -603,6 +613,22 @@ function buildBirthInput({
     timeSource: timePrecision === "unknown" ? "时间未知" : timeSource || "未提供",
     ...(utcOffsetSeconds !== null ? { utcOffsetSeconds } : {}),
     locale
+  };
+}
+
+function reportedTimeWindowFor(precision: BirthTimePrecision) {
+  const radius =
+    precision === "exact"
+      ? 10
+      : precision === "approximate"
+        ? 30
+        : precision === "part_of_day"
+          ? 360
+          : 720;
+  return {
+    minutesBefore: radius,
+    minutesAfter: precision === "unknown" ? 719 : radius,
+    basis: "user_certainty_choice" as const
   };
 }
 

@@ -42,10 +42,12 @@ def build_input_sensitivity_assessment(
     timing_sample_count = 0
     if isinstance(timing_sampling, Mapping):
         raw_status = str(timing_sampling.get("status") or "failed")
-        timing_status = raw_status if raw_status in {"complete", "partial", "failed"} else "failed"
+        timing_status = (
+            raw_status if raw_status in {"complete", "partial", "failed", "not_run"} else "failed"
+        )
         raw_count = timing_sampling.get("successfulSampleCount")
         timing_sample_count = int(raw_count) if isinstance(raw_count, (int, float)) else 0
-        if timing_status == "failed":
+        if timing_status in {"failed", "not_run"}:
             timing_sample_count = 0
     return InputSensitivityAssessment(
         scanStatus="partial" if error_count else "complete",

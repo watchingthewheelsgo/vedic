@@ -221,18 +221,28 @@ events, preserve holdout events for validation, and allow an underdetermined
 result. D60 is unavailable as primary evidence until the input is already
 stable enough for D60 to remain meaningful.
 
+The candidate fingerprint is narrower than the report-stability fingerprint.
+It includes D1 plus D2/D4/D7/D9/D10/D12/D20/D24/D30 fields that the active
+dated-event policy can test. D3/D5/D16/D27, D60, strengths, special points,
+Chara Karaka ordering, and other interpretive states still mark facts unstable,
+but cannot split a candidate when no current question and scoring rule can
+distinguish that split.
+
 An event date is an uncertainty interval unless an event time was supplied.
-The calculator converts the full interval from the birth-place IANA time zone
-to UTC. Vimshottari eligibility is checked against exact PyJHora MD/AD/PD
+When the event location is unknown, the calculator expands the full civil interval
+to the UTC envelope spanning UTC-12 through UTC+14 rather than assuming the birth
+place. Vimshottari eligibility is checked against exact PyJHora MD/AD/PD
 boundaries; slow-transit and diagnostic Chara Dasha evidence may still sample
 the interval. These transparent ranking features use
-`vedicdust-rectification-event-ranking/1.13.0`: correlated matches within one
-Dasha level contribute that level's weight once. Varga-domain selection
+`vedicdust-rectification-event-ranking/1.20.0`: correlated matches within one
+Dasha level contribute that level's weight once, and overlapping reported date
+intervals form one independently counted Life Episode. Varga-domain selection
 uses `vedicdust-varga-domain-policy/1.0.0`, pinned to P.V.R. Narasimha Rao's
 _Vedic Astrology: An Integrated Approach_ (first published 2000; author update
 2010, PDF pp. 71-73). The backend-bound event subtype is part of the event
-identity and may choose a more specific versioned mapping; free text and Agent
-output cannot change it. Event-house and karaka mappings and all numerical weights
+identity and selects the versioned `vedicdust-rectification-event-map/1.6.0`
+mapping for every concrete user-facing subtype; `other` deliberately retains the
+category rule. Free text and Agent output cannot change it. Event-house and karaka mappings and all numerical weights
 remain VedicDust product hypotheses. An unmatched
 activation is neutral missing evidence, not a contradiction, because the
 versioned event map is not an exhaustive causal theory. Only Dasha lords whose
@@ -242,16 +252,40 @@ A period level crossed by the reported interval is withheld. A provider response
 that omits a level without reporting such a boundary fails candidate scoring.
 Year-only events cannot add
 double-transit evidence; month- and day-level transit support must remain active
-at every interval sample rather than appearing at one convenient instant. The support score ranks candidates;
+at every interval sample rather than appearing at one convenient instant. Each
+event retains a complete observational score, including auxiliary Rahu/Ketu,
+Sade Sati, and corroborated KP signals, plus a separate candidate-selection
+score. Only Vimshottari Dasha, the event-relevant Varga, and stable
+Jupiter/Saturn double transit enter the selection score, calibration aggregate,
+event-discrimination test, or hidden holdout result. Auxiliary signals remain
+auditable but cannot break a tie or reverse a candidate ranking. The selection score ranks candidates;
 it is not a probability or proof that an event was astrologically caused.
+The candidate margin is `0.05`, aligned with the policy's smallest repeatedly
+actionable pattern: two `0.08` event-relevant Varga differences across three
+calibration episodes produce an aggregate lead of about `0.053`. One isolated
+Varga difference produces only about `0.027` and remains insufficient. This is
+a versioned product threshold, not a classical constant or statistical confidence.
 
 Candidate selection uses deterministic calibration-event scores only. Reader
 feedback, personality testimony, appearance, preferences, and repeated wording of
 an event cannot alter candidate rank, break a tie, or raise rectification confidence.
+The release gate requires three calibration events across at least two mapped life
+domains. D1 Vimshottari activation, activation of the same period lords in the
+event-relevant Varga, and stable Jupiter/Saturn double transit are distinct
+analysis layers, not statistically independent votes. At least two calibration
+events, and the reserved holdout event, must each receive support from at least
+two layers. This permits D1 period activation plus the relevant Varga without
+making double transit a universal requirement for every event. Chara Dasha
+agreement remains a non-authoritative diagnostic. Agreement, disagreement,
+unavailability, or a tie cannot rank, eliminate, or block a candidate until this
+cross-check earns source-blind and professional validation.
 The reserved holdout event remains outside calibration ranking and must pass before
 a selected chart is released. When the evidence does not separate candidates, the
 system requests genuinely new dated evidence or returns `underdetermined`; it does
 not ask the model to map an answer back to a preferred chart.
+If all remaining intervals are equivalent after the fifth independent episode,
+the workflow stops questioning, preserves every interval, and permits judgement
+only from facts stable across the complete reported input window.
 
 Professionally validated `directional` interpretation remains disabled until a
 professional-review fixture is auditable rather than merely labelled. Such a fixture must retain the reviewed case
@@ -274,15 +308,15 @@ for any candidate interval, rectification enters `calculation_failed`; successfu
 siblings cannot be ranked against an incompletely evaluated alternative, and no
 model-generated questions are accepted until calculation is retried.
 
-Three events are the minimum, not an automatic stopping point. If calibration,
+Four events are the minimum, not an automatic stopping point. If calibration,
 holdout, or candidate equivalence remains inconclusive, the backend issues one
 new candidate-discriminating question at a time up to five events. Only then
 does it preserve an underdetermined or equivalent interval instead of forcing a
 representative minute.
 
-When a chart-changing input window has fewer than three recognized dated events,
+When a chart-changing input window has fewer than four recognized dated events,
 the workflow enters `collecting_evidence` without invoking the Reader. The user
-supplies three to five concise event records through structured cards; one event
+supplies four to five concise event records through structured cards; one event
 is reserved score-blind as holdout, and the calculator reruns candidate event
 scoring. Calibration ranking and the reserved-event check are backend-owned; the
 Reader never receives candidate contrasts and no repeated confirmation of an
@@ -306,9 +340,13 @@ five-second resolution. It never converts that computational boundary into a
 claimed exact birth second; independent evidence still governs the final birth-time
 certainty.
 
-City- and district-level coordinates always require place rectification or an
-explicit equivalence result. Geographic envelope samples use the complete declared
-`radiusKm`; the engine does not silently clip a wide municipality to 30 km.
+City- and district-level coordinates are sampled only for geographic sensitivity.
+If the declared envelope changes material chart fields, the workflow requires a
+user-confirmed address or coordinate before time rectification. Life-event answers
+never select or synthesize a birthplace coordinate. Geographic samples use the
+complete declared `radiusKm`; the engine does not silently clip a wide municipality.
+Joint time/place samples are diagnostics only and are excluded from event scoring
+and candidate selection.
 
 ### 7. Claim synthesis
 
@@ -406,6 +444,10 @@ declare its assurance kind. Contract and invariant tests establish internal
 behavior; same-provider regressions detect adapter drift; independent-external
 fixtures establish cross-implementation agreement; professional-review fixtures
 record expert judgement review under the machine-validated blind-review contract.
+Rectification-benchmark fixtures are a separate assurance class: they evaluate
+whether source-blind output intervals retain a hidden AA-rated known birth-time
+interval, whether the engine abstains instead of forcing an answer, and whether
+successful answers materially narrow the reported window.
 The contract can preserve accepted-with-reservations and withheld cases without
 turning disagreement into approval. Only the last category can help authorize a strict
 `directional` interpretation rule, and it cannot replace the pinned textual source.
@@ -413,7 +455,16 @@ Source grounding plus executable contracts may authorize only the lower-assuranc
 `traditional_tendency` permission described above.
 Rectification maturity labels are not self-authenticating: a professionally
 validated Rectification Record must retain registered professional-review fixture
-IDs, and provenance validation rejects unknown or non-professional fixtures.
+IDs and registered source-blind rectification-benchmark fixture IDs. Provenance
+validation rejects missing, unknown, misclassified, hash-invalid, or release-gate-
+failing evidence. Expert review cannot substitute for known-time outcome testing,
+and known-time coverage cannot substitute for expert method review.
+The professional-review fixture must declare `rectification` or `end_to_end`
+scope; a calculation/report-language review cannot certify birth-time correction.
+That review requires at least five blind cases containing both publish and withhold
+outcomes, the retained Rectification State, and explicit assessments of candidate
+construction, event-method fidelity, holdout independence, stopping/abstention,
+and uncertainty communication.
 
 Runtime evidence confidence cannot outrun derivation maturity. A provisional
 calculation rule may emit only provisional, disputed, or unavailable evidence;

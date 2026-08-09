@@ -92,7 +92,7 @@ def test_chart_record_is_the_public_calculation_contract(tmp_path: Path) -> None
     workspace.write_artifact(
         session_id,
         "chart_record.json",
-        '{"schemaVersion":"vedicdust-chart-record/1.3.0","chartRecordId":"chart-1"}\n',
+        '{"schemaVersion":"vedicdust-chart-record/1.5.0","chartRecordId":"chart-1"}\n',
     )
     workspace.write_artifact(session_id, "obsolete_artifact.md", "# ignored\n")
 
@@ -166,6 +166,11 @@ def test_reader_agent_view_is_minimal_and_blind_to_holdout_evidence() -> None:
                             "eventId": "evt-private",
                             "role": "holdout",
                             "description": secret,
+                        },
+                        {
+                            "eventId": "evt-private-context",
+                            "role": "holdout_context",
+                            "description": f"{secret}_CORROBORATING",
                         },
                     ],
                 }

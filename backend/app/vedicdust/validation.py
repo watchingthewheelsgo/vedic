@@ -18,6 +18,7 @@ from .rule_engine import evaluate_method_rule
 from .rectification_policy import (
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_HOLDOUT_POLICY_ID,
+    MINIMUM_RECTIFICATION_EVENTS,
     RECTIFICATION_SCORING_POLICY_ID,
     RECTIFICATION_SOURCE_IDS,
 )
@@ -133,6 +134,19 @@ def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) 
                 errors.append(
                     f"rectification fixture {fixture_id} is not a professional review fixture"
                 )
+            elif fixture.review_scope not in {"rectification", "end_to_end"}:
+                errors.append(
+                    f"rectification professional review fixture {fixture_id} does not review "
+                    "the rectification workflow"
+                )
+        for fixture_id in record.rectification.rectification_benchmark_fixture_ids:
+            fixture = fixture_registry.get(fixture_id)
+            if fixture is None:
+                errors.append(f"unknown rectification benchmark fixture {fixture_id}")
+            elif fixture.fixture_kind != "rectification_benchmark":
+                errors.append(
+                    f"rectification fixture {fixture_id} is not a source-blind benchmark fixture"
+                )
         for candidate in record.rectification.candidates:
             for score in candidate.evidence_scores:
                 unknown_rules = sorted(set(score.rule_ids) - set(rules_by_id))
@@ -162,7 +176,7 @@ def validate_chart_record_provenance(record: ChartRecord, catalog: RuleCatalog) 
                     errors.append(f"rectification scoring policy drift for event {score.event_id}")
                 if score.event_mapping_id != RECTIFICATION_EVENT_MAPPING_ID:
                     errors.append(f"rectification event mapping drift for event {score.event_id}")
-        if len(record.rectification.life_events) >= 3:
+        if len(record.rectification.life_events) >= MINIMUM_RECTIFICATION_EVENTS:
             holdout_count = sum(
                 1 for event in record.rectification.life_events if event.role == "holdout"
             )

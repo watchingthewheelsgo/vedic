@@ -39,11 +39,29 @@ SkillName = Literal[
 ]
 
 
+class ReportedTimeWindow(ApiModel):
+    minutes_before: int = Field(alias="minutesBefore", ge=0, le=720)
+    minutes_after: int = Field(alias="minutesAfter", ge=0, le=720)
+    basis: Literal["user_certainty_choice", "user_custom_range"] = Field(
+        default="user_certainty_choice"
+    )
+
+    @model_validator(mode="after")
+    def validate_span(self) -> ReportedTimeWindow:
+        if self.minutes_before + self.minutes_after > 1439:
+            raise ValueError("reported birth-time window cannot exceed one civil day")
+        return self
+
+
 class BirthInput(ApiModel):
     birth_date: str = Field(alias="birthDate", min_length=8, max_length=20)
     birth_time: str = Field(default="", alias="birthTime", max_length=20)
     birth_place: str = Field(alias="birthPlace", min_length=2, max_length=160)
     birth_time_precision: BirthTimePrecision = Field(alias="birthTimePrecision")
+    reported_time_window: ReportedTimeWindow | None = Field(
+        default=None,
+        alias="reportedTimeWindow",
+    )
     gender: str = Field(default="[待填]", max_length=80)
     relationship: str = Field(default="[待填]", max_length=120)
     time_source: str = Field(default="未追问", alias="timeSource", max_length=120)

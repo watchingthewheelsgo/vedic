@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -8,6 +9,9 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .models import ContractModel, ValidationFixtureReference
+
+
+MINIMUM_RECTIFICATION_REVIEW_CASES = 5
 
 
 class RetainedReviewArtifact(ContractModel):
@@ -22,15 +26,25 @@ class ProfessionalReviewAssessment(ContractModel):
     reader_comprehensibility: Literal["accepted", "reservation", "rejected"]
 
 
+class ProfessionalRectificationAssessment(ContractModel):
+    candidate_construction: Literal["accepted", "reservation", "rejected"]
+    event_method_fidelity: Literal["accepted", "reservation", "rejected"]
+    holdout_independence: Literal["accepted", "reservation", "rejected"]
+    stopping_and_abstention: Literal["accepted", "reservation", "rejected"]
+    uncertainty_communication: Literal["accepted", "reservation", "rejected"]
+
+
 class ProfessionalReviewCase(ContractModel):
     case_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{2,79}$")
     chart_record: RetainedReviewArtifact
     claim_graph: RetainedReviewArtifact
     consultation_dossier: RetainedReviewArtifact
+    rectification_state: RetainedReviewArtifact | None = None
     expected_disposition: Literal["publish", "withhold"]
     observed_disposition: Literal["publish", "withhold"]
     decision: Literal["accepted", "accepted_with_reservations", "rejected"]
     assessment: ProfessionalReviewAssessment
+    rectification_assessment: ProfessionalRectificationAssessment | None = None
     disagreements: list[str] = Field(default_factory=list)
     rationale: str = Field(min_length=20)
 
@@ -44,10 +58,11 @@ class ProfessionalReviewCase(ContractModel):
 
 
 class ProfessionalReviewArtifact(ContractModel):
-    schema_version: Literal["vedicdust-professional-review/1.0.0"] = (
-        "vedicdust-professional-review/1.0.0"
+    schema_version: Literal["vedicdust-professional-review/1.1.0"] = (
+        "vedicdust-professional-review/1.1.0"
     )
     protocol_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._/-]+$")
+    review_scope: Literal["calculation_and_judgement", "rectification", "end_to_end"]
     reviewer_id: str = Field(min_length=3)
     reviewer_credentials: list[str] = Field(min_length=1)
     reviewed_at: datetime
@@ -67,6 +82,27 @@ class ProfessionalReviewArtifact(ContractModel):
         case_ids = [case.case_id for case in self.cases]
         if len(case_ids) != len(set(case_ids)):
             raise ValueError("professional review contains duplicate case ids")
+        if self.review_scope in {"rectification", "end_to_end"}:
+            if len(self.cases) < MINIMUM_RECTIFICATION_REVIEW_CASES:
+                raise ValueError(
+                    "rectification professional review requires at least "
+                    f"{MINIMUM_RECTIFICATION_REVIEW_CASES} blind cases"
+                )
+            dispositions = {case.expected_disposition for case in self.cases}
+            if dispositions != {"publish", "withhold"}:
+                raise ValueError(
+                    "rectification professional review requires publish and withhold cases"
+                )
+            for case in self.cases:
+                if case.rectification_state is None or case.rectification_assessment is None:
+                    raise ValueError(
+                        "rectification professional review cases require state evidence and "
+                        "a rectification-specific assessment"
+                    )
+                if case.assessment.method_fidelity == "not_applicable":
+                    raise ValueError(
+                        "rectification professional review must assess method fidelity"
+                    )
         return self
 
 
@@ -87,6 +123,8 @@ def validate_professional_review_fixture(
         raise ValueError("professional review reviewer does not match fixture metadata")
     if artifact.reviewed_at != fixture.reviewed_at:
         raise ValueError("professional review timestamp does not match fixture metadata")
+    if artifact.review_scope != fixture.review_scope:
+        raise ValueError("professional review scope does not match fixture metadata")
     artifact_case_ids = {case.case_id for case in artifact.cases}
     if artifact_case_ids != set(fixture.reviewed_case_ids):
         raise ValueError("professional review case ids do not match fixture metadata")
@@ -111,6 +149,23 @@ def validate_professional_review_fixture(
             "Consultation Dossier",
             case.consultation_dossier,
         )
+        if case.rectification_state is not None:
+            state_path = _verify_retained_artifact(
+                evidence_path.parent,
+                case.case_id,
+                "Rectification State",
+                case.rectification_state,
+            )
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                failures.append(f"{case.case_id}: Rectification State is not valid JSON")
+            else:
+                if not isinstance(state, dict) or not state.get("status"):
+                    failures.append(f"{case.case_id}: Rectification State has no terminal status")
+                for field in ("selectionPolicyId", "eventMappingId", "holdoutPolicyId"):
+                    if not state.get(field):
+                        failures.append(f"{case.case_id}: Rectification State is missing {field}")
         if case.expected_disposition != case.observed_disposition:
             failures.append(f"{case.case_id}: publish/withhold disposition mismatch")
         if case.decision == "rejected":
@@ -125,6 +180,17 @@ def validate_professional_review_fixture(
                 f"{case.case_id}: rejected assessment dimensions "
                 + ", ".join(sorted(rejected_dimensions))
             )
+        if case.rectification_assessment is not None:
+            rejected_rectification_dimensions = [
+                field_name
+                for field_name, value in case.rectification_assessment.model_dump().items()
+                if value == "rejected"
+            ]
+            if rejected_rectification_dimensions:
+                failures.append(
+                    f"{case.case_id}: rejected rectification dimensions "
+                    + ", ".join(sorted(rejected_rectification_dimensions))
+                )
     if failures:
         raise ValueError("professional review fixture failed: " + "; ".join(failures))
     return artifact
@@ -135,7 +201,7 @@ def _verify_retained_artifact(
     case_id: str,
     label: str,
     retained: RetainedReviewArtifact,
-) -> None:
+) -> Path:
     artifact_path = Path(retained.path).expanduser()
     if not artifact_path.is_absolute():
         artifact_path = review_dir / artifact_path
@@ -145,3 +211,4 @@ def _verify_retained_artifact(
     digest = "sha256:" + hashlib.sha256(artifact_path.read_bytes()).hexdigest()
     if digest != retained.sha256:
         raise ValueError(f"{label} artifact hash mismatch for {case_id}")
+    return artifact_path

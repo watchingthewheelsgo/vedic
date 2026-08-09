@@ -58,6 +58,13 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
     rectification_status = (
         record.rectification.decision.status if record.rectification else "not_required"
     )
+    stable_intersection_ready = bool(
+        record.rectification
+        and rectification_status == "multiple_equivalent"
+        and record.status == "ready_for_judgement"
+        and record.rectification.decision.holdout_result == "passed"
+        and len(record.rectification.decision.resulting_intervals) >= 2
+    )
     if rectification_status == "input_resolution_required":
         findings.append(
             AuditFinding(
@@ -99,7 +106,12 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
                 category="rectification",
                 field_refs=["rectification.decision"],
                 message="Decision-relevant chart facts still vary inside the reported window.",
-                required_action="Continue rectification or retain a bounded uncertainty disclosure.",
+                required_action=(
+                    "Use only facts stable across the retained intervals and disclose that the "
+                    "exact birth time remains unresolved."
+                    if stable_intersection_ready
+                    else "Continue rectification or retain a bounded uncertainty disclosure."
+                ),
             )
         )
 
@@ -107,12 +119,16 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
     if has_blocker:
         status = "blocked"
         next_steps = ["collect_input"]
-    elif rectification_status in {
-        "collecting_evidence",
-        "comparing_candidates",
-        "multiple_equivalent",
-        "underdetermined",
-    }:
+    elif (
+        rectification_status
+        in {
+            "collecting_evidence",
+            "comparing_candidates",
+            "multiple_equivalent",
+            "underdetermined",
+        }
+        and not stable_intersection_ready
+    ):
         status = "passed_with_limits"
         next_steps = ["rectify"]
     else:

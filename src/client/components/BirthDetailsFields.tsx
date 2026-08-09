@@ -83,22 +83,28 @@ export function BirthDateTimeFields({
 
 export function BirthTimePrecisionField({
   value,
+  error,
   onChange
 }: {
-  value: BirthTimePrecision;
+  value: BirthTimePrecision | "";
+  error?: string;
   onChange: (value: BirthTimePrecision) => void;
 }) {
   const { t } = useI18n();
-  const selectedOption =
-    TIME_PRECISION_OPTIONS.find((option) => option.value === value) ?? TIME_PRECISION_OPTIONS[0];
+  const selectedOption = TIME_PRECISION_OPTIONS.find((option) => option.value === value);
 
   return (
     <Field
       label={t("intake.precision.label")}
       icon={<ShieldCheck size={16} />}
-      hint={t(`intake.precision.${selectedOption.value}.description`)}
+      hint={
+        selectedOption
+          ? t(`intake.precision.${selectedOption.value}.description`)
+          : t("intake.precision.placeholder")
+      }
       hintDisplay="tooltip"
       className="mb-0"
+      error={error}
     >
       <Select value={value} onValueChange={(next) => onChange(next as BirthTimePrecision)}>
         <SelectTrigger>
@@ -112,9 +118,11 @@ export function BirthTimePrecisionField({
           ))}
         </SelectContent>
       </Select>
-      <p className="mb-0 mt-2.5 text-xs leading-relaxed text-cream/48">
-        {t(`intake.precision.${selectedOption.value}.description`)}
-      </p>
+      {selectedOption && (
+        <p className="mb-0 mt-2.5 text-xs leading-relaxed text-cream/48">
+          {t(`intake.precision.${selectedOption.value}.description`)}
+        </p>
+      )}
     </Field>
   );
 }

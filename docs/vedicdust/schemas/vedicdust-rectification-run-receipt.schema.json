@@ -1,0 +1,90 @@
+{
+  "additionalProperties": false,
+  "description": "Machine-produced binding between one blind input and one runtime output.",
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-rectification-run-receipt/1.0.0",
+      "default": "vedicdust-rectification-run-receipt/1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "caseId": {
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,79}$",
+      "title": "Caseid",
+      "type": "string"
+    },
+    "runnerId": {
+      "const": "vedicdust-production-runtime/1.0.0",
+      "default": "vedicdust-production-runtime/1.0.0",
+      "title": "Runnerid",
+      "type": "string"
+    },
+    "engineRevision": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Enginerevision",
+      "type": "string"
+    },
+    "engineSourceSha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Enginesourcesha256",
+      "type": "string"
+    },
+    "workingTreeClean": {
+      "title": "Workingtreeclean",
+      "type": "boolean"
+    },
+    "runOperatorId": {
+      "minLength": 3,
+      "title": "Runoperatorid",
+      "type": "string"
+    },
+    "runStartedAt": {
+      "format": "date-time",
+      "title": "Runstartedat",
+      "type": "string"
+    },
+    "runCompletedAt": {
+      "format": "date-time",
+      "title": "Runcompletedat",
+      "type": "string"
+    },
+    "blindInputSha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Blindinputsha256",
+      "type": "string"
+    },
+    "chartRecordSha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Chartrecordsha256",
+      "type": "string"
+    },
+    "selectionPolicyId": {
+      "title": "Selectionpolicyid",
+      "type": "string"
+    },
+    "eventMappingId": {
+      "title": "Eventmappingid",
+      "type": "string"
+    },
+    "holdoutPolicyId": {
+      "title": "Holdoutpolicyid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "caseId",
+    "engineRevision",
+    "engineSourceSha256",
+    "workingTreeClean",
+    "runOperatorId",
+    "runStartedAt",
+    "runCompletedAt",
+    "blindInputSha256",
+    "chartRecordSha256",
+    "selectionPolicyId",
+    "eventMappingId",
+    "holdoutPolicyId"
+  ],
+  "title": "RectificationBenchmarkRunReceipt",
+  "type": "object"
+}

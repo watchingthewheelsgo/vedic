@@ -321,6 +321,10 @@
           "title": "Eventid",
           "type": "string"
         },
+        "episodeId": {
+          "title": "Episodeid",
+          "type": "string"
+        },
         "eventFingerprint": {
           "anyOf": [
             {
@@ -390,6 +394,52 @@
           "title": "Contradictionscore",
           "type": "number"
         },
+        "selectionScore": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Selectionscore",
+          "type": "number"
+        },
+        "selectionSupportScore": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Selectionsupportscore",
+          "type": "number"
+        },
+        "selectionContradictionScore": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Selectioncontradictionscore",
+          "type": "number"
+        },
+        "methodConvergenceComponents": {
+          "items": {
+            "enum": ["dasha", "varga", "double_transit"],
+            "type": "string"
+          },
+          "title": "Methodconvergencecomponents",
+          "type": "array"
+        },
+        "methodConvergenceLayers": {
+          "items": {
+            "enum": ["d1_period_activation", "domain_varga_activation", "double_transit"],
+            "type": "string"
+          },
+          "title": "Methodconvergencelayers",
+          "type": "array"
+        },
+        "methodConvergenceCount": {
+          "default": 0,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Methodconvergencecount",
+          "type": "integer"
+        },
+        "methodConvergenceMet": {
+          "default": false,
+          "title": "Methodconvergencemet",
+          "type": "boolean"
+        },
         "observations": {
           "items": {
             "$ref": "#/$defs/RectificationEvidenceObservation"
@@ -422,6 +472,11 @@
           "title": "Eventmappingid",
           "type": "string"
         },
+        "eventTimezoneBasis": {
+          "const": "unknown_event_location_utc_offset_envelope",
+          "title": "Eventtimezonebasis",
+          "type": "string"
+        },
         "explanation": {
           "title": "Explanation",
           "type": "string"
@@ -429,15 +484,20 @@
       },
       "required": [
         "eventId",
+        "episodeId",
         "role",
         "score",
         "supportScore",
         "contradictionScore",
+        "selectionScore",
+        "selectionSupportScore",
+        "selectionContradictionScore",
         "observations",
         "ruleIds",
         "sourceIds",
         "scoringPolicyId",
         "eventMappingId",
+        "eventTimezoneBasis",
         "explanation"
       ],
       "title": "CandidateEvidenceScore",
@@ -500,6 +560,12 @@
           "default": null,
           "title": "Aggregatescore"
         },
+        "convergentCalibrationEventCount": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Convergentcalibrationeventcount",
+          "type": "integer"
+        },
         "boundaryResolutionSeconds": {
           "default": 60,
           "exclusiveMinimum": 0,
@@ -539,6 +605,18 @@
           "enum": ["none", "medium", "high"],
           "title": "Ayanamsarisk",
           "type": "string"
+        },
+        "vimshottariDashaScore": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vimshottaridashascore"
         },
         "charaDashaScore": {
           "anyOf": [
@@ -933,6 +1011,10 @@
           "title": "Eventid",
           "type": "string"
         },
+        "episodeId": {
+          "title": "Episodeid",
+          "type": "string"
+        },
         "category": {
           "title": "Category",
           "type": "string"
@@ -957,6 +1039,11 @@
           "title": "Dateprecision",
           "type": "string"
         },
+        "eventTimezoneBasis": {
+          "const": "unknown_event_location_utc_offset_envelope",
+          "title": "Eventtimezonebasis",
+          "type": "string"
+        },
         "description": {
           "title": "Description",
           "type": "string"
@@ -972,9 +1059,11 @@
       },
       "required": [
         "eventId",
+        "episodeId",
         "category",
         "interval",
         "datePrecision",
+        "eventTimezoneBasis",
         "description",
         "role",
         "evidence"
@@ -1221,8 +1310,8 @@
       "additionalProperties": false,
       "properties": {
         "schemaVersion": {
-          "const": "vedicdust-rectification/1.5.0",
-          "default": "vedicdust-rectification/1.5.0",
+          "const": "vedicdust-rectification/1.7.0",
+          "default": "vedicdust-rectification/1.7.0",
           "title": "Schemaversion",
           "type": "string"
         },
@@ -1286,6 +1375,13 @@
             "type": "string"
           },
           "title": "Professionalreviewfixtureids",
+          "type": "array"
+        },
+        "rectificationBenchmarkFixtureIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rectificationbenchmarkfixtureids",
           "type": "array"
         },
         "reportedWindow": {
@@ -1355,6 +1451,31 @@
           "default": null,
           "title": "Eventid"
         },
+        "episodeId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Episodeid"
+        },
+        "episodeRelation": {
+          "anyOf": [
+            {
+              "enum": ["primary", "corroborating"],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Episoderelation"
+        },
         "eventFingerprint": {
           "anyOf": [
             {
@@ -1419,7 +1540,13 @@
         "role": {
           "anyOf": [
             {
-              "enum": ["calibration", "holdout"],
+              "enum": [
+                "calibration",
+                "holdout",
+                "calibration_context",
+                "holdout_context",
+                "context_only"
+              ],
               "type": "string"
             },
             {
@@ -1500,6 +1627,7 @@
             "holdout_failed",
             "holdout_inconclusive",
             "candidate_scores_separated",
+            "correlated_episode_recorded",
             "evidence_recorded_without_required_margin"
           ],
           "title": "Outcome",
@@ -2279,8 +2407,8 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-chart-record/1.3.0",
-      "default": "vedicdust-chart-record/1.3.0",
+      "const": "vedicdust-chart-record/1.5.0",
+      "default": "vedicdust-chart-record/1.5.0",
       "title": "Schemaversion",
       "type": "string"
     },

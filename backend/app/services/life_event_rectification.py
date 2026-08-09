@@ -10,12 +10,19 @@ from typing import Any
 import pytz
 
 from app.calculator.constants import SIGNS, SIGN_LORDS
+from app.vedicdust.event_time import (
+    EVENT_TIMEZONE_BASIS,
+    event_utc_envelope,
+    event_utc_sample_envelope,
+)
 from app.vedicdust.rectification_policy import (
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_EVENT_RULES,
     RECTIFICATION_HOLDOUT_POLICY_ID,
     RECTIFICATION_KP_RULE_ID,
+    MINIMUM_RECTIFICATION_EVENTS,
     RECTIFICATION_RULE_ID,
+    RECTIFICATION_SELECTION_COMPONENTS,
     RECTIFICATION_SOURCE_IDS,
     RECTIFICATION_SCORING_POLICY,
     rectification_rules_for,
@@ -66,6 +73,7 @@ DATE_PATTERN = re.compile(
     r")?"
 )
 MAX_RECTIFICATION_EVENTS = 5
+MIN_RECTIFICATION_EVENTS = MINIMUM_RECTIFICATION_EVENTS
 
 
 def parse_life_event_ledger(
@@ -116,9 +124,24 @@ def parse_life_event_ledger(
 
     eligible_events = [event for event in events if event.get("category") != "unknown"]
     for event in events:
-        event["role"] = "calibration" if event in eligible_events else "context_only"
-    if len(eligible_events) >= 3:
-        _select_holdout_event(eligible_events)["role"] = "holdout"
+        event["role"] = "context_only"
+    episode_primaries = _assign_life_episodes(eligible_events)
+    for primary in episode_primaries:
+        primary["role"] = "calibration"
+        for member in primary.get("episodeMembers") or []:
+            if member is not primary:
+                member["role"] = "calibration_context"
+    # Reserve the third independent episode as soon as it exists. Waiting for a
+    # fourth would let private holdout evidence influence candidate ranking and
+    # the next adaptive question during the preceding round.
+    if len(episode_primaries) >= 3:
+        holdout_primary = _select_holdout_event(episode_primaries)
+        holdout_primary["role"] = "holdout"
+        for member in holdout_primary.get("episodeMembers") or []:
+            if member is not holdout_primary:
+                member["role"] = "holdout_context"
+    for event in eligible_events:
+        event.pop("episodeMembers", None)
     events.sort(
         key=lambda event: (
             str(event.get("date") or ""),
@@ -127,7 +150,7 @@ def parse_life_event_ledger(
     )
     calibration_categories = {
         str(event.get("category"))
-        for event in eligible_events
+        for event in episode_primaries
         if event.get("role") == "calibration" and event.get("category")
     }
     category_counts = Counter(str(event.get("category") or "unknown") for event in events)
@@ -137,15 +160,23 @@ def parse_life_event_ledger(
         "events": events,
         "categoryCounts": dict(sorted(category_counts.items())),
         "eligibleEventCount": len(eligible_events),
+        "independentEpisodeCount": len(episode_primaries),
+        "correlatedEventCount": max(0, len(eligible_events) - len(episode_primaries)),
+        "calibrationEpisodeCount": sum(
+            1 for event in episode_primaries if event.get("role") == "calibration"
+        ),
+        "holdoutEpisodeCount": sum(
+            1 for event in episode_primaries if event.get("role") == "holdout"
+        ),
         "calibrationCategoryCount": len(calibration_categories),
-        "eventCollectionRequired": len(eligible_events) < 3,
-        "recommendedMinimumEvents": 3,
+        "eventCollectionRequired": len(episode_primaries) < MIN_RECTIFICATION_EVENTS,
+        "recommendedMinimumEvents": MIN_RECTIFICATION_EVENTS,
         "maximumAcceptedEvents": MAX_RECTIFICATION_EVENTS,
         "holdoutPolicyId": RECTIFICATION_HOLDOUT_POLICY_ID,
         "recommendedRectificationUse": (
             "Use dated life events as the primary rectification evidence before generic traits."
             if events
-            else "Ask the user for 3-5 dated life events before deep rectification."
+            else "Ask the user for 4-5 dated life events before deep rectification."
         ),
         "semanticEvidence": [item for item in semantic_evidence or [] if isinstance(item, dict)],
     }
@@ -211,6 +242,7 @@ def score_candidate_events(
             "evidenceScores": [],
             "aggregateScore": None,
             "holdoutScore": None,
+            "vimshottariDashaScore": None,
             "charaDashaScore": None,
             "charaDashaDiagnostics": [],
         }
@@ -219,8 +251,7 @@ def score_candidate_events(
     event_local_moments = [_event_midpoint(event) for event in events]
     event_period_intervals = [_event_interval_bounds(event) for event in events]
     event_period_utc_intervals = [
-        _localize_event_interval(start, end, local_timezone)
-        for start, end in event_period_intervals
+        event_utc_envelope(start, end) for start, end in event_period_intervals
     ]
     # Chara Dasha remains diagnostic-only and is sampled over broad user date
     # ranges. Primary Vimshottari evidence uses exact interval boundaries below.
@@ -229,10 +260,8 @@ def score_candidate_events(
     event_period_utc_moments: list[datetime] = []
     for samples in event_period_samples:
         start_index = len(event_period_utc_moments)
-        event_period_utc_moments.extend(
-            _localize_event_sample(moment, local_timezone, index=index, total=len(samples))
-            for index, moment in enumerate(samples)
-        )
+        for moment in samples:
+            event_period_utc_moments.extend(event_utc_sample_envelope(moment))
         event_period_sample_indices.append((start_index, len(event_period_utc_moments)))
     localized_birth = _localized_birth_moment(representative_moment, local_timezone)
     from app.calculator.dasha_pyjhora import calculate_dasha_lords_for_intervals
@@ -354,12 +383,13 @@ def score_candidate_events(
                         details={
                             "level": level,
                             "reason": (
-                                "period_changes_within_reported_date_range"
+                                "period_changes_within_reported_date_or_timezone_envelope"
                                 if level in unstable_periods
                                 else "period_lord_unavailable"
                             ),
                             "exactBoundaryCheck": True,
                             "reportedDate": event.get("date"),
+                            "eventTimezoneBasis": EVENT_TIMEZONE_BASIS,
                         },
                     )
                 )
@@ -510,16 +540,14 @@ def score_candidate_events(
 
         transit_samples: list[dict[str, Any]] = []
         for transit_local in _event_transit_moments(event):
-            transit_utc = local_timezone.localize(transit_local, is_dst=None).astimezone(
-                timezone.utc
-            )
-            transit_samples.append(
-                calc_transits(
-                    lagna_index,
-                    moon_sign_index,
-                    as_of=transit_utc,
+            for transit_utc in event_utc_sample_envelope(transit_local):
+                transit_samples.append(
+                    calc_transits(
+                        lagna_index,
+                        moon_sign_index,
+                        as_of=transit_utc,
+                    )
                 )
-            )
         transit_house_samples = [
             {int(house) for house in transit.get("double_transit_houses") or []}
             for transit in transit_samples
@@ -930,6 +958,54 @@ def score_candidate_events(
             3,
         )
         score = round(max(-1.0, min(1.0, support_score - contradiction_score)), 3)
+        selection_support_score = round(
+            min(
+                sum(
+                    item["weight"]
+                    for item in observations
+                    if item["outcome"] == "support"
+                    and item["component"] in RECTIFICATION_SELECTION_COMPONENTS
+                ),
+                1,
+            ),
+            3,
+        )
+        selection_contradiction_score = round(
+            min(
+                sum(
+                    item["weight"]
+                    for item in observations
+                    if item["outcome"] == "contradiction"
+                    and item["component"] in RECTIFICATION_SELECTION_COMPONENTS
+                ),
+                1,
+            ),
+            3,
+        )
+        selection_score = round(
+            max(-1.0, min(1.0, selection_support_score - selection_contradiction_score)),
+            3,
+        )
+        primary_method_components = sorted(
+            {
+                str(item["component"])
+                for item in observations
+                if item["outcome"] == "support"
+                and item["component"] in {"dasha", "varga", "double_transit"}
+            }
+        )
+        method_convergence_layers: list[str] = []
+        if "dasha" in primary_method_components:
+            method_convergence_layers.append("d1_period_activation")
+        if "varga" in primary_method_components:
+            method_convergence_layers.append("domain_varga_activation")
+        if "double_transit" in primary_method_components:
+            method_convergence_layers.append("double_transit")
+        method_convergence_count = len(method_convergence_layers)
+        method_convergence_met = (
+            method_convergence_count
+            >= RECTIFICATION_SCORING_POLICY.minimum_evidence_layers_per_event
+        )
         rule_ids = [RECTIFICATION_RULE_ID]
         if any(
             item["component"] == "kp_sub_lord" and item["outcome"] == "support"
@@ -939,6 +1015,7 @@ def score_candidate_events(
         evidence_scores.append(
             {
                 "eventId": event["eventId"],
+                "episodeId": event.get("episodeId") or event["eventId"],
                 "eventFingerprint": event.get("eventFingerprint"),
                 "eventSubtype": event.get("eventSubtype"),
                 "semanticFacts": dict(semantic_facts) if isinstance(semantic_facts, dict) else None,
@@ -947,25 +1024,56 @@ def score_candidate_events(
                 "score": score,
                 "supportScore": support_score,
                 "contradictionScore": contradiction_score,
+                "selectionScore": selection_score,
+                "selectionSupportScore": selection_support_score,
+                "selectionContradictionScore": selection_contradiction_score,
+                "methodConvergenceComponents": primary_method_components,
+                "methodConvergenceLayers": method_convergence_layers,
+                "methodConvergenceCount": method_convergence_count,
+                "methodConvergenceMet": method_convergence_met,
                 "observations": observations,
                 "ruleIds": rule_ids,
                 "sourceIds": list(RECTIFICATION_SOURCE_IDS),
                 "scoringPolicyId": RECTIFICATION_SCORING_POLICY.policy_id,
                 "eventMappingId": RECTIFICATION_EVENT_MAPPING_ID,
+                "eventTimezoneBasis": EVENT_TIMEZONE_BASIS,
                 "explanation": (
                     f"{event.get('categoryLabel')}: Dasha lords {period_lords or ['unavailable']}; "
                     f"relevant vargas {relevant_vargas or ['none']}; "
                     "double-transit houses stable across the reported interval "
                     f"{stable_transit_houses}."
                     " Vimshottari eligibility checked against exact period boundaries;"
-                    f" slow-transit and diagnostic Chara checks sampled in {timezone_id}; "
+                    " slow-transit and diagnostic Chara checks sampled across the "
+                    "unknown event-location UTC-offset envelope; "
                     f"display midpoint {event_local.isoformat()}."
                 ),
             }
         )
 
-    calibration = [item["score"] for item in evidence_scores if item["role"] == "calibration"]
-    holdout = [item["score"] for item in evidence_scores if item["role"] == "holdout"]
+    calibration = [
+        item["selectionScore"] for item in evidence_scores if item["role"] == "calibration"
+    ]
+    holdout = [item["selectionScore"] for item in evidence_scores if item["role"] == "holdout"]
+    vimshottari_dasha_calibration = [
+        round(
+            min(
+                sum(
+                    observation["weight"]
+                    for observation in item["observations"]
+                    if observation["component"] == "dasha" and observation["outcome"] == "support"
+                ),
+                1.0,
+            ),
+            3,
+        )
+        for item in evidence_scores
+        if item["role"] == "calibration"
+    ]
+    convergent_calibration_event_count = sum(
+        1
+        for item in evidence_scores
+        if item["role"] == "calibration" and item["methodConvergenceMet"]
+    )
     chara_dasha_calibration = [
         item["score"] for item in chara_dasha_event_scores if item["role"] == "calibration"
     ]
@@ -973,6 +1081,12 @@ def score_candidate_events(
         "evidenceScores": evidence_scores,
         "aggregateScore": round(sum(calibration) / len(calibration), 3) if calibration else None,
         "holdoutScore": round(sum(holdout) / len(holdout), 3) if holdout else None,
+        "vimshottariDashaScore": (
+            round(sum(vimshottari_dasha_calibration) / len(vimshottari_dasha_calibration), 3)
+            if vimshottari_dasha_calibration
+            else None
+        ),
+        "convergentCalibrationEventCount": convergent_calibration_event_count,
         "scoringPolicy": RECTIFICATION_SCORING_POLICY.policy_id,
         "charaDashaScore": (
             round(sum(chara_dasha_calibration) / len(chara_dasha_calibration), 3)
@@ -1020,7 +1134,7 @@ def candidate_event_period_fingerprint(
     event_intervals: list[tuple[datetime, datetime]] = []
     for event in events:
         start, end = _event_interval_bounds(event)
-        event_intervals.append(_localize_event_interval(start, end, local_timezone))
+        event_intervals.append(event_utc_envelope(start, end))
     current_moments: list[datetime] = []
     if reference_moment is not None:
         if reference_moment.tzinfo is None or reference_moment.utcoffset() is None:
@@ -1317,6 +1431,7 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
             "vargas": rules["vargas"],
             "karakas": rules["karakas"],
             "fields": rules["fields"],
+            "sadeSatiRelevant": bool(rules.get("sadeSatiRelevant")),
         },
     }
 
@@ -1329,6 +1444,7 @@ def _apply_event_rules(event: dict[str, Any], *, event_subtype: str | None) -> N
         "vargas": rules["vargas"],
         "karakas": rules["karakas"],
         "fields": rules["fields"],
+        "sadeSatiRelevant": bool(rules.get("sadeSatiRelevant")),
     }
 
 
@@ -1387,8 +1503,56 @@ def _explicit_category(line: str) -> str | None:
     return category if category in RECTIFICATION_EVENT_RULES and category != "unknown" else None
 
 
+def _assign_life_episodes(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group overlapping reported date intervals into independent evidence units.
+
+    Partial dates represent the whole civil interval the user supplied. Treating two
+    overlapping intervals as separate votes would allow one real-world period to meet
+    the evidence minimum more than once. The earliest submitted event remains the
+    scored primary; later events are retained as corroborating context.
+    """
+
+    episodes: list[dict[str, Any]] = []
+    ordered = sorted(events, key=lambda event: int(event.get("intakeSequence") or 0))
+    for event in ordered:
+        start, end = _event_interval_bounds(event)
+        overlapping = [
+            episode for episode in episodes if start <= episode["end"] and end >= episode["start"]
+        ]
+        if not overlapping:
+            episodes.append({"start": start, "end": end, "events": [event]})
+            continue
+
+        # Existing primaries and their date boundaries are immutable. A later,
+        # broader partial date may corroborate the earliest overlapping episode,
+        # but it cannot bridge two earlier episodes and retroactively move holdout.
+        overlapping[0]["events"].append(event)
+
+    primaries: list[dict[str, Any]] = []
+    for episode in sorted(
+        episodes,
+        key=lambda item: min(int(event.get("intakeSequence") or 0) for event in item["events"]),
+    ):
+        members = episode["events"]
+        primary = members[0]
+        fingerprint = str(primary.get("eventFingerprint") or primary.get("eventId") or "")
+        episode_id = f"episode_{fingerprint[:16]}"
+        event_ids = [str(member.get("eventId") or "") for member in members]
+        categories = sorted({str(member.get("category") or "unknown") for member in members})
+        for member in members:
+            member["episodeId"] = episode_id
+            member["episodePrimaryEventId"] = str(primary.get("eventId") or "")
+            member["episodeEventIds"] = event_ids
+            member["episodeCategories"] = categories
+            member["episodeEventCount"] = len(members)
+            member["episodeRelation"] = "primary" if member is primary else "corroborating"
+        primary["episodeMembers"] = members
+        primaries.append(primary)
+    return primaries
+
+
 def _select_holdout_event(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """Reserve the third eligible submission before it can enter calibration."""
+    """Reserve the third independent episode before it can enter calibration."""
 
     return sorted(events, key=lambda event: int(event.get("intakeSequence") or 0))[2]
 

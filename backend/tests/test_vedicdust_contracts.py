@@ -17,6 +17,7 @@ from app.vedicdust.models import (
     AstronomySnapshot,
     AuditFinding,
     BirthAssertion,
+    CandidateEvidenceScore,
     CandidateInterval,
     ChartAudit,
     ChartRecord,
@@ -32,6 +33,7 @@ from app.vedicdust.models import (
     JyotishFact,
     JudgementContext,
     JudgementFinding,
+    LifeEvent,
     ReportSection,
     RectificationDecision,
     RectificationRecord,
@@ -44,8 +46,11 @@ from app.vedicdust.models import (
     ZodiacPosition,
 )
 from app.vedicdust.profiles import parashari_lahiri_profile
-from app.vedicdust.professional_review import validate_professional_review_fixture
-from app.vedicdust.chart_record_builder import _rectification
+from app.vedicdust.professional_review import (
+    ProfessionalReviewArtifact,
+    validate_professional_review_fixture,
+)
+from app.vedicdust.chart_record_builder import _candidate_evidence_score, _rectification
 from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.judgement import TOPICS, _normalize_requested_topics, build_judgement_context
 from app.vedicdust.orchestrator import audit_chart_record
@@ -280,12 +285,24 @@ def test_rectification_record_caps_internal_method_assurance() -> None:
         confidence=ConfidenceGrade.CORROBORATED,
         holdoutResult="passed",
     )
+    candidate = CandidateInterval(
+        candidateId="candidate-1",
+        interval=interval,
+        representativeMoment=interval.start,
+        fingerprint="candidate-1-fingerprint",
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="rectification decision references unknown candidate",
+    ):
+        RectificationRecord(decision=decision)
 
     with pytest.raises(
         ValidationError,
         match="internally validated rectification cannot exceed provisional confidence",
     ):
-        RectificationRecord(decision=decision)
+        RectificationRecord(candidates=[candidate], decision=decision)
 
     with pytest.raises(
         ValidationError,
@@ -293,6 +310,7 @@ def test_rectification_record_caps_internal_method_assurance() -> None:
     ):
         RectificationRecord(
             methodMaturity="professionally_validated",
+            candidates=[candidate],
             decision=decision,
         )
 
@@ -300,19 +318,82 @@ def test_rectification_record_caps_internal_method_assurance() -> None:
         methodMaturity="professionally_validated",
         validationStatus="independent_professional_review",
         professionalReviewFixtureIds=["professional-review.fixture"],
+        rectificationBenchmarkFixtureIds=["rectification-benchmark.fixture"],
+        candidates=[candidate],
         decision=decision,
     )
     assert reviewed.decision.confidence == ConfidenceGrade.CORROBORATED
 
     with pytest.raises(
         ValidationError,
-        match="requires a professional review fixture",
+        match="requires professional review and source-blind benchmark fixtures",
     ):
         RectificationRecord(
             methodMaturity="professionally_validated",
             validationStatus="independent_professional_review",
+            candidates=[candidate],
             decision=decision,
         )
+
+
+def test_chart_record_migrates_supported_rectification_contract_versions() -> None:
+    testimony = EvidenceItem(
+        evidenceId="event-source",
+        evidenceClass="user_testimony",
+        sourceLabel="user",
+        observedValue="2018 career change",
+        confidence="corroborated",
+    )
+    event = LifeEvent(
+        eventId="event-1",
+        episodeId="episode-1",
+        category="career",
+        eventSubtype="job_change",
+        interval=TimeRange(
+            start=datetime(2018, 1, 1, tzinfo=UTC),
+            end=datetime(2019, 1, 1, tzinfo=UTC),
+        ),
+        datePrecision="year",
+        eventTimezoneBasis="unknown_event_location_utc_offset_envelope",
+        description="Changed jobs",
+        role="calibration",
+        evidence=testimony,
+    )
+    record = ChartRecord(
+        chartRecordId="chart-legacy",
+        readingSessionId="session-legacy",
+        revision=1,
+        createdAt=datetime(2026, 8, 9, tzinfo=UTC),
+        subject=SubjectContext(subjectId="subject-legacy"),
+        birthAssertion=BirthAssertion(
+            localDate="1990-01-01",
+            reportedLocalTime="08:00",
+            reportedPlace="Test City",
+            timeCertainty="approximate",
+            evidence=[testimony],
+        ),
+        calculationProfile=parashari_lahiri_profile(),
+        rectification=RectificationRecord(
+            lifeEvents=[event],
+            decision=RectificationDecision(
+                status="underdetermined",
+                confidence=ConfidenceGrade.UNAVAILABLE,
+            ),
+        ),
+        status="intake",
+    )
+    payload = record.model_dump(by_alias=True, mode="json")
+    payload["schemaVersion"] = "vedicdust-chart-record/1.3.0"
+    payload["rectification"]["schemaVersion"] = "vedicdust-rectification/1.4.0"
+    payload["rectification"]["lifeEvents"][0].pop("episodeId")
+    payload["rectification"]["lifeEvents"][0].pop("eventTimezoneBasis")
+
+    migrated = ChartRecord.model_validate(payload)
+
+    assert migrated.schema_version == "vedicdust-chart-record/1.5.0"
+    assert migrated.rectification is not None
+    assert migrated.rectification.schema_version == "vedicdust-rectification/1.7.0"
+    assert migrated.rectification.life_events[0].episode_id == "event-1"
 
 
 def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
@@ -339,9 +420,9 @@ def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
     assert rectification is not None
     assert rectification.decision.status == "input_resolution_required"
     assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
-    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.13.0"
-    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.5.0"
-    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.1.0"
+    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.20.0"
+    assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.6.0"
+    assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.2.0"
     assert rectification.method_maturity == "product_hypothesis"
     assert rectification.validation_status == "internal_regression_only"
     assert rectification.source_ids == [
@@ -363,6 +444,54 @@ def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
     assert any(
         finding.finding_id == "rectification.input-resolution-required"
         and finding.severity == "blocking"
+        for finding in audit.findings
+    )
+
+
+def test_multiple_equivalent_intervals_permit_only_scoped_judgement() -> None:
+    intervals = [
+        TimeRange(
+            start=datetime(1990, 1, 1, 8, minute, tzinfo=UTC),
+            end=datetime(1990, 1, 1, 8, minute + 5, tzinfo=UTC),
+        )
+        for minute in (10, 30)
+    ]
+    rectification = RectificationRecord(
+        candidates=[
+            CandidateInterval(
+                candidateId=candidate_id,
+                interval=interval,
+                representativeMoment=interval.start,
+                fingerprint=f"{candidate_id}-fingerprint",
+            )
+            for candidate_id, interval in zip(
+                ["candidate-a", "candidate-b"], intervals, strict=True
+            )
+        ],
+        decision=RectificationDecision(
+            status="multiple_equivalent",
+            selectedCandidateIds=["candidate-a", "candidate-b"],
+            resultingIntervals=intervals,
+            confidence=ConfidenceGrade.PROVISIONAL,
+            holdoutResult="passed",
+            unresolvedQuestions=["The exact time remains unresolved."],
+        ),
+    )
+    record = SimpleNamespace(
+        chart_record_id="chart-equivalent",
+        status="ready_for_judgement",
+        quality_checks=[],
+        canonical_moment=SimpleNamespace(place=SimpleNamespace(precision="coordinate")),
+        rectification=rectification,
+    )
+
+    audit = audit_chart_record(record)
+
+    assert audit.status == "passed_with_limits"
+    assert audit.permitted_next_steps == ["judge"]
+    assert any(
+        finding.finding_id == "rectification.unresolved"
+        and "stable across the retained intervals" in str(finding.required_action)
         for finding in audit.findings
     )
 
@@ -551,6 +680,61 @@ def test_directional_convergence_requires_permitted_same_polarity_methods() -> N
     }
 
 
+def test_candidate_evidence_migrates_legacy_family_contract_without_changing_observations() -> None:
+    legacy_payload = {
+        "eventId": "event-1",
+        "episodeId": "episode-1",
+        "role": "calibration",
+        "score": 0.57,
+        "supportScore": 0.57,
+        "contradictionScore": 0.0,
+        "methodConvergenceComponents": ["dasha", "varga"],
+        "methodConvergenceFamilies": ["period_domain"],
+        "methodConvergenceCount": 1,
+        "methodConvergenceMet": False,
+        "observations": [
+            {
+                "observationId": "event-1.dasha",
+                "component": "dasha",
+                "outcome": "support",
+                "weight": 0.28,
+            },
+            {
+                "observationId": "event-1.varga",
+                "component": "varga",
+                "outcome": "support",
+                "weight": 0.19,
+            },
+            {
+                "observationId": "event-1.kp",
+                "component": "kp_sub_lord",
+                "outcome": "support",
+                "weight": 0.1,
+            },
+        ],
+        "ruleIds": ["rectification.test"],
+        "sourceIds": ["source.test"],
+        "scoringPolicyId": "vedicdust-rectification-event-ranking/1.19.0",
+        "eventMappingId": "vedicdust-rectification-event-map/1.6.0",
+        "eventTimezoneBasis": "unknown_event_location_utc_offset_envelope",
+        "explanation": "Legacy evidence record.",
+    }
+    score = CandidateEvidenceScore.model_validate(legacy_payload)
+    rebuilt_score = _candidate_evidence_score(legacy_payload)
+
+    assert score.selection_score == pytest.approx(0.47)
+    assert score.selection_support_score == pytest.approx(0.47)
+    assert score.selection_contradiction_score == 0
+    assert score.method_convergence_layers == [
+        "d1_period_activation",
+        "domain_varga_activation",
+    ]
+    assert score.method_convergence_count == 2
+    assert score.method_convergence_met is True
+    assert score.support_score == pytest.approx(0.57)
+    assert rebuilt_score == score
+
+
 def test_public_vedic_skill_api_has_one_report_pipeline() -> None:
     skill_schema = SkillRunInput.model_json_schema()["properties"]["skill"]
     public_skills = set(skill_schema["enum"])
@@ -622,8 +806,9 @@ def test_professional_review_fixture_validates_blind_case_evidence(tmp_path: Pat
             "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
         }
     review_payload = {
-        "schemaVersion": "vedicdust-professional-review/1.0.0",
+        "schemaVersion": "vedicdust-professional-review/1.1.0",
         "protocolId": "blind-output-review/1.0.0",
+        "reviewScope": "calculation_and_judgement",
         "reviewerId": "external-jyotishi-01",
         "reviewerCredentials": ["Recorded lineage and practice credential"],
         "reviewedAt": "2026-08-02T00:00:00Z",
@@ -666,6 +851,7 @@ def test_professional_review_fixture_validates_blind_case_evidence(tmp_path: Pat
         reviewedBy="external-jyotishi-01",
         reviewedAt="2026-08-02T00:00:00Z",
         reviewedCaseIds=["review-case-001"],
+        reviewScope="calculation_and_judgement",
     )
 
     artifact = validate_professional_review_fixture(fixture, review_path)
@@ -688,6 +874,96 @@ def test_professional_review_fixture_validates_blind_case_evidence(tmp_path: Pat
     review_path.write_text(json.dumps(review_payload) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="disposition mismatch"):
         validate_professional_review_fixture(fixture, review_path)
+
+
+def test_rectification_professional_review_requires_specific_workflow_assessment(
+    tmp_path: Path,
+) -> None:
+    retained: dict[str, dict[str, str]] = {}
+    for name, payload in {
+        "chart-record": {"artifact": "chart-record"},
+        "claim-graph": {"artifact": "claim-graph"},
+        "consultation-dossier": {"artifact": "consultation-dossier"},
+        "rectification-state": {
+            "status": "corrected_chart_ready",
+            "selectionPolicyId": "selection-policy",
+            "eventMappingId": "event-map",
+            "holdoutPolicyId": "holdout-policy",
+        },
+    }.items():
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        retained[name] = {
+            "path": path.name,
+            "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    def review_case(index: int) -> dict[str, object]:
+        disposition = "withhold" if index == 0 else "publish"
+        return {
+            "caseId": f"rectification-review-{index}",
+            "chartRecord": retained["chart-record"],
+            "claimGraph": retained["claim-graph"],
+            "consultationDossier": retained["consultation-dossier"],
+            "rectificationState": retained["rectification-state"],
+            "expectedDisposition": disposition,
+            "observedDisposition": disposition,
+            "decision": "accepted",
+            "assessment": {
+                "methodFidelity": "accepted",
+                "evidenceTraceability": "accepted",
+                "uncertaintyCalibration": "accepted",
+                "readerComprehensibility": "accepted",
+            },
+            "rectificationAssessment": {
+                "candidateConstruction": "accepted",
+                "eventMethodFidelity": "accepted",
+                "holdoutIndependence": "accepted",
+                "stoppingAndAbstention": "accepted",
+                "uncertaintyCommunication": "accepted",
+            },
+            "rationale": "The reviewer accepted the source-blind workflow and its stopping rule.",
+        }
+
+    cases = [review_case(index) for index in range(5)]
+    payload = {
+        "schemaVersion": "vedicdust-professional-review/1.1.0",
+        "protocolId": "blind-rectification-review/1.0.0",
+        "reviewScope": "rectification",
+        "reviewerId": "external-jyotishi-02",
+        "reviewerCredentials": ["Documented professional Jyotish practice"],
+        "reviewedAt": "2026-08-03T00:00:00Z",
+        "blindedToSubjectIdentity": True,
+        "blindedToSystemAuthorship": True,
+        "reviewerIndependentOfImplementation": True,
+        "cases": cases,
+    }
+    with pytest.raises(ValidationError, match="at least 5 blind cases"):
+        ProfessionalReviewArtifact.model_validate({**payload, "cases": cases[:1]})
+
+    review_path = tmp_path / "rectification-professional-review.json"
+    review_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    fixture = ValidationFixtureReference(
+        fixtureId="professional.rectification",
+        fixtureKind="professional_review",
+        testNodes=[
+            "backend/tests/test_vedicdust_contracts.py::"
+            "test_rectification_professional_review_requires_specific_workflow_assessment"
+        ],
+        description="Independent blind review of the complete rectification workflow.",
+        evidenceArtifactPath=review_path.name,
+        evidenceArtifactSha256=("sha256:" + hashlib.sha256(review_path.read_bytes()).hexdigest()),
+        reviewProtocolId="blind-rectification-review/1.0.0",
+        reviewedBy="external-jyotishi-02",
+        reviewedAt="2026-08-03T00:00:00Z",
+        reviewedCaseIds=[f"rectification-review-{index}" for index in range(5)],
+        reviewScope="rectification",
+    )
+
+    artifact = validate_professional_review_fixture(fixture, review_path)
+
+    assert artifact.review_scope == "rectification"
+    assert artifact.cases[0].rectification_assessment is not None
 
 
 def test_pinned_source_contract_requires_locator_url_and_textual_edition() -> None:
@@ -1070,7 +1346,9 @@ def test_certainty_language_guard_allows_explicit_negation_only() -> None:
     assert _contains_assertive_phrase("This is a guaranteed event.", "guaranteed event")
 
 
-def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
+def test_claim_graph_references_chart_facts_and_registered_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     profile = parashari_lahiri_profile()
     testimony = EvidenceItem(
         evidence_id="birth-record",
@@ -1323,6 +1601,15 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
         methodMaturity="professionally_validated",
         validationStatus="independent_professional_review",
         professionalReviewFixtureIds=["contract.rashi.whole-sign-house"],
+        rectificationBenchmarkFixtureIds=["contract.workflow.d60-eligibility"],
+        candidates=[
+            CandidateInterval(
+                candidateId="candidate-1",
+                interval=review_interval,
+                representativeMoment=review_interval.start,
+                fingerprint="candidate-1-review-fingerprint",
+            )
+        ],
         decision=RectificationDecision(
             status="bounded_interval",
             selectedCandidateIds=["candidate-1"],
@@ -1334,6 +1621,34 @@ def test_claim_graph_references_chart_facts_and_registered_rules() -> None:
     with pytest.raises(ValueError, match="is not a professional review fixture"):
         validate_chart_record_provenance(false_professional_review, catalog)
 
+    generic_professional_review = ValidationFixtureReference(
+        fixtureId="professional.generic-output-review",
+        fixtureKind="professional_review",
+        testNodes=[
+            "backend/tests/test_vedicdust_contracts.py::"
+            "test_claim_graph_references_chart_facts_and_registered_rules"
+        ],
+        description="Blind review of calculation and report judgement outputs only.",
+        evidenceArtifactPath="reviews/generic-output-review.json",
+        evidenceArtifactSha256="sha256:" + "0" * 64,
+        reviewProtocolId="blind-output-review/1.0.0",
+        reviewedBy="external-jyotishi-generic",
+        reviewedAt="2026-08-03T00:00:00Z",
+        reviewedCaseIds=["generic-review-1"],
+        reviewScope="calculation_and_judgement",
+    )
+    monkeypatch.setattr(
+        "app.vedicdust.validation.load_validation_fixture_registry",
+        lambda: {generic_professional_review.fixture_id: generic_professional_review},
+    )
+    wrong_scope_review = false_professional_review.model_copy(deep=True)
+    assert wrong_scope_review.rectification is not None
+    wrong_scope_review.rectification.professional_review_fixture_ids = [
+        generic_professional_review.fixture_id
+    ]
+    with pytest.raises(ValueError, match="does not review the rectification workflow"):
+        validate_chart_record_provenance(wrong_scope_review, catalog)
+
 
 def test_generated_json_schemas_are_current() -> None:
     from app.vedicdust.models import (
@@ -1343,6 +1658,13 @@ def test_generated_json_schemas_are_current() -> None:
         ReadingSession,
         RuleCatalog,
         SynastryContext,
+        ValidationFixtureRegistry,
+    )
+    from app.vedicdust.rectification_benchmark import (
+        RectificationBenchmarkArtifact,
+        RectificationBenchmarkBlindInput,
+        RectificationBenchmarkReport,
+        RectificationBenchmarkRunReceipt,
     )
 
     models = {
@@ -1355,6 +1677,11 @@ def test_generated_json_schemas_are_current() -> None:
         "vedicdust-agent-context.schema.json": AgentContext,
         "vedicdust-report-manifest.schema.json": ConsultationReportManifest,
         "vedicdust-rule-catalog.schema.json": RuleCatalog,
+        "vedicdust-validation-fixtures.schema.json": ValidationFixtureRegistry,
+        "vedicdust-rectification-benchmark.schema.json": RectificationBenchmarkArtifact,
+        "vedicdust-rectification-benchmark-report.schema.json": RectificationBenchmarkReport,
+        "vedicdust-rectification-blind-input.schema.json": RectificationBenchmarkBlindInput,
+        "vedicdust-rectification-run-receipt.schema.json": RectificationBenchmarkRunReceipt,
         "vedicdust-synastry-context.schema.json": SynastryContext,
     }
     schema_root = ROOT / "docs" / "vedicdust" / "schemas"

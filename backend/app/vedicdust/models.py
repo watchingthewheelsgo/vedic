@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -406,6 +406,7 @@ class ValidationFixtureReference(ContractModel):
         "same_provider_regression",
         "independent_external",
         "professional_review",
+        "rectification_benchmark",
     ]
     test_nodes: list[str] = Field(min_length=1)
     description: str = Field(min_length=3)
@@ -421,6 +422,7 @@ class ValidationFixtureReference(ContractModel):
     reviewed_by: str | None = Field(default=None, min_length=3)
     reviewed_at: datetime | None = None
     reviewed_case_ids: list[str] = Field(default_factory=list)
+    review_scope: Literal["calculation_and_judgement", "rectification", "end_to_end"] | None = None
 
     @model_validator(mode="after")
     def validate_test_nodes(self) -> ValidationFixtureReference:
@@ -432,7 +434,11 @@ class ValidationFixtureReference(ContractModel):
             not case_id.strip() for case_id in self.reviewed_case_ids
         ):
             raise ValueError("reviewed case ids must be unique and non-empty")
-        evidence_backed = self.fixture_kind in {"independent_external", "professional_review"}
+        evidence_backed = self.fixture_kind in {
+            "independent_external",
+            "professional_review",
+            "rectification_benchmark",
+        }
         evidence_fields = (self.evidence_artifact_path, self.evidence_artifact_sha256)
         if evidence_backed and not all(evidence_fields):
             raise ValueError(
@@ -443,11 +449,12 @@ class ValidationFixtureReference(ContractModel):
                 self.review_protocol_id,
                 self.reviewed_by,
                 self.reviewed_at,
+                self.review_scope,
             )
             if not all(required_review_fields) or not self.reviewed_case_ids:
                 raise ValueError(
                     "professional review fixture requires protocol, reviewer, timestamp, "
-                    "and reviewed case ids"
+                    "scope, and reviewed case ids"
                 )
             if self.reviewed_at is not None and (
                 self.reviewed_at.tzinfo is None or self.reviewed_at.utcoffset() is None
@@ -456,7 +463,12 @@ class ValidationFixtureReference(ContractModel):
         elif (
             any(
                 value is not None
-                for value in (self.review_protocol_id, self.reviewed_by, self.reviewed_at)
+                for value in (
+                    self.review_protocol_id,
+                    self.reviewed_by,
+                    self.reviewed_at,
+                    self.review_scope,
+                )
             )
             or self.reviewed_case_ids
         ):
@@ -465,10 +477,23 @@ class ValidationFixtureReference(ContractModel):
 
 
 class ValidationFixtureRegistry(ContractModel):
-    schema_version: Literal["vedicdust-validation-fixtures/1.0.0"] = (
-        "vedicdust-validation-fixtures/1.0.0"
+    schema_version: Literal["vedicdust-validation-fixtures/1.2.0"] = (
+        "vedicdust-validation-fixtures/1.2.0"
     )
     fixtures: list[ValidationFixtureReference]
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_additive_fixture_contract(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if payload.get("schemaVersion") in {
+            "vedicdust-validation-fixtures/1.0.0",
+            "vedicdust-validation-fixtures/1.1.0",
+        }:
+            payload["schemaVersion"] = "vedicdust-validation-fixtures/1.2.0"
+        return payload
 
     @model_validator(mode="after")
     def validate_unique_fixture_ids(self) -> ValidationFixtureRegistry:
@@ -677,10 +702,12 @@ class InputSensitivityAssessment(ContractModel):
 
 class LifeEvent(ContractModel):
     event_id: str
+    episode_id: str
     category: str
     event_subtype: str | None = None
     interval: TimeRange
     date_precision: Literal["day", "month", "year", "range"]
+    event_timezone_basis: Literal["unknown_event_location_utc_offset_envelope"]
     description: str
     role: Literal["calibration", "holdout"]
     evidence: EvidenceItem
@@ -726,6 +753,7 @@ class RectificationSemanticAdjustment(ContractModel):
 
 class CandidateEvidenceScore(ContractModel):
     event_id: str
+    episode_id: str
     event_fingerprint: str | None = None
     event_subtype: str | None = None
     semantic_facts: RectificationEventSemanticFacts | None = None
@@ -734,12 +762,115 @@ class CandidateEvidenceScore(ContractModel):
     score: float = Field(ge=-1, le=1)
     support_score: float = Field(ge=0, le=1)
     contradiction_score: float = Field(ge=0, le=1)
+    selection_score: float = Field(ge=-1, le=1)
+    selection_support_score: float = Field(ge=0, le=1)
+    selection_contradiction_score: float = Field(ge=0, le=1)
+    method_convergence_components: list[Literal["dasha", "varga", "double_transit"]] = Field(
+        default_factory=list
+    )
+    method_convergence_layers: list[
+        Literal["d1_period_activation", "domain_varga_activation", "double_transit"]
+    ] = Field(default_factory=list)
+    method_convergence_count: int = Field(default=0, ge=0, le=3)
+    method_convergence_met: bool = False
     observations: list[RectificationEvidenceObservation] = Field(min_length=1)
     rule_ids: list[str] = Field(min_length=1)
     source_ids: list[str] = Field(min_length=1)
     scoring_policy_id: str
     event_mapping_id: str
+    event_timezone_basis: Literal["unknown_event_location_utc_offset_envelope"]
     explanation: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_selection_contract(cls, value: Any) -> Any:
+        """Derive the selection contract when loading pre-1.20 Chart Records."""
+
+        if not isinstance(value, Mapping):
+            return value
+        data = dict(value)
+        observations = data.get("observations") or []
+
+        def observation_value(item: Any, snake_name: str, camel_name: str) -> Any:
+            if isinstance(item, Mapping):
+                if snake_name in item:
+                    return item[snake_name]
+                return item.get(camel_name)
+            return getattr(item, snake_name, None)
+
+        primary_components = {"dasha", "varga", "double_transit"}
+        if "selectionScore" not in data and "selection_score" not in data:
+            support = round(
+                min(
+                    sum(
+                        float(observation_value(item, "weight", "weight") or 0.0)
+                        for item in observations
+                        if observation_value(item, "outcome", "outcome") == "support"
+                        and observation_value(item, "component", "component") in primary_components
+                    ),
+                    1,
+                ),
+                3,
+            )
+            contradiction = round(
+                min(
+                    sum(
+                        float(observation_value(item, "weight", "weight") or 0.0)
+                        for item in observations
+                        if observation_value(item, "outcome", "outcome") == "contradiction"
+                        and observation_value(item, "component", "component") in primary_components
+                    ),
+                    1,
+                ),
+                3,
+            )
+            data["selection_score"] = round(max(-1.0, min(1.0, support - contradiction)), 3)
+            data["selection_support_score"] = support
+            data["selection_contradiction_score"] = contradiction
+
+        component_key = (
+            "methodConvergenceComponents"
+            if "methodConvergenceComponents" in data
+            else "method_convergence_components"
+        )
+        if component_key not in data:
+            data["method_convergence_components"] = [
+                component
+                for component in ("dasha", "varga", "double_transit")
+                if any(
+                    observation_value(item, "outcome", "outcome") == "support"
+                    and observation_value(item, "component", "component") == component
+                    for item in observations
+                )
+            ]
+            component_key = "method_convergence_components"
+        components = list(data.get(component_key) or [])
+        layers = [
+            layer
+            for component, layer in (
+                ("dasha", "d1_period_activation"),
+                ("varga", "domain_varga_activation"),
+                ("double_transit", "double_transit"),
+            )
+            if component in components
+        ]
+        had_legacy_families = (
+            "methodConvergenceFamilies" in data or "method_convergence_families" in data
+        )
+        data.pop("methodConvergenceFamilies", None)
+        data.pop("method_convergence_families", None)
+        if had_legacy_families:
+            data.pop("methodConvergenceCount", None)
+            data.pop("method_convergence_count", None)
+            data.pop("methodConvergenceMet", None)
+            data.pop("method_convergence_met", None)
+        if "methodConvergenceLayers" not in data and "method_convergence_layers" not in data:
+            data["method_convergence_layers"] = layers
+        if "methodConvergenceCount" not in data and "method_convergence_count" not in data:
+            data["method_convergence_count"] = len(layers)
+        if "methodConvergenceMet" not in data and "method_convergence_met" not in data:
+            data["method_convergence_met"] = len(layers) >= 2
+        return data
 
     @model_validator(mode="after")
     def validate_score_reconciliation(self) -> CandidateEvidenceScore:
@@ -764,6 +895,58 @@ class CandidateEvidenceScore(ContractModel):
             raise ValueError("rectification contradiction score does not match observations")
         if self.score != expected_score:
             raise ValueError("rectification net score does not match observations")
+        selection_components = {"dasha", "varga", "double_transit"}
+        selection_support = round(
+            min(
+                sum(
+                    item.weight
+                    for item in self.observations
+                    if item.outcome == "support" and item.component in selection_components
+                ),
+                1,
+            ),
+            3,
+        )
+        selection_contradiction = round(
+            min(
+                sum(
+                    item.weight
+                    for item in self.observations
+                    if item.outcome == "contradiction" and item.component in selection_components
+                ),
+                1,
+            ),
+            3,
+        )
+        expected_selection_score = round(
+            max(-1.0, min(1.0, selection_support - selection_contradiction)),
+            3,
+        )
+        if self.selection_support_score != selection_support:
+            raise ValueError("rectification selection support does not match primary observations")
+        if self.selection_contradiction_score != selection_contradiction:
+            raise ValueError(
+                "rectification selection contradiction does not match primary observations"
+            )
+        if self.selection_score != expected_selection_score:
+            raise ValueError("rectification selection score does not match primary observations")
+        if len(self.method_convergence_components) != len(set(self.method_convergence_components)):
+            raise ValueError("rectification method convergence components must be unique")
+        if len(self.method_convergence_layers) != len(set(self.method_convergence_layers)):
+            raise ValueError("rectification method convergence layers must be unique")
+        expected_layers = []
+        if "dasha" in self.method_convergence_components:
+            expected_layers.append("d1_period_activation")
+        if "varga" in self.method_convergence_components:
+            expected_layers.append("domain_varga_activation")
+        if "double_transit" in self.method_convergence_components:
+            expected_layers.append("double_transit")
+        if self.method_convergence_layers != expected_layers:
+            raise ValueError("rectification method convergence layers do not match components")
+        if self.method_convergence_count != len(self.method_convergence_layers):
+            raise ValueError("rectification method convergence count does not match layers")
+        if self.method_convergence_met != (self.method_convergence_count >= 2):
+            raise ValueError("rectification method convergence flag does not match count")
         return self
 
 
@@ -783,11 +966,13 @@ class CandidateInterval(ContractModel):
     place_hypothesis: CandidatePlaceHypothesis | None = None
     evidence_scores: list[CandidateEvidenceScore] = Field(default_factory=list)
     aggregate_score: float | None = None
+    convergent_calibration_event_count: int = Field(default=0, ge=0)
     boundary_resolution_seconds: int = Field(default=60, gt=0)
     left_boundary_uncertainty: TimeRange | None = None
     eligible: bool = True
     exclusion_reason: str | None = None
     ayanamsa_risk: Literal["none", "medium", "high"] = "none"
+    vimshottari_dasha_score: float | None = None
     chara_dasha_score: float | None = None
     dasha_system_agreement: Literal["agrees", "disagrees", "not_applicable"] = "not_applicable"
 
@@ -825,6 +1010,8 @@ class RectificationDecision(ContractModel):
 
     @model_validator(mode="after")
     def validate_result_shape(self) -> RectificationDecision:
+        if len(self.selected_candidate_ids) != len(set(self.selected_candidate_ids)):
+            raise ValueError("rectification decision candidate ids must be unique")
         if self.status == "bounded_interval":
             if len(self.selected_candidate_ids) != 1:
                 raise ValueError("bounded-interval decision requires exactly one candidate")
@@ -844,6 +1031,10 @@ class RectificationDecision(ContractModel):
             if self.holdout_result != "passed":
                 raise ValueError("multiple-equivalent decision requires a passed holdout event")
         else:
+            if self.selected_candidate_ids:
+                raise ValueError(
+                    "selected candidates are reserved for bounded or equivalent decisions"
+                )
             if self.resulting_interval is not None:
                 raise ValueError("only bounded-interval decisions can claim one resulting interval")
             if self.resulting_intervals:
@@ -864,12 +1055,23 @@ class RectificationRoundCandidateMetrics(ContractModel):
 class RectificationRoundAnsweredEvent(ContractModel):
     question_id: str | None = None
     event_id: str | None = None
+    episode_id: str | None = None
+    episode_relation: Literal["primary", "corroborating"] | None = None
     event_fingerprint: str | None = None
     category: str | None = None
     event_subtype: str | None = None
     date: str | None = None
     date_precision: Literal["day", "month", "year", "range"] | None = None
-    role: Literal["calibration", "holdout"] | None = None
+    role: (
+        Literal[
+            "calibration",
+            "holdout",
+            "calibration_context",
+            "holdout_context",
+            "context_only",
+        ]
+        | None
+    ) = None
 
 
 class RectificationRoundEvidenceImpact(ContractModel):
@@ -889,6 +1091,7 @@ class RectificationRoundDecisionSummary(ContractModel):
         "holdout_failed",
         "holdout_inconclusive",
         "candidate_scores_separated",
+        "correlated_episode_recorded",
         "evidence_recorded_without_required_margin",
     ]
     status: str = Field(min_length=1)
@@ -917,7 +1120,7 @@ class RectificationRoundRecord(ContractModel):
 
 
 class RectificationRecord(ContractModel):
-    schema_version: Literal["vedicdust-rectification/1.5.0"] = "vedicdust-rectification/1.5.0"
+    schema_version: Literal["vedicdust-rectification/1.7.0"] = "vedicdust-rectification/1.7.0"
     selection_policy_id: str | None = None
     event_mapping_id: str | None = None
     holdout_policy_id: str | None = None
@@ -930,6 +1133,7 @@ class RectificationRecord(ContractModel):
     ] = "internal_regression_only"
     source_ids: list[str] = Field(default_factory=list)
     professional_review_fixture_ids: list[str] = Field(default_factory=list)
+    rectification_benchmark_fixture_ids: list[str] = Field(default_factory=list)
     reported_window: TimeRange | None = None
     life_events: list[LifeEvent] = Field(default_factory=list)
     candidates: list[CandidateInterval] = Field(default_factory=list)
@@ -938,10 +1142,66 @@ class RectificationRecord(ContractModel):
 
     @model_validator(mode="after")
     def validate_method_assurance(self) -> RectificationRecord:
+        event_ids = [event.event_id for event in self.life_events]
+        if len(event_ids) != len(set(event_ids)):
+            raise ValueError("rectification life event ids must be unique")
+        episode_ids = [event.episode_id for event in self.life_events]
+        if len(episode_ids) != len(set(episode_ids)):
+            raise ValueError(
+                "rectification may retain only one scored life event per independent episode"
+            )
+        candidate_ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("rectification candidate ids must be unique")
+        if self.reported_window is not None:
+            escaped_candidates = [
+                candidate.candidate_id
+                for candidate in self.candidates
+                if candidate.interval.start < self.reported_window.start
+                or candidate.interval.end > self.reported_window.end
+            ]
+            if escaped_candidates:
+                raise ValueError(
+                    "rectification candidates must remain inside the reported window: "
+                    + ", ".join(escaped_candidates)
+                )
+        candidates_by_id = {candidate.candidate_id: candidate for candidate in self.candidates}
+        selected_ids = self.decision.selected_candidate_ids
+        missing_selected_ids = [
+            candidate_id for candidate_id in selected_ids if candidate_id not in candidates_by_id
+        ]
+        if missing_selected_ids:
+            raise ValueError(
+                "rectification decision references unknown candidate(s): "
+                + ", ".join(missing_selected_ids)
+            )
+        if self.decision.status == "bounded_interval":
+            selected = candidates_by_id[selected_ids[0]]
+            if self.decision.resulting_interval != selected.interval:
+                raise ValueError(
+                    "bounded rectification interval must equal the selected candidate interval"
+                )
+        elif self.decision.status == "multiple_equivalent":
+            expected_intervals = [
+                candidates_by_id[candidate_id].interval for candidate_id in selected_ids
+            ]
+            if self.decision.resulting_intervals != expected_intervals:
+                raise ValueError(
+                    "equivalent rectification intervals must match selected candidates in order"
+                )
+        dasha_agreements = {candidate.dasha_system_agreement for candidate in self.candidates}
+        if len(dasha_agreements) > 1:
+            raise ValueError(
+                "rectification candidates must share one scan-level dasha system agreement"
+            )
         if len(self.professional_review_fixture_ids) != len(
             set(self.professional_review_fixture_ids)
         ):
             raise ValueError("rectification professional review fixtures must be unique")
+        if len(self.rectification_benchmark_fixture_ids) != len(
+            set(self.rectification_benchmark_fixture_ids)
+        ):
+            raise ValueError("rectification benchmark fixtures must be unique")
         professionally_reviewed = (
             self.method_maturity == "professionally_validated"
             and self.validation_status == "independent_professional_review"
@@ -952,13 +1212,19 @@ class RectificationRecord(ContractModel):
             raise ValueError(
                 "professional rectification maturity requires independent professional review"
             )
-        if professionally_reviewed and not self.professional_review_fixture_ids:
+        if professionally_reviewed and (
+            not self.professional_review_fixture_ids or not self.rectification_benchmark_fixture_ids
+        ):
             raise ValueError(
-                "professionally reviewed rectification requires a professional review fixture"
+                "professionally reviewed rectification requires professional review and "
+                "source-blind benchmark fixtures"
             )
-        if not professionally_reviewed and self.professional_review_fixture_ids:
+        if not professionally_reviewed and (
+            self.professional_review_fixture_ids or self.rectification_benchmark_fixture_ids
+        ):
             raise ValueError(
-                "professional review fixtures are reserved for professionally reviewed rectification"
+                "professional review and benchmark fixtures are reserved for professionally "
+                "reviewed rectification"
             )
         if (
             not professionally_reviewed
@@ -972,7 +1238,7 @@ class RectificationRecord(ContractModel):
 
 
 class ChartRecord(ContractModel):
-    schema_version: Literal["vedicdust-chart-record/1.3.0"] = "vedicdust-chart-record/1.3.0"
+    schema_version: Literal["vedicdust-chart-record/1.5.0"] = "vedicdust-chart-record/1.5.0"
     chart_record_id: str
     reading_session_id: str
     revision: int = Field(ge=1)
@@ -998,6 +1264,67 @@ class ChartRecord(ContractModel):
         "ready_for_judgement",
         "blocked",
     ]
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_supported_additive_versions(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if payload.get("schemaVersion") in {
+            "vedicdust-chart-record/1.3.0",
+            "vedicdust-chart-record/1.4.0",
+        }:
+            payload["schemaVersion"] = "vedicdust-chart-record/1.5.0"
+        rectification = payload.get("rectification")
+        if isinstance(rectification, dict) and rectification.get("schemaVersion") in {
+            "vedicdust-rectification/1.1.0",
+            "vedicdust-rectification/1.2.0",
+            "vedicdust-rectification/1.3.0",
+            "vedicdust-rectification/1.4.0",
+            "vedicdust-rectification/1.5.0",
+            "vedicdust-rectification/1.6.0",
+        }:
+            migrated_rectification = dict(rectification)
+            migrated_rectification["schemaVersion"] = "vedicdust-rectification/1.7.0"
+            migrated_rectification.setdefault("rectificationBenchmarkFixtureIds", [])
+            migrated_events = []
+            for raw_event in migrated_rectification.get("lifeEvents") or []:
+                if not isinstance(raw_event, dict):
+                    migrated_events.append(raw_event)
+                    continue
+                event = dict(raw_event)
+                event.setdefault("episodeId", event.get("eventId"))
+                event.setdefault(
+                    "eventTimezoneBasis",
+                    "unknown_event_location_utc_offset_envelope",
+                )
+                migrated_events.append(event)
+            migrated_rectification["lifeEvents"] = migrated_events
+            migrated_candidates = []
+            for raw_candidate in migrated_rectification.get("candidates") or []:
+                if not isinstance(raw_candidate, dict):
+                    migrated_candidates.append(raw_candidate)
+                    continue
+                candidate = dict(raw_candidate)
+                candidate["dashaSystemAgreement"] = "not_applicable"
+                migrated_scores = []
+                for raw_score in candidate.get("evidenceScores") or []:
+                    if not isinstance(raw_score, dict):
+                        migrated_scores.append(raw_score)
+                        continue
+                    score = dict(raw_score)
+                    score.setdefault("episodeId", score.get("eventId"))
+                    score.setdefault(
+                        "eventTimezoneBasis",
+                        "unknown_event_location_utc_offset_envelope",
+                    )
+                    migrated_scores.append(score)
+                candidate["evidenceScores"] = migrated_scores
+                migrated_candidates.append(candidate)
+            migrated_rectification["candidates"] = migrated_candidates
+            payload["rectification"] = migrated_rectification
+        return payload
 
     @model_validator(mode="after")
     def validate_record_state(self) -> ChartRecord:

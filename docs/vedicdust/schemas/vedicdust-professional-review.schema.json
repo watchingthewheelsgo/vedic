@@ -1,5 +1,44 @@
 {
   "$defs": {
+    "ProfessionalRectificationAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateConstruction": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Candidateconstruction",
+          "type": "string"
+        },
+        "eventMethodFidelity": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Eventmethodfidelity",
+          "type": "string"
+        },
+        "holdoutIndependence": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Holdoutindependence",
+          "type": "string"
+        },
+        "stoppingAndAbstention": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Stoppingandabstention",
+          "type": "string"
+        },
+        "uncertaintyCommunication": {
+          "enum": ["accepted", "reservation", "rejected"],
+          "title": "Uncertaintycommunication",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidateConstruction",
+        "eventMethodFidelity",
+        "holdoutIndependence",
+        "stoppingAndAbstention",
+        "uncertaintyCommunication"
+      ],
+      "title": "ProfessionalRectificationAssessment",
+      "type": "object"
+    },
     "ProfessionalReviewAssessment": {
       "additionalProperties": false,
       "properties": {
@@ -50,6 +89,17 @@
         "consultationDossier": {
           "$ref": "#/$defs/RetainedReviewArtifact"
         },
+        "rectificationState": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetainedReviewArtifact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "expectedDisposition": {
           "enum": ["publish", "withhold"],
           "title": "Expecteddisposition",
@@ -67,6 +117,17 @@
         },
         "assessment": {
           "$ref": "#/$defs/ProfessionalReviewAssessment"
+        },
+        "rectificationAssessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfessionalRectificationAssessment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "disagreements": {
           "items": {
@@ -117,14 +178,19 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "const": "vedicdust-professional-review/1.0.0",
-      "default": "vedicdust-professional-review/1.0.0",
+      "const": "vedicdust-professional-review/1.1.0",
+      "default": "vedicdust-professional-review/1.1.0",
       "title": "Schemaversion",
       "type": "string"
     },
     "protocolId": {
       "pattern": "^[a-z0-9][a-z0-9._/-]+$",
       "title": "Protocolid",
+      "type": "string"
+    },
+    "reviewScope": {
+      "enum": ["calculation_and_judgement", "rectification", "end_to_end"],
+      "title": "Reviewscope",
       "type": "string"
     },
     "reviewerId": {
@@ -168,6 +234,7 @@
   },
   "required": [
     "protocolId",
+    "reviewScope",
     "reviewerId",
     "reviewerCredentials",
     "reviewedAt",

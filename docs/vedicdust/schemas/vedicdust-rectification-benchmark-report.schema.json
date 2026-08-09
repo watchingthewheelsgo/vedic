@@ -1,0 +1,434 @@
+{
+  "$defs": {
+    "RectificationBenchmarkCaseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "caseId": {
+          "title": "Caseid",
+          "type": "string"
+        },
+        "chartRecordId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chartrecordid"
+        },
+        "sourceRating": {
+          "title": "Sourcerating",
+          "type": "string"
+        },
+        "reportedWindowOrigin": {
+          "title": "Reportedwindoworigin",
+          "type": "string"
+        },
+        "eventEvidenceOrigin": {
+          "title": "Eventevidenceorigin",
+          "type": "string"
+        },
+        "primaryEligible": {
+          "title": "Primaryeligible",
+          "type": "boolean"
+        },
+        "protocolFailures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Protocolfailures",
+          "type": "array"
+        },
+        "outputFailures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputfailures",
+          "type": "array"
+        },
+        "decisionStatus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decisionstatus"
+        },
+        "outcome": {
+          "enum": ["hit", "partial", "miss", "abstained", "invalid"],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "truthCoverage": {
+          "enum": ["full", "partial", "none", "not_applicable"],
+          "title": "Truthcoverage",
+          "type": "string"
+        },
+        "predictedIntervals": {
+          "items": {
+            "$ref": "#/$defs/TimeRange"
+          },
+          "title": "Predictedintervals",
+          "type": "array"
+        },
+        "reportedWindowMinutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reportedwindowminutes"
+        },
+        "predictedUnionMinutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predictedunionminutes"
+        },
+        "narrowingRatio": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Narrowingratio"
+        }
+      },
+      "required": [
+        "caseId",
+        "sourceRating",
+        "reportedWindowOrigin",
+        "eventEvidenceOrigin",
+        "primaryEligible",
+        "outcome",
+        "truthCoverage"
+      ],
+      "title": "RectificationBenchmarkCaseResult",
+      "type": "object"
+    },
+    "RectificationBenchmarkCohortMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "caseCount": {
+          "minimum": 0,
+          "title": "Casecount",
+          "type": "integer"
+        },
+        "decisiveCaseCount": {
+          "minimum": 0,
+          "title": "Decisivecasecount",
+          "type": "integer"
+        },
+        "hitCount": {
+          "minimum": 0,
+          "title": "Hitcount",
+          "type": "integer"
+        },
+        "partialCount": {
+          "minimum": 0,
+          "title": "Partialcount",
+          "type": "integer"
+        },
+        "missCount": {
+          "minimum": 0,
+          "title": "Misscount",
+          "type": "integer"
+        },
+        "abstainedCount": {
+          "minimum": 0,
+          "title": "Abstainedcount",
+          "type": "integer"
+        },
+        "invalidCount": {
+          "minimum": 0,
+          "title": "Invalidcount",
+          "type": "integer"
+        },
+        "decisiveRate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decisiverate"
+        },
+        "fullCoverageRate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fullcoveragerate"
+        },
+        "falseExclusionRate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Falseexclusionrate"
+        },
+        "medianNarrowingRatio": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mediannarrowingratio"
+        }
+      },
+      "required": [
+        "caseCount",
+        "decisiveCaseCount",
+        "hitCount",
+        "partialCount",
+        "missCount",
+        "abstainedCount",
+        "invalidCount"
+      ],
+      "title": "RectificationBenchmarkCohortMetrics",
+      "type": "object"
+    },
+    "TimeRange": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        }
+      },
+      "required": ["start", "end"],
+      "title": "TimeRange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "vedicdust-rectification-benchmark-report/1.1.0",
+      "default": "vedicdust-rectification-benchmark-report/1.1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "benchmarkId": {
+      "title": "Benchmarkid",
+      "type": "string"
+    },
+    "protocolId": {
+      "title": "Protocolid",
+      "type": "string"
+    },
+    "acceptancePolicyId": {
+      "const": "vedicdust-rectification-benchmark-release-gate/1.1.0",
+      "default": "vedicdust-rectification-benchmark-release-gate/1.1.0",
+      "title": "Acceptancepolicyid",
+      "type": "string"
+    },
+    "evaluatedAt": {
+      "format": "date-time",
+      "title": "Evaluatedat",
+      "type": "string"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/RectificationBenchmarkCaseResult"
+      },
+      "title": "Cases",
+      "type": "array"
+    },
+    "primaryCaseCount": {
+      "minimum": 0,
+      "title": "Primarycasecount",
+      "type": "integer"
+    },
+    "primaryCaseCountByWindowOrigin": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Primarycasecountbywindoworigin",
+      "type": "object"
+    },
+    "primaryCaseCountByEventOrigin": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Primarycasecountbyeventorigin",
+      "type": "object"
+    },
+    "cohortMetrics": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RectificationBenchmarkCohortMetrics"
+      },
+      "title": "Cohortmetrics",
+      "type": "object"
+    },
+    "decisiveCaseCount": {
+      "minimum": 0,
+      "title": "Decisivecasecount",
+      "type": "integer"
+    },
+    "hitCount": {
+      "minimum": 0,
+      "title": "Hitcount",
+      "type": "integer"
+    },
+    "partialCount": {
+      "minimum": 0,
+      "title": "Partialcount",
+      "type": "integer"
+    },
+    "missCount": {
+      "minimum": 0,
+      "title": "Misscount",
+      "type": "integer"
+    },
+    "abstainedCount": {
+      "minimum": 0,
+      "title": "Abstainedcount",
+      "type": "integer"
+    },
+    "invalidCount": {
+      "minimum": 0,
+      "title": "Invalidcount",
+      "type": "integer"
+    },
+    "decisiveRate": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decisiverate"
+    },
+    "fullCoverageRate": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fullcoveragerate"
+    },
+    "falseExclusionRate": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Falseexclusionrate"
+    },
+    "medianNarrowingRatio": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mediannarrowingratio"
+    },
+    "releaseGatePassed": {
+      "title": "Releasegatepassed",
+      "type": "boolean"
+    },
+    "releaseGateFailures": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Releasegatefailures",
+      "type": "array"
+    }
+  },
+  "required": [
+    "benchmarkId",
+    "protocolId",
+    "evaluatedAt",
+    "cases",
+    "primaryCaseCount",
+    "primaryCaseCountByWindowOrigin",
+    "primaryCaseCountByEventOrigin",
+    "cohortMetrics",
+    "decisiveCaseCount",
+    "hitCount",
+    "partialCount",
+    "missCount",
+    "abstainedCount",
+    "invalidCount",
+    "releaseGatePassed"
+  ],
+  "title": "RectificationBenchmarkReport",
+  "type": "object"
+}

@@ -132,8 +132,12 @@ type RectificationState = {
   selectionConfidence?: string;
   selectionEvidence?: {
     calibrationEventCount?: number;
+    calibrationEpisodeCount?: number;
     calibrationCategoryCount?: number;
     holdoutEventCount?: number;
+    holdoutEpisodeCount?: number;
+    submittedEventCount?: number;
+    correlatedEventCount?: number;
   };
   candidates?: Array<{
     candidateId?: string;
@@ -146,19 +150,28 @@ type RectificationState = {
   reportGate?: {
     fullReportAllowed?: boolean;
     reason?: string;
+    reportScope?: string;
     nextStep?: string;
+  };
+  equivalentCandidateIntersection?: {
+    candidateIds?: string[];
+    intervals?: Array<{ start?: string; end?: string }>;
+    unstableFields?: string[];
   };
   rectificationPlan?: {
     action?: string;
     eventCollectionRequired?: boolean;
   };
   lifeEventLedger?: {
+    independentEpisodeCount?: number;
     events?: Array<{
       eventId?: string;
+      episodeId?: string;
       date?: string;
       category?: RectificationLifeEventCategory;
       eventSubtype?: string;
       description?: string;
+      role?: "calibration" | "holdout" | "calibration_context" | "holdout_context" | "context_only";
     }>;
   };
   rectificationRounds?: Array<{
@@ -173,6 +186,7 @@ type RectificationState = {
         | "holdout_failed"
         | "holdout_inconclusive"
         | "candidate_scores_separated"
+        | "correlated_episode_recorded"
         | "evidence_recorded_without_required_margin";
     };
   }>;
@@ -197,11 +211,20 @@ type RectificationState = {
     selectedInterval?: {
       start?: string;
       end?: string;
+      boundarySemantics?: "start_inclusive_end_exclusive";
+    };
+    methodAssurance?: {
+      methodMaturity?: string;
+      validationStatus?: string;
+      independentProfessionalReviewCompleted?: boolean;
     };
     evidenceSummary?: {
       calibrationEventCount?: number;
+      calibrationEpisodeCount?: number;
       calibrationCategoryCount?: number;
       holdoutEventCount?: number;
+      holdoutEpisodeCount?: number;
+      correlatedEventCount?: number;
       holdoutResult?: string;
       method?: string;
     };
@@ -906,14 +929,7 @@ type RectificationInterviewQuestion = {
 };
 
 type RectificationInterview = {
-  schemaVersion:
-    | "vedicdust-rectification-interview/1.0.0"
-    | "vedicdust-rectification-interview/1.1.0"
-    | "vedicdust-rectification-interview/1.2.0"
-    | "vedicdust-rectification-interview/1.3.0"
-    | "vedicdust-rectification-interview/1.4.0"
-    | "vedicdust-rectification-interview/1.5.0"
-    | "vedicdust-rectification-interview/1.6.0";
+  schemaVersion: `vedicdust-rectification-interview/1.${number}.0`;
   title: string;
   intro: string;
   source: string;
@@ -2667,11 +2683,10 @@ function rectificationNextStepLabel(state: RectificationState | null, t: Transla
   if (state.status === "corrected_chart_ready") {
     return t("session.chart.readiness.ready");
   }
-  if (
-    state.status === "collecting_evidence" ||
-    state.status === "underdetermined" ||
-    state.status === "multiple_equivalent"
-  ) {
+  if (state.status === "multiple_equivalent" && state.reportGate?.fullReportAllowed === true) {
+    return t("session.rectification.stableReport");
+  }
+  if (state.status === "collecting_evidence" || state.status === "underdetermined") {
     return t("session.rectification.continueCheck");
   }
   if (state.status === "input_resolution_required") {
@@ -2713,9 +2728,11 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
   const calculationFailed = state.status === "calculation_failed";
   const { t } = useI18n();
   const confidenceLabel = gateAllowed
-    ? state.status === "corrected_chart_ready"
-      ? t("session.rectification.corrected")
-      : t("session.rectification.accepted")
+    ? state.status === "multiple_equivalent"
+      ? t("session.rectification.stableIntersection")
+      : state.status === "corrected_chart_ready"
+        ? t("session.rectification.corrected")
+        : t("session.rectification.accepted")
     : needsConfirmation
       ? t("session.rectification.conclusion.title")
       : calculationFailed
@@ -2728,7 +2745,11 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
               ? t("session.rectification.underdetermined")
               : t("session.rectification.waiting");
   const confidenceBody = gateAllowed
-    ? t("session.rectification.body.ready")
+    ? state.status === "multiple_equivalent"
+      ? t("session.rectification.body.stableIntersection", {
+          count: state.equivalentCandidateIds?.length ?? 0
+        })
+      : t("session.rectification.body.ready")
     : needsConfirmation
       ? t("session.rectification.conclusion.body")
       : calculationFailed
@@ -2766,7 +2787,11 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
         <div className="mt-3 grid gap-2 text-[12.5px] leading-[1.6] text-body">
           <InfoRow
             label={t("session.rectification.anchors")}
-            value={String(state.selectionEvidence?.calibrationEventCount ?? 0)}
+            value={String(
+              state.selectionEvidence?.calibrationEpisodeCount ??
+                state.selectionEvidence?.calibrationEventCount ??
+                0
+            )}
           />
           <InfoRow
             label={t("session.rectification.nextStep")}
@@ -3172,15 +3197,19 @@ function LifeEventCollector({
       )
     : [];
   const selectedChoice = choices.find((choice) => choice.id === answer?.choiceId);
+  const confirmedEventCount =
+    interview?.progress.answered ??
+    state.lifeEventLedger?.independentEpisodeCount ??
+    (state.lifeEventLedger?.events ?? []).filter(
+      (event) => event.role === "calibration" || event.role === "holdout"
+    ).length;
   const answerComplete = Boolean(
     answer?.date &&
     selectedChoice &&
     (!selectedChoice.requiresNote || answer.note.trim().length >= 3)
   );
-  const reachesTarget = Boolean(
-    interview && existingEvents.length + 1 >= interview.progress.target
-  );
-  const currentStep = existingEvents.length + 1;
+  const reachesTarget = Boolean(interview && confirmedEventCount + 1 >= interview.progress.target);
+  const currentStep = confirmedEventCount + 1;
   const target = interview?.progress.target ?? 3;
   const CategoryIcon = question ? LIFE_EVENT_CATEGORY_ICONS[question.category] : Target;
   const availableCategories = state.availableRectificationCategories ?? [];
@@ -3230,13 +3259,11 @@ function LifeEventCollector({
   }
 
   if (submitting) {
-    return (
-      <RectificationWorkingState mode="comparison" recordedCount={existingEvents.length + 1} />
-    );
+    return <RectificationWorkingState mode="comparison" recordedCount={confirmedEventCount} />;
   }
 
   if (preparing) {
-    return <RectificationWorkingState mode="question" recordedCount={existingEvents.length} />;
+    return <RectificationWorkingState mode="question" recordedCount={confirmedEventCount} />;
   }
 
   if (needsAvailabilityInventory || editingAvailability) {
@@ -3307,12 +3334,12 @@ function LifeEventCollector({
         <div className="w-full shrink-0 sm:w-36">
           <div className="mb-2 flex items-center justify-between text-[11px] text-muted">
             <span>{ui.progress(currentStep, target)}</span>
-            <span>{ui.recorded(existingEvents.length, target)}</span>
+            <span>{ui.recorded(confirmedEventCount, target)}</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-gold/15">
             <div
               className="h-full rounded-full bg-gold transition-[width] duration-300"
-              style={{ width: `${Math.min(100, (existingEvents.length / target) * 100)}%` }}
+              style={{ width: `${Math.min(100, (confirmedEventCount / target) * 100)}%` }}
             />
           </div>
         </div>
@@ -3725,6 +3752,7 @@ function RectificationConclusion({
   const corrected = conclusion?.correctedBirthTime;
   const interval = conclusion?.selectedInterval;
   const evidence = conclusion?.evidenceSummary;
+  const methodAssurance = conclusion?.methodAssurance;
   const evidenceHighlights = conclusion?.evidenceHighlights ?? [];
   const answeredCount = examples.filter((example) => answers[example.exampleId ?? ""]).length;
   const allAnswered = examples.length > 0 && answeredCount === examples.length;
@@ -3746,6 +3774,9 @@ function RectificationConclusion({
   const formatRange = (start?: string, end?: string) => {
     if (!start) return "—";
     if (!end || end === start) return start;
+    if (interval?.boundarySemantics === "start_inclusive_end_exclusive") {
+      return t("session.rectification.conclusion.rangeExclusive", { start, end });
+    }
     return `${start} – ${end}`;
   };
   const formatCorrectedTime = () => {
@@ -3810,10 +3841,18 @@ function RectificationConclusion({
           <InfoRow
             label={t("session.rectification.conclusion.evidence")}
             value={t("session.rectification.conclusion.evidenceValue", {
-              events: evidence?.calibrationEventCount ?? 0,
+              events: evidence?.calibrationEpisodeCount ?? evidence?.calibrationEventCount ?? 0,
               categories: evidence?.calibrationCategoryCount ?? 0,
-              holdout: evidence?.holdoutEventCount ?? 0
+              holdout: evidence?.holdoutEpisodeCount ?? evidence?.holdoutEventCount ?? 0
             })}
+          />
+          <InfoRow
+            label={t("session.rectification.conclusion.methodStatus")}
+            value={
+              methodAssurance?.independentProfessionalReviewCompleted
+                ? t("session.rectification.conclusion.methodReviewed")
+                : t("session.rectification.conclusion.methodInternalOnly")
+            }
           />
         </div>
       </section>
@@ -4094,7 +4133,11 @@ function ReaderDetail({
     rectificationState?.status === "rectification_confirmation_required" &&
     rectificationState.rectificationConclusion?.confirmation?.status === "pending";
   const interviewArtifact = findArtifact(session, "rectification_interview.json");
-  const collectedLifeEventCount = rectificationState?.lifeEventLedger?.events?.length ?? 0;
+  const collectedLifeEventCount =
+    rectificationState?.lifeEventLedger?.independentEpisodeCount ??
+    (rectificationState?.lifeEventLedger?.events ?? []).filter(
+      (event) => event.role === "calibration" || event.role === "holdout"
+    ).length;
   const needsAvailabilityInventory =
     collectedLifeEventCount === 0 &&
     (rectificationState?.availableRectificationCategories?.length ?? 0) === 0;
@@ -5289,11 +5332,10 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
       ),
       timePrecision: displayMappedValue(navState.birth.birthTimePrecision, PRECISION_LABELS),
       timeSource: displayMappedValue(navState.birth.timeSource || "未追问", TIME_SOURCE_LABELS),
-      effectivePrecision:
-        navState.birth.birthTimePrecision === "exact" &&
-        navState.birth.timeSource === "出生证/医院记录"
-          ? "± minute-level"
-          : "Adjusted by time certainty",
+      effectivePrecision: reportedTimeWindowLabel(
+        navState.birth.birthTimePrecision,
+        navState.birth.reportedTimeWindow
+      ),
       concern: navState.concern?.trim() ?? ""
     };
   }
@@ -5325,7 +5367,9 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
   const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
   const subject = objectValue(chartRecord, "subject");
   const birthAssertion = objectValue(chartRecord, "birthAssertion");
-  const canonicalMoment = objectValue(chartRecord, "canonicalMoment");
+  const inputContext = parseJsonArtifact(session, "birth_input_context.json");
+  const timeContext = objectValue(inputContext, "time");
+  const reportedWindow = objectValue(timeContext, "window");
   const birthEvidence = Array.isArray(birthAssertion?.evidence) ? birthAssertion.evidence : [];
   const firstEvidence = objectFromUnknown(birthEvidence[0]);
   const timeCertainty = String(birthAssertion?.timeCertainty ?? "unknown");
@@ -5347,9 +5391,21 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     relationship: displayCollected(String(subject?.relationshipStatus ?? "")),
     timePrecision: displayMappedValue(normalizedPrecision, PRECISION_LABELS),
     timeSource: displayMappedValue(String(firstEvidence?.sourceLabel ?? ""), TIME_SOURCE_LABELS),
-    effectivePrecision: String(canonicalMoment?.resolutionConfidence ?? "—"),
+    effectivePrecision: reportedTimeWindowLabel(normalizedPrecision, reportedWindow),
     concern: extractConcern(feedback)
   };
+}
+
+function reportedTimeWindowLabel(
+  precision: string,
+  window?: { minutesBefore?: unknown; minutesAfter?: unknown } | null
+): string {
+  if (precision === "unknown") return "00:00–24:00";
+  const before = Number(window?.minutesBefore);
+  const after = Number(window?.minutesAfter);
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return "—";
+  if (before === after) return `±${before} min`;
+  return `−${before} / +${after} min`;
 }
 
 function resolveBirthCoordinates(
@@ -5395,15 +5451,7 @@ function parseRectificationInterview(content: string): RectificationInterview | 
   try {
     const parsed = JSON.parse(content) as RectificationInterview;
     if (
-      !(
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.0.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.1.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.2.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.3.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.4.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.5.0" ||
-        parsed.schemaVersion === "vedicdust-rectification-interview/1.6.0"
-      ) ||
+      !/^vedicdust-rectification-interview\/1\.\d+\.0$/.test(parsed.schemaVersion) ||
       !Array.isArray(parsed.questions) ||
       !parsed.progress
     ) {
@@ -5459,6 +5507,13 @@ function readingContinuationAction(
     status === "corrected_chart_ready" &&
     state.holdoutResult === "passed" &&
     gate?.fullReportAllowed === true
+  ) {
+    return "full_report";
+  }
+  if (
+    status === "multiple_equivalent" &&
+    gate?.fullReportAllowed === true &&
+    gate.reportScope === "stable_intersection_only"
   ) {
     return "full_report";
   }

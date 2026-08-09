@@ -237,16 +237,16 @@ export const messages: Record<LocaleCode, Dict> = {
     "intake.precision.placeholder": "Choose one",
     "intake.precision.exact.label": "I know the minute",
     "intake.precision.exact.description":
-      "Choose this when you are confident the stated minute is close; the system checks a narrow range around it",
+      "Use the minute you remember; the system still checks 10 minutes on either side",
     "intake.precision.approximate.label": "It may be a little earlier or later",
     "intake.precision.approximate.description":
-      "The system checks a wider range around the time you enter",
+      "The system checks 30 minutes on either side of the time you enter",
     "intake.precision.part_of_day.label": "I only know the general time",
     "intake.precision.part_of_day.description":
-      "Choose the closest hour; the system checks a broad surrounding range before interpreting sensitive parts",
+      "Choose the closest hour; the system checks six hours on either side",
     "intake.precision.unknown.label": "I do not know",
     "intake.precision.unknown.description":
-      "You can continue, but timing-sensitive parts will stay cautious",
+      "The system checks the full civil day; a bounded result may not be possible",
     "intake.source.label": "Birth time source",
     "intake.source.hint":
       "Optional provenance for your records. It does not change the search range or candidate ranking.",
@@ -279,6 +279,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "intake.error.birthDate": "Select your date of birth.",
     "intake.error.birthHour": "Select the closest known birth hour.",
     "intake.error.birthTime": "Select your birth time.",
+    "intake.error.timePrecision": "Choose how closely you remember the birth time.",
     "intake.error.place": "Choose a city or enter valid coordinates.",
     "intake.error.start": "Could not start the report.",
     "intake.ambiguousTime.title": "This clock time happened twice",
@@ -521,23 +522,26 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.moreChecks": "More checks needed",
     "session.rectification.waiting": "Waiting for feedback",
     "session.rectification.equivalent": "Equivalent time ranges remain",
+    "session.rectification.stableIntersection": "Stable shared chart ready",
     "session.rectification.underdetermined": "Time remains unresolved",
     "session.rectification.inputResolution": "Birth input needs clarification",
     "session.rectification.calculationFailed": "Chart comparison needs a retry",
     "session.rectification.body.ready":
       "Your replies are enough to continue into the full interpretation.",
+    "session.rectification.body.stableIntersection":
+      "Your replies narrowed the chart to {count} equivalent time ranges. The exact minute remains unresolved, so the reading will include only conclusions shared by every range.",
     "session.rectification.body.more":
       "The system will use the next question card to reduce chart uncertainty before the report proceeds.",
     "session.rectification.body.equivalent":
       "{count} time ranges produce the same decision-relevant chart. The system will preserve them instead of inventing one exact birth time.",
     "session.rectification.body.underdetermined":
-      "The available evidence cannot narrow the reported time enough. A better source time or additional dated events are needed.",
+      "The available evidence cannot narrow the reported time enough. Review the reported time window or add another independently dated event.",
     "session.rectification.body.inputResolution":
       "Part of the reported time or place cannot be mapped unambiguously. Clarify the input before chart calibration continues.",
     "session.rectification.body.calculationFailed":
       "One or more candidate charts could not be calculated consistently. No birth time was selected; retry the chart calculation before continuing.",
     "session.rectification.reviewMeta": "{risk} review · revision {revision}",
-    "session.rectification.anchors": "Calibration events",
+    "session.rectification.anchors": "Independent milestones",
     "session.rectification.nextStep": "Next step",
     "session.rectification.continue": "Continue when ready",
     "session.rectification.latestAnswer": "Latest answer",
@@ -549,10 +553,13 @@ export const messages: Record<LocaleCode, Dict> = {
       "The reserved event could not separate the remaining ranges.",
     "session.rectification.round.candidate_scores_separated":
       "This event meaningfully separated the remaining birth-time ranges.",
+    "session.rectification.round.correlated_episode_recorded":
+      "This event overlaps an existing milestone. It was saved as context without counting twice.",
     "session.rectification.round.evidence_recorded_without_required_margin":
       "This event was recorded, but another independently dated event is still needed.",
     "session.rectification.preparingNext": "Preparing next card...",
     "session.rectification.continueCheck": "Continue time check",
+    "session.rectification.stableReport": "View the stable shared reading",
     "session.rectification.advanced": "Advanced chart candidates",
     "session.rectification.baseCandidate": "base",
     "session.rectification.score": "score {score}",
@@ -563,6 +570,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.conclusion.resultTitle": "Stage conclusion",
     "session.rectification.conclusion.correctedTime": "Calculation reference time",
     "session.rectification.conclusion.range": "Remaining time range",
+    "session.rectification.conclusion.rangeExclusive": "{start} – before {end}",
     "session.rectification.conclusion.confidence": "Current confidence",
     "session.rectification.conclusion.bounded": "Bounded, not exact to the second",
     "session.rectification.conclusion.confidenceHigh": "Higher within this time window",
@@ -570,10 +578,14 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.conclusion.confidenceLow": "Lower; more checking is needed",
     "session.rectification.conclusion.evidence": "Evidence used",
     "session.rectification.conclusion.evidenceValue":
-      "{events} dated events · {categories} areas · {holdout} reserved check",
+      "{events} independent milestones · {categories} areas · {holdout} reserved check",
+    "session.rectification.conclusion.methodStatus": "Method status",
+    "session.rectification.conclusion.methodReviewed": "Independent professional review completed",
+    "session.rectification.conclusion.methodInternalOnly":
+      "Internal regression passed; independent professional blind review is pending",
     "session.rectification.conclusion.explanationTitle": "How this range was reached",
     "session.rectification.conclusion.explanationBody":
-      "One event helped compare the candidates; another was kept aside and checked separately only after a range led.",
+      "Calibration milestones compared every candidate; a separate milestone was reserved and checked only after a range led.",
     "session.rectification.conclusion.calibrationRole": "Comparison evidence",
     "session.rectification.conclusion.holdoutRole": "Reserved check",
     "session.rectification.conclusion.calibrationResult":
@@ -1012,14 +1024,13 @@ const zhOverrides: Dict = {
   "intake.precision.label": "这个时间有多确定？",
   "intake.precision.placeholder": "选择可信度",
   "intake.precision.exact.label": "记得具体分钟",
-  "intake.precision.exact.description": "你确信填写的分钟基本准确；系统会检查它附近的窄范围",
+  "intake.precision.exact.description": "按记得的分钟填写；系统仍会检查前后各 10 分钟",
   "intake.precision.approximate.label": "前后可能有些偏差",
-  "intake.precision.approximate.description": "系统会检查你填写时间前后更宽的范围",
+  "intake.precision.approximate.description": "系统会检查填写时间前后各 30 分钟",
   "intake.precision.part_of_day.label": "只记得大概时段",
-  "intake.precision.part_of_day.description":
-    "选择最接近的小时；系统会先检查更宽的时间范围，再进入敏感判断",
+  "intake.precision.part_of_day.description": "选择最接近的小时；系统会检查前后各 6 小时",
   "intake.precision.unknown.label": "完全不确定",
-  "intake.precision.unknown.description": "可以继续，但时间敏感的内容会更保守",
+  "intake.precision.unknown.description": "系统会检查整个出生自然日，但不保证能收敛到窄范围",
   "intake.source.label": "出生时间来源",
   "intake.source.hint": "仅作为可选来源记录，不会改变搜索范围或候选排序。",
   "intake.source.placeholder": "可选",
@@ -1048,6 +1059,7 @@ const zhOverrides: Dict = {
   "intake.error.birthDate": "请选择出生日期。",
   "intake.error.birthHour": "请选择最接近的出生小时。",
   "intake.error.birthTime": "请选择出生时间。",
+  "intake.error.timePrecision": "请选择你对出生时间记忆的精确程度。",
   "intake.error.place": "请选择城市，或输入合法经纬度。",
   "intake.error.start": "无法开始报告。",
   "intake.ambiguousTime.title": "这个钟表时间当天出现了两次",
@@ -1281,21 +1293,24 @@ const zhOverrides: Dict = {
   "session.rectification.moreChecks": "需要继续校验",
   "session.rectification.waiting": "等待反馈",
   "session.rectification.equivalent": "保留多个等价时间范围",
+  "session.rectification.stableIntersection": "共享稳定盘面已准备",
   "session.rectification.underdetermined": "出生时间仍未收敛",
   "session.rectification.inputResolution": "出生信息需要先确认",
   "session.rectification.calculationFailed": "候选盘计算需要重试",
   "session.rectification.body.ready": "你的回复已经足够支撑后续完整解读。",
+  "session.rectification.body.stableIntersection":
+    "你的回复已将盘面收敛到 {count} 个等价时间范围。精确分钟仍未唯一确定，后续只会解读所有范围共同稳定的结论。",
   "session.rectification.body.more": "系统会用下一张问题卡继续降低盘面不确定性，然后再进入报告。",
   "session.rectification.body.equivalent":
     "目前有 {count} 个时间范围会产生相同的关键盘面。系统会保留这些范围，不会虚构一个精确出生时刻。",
   "session.rectification.body.underdetermined":
-    "现有证据不足以继续缩小出生时间，请提供更可靠的时间来源或更多有明确日期的人生事件。",
+    "现有证据不足以继续缩小出生时间，请重新确认申报的时间范围，或再提供一件可独立确认日期的人生事件。",
   "session.rectification.body.inputResolution":
     "输入的时间或地点中有一部分无法唯一映射，请先缩小范围或确认时区分支，再继续生时校验。",
   "session.rectification.body.calculationFailed":
     "部分候选盘未能完成一致的确定性计算，系统没有选择出生时间。请先重试盘面计算，再继续生时校验。",
   "session.rectification.reviewMeta": "{risk} 置信度复核 · 第 {revision} 版",
-  "session.rectification.anchors": "校准事件",
+  "session.rectification.anchors": "独立人生节点",
   "session.rectification.nextStep": "下一步",
   "session.rectification.continue": "准备好后继续",
   "session.rectification.latestAnswer": "刚才的答案",
@@ -1306,10 +1321,13 @@ const zhOverrides: Dict = {
   "session.rectification.round.holdout_inconclusive": "保留事件暂时无法区分剩余时间范围。",
   "session.rectification.round.candidate_scores_separated":
     "这条经历有效拉开了剩余出生时间范围的差异。",
+  "session.rectification.round.correlated_episode_recorded":
+    "这条经历与已有时间区间重叠，已作为背景保存，但不会重复计票。",
   "session.rectification.round.evidence_recorded_without_required_margin":
     "这条经历已记录，但仍需要另一条可独立确认日期的经历。",
   "session.rectification.preparingNext": "正在准备下一张卡片...",
   "session.rectification.continueCheck": "继续生时校验",
+  "session.rectification.stableReport": "查看共享稳定解读",
   "session.rectification.advanced": "高级候选盘",
   "session.rectification.baseCandidate": "基础盘",
   "session.rectification.score": "得分 {score}",
@@ -1320,6 +1338,7 @@ const zhOverrides: Dict = {
   "session.rectification.conclusion.resultTitle": "阶段性结论",
   "session.rectification.conclusion.correctedTime": "盘面计算参考时间",
   "session.rectification.conclusion.range": "仍保留的时间范围",
+  "session.rectification.conclusion.rangeExclusive": "{start} 至 {end} 前",
   "session.rectification.conclusion.confidence": "当前可信度",
   "session.rectification.conclusion.bounded": "已限定范围，但不是精确到秒",
   "session.rectification.conclusion.confidenceHigh": "在当前时间范围内较高",
@@ -1327,10 +1346,13 @@ const zhOverrides: Dict = {
   "session.rectification.conclusion.confidenceLow": "较低，仍需要继续校验",
   "session.rectification.conclusion.evidence": "用于判断的证据",
   "session.rectification.conclusion.evidenceValue":
-    "{events} 件带日期经历 · {categories} 个领域 · {holdout} 件保留复核",
+    "{events} 个独立人生节点 · {categories} 个领域 · {holdout} 件保留复核",
+  "session.rectification.conclusion.methodStatus": "方法验证状态",
+  "session.rectification.conclusion.methodReviewed": "已完成独立专业盲审",
+  "session.rectification.conclusion.methodInternalOnly": "已通过内部回归；独立专业盲审尚未完成",
   "session.rectification.conclusion.explanationTitle": "这个范围是怎么得到的",
   "session.rectification.conclusion.explanationBody":
-    "一件经历参与候选比较；另一件被提前保留，等范围领先后才单独复核。",
+    "校准经历用于比较全部候选；另有一件独立经历被提前保留，只在范围领先后单独复核。",
   "session.rectification.conclusion.calibrationRole": "候选比较证据",
   "session.rectification.conclusion.holdoutRole": "保留复核",
   "session.rectification.conclusion.calibrationResult":
@@ -1693,14 +1715,14 @@ const jaOverrides: Dict = {
   "intake.precision.placeholder": "確度を選択",
   "intake.precision.exact.label": "分まで覚えています",
   "intake.precision.exact.description":
-    "入力した分がほぼ正しいと確信できる場合。周辺の狭い範囲を確認します",
+    "覚えている分を入力してください。システムは前後10分も確認します",
   "intake.precision.approximate.label": "少し前後する可能性があります",
-  "intake.precision.approximate.description": "入力時刻の前後をより広く確認します",
+  "intake.precision.approximate.description": "入力時刻の前後30分を確認します",
   "intake.precision.part_of_day.label": "おおよその時間帯だけ分かります",
-  "intake.precision.part_of_day.description":
-    "最も近い時刻を選び、敏感な判断の前に広い範囲を確認します",
+  "intake.precision.part_of_day.description": "最も近い時刻を選び、前後6時間を確認します",
   "intake.precision.unknown.label": "分かりません",
-  "intake.precision.unknown.description": "続行できますが、時刻に敏感な内容は慎重に扱います",
+  "intake.precision.unknown.description":
+    "出生日の一日全体を確認しますが、狭い範囲に絞れない場合があります",
   "intake.source.label": "出生時刻の情報源",
   "intake.source.hint": "任意の出所記録です。検索範囲や候補順位には影響しません。",
   "intake.source.placeholder": "任意",
@@ -1729,6 +1751,7 @@ const jaOverrides: Dict = {
   "intake.select": "選択",
   "intake.submit.busy": "準備中...",
   "intake.submit": "リーディングへ進む",
+  "intake.error.timePrecision": "出生時刻をどの程度詳しく覚えているか選択してください。",
   "intake.error.place": "都市を選ぶか、有効な座標を入力してください。",
   "intake.ambiguousTime.title": "この時刻は同じ日に2回ありました",
   "intake.ambiguousTime.body":
@@ -1968,21 +1991,24 @@ const jaOverrides: Dict = {
   "session.rectification.moreChecks": "追加確認が必要",
   "session.rectification.waiting": "回答待ち",
   "session.rectification.equivalent": "同等の時刻範囲を保持",
+  "session.rectification.stableIntersection": "共通して安定したチャートを準備済み",
   "session.rectification.underdetermined": "出生時刻は未確定",
   "session.rectification.inputResolution": "出生情報の確認が必要",
   "session.rectification.calculationFailed": "候補チャートの再計算が必要",
   "session.rectification.body.ready": "回答は完全な解釈へ進むのに十分です。",
+  "session.rectification.body.stableIntersection":
+    "回答により {count} 個の同等な時刻範囲まで絞り込まれました。正確な分は未確定のため、すべての範囲で共通して安定する結論だけを解釈します。",
   "session.rectification.body.more": "次の質問カードで不確実性を下げてからレポートへ進みます。",
   "session.rectification.body.equivalent":
     "{count} 個の時刻範囲が同じ重要チャートを示します。正確な一時刻を作らず、範囲として保持します。",
   "session.rectification.body.underdetermined":
-    "現在の証拠では出生時刻を十分に絞れません。より確かな時刻情報または日付付きの出来事が必要です。",
+    "現在の証拠では出生時刻を十分に絞れません。申告した時刻範囲を見直すか、独立して日付を確認できる出来事をもう一つ追加してください。",
   "session.rectification.body.inputResolution":
     "入力した時刻または場所の一部を一意に解決できません。範囲やタイムゾーンを確認してから補正を続けます。",
   "session.rectification.body.calculationFailed":
     "一部の候補チャートを一貫して計算できませんでした。出生時刻は選択せず、再計算後に補正を続けます。",
   "session.rectification.reviewMeta": "{risk} 信頼度レビュー · 第 {revision} 版",
-  "session.rectification.anchors": "校正イベント",
+  "session.rectification.anchors": "独立した人生の節目",
   "session.rectification.nextStep": "次のステップ",
   "session.rectification.continue": "準備できたら続行",
   "session.rectification.latestAnswer": "直前の回答",
@@ -1994,10 +2020,13 @@ const jaOverrides: Dict = {
     "保留した出来事では、残る時間帯を区別できませんでした。",
   "session.rectification.round.candidate_scores_separated":
     "この出来事は、残る出生時刻の範囲を有意に区別しました。",
+  "session.rectification.round.correlated_episode_recorded":
+    "この出来事は既存の時期と重なるため、背景情報として保存し、重複して数えません。",
   "session.rectification.round.evidence_recorded_without_required_margin":
     "この出来事は記録されましたが、日付を独立して確認できる別の出来事が必要です。",
   "session.rectification.preparingNext": "次のカードを準備中...",
   "session.rectification.continueCheck": "時刻確認を続ける",
+  "session.rectification.stableReport": "共通して安定した解釈を見る",
   "session.rectification.advanced": "高度な候補チャート",
   "session.rectification.baseCandidate": "基準",
   "session.rectification.score": "スコア {score}",
@@ -2008,6 +2037,7 @@ const jaOverrides: Dict = {
   "session.rectification.conclusion.resultTitle": "中間結論",
   "session.rectification.conclusion.correctedTime": "計算用の参照時刻",
   "session.rectification.conclusion.range": "残る時刻の範囲",
+  "session.rectification.conclusion.rangeExclusive": "{start} 以上、{end} 未満",
   "session.rectification.conclusion.confidence": "現在の信頼度",
   "session.rectification.conclusion.bounded": "範囲を限定済み（秒単位ではありません）",
   "session.rectification.conclusion.confidenceHigh": "この時刻範囲では高め",
@@ -2015,10 +2045,14 @@ const jaOverrides: Dict = {
   "session.rectification.conclusion.confidenceLow": "低め。追加確認が必要",
   "session.rectification.conclusion.evidence": "使用した証拠",
   "session.rectification.conclusion.evidenceValue":
-    "日付付き {events} 件 · {categories} 分野 · 保留確認 {holdout} 件",
+    "独立した節目 {events} 件 · {categories} 分野 · 保留確認 {holdout} 件",
+  "session.rectification.conclusion.methodStatus": "手法の検証状況",
+  "session.rectification.conclusion.methodReviewed": "独立した専門家のブラインドレビュー完了",
+  "session.rectification.conclusion.methodInternalOnly":
+    "内部回帰テスト済み。独立した専門家のブラインドレビューは未完了",
   "session.rectification.conclusion.explanationTitle": "この範囲を得た方法",
   "session.rectification.conclusion.explanationBody":
-    "一つの出来事は候補比較に使い、別の出来事は保留して、範囲が先行した後にだけ確認しました。",
+    "校正用の節目で全候補を比較し、別の独立した節目は保留して、範囲が先行した後にだけ確認しました。",
   "session.rectification.conclusion.calibrationRole": "比較用の証拠",
   "session.rectification.conclusion.holdoutRole": "保留確認",
   "session.rectification.conclusion.calibrationResult":

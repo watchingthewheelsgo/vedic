@@ -29,6 +29,8 @@ Birth Assertion
 - `backend/app/vedicdust/profiles.py` declares calculation profiles.
 - `independent-reference.md` defines external desktop-software certification.
 - `vedicdust-professional-review.schema.json` defines retained blind-review evidence.
+- `rectification-benchmark.md` defines the source-blind known-time benchmark and
+  rectification maturity gate.
 - Generated JSON Schemas live in `docs/vedicdust/schemas/`.
 
 The deterministic engine is authoritative for calculation and candidate

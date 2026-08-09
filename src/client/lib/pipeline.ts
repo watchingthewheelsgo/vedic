@@ -201,13 +201,16 @@ function readerPipelineNode(
     (artifact) => artifact.path === "chart_rectification_state.json"
   );
   const rectificationStatus = parseArtifactStatus(rectification?.content);
+  const rectificationAllowsReport = parseArtifactReportAllowed(rectification?.content);
   let status = "pending";
   if (rectificationStatus === "rectification_confirmation_required") status = "waiting";
   else if (feedback) status = "completed";
   else if (prevalidation) status = "waiting";
   else if (readerRunning) status = "running";
   else if (rectificationStatus === "corrected_chart_ready") status = "completed";
-  else if (rectificationStatus === "calculation_failed") status = "failed";
+  else if (rectificationStatus === "multiple_equivalent" && rectificationAllowsReport) {
+    status = "completed";
+  } else if (rectificationStatus === "calculation_failed") status = "failed";
   else if (
     rectificationStatus === "collecting_evidence" ||
     rectificationStatus === "underdetermined" ||
@@ -244,6 +247,18 @@ function parseArtifactStatus(content?: string): string {
     return typeof payload.status === "string" ? payload.status : "";
   } catch {
     return "";
+  }
+}
+
+function parseArtifactReportAllowed(content?: string): boolean {
+  if (!content) return false;
+  try {
+    const payload = JSON.parse(content) as {
+      reportGate?: { fullReportAllowed?: unknown };
+    };
+    return payload.reportGate?.fullReportAllowed === true;
+  } catch {
+    return false;
   }
 }
 

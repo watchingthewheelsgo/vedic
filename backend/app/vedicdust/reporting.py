@@ -524,7 +524,7 @@ def _residual_uncertainties(record: ChartRecord) -> list[str]:
     if record.rectification is not None:
         values.extend(record.rectification.decision.unresolved_questions)
         if (
-            record.rectification.decision.status == "bounded_interval"
+            record.rectification.decision.status in {"bounded_interval", "multiple_equivalent"}
             and record.rectification.validation_status == "internal_regression_only"
         ):
             values.append(_rectification_validation_limitation(record.subject.locale))
@@ -772,6 +772,12 @@ def _render_scope(
                 f"{decision.resulting_interval.start.isoformat()} to "
                 f"{decision.resulting_interval.end.isoformat()}"
             )
+        elif decision and decision.resulting_intervals:
+            retained = "; ".join(
+                f"{interval.start.isoformat()} to {interval.end.isoformat()}"
+                for interval in decision.resulting_intervals
+            )
+            calculation_basis += f" · {_equivalent_intervals_label(dossier.locale)} {retained}"
     lines = [
         f"- **{copy['reported_birth']}**: {reported_birth}",
         f"- **{copy['calculation_basis']}**: {calculation_basis}",
@@ -981,6 +987,12 @@ def _calculation_assurance_label(record: ChartRecord, locale: str) -> str:
 def _selected_interval_label(locale: str) -> str:
     return {"zh": "校正后采用范围", "ja": "補正後の採用範囲"}.get(
         locale, "rectified working interval"
+    )
+
+
+def _equivalent_intervals_label(locale: str) -> str:
+    return {"zh": "保留的等价范围", "ja": "保持された同等範囲"}.get(
+        locale, "retained equivalent intervals"
     )
 
 

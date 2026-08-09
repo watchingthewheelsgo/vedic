@@ -12,6 +12,7 @@ import pytz
 
 from app.calculator.civil_time import resolve_civil_time
 from app.calculator.constants import SIGNS, SIGN_LORDS
+from app.vedicdust.event_time import EVENT_TIMEZONE_BASIS, event_utc_envelope
 
 from .fact_catalog import FactType, fact_definition
 from .confidence import minimum_confidence
@@ -217,6 +218,7 @@ def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
     requires_rectification = rectification is not None and rectification.decision.status not in {
         "not_required",
         "bounded_interval",
+        "multiple_equivalent",
     }
     status = (
         "blocked"
@@ -2193,6 +2195,71 @@ def _changed_signature_fields(before: Mapping[str, Any], after: Mapping[str, Any
     return sorted(set(changed))
 
 
+def _candidate_evidence_score(score: Mapping[str, Any]) -> CandidateEvidenceScore:
+    observations = [
+        RectificationEvidenceObservation.model_validate(observation)
+        for observation in score.get("observations") or []
+        if isinstance(observation, Mapping)
+    ]
+    payload: dict[str, Any] = {
+        "event_id": str(score.get("eventId")),
+        "episode_id": str(score.get("episodeId") or score.get("eventId")),
+        "event_subtype": str(score["eventSubtype"]) if score.get("eventSubtype") else None,
+        "event_fingerprint": (
+            str(score["eventFingerprint"]) if score.get("eventFingerprint") else None
+        ),
+        "semantic_facts": (
+            score.get("semanticFacts") if isinstance(score.get("semanticFacts"), Mapping) else None
+        ),
+        "semantic_adjustment": (
+            score.get("semanticAdjustment")
+            if isinstance(score.get("semanticAdjustment"), Mapping)
+            else None
+        ),
+        "role": str(score.get("role") or "calibration"),
+        "score": float(score.get("score") or 0.0),
+        "support_score": float(score.get("supportScore") or 0.0),
+        "contradiction_score": float(score.get("contradictionScore") or 0.0),
+        "observations": observations,
+        "rule_ids": [str(value) for value in score.get("ruleIds") or []],
+        "source_ids": [str(value) for value in score.get("sourceIds") or []],
+        "scoring_policy_id": str(score.get("scoringPolicyId") or ""),
+        "event_mapping_id": str(score.get("eventMappingId") or ""),
+        "event_timezone_basis": EVENT_TIMEZONE_BASIS,
+        "explanation": str(score.get("explanation") or "No explanation supplied."),
+    }
+    optional_fields = {
+        "selectionScore": "selection_score",
+        "selectionSupportScore": "selection_support_score",
+        "selectionContradictionScore": "selection_contradiction_score",
+    }
+    for source_key, target_key in optional_fields.items():
+        if score.get(source_key) is not None:
+            payload[target_key] = score[source_key]
+    if score.get("methodConvergenceComponents") is not None:
+        payload["method_convergence_components"] = [
+            str(value)
+            for value in score.get("methodConvergenceComponents") or []
+            if value in {"dasha", "varga", "double_transit"}
+        ]
+    if score.get("methodConvergenceLayers") is not None:
+        payload["method_convergence_layers"] = [
+            str(value)
+            for value in score.get("methodConvergenceLayers") or []
+            if value
+            in {
+                "d1_period_activation",
+                "domain_varga_activation",
+                "double_transit",
+            }
+        ]
+        if score.get("methodConvergenceCount") is not None:
+            payload["method_convergence_count"] = score["methodConvergenceCount"]
+        if score.get("methodConvergenceMet") is not None:
+            payload["method_convergence_met"] = score["methodConvergenceMet"]
+    return CandidateEvidenceScore.model_validate(payload)
+
+
 def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterval]:
     raw_candidates = source.sensitivity_scan.get("candidateGroups") or []
     result: list[CandidateInterval] = []
@@ -2262,46 +2329,15 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                 hypothesis_axes=axes or ["time"],
                 place_hypothesis=place_hypothesis,
                 evidence_scores=[
-                    CandidateEvidenceScore(
-                        event_id=str(score.get("eventId")),
-                        event_subtype=(
-                            str(score["eventSubtype"]) if score.get("eventSubtype") else None
-                        ),
-                        event_fingerprint=(
-                            str(score["eventFingerprint"])
-                            if score.get("eventFingerprint")
-                            else None
-                        ),
-                        semantic_facts=(
-                            score.get("semanticFacts")
-                            if isinstance(score.get("semanticFacts"), Mapping)
-                            else None
-                        ),
-                        semantic_adjustment=(
-                            score.get("semanticAdjustment")
-                            if isinstance(score.get("semanticAdjustment"), Mapping)
-                            else None
-                        ),
-                        role=str(score.get("role") or "calibration"),
-                        score=float(score.get("score") or 0.0),
-                        support_score=float(score.get("supportScore") or 0.0),
-                        contradiction_score=float(score.get("contradictionScore") or 0.0),
-                        observations=[
-                            RectificationEvidenceObservation.model_validate(observation)
-                            for observation in score.get("observations") or []
-                            if isinstance(observation, Mapping)
-                        ],
-                        rule_ids=[str(value) for value in score.get("ruleIds") or []],
-                        source_ids=[str(value) for value in score.get("sourceIds") or []],
-                        scoring_policy_id=str(score.get("scoringPolicyId") or ""),
-                        event_mapping_id=str(score.get("eventMappingId") or ""),
-                        explanation=str(score.get("explanation") or "No explanation supplied."),
-                    )
+                    _candidate_evidence_score(score)
                     for score in raw.get("evidenceScores") or []
                     if isinstance(score, Mapping) and score.get("eventId")
                 ],
                 aggregate_score=(
                     float(raw["aggregateScore"]) if raw.get("aggregateScore") is not None else None
+                ),
+                convergent_calibration_event_count=int(
+                    raw.get("convergentCalibrationEventCount") or 0
                 ),
                 boundary_resolution_seconds=int(raw.get("boundaryResolutionSeconds") or 60),
                 left_boundary_uncertainty=_boundary_range(
@@ -2311,6 +2347,11 @@ def _candidate_intervals(source: ChartRecordBuildInput) -> list[CandidateInterva
                     str(raw["ayanamsaRisk"])
                     if raw.get("ayanamsaRisk") in {"none", "medium", "high"}
                     else "none"
+                ),
+                vimshottari_dasha_score=(
+                    float(raw["vimshottariDashaScore"])
+                    if raw.get("vimshottariDashaScore") is not None
+                    else None
                 ),
                 chara_dasha_score=(
                     float(raw["charaDashaScore"])
@@ -2356,16 +2397,18 @@ def _life_events(source: ChartRecordBuildInput) -> list[LifeEvent]:
         precision = str(raw.get("datePrecision") or "year")
         if precision == "day":
             start_naive = datetime.fromisoformat(date_value)
-            end_naive = start_naive + timedelta(days=1)
+            end_naive = start_naive + timedelta(days=1) - timedelta(seconds=1)
         elif precision == "month":
             year, month = (int(value) for value in date_value.split("-"))
             start_naive = datetime(year, month, 1)
-            end_naive = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+            next_month = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+            end_naive = next_month - timedelta(seconds=1)
         else:
             year = int(date_value[:4])
             start_naive = datetime(year, 1, 1)
-            end_naive = datetime(year + 1, 1, 1)
+            end_naive = datetime(year + 1, 1, 1) - timedelta(seconds=1)
             precision = "year"
+        event_start, event_end = event_utc_envelope(start_naive, end_naive)
         confidence = (
             ConfidenceGrade.CORROBORATED
             if str(raw.get("confidence")) == "high"
@@ -2374,13 +2417,15 @@ def _life_events(source: ChartRecordBuildInput) -> list[LifeEvent]:
         result.append(
             LifeEvent(
                 event_id=str(raw["eventId"]),
+                episode_id=str(raw.get("episodeId") or raw["eventId"]),
                 category=str(raw.get("category") or "unknown"),
                 event_subtype=(str(raw["eventSubtype"]) if raw.get("eventSubtype") else None),
                 interval=TimeRange(
-                    start=_localize_naive(start_naive, source.timezone_id),
-                    end=_localize_naive(end_naive, source.timezone_id),
+                    start=event_start,
+                    end=event_end,
                 ),
                 date_precision=precision,
+                event_timezone_basis=EVENT_TIMEZONE_BASIS,
                 description=str(raw.get("description") or "Dated life event"),
                 role=str(raw.get("role") or "calibration"),
                 evidence=EvidenceItem(

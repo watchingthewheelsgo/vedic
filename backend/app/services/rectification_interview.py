@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, datetime, timezone
+import re
 from typing import Any
 
 from app.schemas import AppLocale
-from app.services.life_event_rectification import MAX_RECTIFICATION_EVENTS
+from app.services.life_event_rectification import (
+    MAX_RECTIFICATION_EVENTS,
+    MIN_RECTIFICATION_EVENTS,
+)
 from app.vedicdust.rectification_policy import (
     RECTIFICATION_EVENT_RULES,
     RECTIFICATION_EVENT_SUBTYPES,
@@ -175,8 +179,30 @@ def build_rectification_interview(
         state.get("rectificationPlan") if isinstance(state.get("rectificationPlan"), dict) else {}
     )
     ledger = state.get("lifeEventLedger") if isinstance(state.get("lifeEventLedger"), dict) else {}
-    existing = [item for item in ledger.get("events", []) if isinstance(item, dict)]
+    existing = [
+        item
+        for item in ledger.get("events", [])
+        if isinstance(item, dict) and item.get("role") in {"calibration", "holdout"}
+    ]
     existing_categories = {str(item.get("category") or "") for item in existing}
+    round_history = [
+        item for item in state.get("rectificationRounds", []) if isinstance(item, dict)
+    ]
+    recorded_question_rounds = []
+    for item in ledger.get("events", []):
+        if not isinstance(item, dict):
+            continue
+        match = re.match(r"^rectify\.r(\d+)\.q\d+\.[a-z]+$", str(item.get("questionId") or ""))
+        if match:
+            recorded_question_rounds.append(int(match.group(1)))
+    interaction_round = (
+        max(
+            len(existing),
+            max((int(item.get("round") or 0) for item in round_history), default=0),
+            max(recorded_question_rounds, default=0),
+        )
+        + 1
+    )
     # Prefer a third distinct domain for the reserved event. If the user only has
     # two reliably dated domains, permit a repeat rather than invent an event.
     excluded_categories = existing_categories if len(existing) < 3 else set()
@@ -225,7 +251,7 @@ def build_rectification_interview(
     # only rewrite that selected question; it cannot choose a different category.
     pool_categories = categories[: min(3, remaining)]
     copy = _COPY.get(locale, _COPY["en"])
-    target = min(MAX_RECTIFICATION_EVENTS, max(3, len(existing) + 1))
+    target = min(MAX_RECTIFICATION_EVENTS, max(MIN_RECTIFICATION_EVENTS, len(existing) + 1))
     discriminating_fields = [str(value) for value in plan.get("discriminatingFields") or []]
     question_pool = []
     for index, category in enumerate(pool_categories, start=1):
@@ -239,7 +265,7 @@ def build_rectification_interview(
         )
         question_pool.append(
             {
-                "questionId": f"rectify.r{len(existing) + 1}.q{index}.{category}",
+                "questionId": f"rectify.r{interaction_round}.q{index}.{category}",
                 "category": category,
                 "title": title,
                 "prompt": prompt,
@@ -278,14 +304,14 @@ def build_rectification_interview(
         "generatedAt": datetime.now(timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
-        "round": max(1, len(existing) + 1),
+        "round": interaction_round,
         "status": status,
         "title": copy["title"],
         "intro": copy["intro"],
         "progress": {
             "answered": len(existing),
-            "minimumRequired": 3,
             "maximumAccepted": MAX_RECTIFICATION_EVENTS,
+            "minimumRequired": MIN_RECTIFICATION_EVENTS,
             "target": target,
             "label": copy["progress"].format(answered=len(existing), target=target),
         },
