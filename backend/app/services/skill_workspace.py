@@ -6,6 +6,10 @@ from datetime import datetime
 from pathlib import Path
 
 from app.schemas import SkillArtifact
+from app.services.public_artifact_projection import (
+    PUBLIC_PROJECTED_ARTIFACTS,
+    project_public_artifact,
+)
 from app.settings import Settings
 from app.utils.ids import make_id
 
@@ -52,6 +56,10 @@ class SkillWorkspace:
     }
 
     INTERNAL_ARTIFACTS = {
+        "birth_input_context.json",
+        "sensitivity_scan.json",
+        "chart_record.json",
+        "chart_rectification_state.json",
         "reading_session.json",
         "chart_audit.json",
         "judgement_context.json",
@@ -110,13 +118,22 @@ class SkillWorkspace:
             and path.suffix.lower() in [".md", ".txt", ".json"]
             and not any(part.startswith(".") for part in path.relative_to(session_dir).parts)
             and self.is_current_runtime_file(path.relative_to(session_dir).as_posix())
-            and (
-                include_internal
-                or path.relative_to(session_dir).as_posix() not in self.INTERNAL_ARTIFACTS
-            )
         ]
         files.sort(key=lambda path: (self._artifact_rank(path.name), path.name))
-        return [self._artifact_from_path(session_dir, path) for path in files]
+        artifacts: list[SkillArtifact] = []
+        for path in files:
+            relative = path.relative_to(session_dir).as_posix()
+            if include_internal:
+                artifacts.append(self._artifact_from_path(session_dir, path))
+                continue
+            if relative in PUBLIC_PROJECTED_ARTIFACTS:
+                projected = self._projected_artifact_from_path(session_dir, path)
+                if projected is not None:
+                    artifacts.append(projected)
+                continue
+            if relative not in self.INTERNAL_ARTIFACTS:
+                artifacts.append(self._artifact_from_path(session_dir, path))
+        return artifacts
 
     @staticmethod
     def is_current_runtime_file(relative_path: str) -> bool:
@@ -289,6 +306,23 @@ class SkillWorkspace:
             title=relative,
             content=path.read_text(encoding="utf-8"),
             kind=kind,
+            updated_at=datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+        )
+
+    def _projected_artifact_from_path(
+        self,
+        session_dir: Path,
+        path: Path,
+    ) -> SkillArtifact | None:
+        relative = path.resolve().relative_to(session_dir.resolve()).as_posix()
+        content = project_public_artifact(relative, path.read_text(encoding="utf-8"))
+        if content is None:
+            return None
+        return SkillArtifact(
+            path=relative,
+            title=relative,
+            content=content,
+            kind="json",
             updated_at=datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
         )
 

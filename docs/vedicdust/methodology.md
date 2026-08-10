@@ -362,11 +362,12 @@ and the typed Chart Record publishes a `SensitivityBoundary` with its resolution
 The sampled minute is never presented as a discovered exact transition. After
 dated-event evidence and the reserved holdout select one candidate, VedicDust may
 recalculate only that candidate's existing transition band at sub-minute instants.
-The refinement excludes D60 and Dasha-only changes, stops if a third structural
-fingerprint appears, and emits a bounded interval no narrower than the configured
-five-second resolution. It never converts that computational boundary into a
-claimed exact birth second; independent evidence still governs the final birth-time
-certainty.
+The refinement excludes D60. It includes a Dasha-only change only when that change
+comes from a calibration event whose historical period has candidate-selection
+authority. It stops if a third authorized fingerprint appears and emits a bounded
+interval no narrower than the configured five-second resolution. It never converts
+that computational boundary into a claimed exact birth second; independent evidence
+still governs the final birth-time certainty.
 
 City- and district-level coordinates are sampled only for geographic sensitivity.
 If the declared envelope changes material chart fields, the workflow requires a

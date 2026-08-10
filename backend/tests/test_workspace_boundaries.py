@@ -104,6 +104,187 @@ def test_chart_record_is_the_public_calculation_contract(tmp_path: Path) -> None
     assert runtime_artifacts[0].kind == "json"
 
 
+def test_rectification_runtime_artifacts_have_strict_client_projections(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    private_marker = "PRIVATE_CANDIDATE_EVIDENCE"
+    source_payloads = {
+        "birth_input_context.json": {
+            "schemaVersion": "birth-input-context/v1",
+            "time": {"reported": "09:30", "window": {"minutesBefore": 30}},
+            "place": {"reported": "Shanghai", "coordinates": {"lat": 31.2, "lon": 121.5}},
+            "lifeEvents": {
+                "independentEpisodeCount": 1,
+                "events": [
+                    {
+                        "date": "2020",
+                        "category": "career",
+                        "description": "Started a new job",
+                        "role": "holdout",
+                    }
+                ],
+            },
+            "lifeEventSemantics": [{"private": private_marker}],
+        },
+        "sensitivity_scan.json": {
+            "schemaVersion": "vedic-sensitivity-scan/v1",
+            "summary": {"riskLevel": "high", "candidateScoringErrors": []},
+            "reportReadiness": {
+                "mode": "rectification_required",
+                "candidateCount": 2,
+            },
+            "base": {"private": private_marker},
+            "candidateGroups": [{"candidateId": "A", "private": private_marker}],
+            "timeVariants": [{"private": private_marker}],
+        },
+        "chart_record.json": {
+            "schemaVersion": "vedicdust-chart-record/1.6.0",
+            "chartRecordId": "chart-1",
+            "astronomy": {"public": "chart facts remain visible"},
+            "sensitivityBoundaries": [
+                {"beforeFingerprint": private_marker, "afterFingerprint": private_marker}
+            ],
+            "rectification": {
+                "candidates": [
+                    {
+                        "candidateId": "A",
+                        "evidenceScores": [{"explanation": private_marker}],
+                    }
+                ]
+            },
+        },
+        "chart_rectification_state.json": {
+            "schemaVersion": "vedicdust-chart-rectification-state/1.0.0",
+            "status": "collecting_evidence",
+            "riskLevel": "high",
+            "equivalentCandidateIds": ["A", "B"],
+            "holdoutResult": "not_run",
+            "reportGate": {"fullReportAllowed": False, "nextStep": "collect_dated_events"},
+            "rectificationPlan": {
+                "action": "collect_dated_life_events",
+                "eventCollectionRequired": True,
+            },
+            "selectionEvidence": {
+                "calibrationEventCount": 2,
+                "holdoutEventCount": 1,
+                "blockers": [private_marker],
+            },
+            "lifeEventLedger": {
+                "independentEpisodeCount": 1,
+                "events": [
+                    {
+                        "eventId": "event-private",
+                        "date": "2020",
+                        "datePrecision": "year",
+                        "category": "career",
+                        "eventSubtype": "first_job",
+                        "description": "Started a new job",
+                        "role": "holdout",
+                    }
+                ],
+            },
+            "candidates": [
+                {
+                    "candidateId": "A",
+                    "signature": {"private": private_marker},
+                    "evidenceScores": [{"explanation": private_marker}],
+                }
+            ],
+            "rectificationRounds": [
+                {
+                    "round": 1,
+                    "evidenceImpact": {"private": private_marker},
+                    "decision": {
+                        "outcome": "candidate_scores_separated",
+                        "selectedCandidateId": "A",
+                    },
+                }
+            ],
+            "rectificationConclusion": {
+                "schemaVersion": "vedicdust-rectification-conclusion/1.1.0",
+                "status": "ready_for_confirmation",
+                "chartRevision": 2,
+                "candidateId": "A",
+                "confidence": "high",
+                "correctedBirthTime": {
+                    "localDate": "1990-01-01",
+                    "localTime": "08:22",
+                    "timezoneId": "Asia/Shanghai",
+                },
+                "evidenceSummary": {
+                    "calibrationEventCount": 2,
+                    "holdoutEventCount": 1,
+                    "selectionPolicyId": private_marker,
+                },
+                "futurePrivateField": private_marker,
+                "confirmation": {
+                    "status": "pending",
+                    "responses": [{"note": private_marker}],
+                },
+            },
+        },
+    }
+    for path, payload in source_payloads.items():
+        workspace.write_artifact(session_id, path, json.dumps(payload))
+
+    public = {
+        artifact.path: json.loads(artifact.content)
+        for artifact in workspace.read_artifacts(session_id)
+    }
+    internal = {
+        artifact.path: artifact.content
+        for artifact in workspace.read_artifacts(session_id, include_internal=True)
+    }
+
+    assert set(source_payloads) <= set(public)
+    assert private_marker not in json.dumps(public)
+    assert private_marker in internal["chart_rectification_state.json"]
+    assert "lifeEvents" not in public["birth_input_context.json"]
+    assert "lifeEventSemantics" not in public["birth_input_context.json"]
+    assert "candidateGroups" not in public["sensitivity_scan.json"]
+    assert "timeVariants" not in public["sensitivity_scan.json"]
+    assert "rectification" not in public["chart_record.json"]
+    assert "sensitivityBoundaries" not in public["chart_record.json"]
+    public_state = public["chart_rectification_state.json"]
+    assert "candidates" not in public_state
+    assert "holdoutResult" not in public_state
+    assert "equivalentCandidateIds" not in public_state
+    assert public_state["equivalentCandidateCount"] == 2
+    assert public_state["lifeEventLedger"]["events"] == [
+        {
+            "date": "2020",
+            "datePrecision": "year",
+            "category": "career",
+            "eventSubtype": "first_job",
+            "description": "Started a new job",
+        }
+    ]
+    assert public_state["rectificationRounds"] == [
+        {"round": 1, "decision": {"outcome": "candidate_scores_separated"}}
+    ]
+    public_conclusion = public_state["rectificationConclusion"]
+    assert public_conclusion["correctedBirthTime"]["localTime"] == "08:22"
+    assert public_conclusion["confirmation"] == {"status": "pending"}
+    assert "candidateId" not in public_conclusion
+    assert "selectionPolicyId" not in public_conclusion["evidenceSummary"]
+    assert "futurePrivateField" not in public_conclusion
+
+
+def test_malformed_private_projection_is_not_returned_to_client(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(session_id, "chart_rectification_state.json", "not-json")
+
+    public_paths = {artifact.path for artifact in workspace.read_artifacts(session_id)}
+    internal = {
+        artifact.path: artifact.content
+        for artifact in workspace.read_artifacts(session_id, include_internal=True)
+    }
+
+    assert "chart_rectification_state.json" not in public_paths
+    assert internal["chart_rectification_state.json"] == "not-json"
+
+
 def test_core_completion_requires_all_released_consultation_artifacts(tmp_path: Path) -> None:
     workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
     session_id = workspace.create_session()

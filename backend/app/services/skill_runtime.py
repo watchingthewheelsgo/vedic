@@ -2766,9 +2766,16 @@ Return JSON only:
     def _write_prevalidation_result(
         self, session_id: str, *, feedback_markdown: str | None = None
     ) -> dict[str, object] | None:
+        artifact_paths = (
+            "reader_prevalidation.md",
+            "user_context.md",
+            CHART_RECORD_JSON,
+            "sensitivity_scan.json",
+            "prevalidation_result.json",
+        )
         artifacts = {
-            artifact.path: artifact.content
-            for artifact in self.workspace.read_artifacts(session_id)
+            path: self.workspace.read_artifact_text(session_id, path) or ""
+            for path in artifact_paths
         }
         prevalidation = artifacts.get("reader_prevalidation.md", "")
         if not prevalidation.strip():
@@ -2824,11 +2831,9 @@ Return JSON only:
         session_id: str,
         prevalidation_result: dict[str, object],
     ) -> None:
-        artifacts = {
-            artifact.path: artifact.content
-            for artifact in self.workspace.read_artifacts(session_id)
-        }
-        state = self._json_dict(artifacts.get("chart_rectification_state.json", ""))
+        state = self._json_dict(
+            self.workspace.read_artifact_text(session_id, "chart_rectification_state.json") or ""
+        )
         if not state:
             return
         if state.get("status") == "not_required":
@@ -4047,11 +4052,9 @@ Return JSON only:
                 break
         if not prevalidation.strip():
             raise ValueError("vedic-reader must return reader_prevalidation.md")
-        existing = {
-            artifact.path: artifact.content
-            for artifact in self.workspace.read_artifacts(session_id)
-        }
-        state = self._json_dict(existing.get("chart_rectification_state.json", ""))
+        state = self._json_dict(
+            self.workspace.read_artifact_text(session_id, "chart_rectification_state.json") or ""
+        )
         errors = self.rectification.validate_prevalidation_contract(
             state,
             prevalidation,

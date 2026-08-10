@@ -258,9 +258,10 @@ D9, D10, D12, D16, D20, D24, D27, D30, D60`. The calculator now writes
       exhaustive.
 - [x] Add optional sub-minute boundary refinement for the final surviving interval.
       After evidence selects a candidate, the runtime now narrows only its existing
-      60-second chart-transition band to a bounded five-second interval. It stops on
-      an intermediate fingerprint, does not refine Dasha-only transitions, excludes
-      D60, and never publishes a discovered exact birth second.
+      60-second chart or calibration-period transition band to a bounded five-second
+      interval. It stops on an intermediate fingerprint, includes Dasha-only changes
+      only when they come from calibration events with selection authority, excludes D60,
+      and never publishes a discovered exact birth second.
 - [x] Score each place candidate with its own coordinates and coordinate-derived
       timezone. A selected coordinate is recalculated as coordinate-level input and
       no longer inherits the original city radius.

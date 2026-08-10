@@ -125,10 +125,7 @@ type RectificationState = {
   status?: string;
   riskLevel?: string;
   reportReadinessMode?: string;
-  scanChangedFields?: string[];
-  activeCandidateId?: string | null;
-  selectedCandidateId?: string | null;
-  equivalentCandidateIds?: string[];
+  equivalentCandidateCount?: number;
   availableRectificationCategories?: RectificationLifeEventCategory[];
   selectionConfidence?: string;
   selectionEvidence?: {
@@ -140,24 +137,11 @@ type RectificationState = {
     submittedEventCount?: number;
     correlatedEventCount?: number;
   };
-  candidates?: Array<{
-    candidateId?: string;
-    isBase?: boolean;
-    score?: number;
-    support?: number;
-    reject?: number;
-    changedFromBase?: string[];
-  }>;
   reportGate?: {
     fullReportAllowed?: boolean;
     reason?: string;
     reportScope?: string;
     nextStep?: string;
-  };
-  equivalentCandidateIntersection?: {
-    candidateIds?: string[];
-    intervals?: Array<{ start?: string; end?: string }>;
-    unstableFields?: string[];
   };
   rectificationPlan?: {
     action?: string;
@@ -166,21 +150,14 @@ type RectificationState = {
   lifeEventLedger?: {
     independentEpisodeCount?: number;
     events?: Array<{
-      eventId?: string;
-      episodeId?: string;
       date?: string;
       category?: RectificationLifeEventCategory;
       eventSubtype?: string;
       description?: string;
-      role?: "calibration" | "holdout" | "calibration_context" | "holdout_context" | "context_only";
     }>;
   };
   rectificationRounds?: Array<{
     round?: number;
-    evidenceImpact?: {
-      scoreSpread?: number | null;
-      discriminating?: boolean;
-    };
     decision?: {
       outcome?:
         | "bounded_candidate_selected"
@@ -194,13 +171,11 @@ type RectificationState = {
   activeChartRevision?: {
     revision?: number;
     source?: string;
-    candidateId?: string | null;
   };
   rectificationConclusion?: {
     schemaVersion?: string;
     status?: string;
     chartRevision?: number;
-    candidateId?: string;
     confidence?: string;
     correctedBirthTime?: {
       localDate?: string;
@@ -2823,7 +2798,7 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
   const confidenceBody = gateAllowed
     ? state.status === "multiple_equivalent"
       ? t("session.rectification.body.stableIntersection", {
-          count: state.equivalentCandidateIds?.length ?? 0
+          count: state.equivalentCandidateCount ?? 0
         })
       : t("session.rectification.body.ready")
     : needsConfirmation
@@ -2834,7 +2809,7 @@ function ChartRectificationSummary({ state }: { state: RectificationState }) {
           ? t("session.rectification.body.inputResolution")
           : hasEquivalentCandidates
             ? t("session.rectification.body.equivalent", {
-                count: state.equivalentCandidateIds?.length ?? 0
+                count: state.equivalentCandidateCount ?? 0
               })
             : isUnderdetermined
               ? t("session.rectification.body.underdetermined")
@@ -3283,9 +3258,7 @@ function LifeEventCollector({
             event
           ): event is Required<
             Pick<RectificationLifeEventInput, "date" | "category" | "description">
-          > =>
-            Boolean(event.date && event.category && event.description) &&
-            event.role !== "context_only"
+          > => Boolean(event.date && event.category && event.description)
         )
         .map((event) => ({
           date: event.date,
@@ -3337,9 +3310,7 @@ function LifeEventCollector({
   const confirmedEventCount =
     interview?.progress.answered ??
     state.lifeEventLedger?.independentEpisodeCount ??
-    (state.lifeEventLedger?.events ?? []).filter(
-      (event) => event.role === "calibration" || event.role === "holdout"
-    ).length;
+    (state.lifeEventLedger?.events ?? []).length;
   const answerComplete = Boolean(
     answer?.date &&
     selectedChoice &&
@@ -4304,9 +4275,7 @@ function ReaderDetail({
   const interviewArtifact = findArtifact(session, "rectification_interview.json");
   const collectedLifeEventCount =
     rectificationState?.lifeEventLedger?.independentEpisodeCount ??
-    (rectificationState?.lifeEventLedger?.events ?? []).filter(
-      (event) => event.role === "calibration" || event.role === "holdout"
-    ).length;
+    (rectificationState?.lifeEventLedger?.events ?? []).length;
   const needsAvailabilityInventory =
     collectedLifeEventCount === 0 &&
     (rectificationState?.availableRectificationCategories?.length ?? 0) === 0;
@@ -5675,11 +5644,7 @@ function readingContinuationAction(
   const plan = objectValue(state, "rectificationPlan");
   const action = String(plan?.action ?? "").trim();
   const gate = objectValue(state, "reportGate");
-  if (
-    status === "corrected_chart_ready" &&
-    state.holdoutResult === "passed" &&
-    gate?.fullReportAllowed === true
-  ) {
+  if (status === "corrected_chart_ready" && gate?.fullReportAllowed === true) {
     return "full_report";
   }
   if (

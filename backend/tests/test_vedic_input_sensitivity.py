@@ -4498,9 +4498,12 @@ def test_reader_artifact_validation_rejects_missing_candidate_field_lines() -> N
     )
     runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
     runtime.workspace = SimpleNamespace(
+        read_artifact_text=lambda _session_id, path: (
+            json.dumps(state) if path == "chart_rectification_state.json" else None
+        ),
         read_artifacts=lambda _session_id: [
             SimpleNamespace(path="chart_rectification_state.json", content=json.dumps(state))
-        ]
+        ],
     )
     runtime.rectification = service
 
