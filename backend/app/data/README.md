@@ -1,0 +1,41 @@
+# Location catalog
+
+`china_location_catalog.json` is the VedicDust-owned location contract for the
+China intake flow.
+
+## Contract
+
+- `country`: the supported country identity and its display/search names.
+- `regions[]`: province, autonomous-region, municipality, or SAR records
+  identified by a stable `CN-######` code.
+- `regions[].children[]`: the direct next-level administrative units. Depending
+  on the parent, these are cities, prefectures, counties, leagues, banners, or
+  districts. Every child has a stable ID and `parentRegionId`.
+- `sourceLevel` and `unitType`: preserve the source hierarchy and expose the
+  business type without making the application infer it from a localized name.
+- `searchNames`: data-backed names used for matching; no location aliases are
+  maintained in application code.
+- `center`: an administrative center with explicit `longitude` and `latitude`.
+- `source`: source, version, retrieval date, coordinate reference, and the
+  intended fallback behavior are recorded with the data.
+
+The selected region or child ID is submitted to the backend. `PlaceService`
+resolves that ID directly to coordinates and an IANA timezone, so the
+calculator does not need to reverse-parse a localized display label. A user can
+stop at the region level or choose one direct child for a more precise
+administrative center.
+
+## Source and precision
+
+The current snapshot is generated from GeoJSON.CN China administrative data
+version `1.6.3`. It contains administrative centers, not hospital, street, or
+building coordinates. The selected region or direct child center is therefore
+the initial calculation point. An optional POI lookup may replace it only
+after the result is verified against the selected administrative scope.
+
+The source coordinates are published as CGCS2000 (EPSG:4490). The VedicDust
+calculator exposes the city point through its WGS84 calculation contract at
+city-level precision; the source datum remains recorded in the catalog for
+future coordinate normalization.
+
+GeoJSON.CN source: <https://geojson.cn/data/atlas/china>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from calendar import monthrange
 from collections import Counter
@@ -19,6 +20,7 @@ from app.vedicdust.rectification_policy import (
     RECTIFICATION_CONVERGENCE_COMPONENTS,
     RECTIFICATION_EVENT_MAPPING_ID,
     RECTIFICATION_EVENT_RULES,
+    RECTIFICATION_EVENT_SUBTYPES,
     RECTIFICATION_HOLDOUT_POLICY_ID,
     RECTIFICATION_KP_RULE_ID,
     MINIMUM_RECTIFICATION_EVENTS,
@@ -74,6 +76,8 @@ DATE_PATTERN = re.compile(
     r"(?:\s*(?:-|/|\.)?\s*(?P<day>3[01]|[12]\d|0?[1-9])\s*日?)?"
     r")?"
 )
+STRUCTURED_LIFE_EVENT_EVIDENCE_SCHEMA_VERSION = "vedicdust-structured-life-events/1.0.0"
+STRUCTURED_LIFE_EVENT_EVIDENCE_AUTHORITY = "backend_question_binding"
 MAX_RECTIFICATION_EVENTS = 5
 MIN_RECTIFICATION_EVENTS = MINIMUM_RECTIFICATION_EVENTS
 TRANSIT_COVERAGE_STEP = timedelta(hours=12)
@@ -83,10 +87,51 @@ CHALLENGING_DIGNITIES = frozenset({"debilitated", "great_enemy", "enemy"})
 CLASSICAL_GRAHAS = frozenset({"Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"})
 
 
+def encode_structured_life_event_evidence(events: list[dict[str, Any]]) -> str:
+    """Persist backend-bound event records without round-tripping through prose."""
+
+    return json.dumps(
+        {
+            "schemaVersion": STRUCTURED_LIFE_EVENT_EVIDENCE_SCHEMA_VERSION,
+            "authority": STRUCTURED_LIFE_EVENT_EVIDENCE_AUTHORITY,
+            "events": events,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def decode_life_event_evidence(raw: str) -> tuple[list[dict[str, Any]], bool]:
+    """Read the current authoritative envelope while accepting legacy semantic lists."""
+
+    text = (raw or "").strip()
+    if not text:
+        return [], False
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return [], False
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)], False
+    if not isinstance(payload, dict):
+        return [], False
+    if payload.get("schemaVersion") != STRUCTURED_LIFE_EVENT_EVIDENCE_SCHEMA_VERSION:
+        return [], False
+    if payload.get("authority") != STRUCTURED_LIFE_EVENT_EVIDENCE_AUTHORITY:
+        raise ValueError("structured life-event evidence has an invalid authority")
+    events = payload.get("events")
+    if not isinstance(events, list):
+        raise ValueError("structured life-event evidence must contain an events list")
+    if any(not isinstance(item, dict) for item in events):
+        raise ValueError("structured life-event evidence contains a non-object event")
+    return events, True
+
+
 def parse_life_event_ledger(
     raw: str,
     *,
     semantic_evidence: list[dict[str, Any]] | None = None,
+    structured_authority: bool = False,
 ) -> dict[str, Any]:
     text = (raw or "").strip()
     semantic_by_fingerprint: dict[str, list[dict[str, Any]]] = {}
@@ -104,30 +149,34 @@ def parse_life_event_ledger(
         )
         semantic_by_fingerprint.setdefault(match_key, []).append(item)
     events: list[dict[str, Any]] = []
-    for index, line in enumerate(_candidate_lines(text), start=1):
-        event = _parse_event_line(line, index)
-        if event is not None:
-            event["intakeSequence"] = index
-            semantic_matches = semantic_by_fingerprint.get(
-                str(event.get("eventFingerprint") or ""), []
-            )
-            semantic = semantic_matches.pop(0) if semantic_matches else None
-            if semantic:
-                event["questionId"] = str(semantic.get("questionId") or "")
-                event["semanticFacts"] = dict(semantic.get("eventFacts") or {})
-                event_subtype = str(semantic.get("eventSubtype") or "").strip().casefold()
-                if event_subtype:
-                    event["eventSubtype"] = event_subtype
-                    _apply_event_rules(event, event_subtype=event_subtype)
-                    event_fingerprint = _event_fingerprint(
-                        str(event.get("date") or ""),
-                        str(event.get("category") or ""),
-                        str(event.get("description") or ""),
-                        event_subtype,
-                    )
-                    event["eventFingerprint"] = event_fingerprint
-                    event["eventId"] = f"evt_{event_fingerprint[:16]}"
-            events.append(event)
+    if structured_authority:
+        for index, item in enumerate(semantic_evidence or [], start=1):
+            events.append(_structured_event(item, index))
+    else:
+        for index, line in enumerate(_candidate_lines(text), start=1):
+            event = _parse_event_line(line, index)
+            if event is not None:
+                event["intakeSequence"] = index
+                semantic_matches = semantic_by_fingerprint.get(
+                    str(event.get("eventFingerprint") or ""), []
+                )
+                semantic = semantic_matches.pop(0) if semantic_matches else None
+                if semantic:
+                    event["questionId"] = str(semantic.get("questionId") or "")
+                    event["semanticFacts"] = dict(semantic.get("eventFacts") or {})
+                    event_subtype = str(semantic.get("eventSubtype") or "").strip().casefold()
+                    if event_subtype:
+                        event["eventSubtype"] = event_subtype
+                        _apply_event_rules(event, event_subtype=event_subtype)
+                        event_fingerprint = _event_fingerprint(
+                            str(event.get("date") or ""),
+                            str(event.get("category") or ""),
+                            str(event.get("description") or ""),
+                            event_subtype,
+                        )
+                        event["eventFingerprint"] = event_fingerprint
+                        event["eventId"] = f"evt_{event_fingerprint[:16]}"
+                events.append(event)
 
     eligible_events = [event for event in events if event.get("category") != "unknown"]
     for event in events:
@@ -186,6 +235,11 @@ def parse_life_event_ledger(
             else "Ask the user for 4-5 dated life events before deep rectification."
         ),
         "semanticEvidence": [item for item in semantic_evidence or [] if isinstance(item, dict)],
+        "evidenceAuthority": (
+            STRUCTURED_LIFE_EVENT_EVIDENCE_AUTHORITY
+            if structured_authority
+            else "legacy_text_import"
+        ),
     }
 
 
@@ -486,6 +540,8 @@ def score_candidate_events(
         for lord in period_lords:
             _required_sign_index(planet_signs, lord, scope="D1")
         available_levels = {level for level, _ in period_entries}
+        complete_dasha_hierarchy = available_levels == {"md", "ad", "pd"}
+        activated_dasha_levels: list[str] = []
         for level in ("md", "ad", "pd"):
             if level not in available_levels:
                 observations.append(
@@ -538,6 +594,7 @@ def score_candidate_events(
             if ruled_houses:
                 matched_dimensions.append("lord")
             if matched_dimensions:
+                activated_dasha_levels.append(level)
                 support_score += weight
                 observations.append(
                     _observation(
@@ -571,6 +628,25 @@ def score_candidate_events(
                         },
                     )
                 )
+
+        if complete_dasha_hierarchy and not activated_dasha_levels:
+            observations.append(
+                _observation(
+                    candidate_id,
+                    event["eventId"],
+                    "dasha.complete_non_activation",
+                    component="dasha",
+                    outcome="contradiction",
+                    weight=RECTIFICATION_SCORING_POLICY.dasha_complete_non_activation_weight,
+                    details={
+                        "periodLords": period_lords,
+                        "relevantHouses": sorted(relevant_houses),
+                        "karakas": sorted(karakas),
+                        "reason": "complete_stable_hierarchy_has_no_mapped_activation",
+                        "hardElimination": False,
+                    },
+                )
+            )
 
         for varga in relevant_vargas:
             factor_field = f"d{varga[1:]}Lagna"
@@ -653,6 +729,27 @@ def score_candidate_events(
                         },
                     )
                 )
+                if complete_dasha_hierarchy:
+                    observations.append(
+                        _observation(
+                            candidate_id,
+                            event["eventId"],
+                            f"{varga.lower()}.complete_non_activation",
+                            component="varga",
+                            outcome="contradiction",
+                            weight=(
+                                RECTIFICATION_SCORING_POLICY.varga_complete_non_activation_weight
+                            ),
+                            details={
+                                "varga": varga,
+                                "lagnaSign": varga_sign,
+                                "periodLords": period_lords,
+                                "relevantHouses": sorted(relevant_houses),
+                                "reason": "complete_stable_hierarchy_has_no_domain_activation",
+                                "hardElimination": False,
+                            },
+                        )
+                    )
 
         transit_samples = [
             calc_transits(
@@ -1654,6 +1751,49 @@ def _parse_event_line(line: str, index: int) -> dict[str, Any] | None:
             "outcomePolarity": rectification_outcome_polarity(category),
         },
     }
+
+
+def _structured_event(item: dict[str, Any], index: int) -> dict[str, Any]:
+    """Build one scored event from one backend-bound answer.
+
+    Descriptions remain opaque data here. They are never split on punctuation or
+    searched for additional dates, so one submitted answer cannot manufacture
+    another calibration or holdout episode.
+    """
+
+    date_value = str(item.get("date") or "").strip()
+    category = str(item.get("category") or "").strip().casefold()
+    event_subtype = str(item.get("eventSubtype") or "").strip().casefold()
+    description = " ".join(str(item.get("description") or "").split())
+    question_id = str(item.get("questionId") or "").strip()
+    if item.get("accepted") is not True:
+        raise ValueError("structured life-event evidence contains an unaccepted event")
+    if not question_id:
+        raise ValueError("structured life-event evidence is missing its question binding")
+    if category not in RECTIFICATION_EVENT_RULES or category == "unknown":
+        raise ValueError("structured life-event evidence has an unsupported category")
+    if event_subtype not in RECTIFICATION_EVENT_SUBTYPES.get(category, ()):
+        raise ValueError("structured life-event evidence has an unsupported subtype")
+    if not description:
+        raise ValueError("structured life-event evidence is missing its description")
+    line = f"{date_value} {category}: {description}"
+    event = _parse_event_line(line, index)
+    if event is None or event.get("date") != date_value or event.get("category") != category:
+        raise ValueError("structured life-event evidence has an invalid date or category")
+    event["intakeSequence"] = index
+    event["questionId"] = question_id
+    event["semanticFacts"] = dict(item.get("eventFacts") or {})
+    event["eventSubtype"] = event_subtype
+    _apply_event_rules(event, event_subtype=event_subtype)
+    event_fingerprint = _event_fingerprint(
+        date_value,
+        category,
+        str(event.get("description") or ""),
+        event_subtype,
+    )
+    event["eventFingerprint"] = event_fingerprint
+    event["eventId"] = f"evt_{event_fingerprint[:16]}"
+    return event
 
 
 def _apply_event_rules(event: dict[str, Any], *, event_subtype: str | None) -> None:

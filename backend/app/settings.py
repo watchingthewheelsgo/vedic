@@ -82,7 +82,7 @@ class Settings(BaseSettings):
         default=8, alias="PLACE_LOOKUP_AGENT_MAX_TURNS", ge=1, le=16
     )
     # POI search traces can contain user-entered addresses and provider evidence.
-    # Operators must opt in explicitly when diagnosing a lookup in a safe environment.
+    # Enable them only in a local, ignored .env while diagnosing a lookup.
     place_lookup_trace_enabled: bool = Field(default=False, alias="PLACE_LOOKUP_TRACE_ENABLED")
     place_lookup_trace_max_chars: int = Field(default=4000, alias="PLACE_LOOKUP_TRACE_MAX_CHARS")
     place_lookup_rate_limit: int = Field(default=30, alias="PLACE_LOOKUP_RATE_LIMIT", ge=1)

@@ -4,11 +4,11 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Literal, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal
 
 from app.agents.claude_runtime import ClaudeRuntime
 from app.schemas import PrecisePlaceOption, PrecisePlaceSearchResponse
-from app.services.place_entity_matching import matches_place_entity
 from app.services.place_lookup_budget import PlaceLookupBudget, PlaceLookupRateLimitError
 from app.services.place_service import PlaceService, ResolvedPlace
 
@@ -35,9 +35,12 @@ class PrecisePlaceLookupService:
         *,
         query: str = "",
         city_context: str | None = None,
+        locale: Literal["zh", "en", "ja"] = "en",
         limit: int = 8,
         client_key: str | None = None,
+        progress_callback: Callable[[str, dict[str, object]], Awaitable[None]] | None = None,
     ) -> PrecisePlaceSearchResponse:
+        await self._emit_progress(progress_callback, "resolving", {"query": query})
         agent_enabled = self.agent_runtime.is_configured()
         baseline = self.place_service.search_precise(
             query=query,
@@ -50,11 +53,7 @@ class PrecisePlaceLookupService:
 
         city_base = self.place_service.resolve_city_scope(city_context or "")
         agent_options: list[PrecisePlaceOption] = []
-        agent_search_queries = self._build_agent_search_queries(
-            query=query,
-            city_context=city_context,
-            city_base=city_base,
-        )
+        agent_search_queries: list[str] = []
         self._log_place_trace(
             "agent_candidate_lookup",
             {
@@ -64,7 +63,6 @@ class PrecisePlaceLookupService:
                 "city_lat": city_base.lat,
                 "city_lon": city_base.lon,
                 "agent_enabled": agent_enabled,
-                "agent_search_queries": agent_search_queries,
             },
         )
         agent_error: str | None = None
@@ -73,6 +71,11 @@ class PrecisePlaceLookupService:
         if agent_enabled:
             agent_attempted = True
             try:
+                await self._emit_progress(
+                    progress_callback,
+                    "searching",
+                    {"query": query, "scope": city_base.label},
+                )
                 self._agent_budget.acquire(client_key or "internal")
                 budget_acquired = True
                 agent_settings = getattr(self.agent_runtime, "settings", None)
@@ -88,13 +91,17 @@ class PrecisePlaceLookupService:
                     result = await self.agent_runtime.run_place_lookup_task(
                         query=query,
                         city_label=city_base.label,
-                        selected_scope_label=city_context,
-                        city_lat=city_base.lat,
-                        city_lon=city_base.lon,
-                        max_distance_km=self.place_service.max_city_distance_km(city_base),
+                        selected_scope_label=city_base.label,
+                        locale=locale,
                         max_results=min(limit, 5),
-                        search_queries=agent_search_queries,
+                        progress_callback=progress_callback,
                     )
+                agent_search_queries = list(getattr(result, "tool_queries", ()) or ())
+                await self._emit_progress(
+                    progress_callback,
+                    "matching",
+                    {"query": query, "scope": city_base.label},
+                )
                 agent_options = self._agent_result_to_options(result, query, city_base)
             except TimeoutError:
                 agent_error = "agent place lookup timed out"
@@ -144,6 +151,11 @@ class PrecisePlaceLookupService:
             agent_error=agent_error,
             agent_search_queries=agent_search_queries,
         )
+        await self._emit_progress(
+            progress_callback,
+            "complete",
+            {"query": query, "optionCount": len(final.options)},
+        )
         logger.info(
             "precise_place_lookup query=%r city=%r agent_queries=%s sources=%s "
             "agent_enabled=%s agent_attempted=%s agent_candidates=%s rejected=%s",
@@ -182,130 +194,21 @@ class PrecisePlaceLookupService:
         return final
 
     @staticmethod
+    async def _emit_progress(
+        callback: Callable[[str, dict[str, object]], Awaitable[None]] | None,
+        stage: str,
+        payload: dict[str, object],
+    ) -> None:
+        if callback is not None:
+            await callback(stage, payload)
+
+    @staticmethod
     def _should_attempt_agent(response: PrecisePlaceSearchResponse) -> bool:
         if not response.verification_base:
             return False
         if not response.options:
             return True
         return all(option.verification_status == "city-fallback" for option in response.options)
-
-    def _build_agent_search_queries(
-        self,
-        *,
-        query: str,
-        city_context: str | None,
-        city_base: ResolvedPlace,
-        max_queries: int = 6,
-    ) -> list[str]:
-        trimmed_query = self._compact_text(query)
-        if not trimmed_query:
-            return []
-
-        contexts = self._agent_search_contexts(city_context, city_base)
-        queries: list[str] = []
-
-        def add(value: str) -> None:
-            compacted = self._compact_text(value)
-            if compacted and compacted not in queries:
-                queries.append(compacted)
-
-        if self._has_cjk(trimmed_query):
-            for context in contexts:
-                if self._has_cjk(context):
-                    base = self._join_query_context(trimmed_query, context)
-                    add(f"{base} 经纬度")
-                    add(f"{base} 坐标")
-            add(f"{trimmed_query} 经纬度")
-            add(f"{trimmed_query} 地址 经纬度")
-
-        english_contexts = [
-            context for context in contexts if not self._has_cjk(context)
-        ] or contexts
-        for context in english_contexts:
-            base = self._join_query_context(trimmed_query, context)
-            add(f"{base} latitude longitude coordinates")
-            add(f"{base} WGS84 coordinates")
-
-        return queries[:max_queries]
-
-    def _agent_search_contexts(
-        self, city_context: str | None, city_base: ResolvedPlace
-    ) -> list[str]:
-        contexts: list[str] = []
-
-        def add(value: str | None) -> None:
-            compacted = self._compact_text(value or "")
-            if compacted and compacted not in contexts:
-                contexts.append(compacted)
-
-        add(self._localized_china_context(city_base))
-        if city_context:
-            add(city_context)
-        if city_base.raw_query and self._has_cjk(city_base.raw_query):
-            add(city_base.raw_query)
-        add(city_base.label.replace(",", " "))
-        return contexts
-
-    def _localized_china_context(self, city_base: ResolvedPlace) -> str | None:
-        matched = city_base.matched or {}
-        if matched.get("country") != "China":
-            return None
-
-        state = matched.get("state", "")
-        place_name = matched.get("placeName", "")
-        region_alias = self._first_cjk_region_alias(state)
-        city_alias = self._first_cjk_city_alias(place_name, state)
-        if not city_alias:
-            city_alias = self._first_cjk_token(matched.get("alternateNames", ""))
-
-        parts: list[str] = []
-        if region_alias:
-            parts.append(region_alias)
-        if city_alias and self.place_service.normalize(city_alias) not in {
-            self.place_service.normalize(part) for part in parts
-        }:
-            parts.append(city_alias)
-        return " ".join(parts) or None
-
-    def _first_cjk_city_alias(self, place_name: str, state: str) -> str | None:
-        for alias, preference in self.place_service.city_aliases.items():
-            if (
-                self._has_cjk(alias)
-                and preference.country == "China"
-                and preference.state == state
-                and self.place_service.normalize(preference.query)
-                == self.place_service.normalize(place_name)
-            ):
-                return alias
-        return None
-
-    def _first_cjk_region_alias(self, state: str) -> str | None:
-        for alias, canonical in self.place_service.region_aliases.items():
-            if self._has_cjk(alias) and canonical == state:
-                return alias
-        return None
-
-    def _first_cjk_token(self, value: str) -> str | None:
-        for token in re.split(r"[|,，/;；\s]+", value):
-            compacted = self._compact_text(token)
-            if compacted and self._has_cjk(compacted):
-                return compacted
-        return None
-
-    def _join_query_context(self, query: str, context: str) -> str:
-        normalized_query = self.place_service.normalize(query)
-        normalized_context = self.place_service.normalize(context)
-        if normalized_context and normalized_context in normalized_query:
-            return query
-        return f"{query} {context}"
-
-    @staticmethod
-    def _compact_text(value: str) -> str:
-        return re.sub(r"\s+", " ", value).strip()
-
-    @staticmethod
-    def _has_cjk(value: str) -> bool:
-        return bool(re.search(r"[\u4e00-\u9fff]", value))
 
     def _log_place_trace(self, event: str, payload: dict[str, object]) -> None:
         settings = getattr(self.agent_runtime, "settings", None)
@@ -327,9 +230,9 @@ class PrecisePlaceLookupService:
         self, result: object, query: str, city_base: ResolvedPlace
     ) -> list[PrecisePlaceOption]:
         provenance = getattr(result, "provenance", "agent_final")
-        if provenance != "tool_observation":
-            # Never let a model-generated final JSON become geocoding evidence.
-            # Only Claude SDK PostToolUse observations are parsed below.
+        if provenance not in {"tool_observation", "agent_grounded"}:
+            # A final answer is usable only when the runtime observed at least one
+            # WebSearch/WebFetch result during the same Agent turn.
             self._log_place_trace(
                 "agent_result_rejected",
                 {"reason": "untrusted_agent_final_provenance", "provenance": provenance},
@@ -381,21 +284,28 @@ class PrecisePlaceLookupService:
         if not -90 <= lat <= 90 or not -180 <= lon <= 180:
             return None
 
-        label = (
+        source_label = (
             self._string_value(item.get("label"))
             or self._string_value(item.get("name"))
             or query.strip()
             or city_base.label
         )
-        address = self._string_value(item.get("address")) or label
-        accuracy_value = self._string_value(item.get("accuracy")) or "poi"
-        accuracy: Literal["city", "poi", "address", "district", "coordinate"]
-        if accuracy_value in {"city", "poi", "address", "district", "coordinate"}:
-            accuracy = cast(
-                Literal["city", "poi", "address", "district", "coordinate"], accuracy_value
-            )
-        else:
-            accuracy = "poi"
+        source_address = self._string_value(item.get("address")) or source_label
+        label = self._string_value(item.get("displayLabel")) or source_label
+        address = self._string_value(item.get("displayAddress")) or source_address
+        location_type = self._string_value(item.get("locationType")).lower()
+        accuracy_by_location_type: dict[str, Literal["poi", "address", "district"]] = {
+            "poi": "poi",
+            "landmark": "poi",
+            "address": "address",
+            "district": "district",
+            "county": "district",
+            "town": "district",
+            "village": "district",
+        }
+        accuracy = accuracy_by_location_type.get(location_type)
+        if accuracy is None:
+            return None
         coordinate_system = self._string_value(
             item.get("coordinateSystem") or item.get("coordinate_system")
         ).upper()
@@ -415,12 +325,15 @@ class PrecisePlaceLookupService:
             # Coordinates without provenance are indistinguishable from model guesses.
             # Tool adapters may omit a URL, but they must still provide an evidence summary.
             return None
-        entity_evidence = " | ".join(value for value in [label, address, raw_evidence] if value)
-        if not matches_place_entity(query, entity_evidence):
-            # A same-city coordinate is still unsafe when the Agent did not establish
-            # that it belongs to the requested entity. Let PlaceService return city fallback.
+        scope_assessment = item.get("scopeAssessment")
+        scope_status = self._string_value(item.get("scopeMatchStatus"))
+        scope_reason = self._string_value(item.get("scopeMatchReason"))
+        if isinstance(scope_assessment, dict):
+            scope_status = scope_status or self._string_value(scope_assessment.get("status"))
+            scope_reason = scope_reason or self._string_value(scope_assessment.get("reason"))
+        if scope_status != "match":
             return None
-        readable = ", ".join(part for part in [label, city_base.label] if part)
+        readable = ", ".join(part for part in [source_label, city_base.label] if part)
         return PrecisePlaceOption(
             id=f"agent:{self.place_service.normalize(label)[:48]}:{lat:.6f}:{lon:.6f}:{index}",
             label=label,
@@ -440,6 +353,9 @@ class PrecisePlaceLookupService:
             ),
             sourceUrl=source_url or None,
             rawEvidence=raw_evidence or None,
+            locationType=location_type,
+            scopeMatchStatus="match",
+            scopeMatchReason=scope_reason or "Agent matched the candidate to the selected scope.",
         )
 
     @staticmethod

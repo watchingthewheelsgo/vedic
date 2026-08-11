@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 RECTIFICATION_RULE_ID = "rectify.event-evidence-ranking"
 RECTIFICATION_KP_RULE_ID = "rectify.kp-sub-lord-corroboration"
-RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.25.0"
+RECTIFICATION_SCORING_POLICY_ID = "vedicdust-rectification-event-ranking/1.26.0"
 RECTIFICATION_EVENT_MAPPING_ID = "vedicdust-rectification-event-map/1.8.0"
 RECTIFICATION_HOLDOUT_POLICY_ID = "vedicdust-rectification-holdout/1.5.0"
 RECTIFICATION_METHOD_MATURITY = "product_hypothesis"
@@ -105,8 +105,10 @@ RECTIFICATION_EVENT_OUTCOME_POLARITY: Mapping[tuple[str, str], str] = MappingPro
 class RectificationScoringPolicy:
     policy_id: str
     dasha_level_weights: Mapping[str, float]
+    dasha_complete_non_activation_weight: float
     natal_promise_support_weight: float
     varga_lagna_lord_support_weight: float
+    varga_complete_non_activation_weight: float
     double_transit_support_weight: float
     node_transit_support_weight: float
     sade_sati_support_weight: float
@@ -127,8 +129,10 @@ class RectificationScoringPolicy:
 RECTIFICATION_SCORING_POLICY = RectificationScoringPolicy(
     policy_id=RECTIFICATION_SCORING_POLICY_ID,
     dasha_level_weights=MappingProxyType({"md": 0.12, "ad": 0.16, "pd": 0.10}),
+    dasha_complete_non_activation_weight=0.04,
     natal_promise_support_weight=0.10,
     varga_lagna_lord_support_weight=0.08,
+    varga_complete_non_activation_weight=0.03,
     double_transit_support_weight=0.22,
     node_transit_support_weight=0.11,
     sade_sati_support_weight=0.09,

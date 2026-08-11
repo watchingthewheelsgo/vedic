@@ -19,6 +19,7 @@ export type PlaceOption = {
   latitude?: number;
   longitude?: number;
   timezone?: string;
+  searchText?: string;
 };
 
 export type PlaceSearchResponse = {
@@ -48,6 +49,18 @@ export type PrecisePlaceOption = {
   cityLabel?: string | null;
   sourceUrl?: string | null;
   rawEvidence?: string | null;
+  locationType?: string | null;
+  scopeMatchStatus?: "match" | "conflict" | "uncertain" | null;
+  scopeMatchReason?: string | null;
+};
+
+export type PrecisePlaceLookupStage =
+  "resolving" | "searching" | "verifying" | "matching" | "complete";
+
+export type PrecisePlaceLookupProgress = {
+  stage: PrecisePlaceLookupStage;
+  query?: string | null;
+  tool?: string | null;
 };
 
 export type PrecisePlaceSearchResponse = {

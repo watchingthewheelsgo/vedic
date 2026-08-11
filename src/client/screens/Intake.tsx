@@ -80,7 +80,6 @@ export function Intake() {
   const [birthDate, setBirthDate] = useState<Date | null>(null);
   const [birthTime, setBirthTime] = useState<Date | null>(null);
   const [place, setPlace] = useState("");
-  const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [name, setName] = useState("");
   const [gender, setGender] = useState("");
   const [relationship, setRelationship] = useState("");
@@ -92,6 +91,7 @@ export function Intake() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [busy, setBusy] = useState(false);
   const [visualLocation, setVisualLocation] = useState<BirthPlaceVisualState | null>(null);
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
   const handleVisualLocationChange = useCallback((next: BirthPlaceVisualState | null) => {
     setVisualLocation(next);
   }, []);
@@ -126,9 +126,10 @@ export function Intake() {
   const birthTimeReady =
     Boolean(timePrecision) && (timePrecision === "unknown" || Boolean(birthTime));
   const birthMomentReady = Boolean(birthDate) && birthTimeReady;
-  const locationReady = Boolean(place) && locationConfirmed;
+  const locationReady = Boolean(place);
+  const locationComplete = locationReady && locationConfirmed;
   const optionalProfileTouched = Boolean(name || gender || relationship || readingFocus.trim());
-  const currentStep = !birthMomentReady ? 1 : !locationReady ? 2 : 3;
+  const currentStep = !birthMomentReady ? 1 : !locationComplete ? 2 : 3;
   const birthMomentSummary = birthDate
     ? `${formatDate(birthDate, { year: "numeric", month: "short", day: "numeric" })} · ${
         timePrecision === "unknown"
@@ -145,7 +146,7 @@ export function Intake() {
   ]
     .filter(Boolean)
     .join(" · ");
-  const locationSummary = place.split("|", 1)[0]?.trim() ?? "";
+  const locationSummary = visualLocation?.label || place.split("|", 1)[0]?.trim() || "";
   const locationDetail = visualLocation
     ? t(visualLocation.exact ? "place.readout.status.precise" : "place.readout.status.city")
     : "";
@@ -290,8 +291,8 @@ export function Intake() {
             title={t("intake.flow.place.title")}
             body={t("intake.flow.place.body")}
             icon={<MapPin size={17} />}
-            active={!locationReady}
-            complete={locationReady}
+            active={!locationComplete}
+            complete={locationComplete}
             summary={locationSummary}
             summaryDetail={locationDetail}
           >
@@ -300,25 +301,32 @@ export function Intake() {
               onVisualStateChange={handleVisualLocationChange}
               onChange={(value) => {
                 setPlace(value);
+                setLocationConfirmed(false);
                 setUtcOffsetSeconds(null);
                 setAmbiguousTime(null);
-                setLocationConfirmed(false);
                 if (value) clearError(setErrors, "place");
               }}
               error={errors.place}
             />
-            <Button
-              type="button"
-              variant="gold"
-              disabled={!place}
-              onClick={() => setLocationConfirmed(true)}
-            >
-              {t("intake.flow.place.confirm")}
-            </Button>
+            {locationReady && (
+              <div className="flex flex-col gap-3 border-t border-gold/18 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="m-0 text-xs leading-relaxed text-cream/45">
+                  {t("intake.flow.place.next")}
+                </p>
+                <Button
+                  type="button"
+                  className="shrink-0"
+                  onClick={() => setLocationConfirmed(true)}
+                >
+                  {t("intake.flow.place.confirm")}
+                  <ArrowRight className="size-4" />
+                </Button>
+              </div>
+            )}
           </IntakeFlowSection>
         )}
 
-        {locationReady && (
+        {locationComplete && (
           <IntakeFlowSection
             index={3}
             title={t("intake.flow.profile.title")}
@@ -422,7 +430,7 @@ export function Intake() {
           </div>
         )}
 
-        {locationReady && (
+        {locationComplete && (
           <Button className="w-full" size="lg" disabled={busy}>
             {busy ? (
               t("intake.submit.busy")

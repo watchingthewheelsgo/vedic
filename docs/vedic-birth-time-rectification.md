@@ -51,19 +51,26 @@ by the user is not independent evidence and cannot change a chart score.
    only when that is the available factual evidence. Later answers cannot
    retroactively move an event from calibration into holdout. Backend-issued question,
    subtype, category, and date validation own event acceptance. The intake Agent may
-   see the submitted statement only to classify bounded optional semantic context; it
-   cannot reject the structured answer and never receives the event's holdout role,
+   see the submitted statement only to classify bounded optional semantic context. It
+   may pause an answer for one neutral clarification when the user's own note explicitly
+   contradicts the selected event or leaves occurrence/date genuinely uncertain; that
+   answer is not persisted or scored. The Agent never receives the event's holdout role,
    candidate identities, scores, chart values, or a favored answer. Its semantic labels
    cannot change deterministic scores.
-   The backend selects the next category from its private discrimination ranking.
-   The Agent may rewrite only that one selected question and cannot switch to a
-   lower-ranked pool item.
+   The backend builds a small private discrimination pool from its ranking. The
+   Agent may choose and rewrite exactly one item from that approved pool, which
+   lets wording follow the user's language without giving the Agent authority to
+   invent questions or change the scoring policy. It cannot select outside the
+   pool.
 7. Score each candidate from calibration events only. The complete audit score
    records bounded D1 directional capacity, Dasha activation, relevant Varga
    domain activation, and stable Jupiter/Saturn double-transit support. Only
    Vimshottari Dasha plus the event-relevant Varga enter the selection score;
-   D1 capacity and transit signals remain non-selecting corroboration. Missing
-   positive support is neutral, not fabricated contradiction evidence.
+   D1 capacity and transit signals remain non-selecting corroboration. A complete,
+   stable MD/AD/PD hierarchy with no mapped Dasha activation or no relevant-Varga
+   activation receives a small bounded contradiction penalty. Incomplete or
+   boundary-sensitive evidence remains neutral `missing`; contradiction is never a
+   hard elimination rule.
 8. Select only when every candidate has the same calibration episode set, at least
    three calibration episodes cover at least two mapped life domains, at least two
    calibration episodes each have both Vimshottari and relevant-Varga support,
@@ -210,8 +217,9 @@ interval rather than an exact second.
   event-relevant Varga are complementary layers, not claims of statistical
   independence. Both are required for a convergent event. Double transit remains
   auditable corroboration when the event interval can support it.
-- The contradiction channel is intentionally unused until contrary rules have
-  edition-pinned sources and professional review fixtures.
+- The contradiction channel is limited to complete stable non-activation in the two
+  selection-authorized layers. D1 dignity and auxiliary transit diagnostics cannot
+  create contradiction evidence or veto a candidate.
 - Independent JHora desktop golden cases, source-blind rectification benchmark
   cases, and professional end-to-end review fixtures are not yet populated, so
   release certification is incomplete.

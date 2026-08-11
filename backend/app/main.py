@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+import json
 import logging
 from typing import Literal
 from uuid import uuid4
@@ -8,7 +10,7 @@ from uuid import uuid4
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.auth import AuthenticatedUser, require_user, resolve_session_user
 from app.calculator.civil_time import AmbiguousCivilTimeError
@@ -42,6 +44,7 @@ from app.schemas import (
 )
 from app.settings import get_settings
 from app.services.place_lookup_budget import PlaceLookupRateLimitError
+from app.services.rectification_interview import RectificationEvidenceClarificationRequired
 
 
 logger = logging.getLogger(__name__)
@@ -109,7 +112,8 @@ async def places(
     q: str = Query(default=""),
     country: str | None = Query(default=None),
     region: str | None = Query(default=None),
-    limit: int = Query(default=30, ge=5, le=80),
+    locale: Literal["zh", "en", "ja"] = Query(default="en"),
+    limit: int = Query(default=30, ge=5, le=500),
 ) -> PlaceSearchResponse:
     try:
         return get_container().place_service.search(
@@ -117,6 +121,7 @@ async def places(
             query=q,
             country=country,
             region=region,
+            locale=locale,
             limit=limit,
         )
     except Exception as exc:
@@ -128,6 +133,7 @@ async def precise_places(
     request: Request,
     q: str = Query(default="", min_length=0, max_length=120),
     city: str | None = Query(default=None, max_length=160),
+    locale: Literal["zh", "en", "ja"] = Query(default="en"),
     limit: int = Query(default=8, ge=1, le=20),
 ) -> PrecisePlaceSearchResponse:
     try:
@@ -135,6 +141,7 @@ async def precise_places(
             query=q,
             limit=limit,
             city_context=city,
+            locale=locale,
             client_key=request.client.host if request.client else "unknown",
         )
     except PlaceLookupRateLimitError as exc:
@@ -147,6 +154,79 @@ async def precise_places(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise _internal_server_error("precise place search", exc) from exc
+
+
+@app.get("/api/precise-places/stream")
+async def precise_places_stream(
+    request: Request,
+    q: str = Query(default="", min_length=0, max_length=120),
+    city: str | None = Query(default=None, max_length=160),
+    locale: Literal["zh", "en", "ja"] = Query(default="en"),
+    limit: int = Query(default=8, ge=1, le=20),
+) -> StreamingResponse:
+    """Stream real lookup stages followed by the ordinary precise-place response."""
+
+    queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+    async def report_progress(stage: str, payload: dict[str, object]) -> None:
+        await queue.put({"type": "progress", "stage": stage, **payload})
+
+    async def run_lookup() -> None:
+        try:
+            result = await get_container().precise_place_lookup.search_precise(
+                query=q,
+                limit=limit,
+                city_context=city,
+                locale=locale,
+                client_key=request.client.host if request.client else "unknown",
+                progress_callback=report_progress,
+            )
+            await queue.put(
+                {
+                    "type": "result",
+                    "data": result.model_dump(by_alias=True),
+                }
+            )
+        except PlaceLookupRateLimitError as exc:
+            await queue.put(
+                {
+                    "type": "error",
+                    "status": 429,
+                    "detail": "地点查询请求过于频繁，请稍后再试。",
+                    "retryAfter": exc.retry_after_seconds,
+                }
+            )
+        except ValueError as exc:
+            await queue.put({"type": "error", "status": 400, "detail": str(exc)})
+        except Exception as exc:
+            reference = uuid4().hex[:12]
+            logger.exception("precise place stream failed reference=%s", reference, exc_info=exc)
+            await queue.put(
+                {
+                    "type": "error",
+                    "status": 500,
+                    "detail": f"precise place search failed. Reference: {reference}",
+                }
+            )
+
+    async def events():
+        task = asyncio.create_task(run_lookup())
+        try:
+            while True:
+                event = await queue.get()
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+                if event.get("type") in {"result", "error"}:
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/admin/sessions", response_model=AdminSessionListResponse)
@@ -370,6 +450,8 @@ async def record_rectification_life_events(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RectificationEvidenceClarificationRequired as exc:
+        raise HTTPException(status_code=409, detail=exc.api_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PermissionError as exc:

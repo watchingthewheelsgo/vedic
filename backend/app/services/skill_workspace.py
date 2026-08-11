@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +18,25 @@ from app.utils.ids import make_id
 
 class SkillWorkspace:
     """File-backed workspace for the current VedicDust and BaZi contracts."""
+
+    RECTIFICATION_TRANSACTION_PATHS = (
+        "birth_input_context.json",
+        "sensitivity_scan.json",
+        "active_chart_sensitivity.json",
+        "chart_record.json",
+        "chart_audit.json",
+        "reading_session.json",
+        "chart_rectification_state.json",
+        "rectification_interview.json",
+        "life_event_evidence_validation.json",
+        "judgement_context.json",
+        "claim_graph.json",
+        "consultation_dossier.json",
+        "consultation_report_manifest.json",
+        "agent_context.json",
+        "consultation_report.md",
+    )
+    RECTIFICATION_TRANSACTION_META = ".meta/rectification_transaction.json"
 
     ROOT_ARTIFACTS = {
         "birth_input_context.json",
@@ -38,7 +59,6 @@ class SkillWorkspace:
         "consultation_report.md",
         "consultation_conversation.json",
         "consultation_grounding_audit.json",
-        "life_event_evidence_validation.json",
         "rectification_report.md",
         "run_metrics.json",
     }
@@ -70,10 +90,12 @@ class SkillWorkspace:
         "active_chart_sensitivity.json",
         "consultation_conversation.json",
         "consultation_grounding_audit.json",
+        "life_event_evidence_validation.json",
     }
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._active_transaction_tokens: set[str] = set()
         self.assert_no_project_runtime_artifacts()
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -101,8 +123,67 @@ class SkillWorkspace:
         session_dir = self.require_session_dir(session_id)
         target = self._safe_artifact_path(session_dir, path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        self._atomic_write_text(target, content)
         return self._artifact_from_path(session_dir, target)
+
+    def begin_rectification_transaction(self, session_id: str) -> None:
+        """Start a recoverable multi-artifact rectification update."""
+
+        session_dir = self.require_session_dir(session_id)
+        self._recover_pending_rectification_transaction(session_dir)
+        chart_record = session_dir / "chart_record.json"
+        previous_revision: int | None = None
+        if chart_record.exists():
+            try:
+                payload = json.loads(chart_record.read_text(encoding="utf-8"))
+                previous_revision = int(payload.get("revision"))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                previous_revision = None
+        token = make_id("rectification_tx")
+        self._active_transaction_tokens.add(token)
+        payload = {
+            "schemaVersion": "vedicdust-rectification-transaction/1.0.0",
+            "token": token,
+            "status": "started",
+            "previousRevision": previous_revision,
+            "paths": list(self.RECTIFICATION_TRANSACTION_PATHS),
+            "startedAt": datetime.utcnow().isoformat() + "Z",
+        }
+        self._atomic_write_text(
+            session_dir / self.RECTIFICATION_TRANSACTION_META,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+
+    def mark_rectification_transaction_archive_ready(self, session_id: str) -> None:
+        session_dir = self.require_session_dir(session_id)
+        marker_path = session_dir / self.RECTIFICATION_TRANSACTION_META
+        payload = self._read_rectification_transaction(marker_path)
+        if payload is None:
+            raise RuntimeError("rectification transaction marker is missing")
+        payload["status"] = "archive_ready"
+        payload["archiveReadyAt"] = datetime.utcnow().isoformat() + "Z"
+        self._atomic_write_text(
+            marker_path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+
+    def commit_rectification_transaction(self, session_id: str) -> None:
+        session_dir = self.require_session_dir(session_id)
+        marker_path = session_dir / self.RECTIFICATION_TRANSACTION_META
+        payload = self._read_rectification_transaction(marker_path)
+        if payload is not None:
+            self._active_transaction_tokens.discard(str(payload.get("token") or ""))
+        marker_path.unlink(missing_ok=True)
+
+    def rollback_rectification_transaction(self, session_id: str) -> None:
+        session_dir = self.require_session_dir(session_id)
+        marker_path = session_dir / self.RECTIFICATION_TRANSACTION_META
+        payload = self._read_rectification_transaction(marker_path)
+        if payload is None:
+            return
+        self._restore_rectification_transaction(session_dir, payload)
+        self._active_transaction_tokens.discard(str(payload.get("token") or ""))
+        marker_path.unlink(missing_ok=True)
 
     def read_artifacts(
         self,
@@ -111,6 +192,7 @@ class SkillWorkspace:
         include_internal: bool = False,
     ) -> list[SkillArtifact]:
         session_dir = self.require_session_dir(session_id)
+        self._recover_pending_rectification_transaction(session_dir)
         files = [
             path
             for path in session_dir.rglob("*")
@@ -154,6 +236,7 @@ class SkillWorkspace:
 
     def read_artifact_text(self, session_id: str, path: str) -> str | None:
         session_dir = self.require_session_dir(session_id)
+        self._recover_pending_rectification_transaction(session_dir)
         target = self._safe_artifact_path(session_dir, path)
         if not target.exists() or not target.is_file():
             return None
@@ -169,12 +252,14 @@ class SkillWorkspace:
             "chartRecordSha256": self.chart_record_sha256(session_id),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
-        manifest_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        self._atomic_write_text(
+            manifest_path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         )
 
     def read_session_locale(self, session_id: str) -> str:
         session_dir = self.require_session_dir(session_id)
+        self._recover_pending_rectification_transaction(session_dir)
         manifest_path = session_dir / ".meta" / "session.json"
         if not manifest_path.exists():
             return "en"
@@ -208,9 +293,110 @@ class SkillWorkspace:
             "dependencySha256": self._dependency_hashes(session_dir, dependency_paths or []),
             "updatedAt": datetime.utcnow().isoformat() + "Z",
         }
-        metadata_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        self._atomic_write_text(
+            metadata_path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         )
+
+    @staticmethod
+    def _atomic_write_text(target: Path, content: str) -> None:
+        """Replace a workspace file only after the complete UTF-8 payload is durable."""
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=target.parent,
+                prefix=f".{target.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temporary_path = temporary.name
+            os.replace(temporary_path, target)
+            temporary_path = None
+        finally:
+            if temporary_path:
+                try:
+                    os.unlink(temporary_path)
+                except FileNotFoundError:
+                    pass
+
+    def _recover_pending_rectification_transaction(self, session_dir: Path) -> None:
+        marker_path = session_dir / self.RECTIFICATION_TRANSACTION_META
+        payload = self._read_rectification_transaction(marker_path)
+        if payload is None:
+            return
+        token = str(payload.get("token") or "")
+        if token in self._active_transaction_tokens:
+            return
+        self._restore_rectification_transaction(session_dir, payload)
+        marker_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _read_rectification_transaction(marker_path: Path) -> dict[str, object] | None:
+        if not marker_path.exists() or not marker_path.is_file():
+            return None
+        try:
+            payload = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raise RuntimeError("rectification transaction marker is unreadable")
+        if not isinstance(payload, dict):
+            raise RuntimeError("rectification transaction marker is invalid")
+        return payload
+
+    def _restore_rectification_transaction(
+        self,
+        session_dir: Path,
+        payload: dict[str, object],
+    ) -> None:
+        if payload.get("status") != "archive_ready":
+            # No active artifact was replaced before the archive was declared
+            # ready. Clearing the marker is safer than restoring an unrelated
+            # older revision.
+            return
+        previous_revision = payload.get("previousRevision")
+        try:
+            revision = int(previous_revision)
+        except (TypeError, ValueError):
+            raise RuntimeError("rectification transaction cannot identify its previous revision")
+        archive_dir = session_dir / ".runtime" / "chart_revisions" / f"rev_{revision}"
+        if not archive_dir.exists():
+            raise RuntimeError("rectification transaction archive is missing")
+        raw_paths = payload.get("paths")
+        paths = (
+            raw_paths if isinstance(raw_paths, list) else list(self.RECTIFICATION_TRANSACTION_PATHS)
+        )
+        for raw_path in paths:
+            relative_path = str(raw_path)
+            target = self._safe_artifact_path(session_dir, relative_path)
+            backup = self._safe_artifact_path(archive_dir, relative_path)
+            if backup.exists() and backup.is_file():
+                self._atomic_write_text(target, backup.read_text(encoding="utf-8"))
+            else:
+                target.unlink(missing_ok=True)
+
+        # Checkpoints and the session manifest describe the active bundle too.
+        # Restore them with the same revision or remove newly-created metadata.
+        metadata_paths = [
+            ".meta/session.json",
+            *[
+                self.artifact_checkpoint_relative_path(str(raw_path))
+                for raw_path in paths
+                if not str(raw_path).startswith(".meta/")
+            ],
+        ]
+        for relative_path in metadata_paths:
+            target = self._safe_artifact_path(session_dir, relative_path)
+            backup = self._safe_artifact_path(archive_dir, relative_path)
+            if backup.exists() and backup.is_file():
+                self._atomic_write_text(target, backup.read_text(encoding="utf-8"))
+            else:
+                target.unlink(missing_ok=True)
 
     def artifact_checkpoint_valid(
         self,
@@ -278,8 +464,12 @@ class SkillWorkspace:
         return target
 
     def _artifact_checkpoint_path(self, session_dir: Path, relative_path: str) -> Path:
+        return session_dir / self.artifact_checkpoint_relative_path(relative_path)
+
+    @staticmethod
+    def artifact_checkpoint_relative_path(relative_path: str) -> str:
         digest = hashlib.sha256(relative_path.encode("utf-8")).hexdigest()
-        return session_dir / ".meta" / "artifacts" / f"{digest}.json"
+        return f".meta/artifacts/{digest}.json"
 
     def _file_sha256(self, path: Path) -> str:
         digest = hashlib.sha256()

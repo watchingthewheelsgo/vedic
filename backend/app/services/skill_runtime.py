@@ -34,9 +34,13 @@ from app.schemas import (
     SynastryBirthInput,
 )
 from app.services.chart_rectification import ChartRectificationService
-from app.services.life_event_rectification import MAX_RECTIFICATION_EVENTS
+from app.services.life_event_rectification import (
+    MAX_RECTIFICATION_EVENTS,
+    encode_structured_life_event_evidence,
+)
 from app.services.metadata_store import MetadataStore
 from app.services.rectification_interview import (
+    RectificationEvidenceClarificationRequired,
     build_rectification_interview,
     validate_agent_event_evidence,
     validate_agent_question_wording,
@@ -59,7 +63,7 @@ from app.vedicdust.models import (
     RectificationRoundRecord,
     TimeRange,
 )
-from app.vedicdust.judgement import build_judgement_context
+from app.vedicdust.judgement import TOPICS, build_judgement_context
 from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.orchestrator import audit_chart_record
 from app.vedicdust.reporting import (
@@ -91,6 +95,7 @@ ACTIVE_CHART_SENSITIVITY_JSON = "active_chart_sensitivity.json"
 RECTIFICATION_INTERVIEW_JSON = "rectification_interview.json"
 LIFE_EVENT_EVIDENCE_VALIDATION_JSON = "life_event_evidence_validation.json"
 CONSULTATION_GROUNDING_AUDIT_JSON = "consultation_grounding_audit.json"
+CONSULTATION_TOPIC_SELECTION_JSON = ".runtime/consultation-topic-selection.json"
 CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
 PREVALIDATION_DEPENDENCY_PATHS = [
@@ -203,7 +208,18 @@ class SkillRuntime:
                             break
                         except BlockingIOError:
                             await asyncio.sleep(0.05)
-                yield
+                transaction_started = False
+                try:
+                    self.workspace.begin_rectification_transaction(session_id)
+                    transaction_started = True
+                    yield
+                except BaseException:
+                    if transaction_started:
+                        self.workspace.rollback_rectification_transaction(session_id)
+                    raise
+                else:
+                    if transaction_started:
+                        self.workspace.commit_rectification_transaction(session_id)
             finally:
                 if lock_handle is not None:
                     if fcntl is not None:
@@ -283,6 +299,148 @@ class SkillRuntime:
             "mode": getattr(result, "mode", None),
         }
 
+    async def _ensure_consultation_topic_selection(
+        self,
+        session_id: str,
+        user_message: str,
+    ) -> list[str]:
+        """Let the Agent map free text to canonical consultation topics."""
+
+        chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if not chart_record_json:
+            raise ValueError("Session is missing chart_record.json")
+        record = ChartRecord.model_validate_json(chart_record_json)
+        source_texts = list(
+            dict.fromkeys(
+                text.strip()
+                for text in [*record.subject.consultation_topics, user_message]
+                if text.strip()
+            )
+        )
+        input_hash = hashlib.sha256(
+            json.dumps(
+                {"locale": record.subject.locale, "texts": source_texts},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        existing = self._json_dict(
+            self.workspace.read_artifact_text(session_id, CONSULTATION_TOPIC_SELECTION_JSON) or ""
+        )
+        if existing.get("inputHash") == input_hash and existing.get("status") in {
+            "classified",
+            "no_input",
+        }:
+            return self._canonical_topic_ids(existing.get("selectedTopicIds"))
+
+        if not source_texts:
+            payload: dict[str, object] = {
+                "schemaVersion": "vedicdust-consultation-topic-selection/1.0.0",
+                "status": "no_input",
+                "inputHash": input_hash,
+                "selectedTopicIds": [],
+                "rationale": "No consultation focus was supplied.",
+            }
+        elif self.agent_runtime is None or not self.agent_runtime.is_configured():
+            payload = {
+                "schemaVersion": "vedicdust-consultation-topic-selection/1.0.0",
+                "status": "agent_unavailable",
+                "inputHash": input_hash,
+                "selectedTopicIds": [],
+                "rationale": "Semantic topic classification was unavailable.",
+            }
+        else:
+            ontology = [
+                {
+                    "topicId": topic.topic_id,
+                    "title": topic.title,
+                    "purpose": topic.purpose,
+                }
+                for topic in TOPICS
+            ]
+            prompt = (
+                "Map the user's consultation focus to zero or more topic IDs from the supplied "
+                "ontology. Understand the text semantically in its own language. Select only "
+                "topics that the user actually asks about; do not use keyword or substring rules. "
+                "If the input is merely a command to start, return no topics.\n\n"
+                + json.dumps(
+                    {
+                        "locale": record.subject.locale,
+                        "userTexts": source_texts,
+                        "topicOntology": ontology,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            try:
+                result = await self.agent_runtime.run_structured_reasoning_task(
+                    "consultation-topic-selection",
+                    prompt,
+                    schema=self._consultation_topic_selection_schema(),
+                    max_turns=2,
+                )
+                decision = self._json_dict(result.raw_text)
+                selected_topic_ids = self._canonical_topic_ids(decision.get("topicIds"))
+                payload = {
+                    "schemaVersion": "vedicdust-consultation-topic-selection/1.0.0",
+                    "status": "classified",
+                    "inputHash": input_hash,
+                    "selectedTopicIds": selected_topic_ids,
+                    "rationale": str(decision.get("rationale") or "").strip(),
+                    "agent": self._agent_result_trace(result),
+                }
+            except Exception as exc:
+                payload = {
+                    "schemaVersion": "vedicdust-consultation-topic-selection/1.0.0",
+                    "status": "agent_failed",
+                    "inputHash": input_hash,
+                    "selectedTopicIds": [],
+                    "rationale": "Semantic topic classification failed; no topic priority applied.",
+                    "errorType": type(exc).__name__,
+                }
+
+        self.workspace.write_artifact(
+            session_id,
+            CONSULTATION_TOPIC_SELECTION_JSON,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CONSULTATION_TOPIC_SELECTION_JSON,
+            producer="vedicdust-consultation-topic-agent",
+            dependency_paths=[CHART_RECORD_JSON],
+        )
+        return self._canonical_topic_ids(payload.get("selectedTopicIds"))
+
+    @staticmethod
+    def _canonical_topic_ids(value: object) -> list[str]:
+        allowed = {topic.topic_id for topic in TOPICS}
+        if not isinstance(value, list):
+            return []
+        return list(
+            dict.fromkeys(item for item in value if isinstance(item, str) and item in allowed)
+        )
+
+    @staticmethod
+    def _consultation_topic_selection_schema() -> dict[str, object]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "topicIds": {
+                    "type": "array",
+                    "uniqueItems": True,
+                    "items": {
+                        "type": "string",
+                        "enum": [topic.topic_id for topic in TOPICS],
+                    },
+                },
+                "rationale": {"type": "string"},
+            },
+            "required": ["topicIds", "rationale"],
+        }
+
     async def create_reader_session(
         self, input_data: SkillBirthInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
@@ -293,7 +451,15 @@ class SkillRuntime:
             chart_record_id=make_id("chart"),
             subject_id=make_id("subject"),
         )
-        calculation = self.calculator.calculate(input_data, identity=identity)
+        # Rectification evidence must enter through the backend-issued interview.
+        # Public intake prose cannot pre-populate calibration or holdout events.
+        calculation_input = input_data.model_copy(
+            update={
+                "life_events": "",
+                "life_event_facts": encode_structured_life_event_evidence([]),
+            }
+        )
+        calculation = self.calculator.calculate(calculation_input, identity=identity)
         self.workspace.create_session(session_id)
         finished = datetime.now(timezone.utc)
         self.workspace.write_artifact(
@@ -551,6 +717,16 @@ class SkillRuntime:
             producer="vedicdust-rectification-evidence-validator",
             dependency_paths=[RECTIFICATION_INTERVIEW_JSON],
         )
+        clarification = next(
+            (
+                item
+                for item in evidence_validation.get("results") or []
+                if isinstance(item, dict) and item.get("clarificationRequired") is True
+            ),
+            None,
+        )
+        if clarification is not None:
+            raise RectificationEvidenceClarificationRequired(clarification)
 
         revision = current_record.revision + 1
         previous_life_events = context.get("lifeEvents")
@@ -573,7 +749,7 @@ class SkillRuntime:
             record_payload,
             combined_life_events,
         )
-        birth_input.life_event_facts = json.dumps(semantic_evidence, ensure_ascii=False)
+        birth_input.life_event_facts = encode_structured_life_event_evidence(semantic_evidence)
         identity = self._chart_record_identity(session_id, revision=revision)
         calculation = self.calculator.calculate(birth_input, identity=identity)
         updated_context = self._json_dict(calculation.birth_input_context_json)
@@ -590,6 +766,7 @@ class SkillRuntime:
             raise ValueError("at least one independent, dated life episode is required")
 
         self._archive_current_chart_artifacts(session_id, current_record.revision, artifacts)
+        self.workspace.mark_rectification_transaction_archive_ready(session_id)
         session_dir = self.workspace.require_session_dir(session_id)
         for stale_path in [
             "reader_prevalidation.md",
@@ -760,7 +937,7 @@ class SkillRuntime:
                 record_payload,
                 "",
             )
-            birth_input.life_event_facts = "[]"
+            birth_input.life_event_facts = encode_structured_life_event_evidence([])
             revision = current_record.revision + 1
             identity = self._chart_record_identity(session_id, revision=revision)
             calculation = self.calculator.calculate(birth_input, identity=identity)
@@ -770,6 +947,7 @@ class SkillRuntime:
                 current_record.revision,
                 artifacts,
             )
+            self.workspace.mark_rectification_transaction_archive_ready(session_id)
             session_dir = self.workspace.require_session_dir(session_id)
             for stale_path in [
                 "reader_prevalidation.md",
@@ -854,14 +1032,42 @@ class SkillRuntime:
         session_id: str,
         state: dict[str, Any],
     ) -> dict[str, Any]:
-        """Keep confirmation grounded in submitted events and deterministic scores.
+        """Validate the confirmation bundle before exposing the checkpoint.
 
-        Generating new retrospective events from finalized timing periods creates
-        unverified claims. The Agent therefore has no production role at this
-        gate until each example can reference a backend-released claim.
+        Confirmation examples are deliberately deterministic. This gate rejects
+        stale or model-generated example sources instead of silently exposing a
+        claim that was not released by the rectification backend.
         """
 
         _ = session_id
+        conclusion = state.get("rectificationConclusion")
+        if not isinstance(conclusion, dict):
+            # Initial and collecting states do not have a confirmation bundle
+            # yet. Validation becomes mandatory only once the workflow enters
+            # the confirmation gate.
+            if state.get("status") in {
+                "rectification_confirmation_required",
+                "corrected_chart_ready",
+            }:
+                raise ValueError("rectification conclusion is missing or expired")
+            return state
+        examples = conclusion.get("examples")
+        if not isinstance(examples, list) or not examples:
+            raise ValueError("rectification conclusion has no confirmation examples")
+        allowed_sources = {"deterministic_input_review", "submitted_evidence"}
+        example_ids: set[str] = set()
+        for example in examples:
+            if not isinstance(example, dict):
+                raise ValueError("rectification confirmation example must be an object")
+            example_id = str(example.get("exampleId") or "")
+            source = str(example.get("source") or "")
+            if not example_id or example_id in example_ids:
+                raise ValueError("rectification confirmation examples must have unique ids")
+            if source not in allowed_sources:
+                raise ValueError("rectification confirmation contains an unreleased example source")
+            example_ids.add(example_id)
+        if "corrected-time-review" not in example_ids:
+            raise ValueError("rectification confirmation must include a corrected-time review")
         return state
 
     async def confirm_rectification_result(
@@ -1031,6 +1237,19 @@ class SkillRuntime:
         message: str,
         owner_user_id: str | None,
     ) -> SkillSessionResponse:
+        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if chart_record_text:
+            current_record = ChartRecord.model_validate_json(chart_record_text)
+            current_artifacts = {
+                artifact.path: artifact.content
+                for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
+            }
+            self._archive_current_chart_artifacts(
+                session_id,
+                current_record.revision,
+                current_artifacts,
+            )
+            self.workspace.mark_rectification_transaction_archive_ready(session_id)
         session_dir = self.workspace.require_session_dir(session_id)
         (session_dir / RECTIFICATION_INTERVIEW_JSON).unlink(missing_ok=True)
         self.workspace.write_artifact(
@@ -1169,6 +1388,21 @@ class SkillRuntime:
                 )
             skipped_categories &= available_categories
             state["availableRectificationCategories"] = sorted(available_categories)
+        # The interview update touches state and the current question as a
+        # bundle. Preserve the active revision before either file is replaced.
+        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if chart_record_text:
+            current_record = ChartRecord.model_validate_json(chart_record_text)
+            current_artifacts = {
+                artifact.path: artifact.content
+                for artifact in self.workspace.read_artifacts(session_id, include_internal=True)
+            }
+            self._archive_current_chart_artifacts(
+                session_id,
+                current_record.revision,
+                current_artifacts,
+            )
+            self.workspace.mark_rectification_transaction_archive_ready(session_id)
         if (
             input_data.reset_skipped
             or input_data.skipped_category
@@ -1187,7 +1421,6 @@ class SkillRuntime:
                 producer="vedicdust-rectification-interview",
             )
 
-        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         life_stage = None
         if chart_record_text:
             life_stage = ChartRecord.model_validate_json(chart_record_text).subject.life_stage
@@ -1218,7 +1451,10 @@ class SkillRuntime:
                 interview = validate_agent_question_wording(interview, wording)
             except Exception as exc:
                 interview["source"] = "deterministic_fallback"
-                interview["agentFallbackReason"] = self._safe_agent_failure_reason(exc)
+                # Keep provider/runtime failures out of the public interview artifact.
+                # The deterministic question is still valid; operational details belong
+                # in server logs/metrics rather than in a user-facing contract.
+                _ = exc
 
         # The candidate-ranking pool is backend-private. The client receives only
         # the single question selected for this round.
@@ -1727,7 +1963,11 @@ class SkillRuntime:
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
-        self.assert_core_readiness(input_data.session_id, input_data.user_message)
+        self.assert_core_readiness(input_data.session_id, prepare_judgement=False)
+        await self._ensure_consultation_topic_selection(
+            input_data.session_id, input_data.user_message
+        )
+        self._prepare_judgement_context(input_data.session_id)
         locale = self._run_locale(input_data)
         batches = self.core_batches(input_data.user_message, locale)
         existing_paths = self._session_paths(session_dir)
@@ -1757,7 +1997,7 @@ class SkillRuntime:
             input_data, batch, batches=batches, owner_user_id=owner_user_id
         )
 
-    def assert_core_readiness(self, session_id: str, user_message: str = "") -> None:
+    def assert_core_readiness(self, session_id: str, *, prepare_judgement: bool = True) -> None:
         session_dir = self.workspace.require_session_dir(session_id)
         read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
         if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
@@ -1795,7 +2035,8 @@ class SkillRuntime:
             and state_gate.get("fullReportAllowed") is True
         ):
             if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
-                self._prepare_judgement_context(session_id, user_message)
+                if prepare_judgement:
+                    self._prepare_judgement_context(session_id)
             return
         if (
             state_status == "multiple_equivalent"
@@ -1804,7 +2045,8 @@ class SkillRuntime:
             and state_gate.get("reportScope") == "stable_intersection_only"
         ):
             if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
-                self._prepare_judgement_context(session_id, user_message)
+                if prepare_judgement:
+                    self._prepare_judgement_context(session_id)
             return
         result_path = session_dir / "prevalidation_result.json"
         if not result_path.exists():
@@ -1859,7 +2101,8 @@ class SkillRuntime:
                 "当前输入只允许验前事/低置信D1-only说明，不允许生成完整 vedic-core 报告。"
             )
         if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
-            self._prepare_judgement_context(session_id, user_message)
+            if prepare_judgement:
+                self._prepare_judgement_context(session_id)
 
     def _assert_reader_readiness(self, session_id: str) -> None:
         read_artifact_text = getattr(self.workspace, "read_artifact_text", None)
@@ -1975,7 +2218,11 @@ class SkillRuntime:
         owner_user_id: str | None = None,
     ) -> SkillSessionResponse:
         session_dir = self.workspace.require_session_dir(input_data.session_id)
-        self.assert_core_readiness(input_data.session_id, input_data.user_message)
+        self.assert_core_readiness(input_data.session_id, prepare_judgement=False)
+        await self._ensure_consultation_topic_selection(
+            input_data.session_id, input_data.user_message
+        )
+        self._prepare_judgement_context(input_data.session_id)
         locale = self._run_locale(input_data)
         batches = batches or self.core_batches(input_data.user_message, locale)
         expected = set(self.core_batch_files(batch))
@@ -2464,44 +2711,56 @@ class SkillRuntime:
         locale: str,
     ) -> str:
         public_questions = []
-        for item in brief.get("questions", []):
+        raw_pool = brief.get("questionPool")
+        question_pool = raw_pool if isinstance(raw_pool, list) else brief.get("questions", [])
+        for index, item in enumerate(question_pool):
             if not isinstance(item, dict):
                 continue
-            public_questions.append(
-                {
-                    key: item[key]
-                    for key in (
-                        "questionId",
-                        "category",
-                        "title",
-                        "prompt",
-                        "whyWeAsk",
-                        "detailsPlaceholder",
-                    )
-                    if key in item
+            question = {
+                key: item[key]
+                for key in (
+                    "questionId",
+                    "category",
+                    "title",
+                    "prompt",
+                    "whyWeAsk",
+                    "detailsPlaceholder",
+                )
+                if key in item
+            }
+            private_value = item.get("questionValue")
+            if isinstance(private_value, dict):
+                # Expose only bounded comparison signals. Raw chart fields and
+                # candidate values stay in the backend.
+                question["selectionSignals"] = {
+                    "priority": "primary" if index == 0 else "alternate",
+                    "separatesRemainingOptions": int(private_value.get("partitionCount") or 0) > 1,
+                    "coverageCount": int(private_value.get("candidateCount") or 0),
+                    "hasDiscriminatingEvidence": int(private_value.get("matchedFieldCount") or 0)
+                    > 0,
                 }
-            )
-        return f"""Rewrite the backend-selected birth-time verification question for a calm,
-clear consumer product.
+            public_questions.append(question)
+        return f"""Prepare the next birth-time verification question for a calm, clear consumer product.
 
 {self._language_instruction(locale)}
 
-The backend has already selected exactly one question for this round. Rewrite only that question.
-The backend will recalculate candidates after the answer and select the next question. You may
-improve title, prompt, whyWeAsk, and detailsPlaceholder, but you must not invent or switch a
-questionId or category. Candidate-ranking context is not included in this prompt. Do not mention candidate charts,
-scores, houses, planets, vargas, D1-D60, or imply that an answer is expected. Keep every
-question factual and non-leading. Never add personality or physical-trait questions.
+The backend has recalculated the state and provided a small approved question pool. Choose exactly
+one questionId from that pool for this round, then rewrite only that approved question. Prefer a
+question marked as primary or one whose selectionSignals show that it separates the remaining
+options. The next answer will be recalculated before another pool is built. You must not invent or
+switch a questionId or category. Do not mention candidate charts, scores, houses, planets, vargas,
+D1-D60, or imply that an answer is expected. Keep every question factual and non-leading. Never add
+personality or physical-trait questions.
 
-BACKEND QUESTION BRIEF
-{json.dumps({"questions": public_questions}, ensure_ascii=False, indent=2)}
+APPROVED QUESTION POOL
+{json.dumps({"questionPool": public_questions}, ensure_ascii=False, indent=2)}
 
 Return JSON only:
 {{
   "questions": [
     {{
-      "questionId": "the unchanged backend questionId",
-      "category": "the unchanged backend category",
+      "questionId": "one unchanged approved backend questionId",
+      "category": "the unchanged approved backend category",
       "title": "short readable title",
       "prompt": "concrete examples of qualifying events",
       "whyWeAsk": "one plain-language sentence",
@@ -2517,25 +2776,19 @@ Return JSON only:
         def bound_event_result(
             *, source: str, agent_failure: Exception | None = None
         ) -> dict[str, Any]:
+            semantic_review_unavailable = source in {
+                "question_binding_only",
+                "question_binding_fallback",
+            }
             payload = {
                 "schemaVersion": "vedicdust-life-event-evidence-validation/1.0.0",
                 "source": source,
                 "results": [
-                    {
-                        "questionId": event["questionId"],
-                        "category": event["category"],
-                        "eventSubtype": event.get("eventSubtype"),
-                        "date": event.get("date", ""),
-                        "description": event.get("description", ""),
-                        "accepted": True,
-                        "reason": "Backend-issued question, subtype, and category binding validated.",
-                        "eventFacts": {
-                            "occurrence": "occurred",
-                            "agency": "unknown",
-                            "impact": "unknown",
-                            "dateConfidence": "unknown",
-                        },
-                    }
+                    self._bound_event_evidence_result(
+                        event,
+                        semantic_review_unavailable=semantic_review_unavailable
+                        and self._description_contains_optional_note(event.get("description")),
+                    )
                     for event in events
                 ],
             }
@@ -2546,11 +2799,14 @@ Return JSON only:
         if self.agent_runtime is None or not self.agent_runtime.is_configured():
             return bound_event_result(source="question_binding_only")
 
-        prompt = f"""Classify optional semantic context for each structured life event. The backend
-has already validated the current question, selected subtype, category, and date; you do not decide
-whether the event is accepted. This is evidence enrichment, not astrology interpretation. Do not
-infer chart meaning, score candidates, rewrite the user's statement, or change a category or
-eventSubtype. Use `unknown` whenever the submitted details do not support a semantic label. A
+        prompt = f"""Audit optional semantic context for each structured life event. The backend
+has already validated the current question, selected subtype, category, and date. Mark the answer
+`clear` unless the user's own description explicitly contradicts that selected event, says the event
+did not happen, or makes the occurrence/date genuinely uncertain. Do not request clarification merely
+because the optional note is short or absent. When clarification is required, ask one neutral factual
+question that lets the user confirm or correct the selected event. This is evidence intake, not
+astrology interpretation. Do not infer chart meaning, score candidates, rewrite the statement, or
+change a category or eventSubtype. Use `unknown` whenever details do not support a semantic label. A
 year-only date is valid.
 
 SUBMITTED EVENTS
@@ -2563,6 +2819,9 @@ Return JSON only:
       "questionId": "exact submitted questionId",
 	      "category": "exact submitted category",
 	      "eventSubtype": "exact submitted eventSubtype",
+	      "assessment": "clear|needs_clarification",
+            "clarificationReasonCode": "event_not_confirmed|description_conflicts_with_selection|date_or_occurrence_uncertain|semantic_review_unavailable|null",
+	      "clarificationQuestion": "one short neutral question, or null when clear",
 	      "reason": "short audit note about available semantic detail",
 	      "eventFacts": {{
             "occurrence": "occurred|ongoing|uncertain",
@@ -2600,6 +2859,62 @@ Return JSON only:
             source="question_binding_fallback",
             agent_failure=last_error,
         )
+
+    @staticmethod
+    def _description_contains_optional_note(description: Any) -> bool:
+        """Detect the UI's explicitly marked free-text note without parsing prose."""
+
+        value = str(description or "").strip()
+        return bool(re.search(r"(?:\([^()\n]{1,160}\)|（[^（）\n]{1,160}）)\s*$", value))
+
+    @staticmethod
+    def _bound_event_evidence_result(
+        event: dict[str, Any],
+        *,
+        semantic_review_unavailable: bool,
+    ) -> dict[str, Any]:
+        if semantic_review_unavailable:
+            return {
+                "questionId": event["questionId"],
+                "category": event["category"],
+                "eventSubtype": event.get("eventSubtype"),
+                "date": event.get("date", ""),
+                "description": event.get("description", ""),
+                "accepted": False,
+                "reason": (
+                    "The optional note needs semantic review before this event can be accepted."
+                ),
+                "assessment": "needs_clarification",
+                "clarificationRequired": True,
+                "clarificationReasonCode": "semantic_review_unavailable",
+                "clarificationQuestion": (
+                    "We could not safely check the optional note. Remove the optional note and "
+                    "submit again, or retry later."
+                ),
+                "eventFacts": {
+                    "occurrence": "uncertain",
+                    "agency": "unknown",
+                    "impact": "unknown",
+                    "dateConfidence": "unknown",
+                },
+            }
+        return {
+            "questionId": event["questionId"],
+            "category": event["category"],
+            "eventSubtype": event.get("eventSubtype"),
+            "date": event.get("date", ""),
+            "description": event.get("description", ""),
+            "accepted": True,
+            "reason": "Backend-issued question, subtype, and category binding validated.",
+            "assessment": "clear",
+            "clarificationRequired": False,
+            "eventFacts": {
+                "occurrence": "occurred",
+                "agency": "unknown",
+                "impact": "unknown",
+                "dateConfidence": "unknown",
+            },
+        }
 
     def _consultation_question_prompt(
         self,
@@ -3095,18 +3410,8 @@ Return JSON only:
         revision: int,
         artifacts: dict[str, str],
     ) -> None:
-        for path in [
-            "birth_input_context.json",
-            "sensitivity_scan.json",
-            ACTIVE_CHART_SENSITIVITY_JSON,
-            CHART_RECORD_JSON,
-            JUDGEMENT_CONTEXT_JSON,
-            CLAIM_GRAPH_JSON,
-            CONSULTATION_DOSSIER_JSON,
-            CONSULTATION_REPORT_MANIFEST_JSON,
-            AGENT_CONTEXT_JSON,
-            CONSULTATION_REPORT_MD,
-        ]:
+        session_dir = self.workspace.require_session_dir(session_id)
+        for path in SkillWorkspace.RECTIFICATION_TRANSACTION_PATHS:
             content = artifacts.get(path)
             if content is None:
                 continue
@@ -3114,6 +3419,22 @@ Return JSON only:
                 session_id,
                 f".runtime/chart_revisions/rev_{revision}/{path}",
                 content,
+            )
+            checkpoint_path = SkillWorkspace.artifact_checkpoint_relative_path(path)
+            checkpoint = session_dir / checkpoint_path
+            if checkpoint.exists() and checkpoint.is_file():
+                self.workspace.write_artifact(
+                    session_id,
+                    f".runtime/chart_revisions/rev_{revision}/{checkpoint_path}",
+                    checkpoint.read_text(encoding="utf-8"),
+                )
+
+        manifest = session_dir / ".meta/session.json"
+        if manifest.exists() and manifest.is_file():
+            self.workspace.write_artifact(
+                session_id,
+                f".runtime/chart_revisions/rev_{revision}/.meta/session.json",
+                manifest.read_text(encoding="utf-8"),
             )
 
     def _ensure_runtime_contracts(self, session_id: str) -> None:
@@ -4287,7 +4608,7 @@ User request:
             if path.is_file()
         }
 
-    def _prepare_judgement_context(self, session_id: str, user_message: str = "") -> None:
+    def _prepare_judgement_context(self, session_id: str) -> None:
         chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         if not chart_record_json:
             raise ValueError("Session is missing chart_record.json")
@@ -4297,12 +4618,15 @@ User request:
             record, sensitivity
         )
         catalog = load_rule_catalog()
+        topic_selection = self._json_dict(
+            self.workspace.read_artifact_text(session_id, CONSULTATION_TOPIC_SELECTION_JSON) or ""
+        )
         context = build_judgement_context(
             record,
             catalog,
             restricted_fact_ids=restricted_fact_ids,
             restrict_timing=restrict_timing,
-            requested_topics=[user_message] if user_message.strip() else [],
+            requested_topics=self._canonical_topic_ids(topic_selection.get("selectedTopicIds")),
             now=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
         )
         validate_judgement_context(record, context, catalog)

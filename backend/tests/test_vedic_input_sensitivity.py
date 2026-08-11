@@ -25,10 +25,13 @@ from app.services.chart_rectification import ChartRectificationService
 from app.services.life_event_rectification import (
     _localize_event_interval,
     candidate_event_period_fingerprint,
+    decode_life_event_evidence,
+    encode_structured_life_event_evidence,
     parse_life_event_ledger,
     score_candidate_events,
 )
 from app.services.rectification_confirmation import build_rectification_conclusion
+from app.services.rectification_interview import RectificationEvidenceClarificationRequired
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
@@ -1345,6 +1348,69 @@ def test_structured_life_event_category_wins_over_description_keywords() -> None
     ]
 
 
+def test_backend_bound_event_description_cannot_manufacture_another_episode() -> None:
+    evidence = [
+        {
+            "questionId": "rectify.r1.q1.career",
+            "date": "2018-03",
+            "category": "career",
+            "eventSubtype": "job_change",
+            "description": "Changed employer; 2021-10 relationship: Registered marriage",
+            "accepted": True,
+            "eventFacts": {
+                "occurrence": "occurred",
+                "agency": "active",
+                "impact": "major",
+                "dateConfidence": "month",
+            },
+        }
+    ]
+    encoded = encode_structured_life_event_evidence(evidence)
+    decoded, authoritative = decode_life_event_evidence(encoded)
+
+    ledger = parse_life_event_ledger(
+        "2018-03 career: Changed employer; 2021-10 relationship: Registered marriage",
+        semantic_evidence=decoded,
+        structured_authority=authoritative,
+    )
+
+    assert authoritative is True
+    assert ledger["evidenceAuthority"] == "backend_question_binding"
+    assert ledger["independentEpisodeCount"] == 1
+    assert [(event["date"], event["category"]) for event in ledger["events"]] == [
+        ("2018-03", "career")
+    ]
+    assert "2021-10 relationship" in ledger["events"][0]["description"]
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        (
+            {
+                "schemaVersion": "vedicdust-structured-life-events/1.0.0",
+                "authority": "user_supplied",
+                "events": [],
+            },
+            "invalid authority",
+        ),
+        (
+            {
+                "schemaVersion": "vedicdust-structured-life-events/1.0.0",
+                "authority": "backend_question_binding",
+                "events": ["not-an-event"],
+            },
+            "non-object event",
+        ),
+    ],
+)
+def test_authoritative_life_event_envelope_fails_closed(
+    payload: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        decode_life_event_evidence(json.dumps(payload))
+
+
 def test_structured_relationship_subtype_selects_specific_versioned_rule() -> None:
     ledger = parse_life_event_ledger(
         "2018-10 relationship: Got married",
@@ -2345,7 +2411,9 @@ def test_materialized_chart_revision_keeps_original_candidate_scan(
     assert context["activeCanonicalInput"]["candidateId"] == "candidate-selected"
 
 
-def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path) -> None:
+def test_runtime_recalculates_chart_after_collecting_dated_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class FixedPlaceService:
         @staticmethod
         def resolve(_: str) -> ResolvedPlace:
@@ -2378,7 +2446,7 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
                 relationship="not provided",
                 timeSource="family memory",
                 readingFocus="Career direction",
-                lifeEvents="",
+                lifeEvents="2010 education: Unbound intake event must not be scored",
                 readerRelationship="parent",
                 locale="en",
             )
@@ -2388,6 +2456,39 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
             or "{}"
         )
         assert state["status"] == "collecting_evidence"
+        initial_context = json.loads(
+            workspace.read_artifact_text(created.session_id, "birth_input_context.json") or "{}"
+        )
+        assert initial_context["lifeEvents"]["eligibleEventCount"] == 0
+        assert initial_context["lifeEventEvidenceAuthority"] == "backend_question_binding"
+
+        evidence_audit_calls = 0
+
+        async def clarify_first_submission(events: list[dict[str, Any]]) -> dict[str, Any]:
+            nonlocal evidence_audit_calls
+            evidence_audit_calls += 1
+            if evidence_audit_calls == 1:
+                event = events[0]
+                return {
+                    "schemaVersion": "vedicdust-rectification-event-evidence/1.0.0",
+                    "source": "agent_semantic_enrichment",
+                    "results": [
+                        {
+                            **event,
+                            "accepted": False,
+                            "clarificationRequired": True,
+                            "clarificationReasonCode": "description_conflicts_with_selection",
+                            "clarificationQuestion": "Did this event actually happen as selected?",
+                        }
+                    ],
+                }
+            return await SkillRuntime._validate_rectification_event_evidence(runtime, events)
+
+        monkeypatch.setattr(
+            runtime,
+            "_validate_rectification_event_evidence",
+            clarify_first_submission,
+        )
 
         for stale_path in [
             "reader_prevalidation.md",
@@ -2401,7 +2502,7 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
         updated = None
         for index, description in enumerate(
             [
-                "Graduated from university",
+                "Graduated from university; 2020-10 career: Changed role",
                 "Changed employer and role",
                 "Registered marriage",
                 "Underwent surgery",
@@ -2454,6 +2555,18 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(tmp_path: Path
                     }
                 ],
             )
+            if index == 1:
+                with pytest.raises(RectificationEvidenceClarificationRequired):
+                    await runtime.record_rectification_life_events(submission)
+                unchanged_record = json.loads(
+                    workspace.read_artifact_text(created.session_id, "chart_record.json") or "{}"
+                )
+                unchanged_context = json.loads(
+                    workspace.read_artifact_text(created.session_id, "birth_input_context.json")
+                    or "{}"
+                )
+                assert unchanged_record["revision"] == 1
+                assert unchanged_context["lifeEvents"]["eligibleEventCount"] == 0
             updated = await runtime.record_rectification_life_events(submission)
             if index == 1:
                 replayed = await runtime.record_rectification_life_events(submission)
@@ -5097,6 +5210,7 @@ def test_rectification_withholds_dasha_level_that_changes_inside_reported_interv
         item["observationId"].endswith(("md.activation", "md.activation_not_observed"))
         for item in score["observations"]
     )
+    assert score["selectionContradictionScore"] == 0.0
 
 
 def test_year_precision_cannot_create_transit_evidence(monkeypatch) -> None:
@@ -5214,7 +5328,8 @@ def test_month_precision_requires_stable_transit_activation(monkeypatch) -> None
         "minimumBoundaryDistanceDegrees": 15.0,
         "certified": True,
     }
-    assert stable["selectionScore"] == 0.0
+    assert stable["selectionContradictionScore"] == pytest.approx(0.07)
+    assert stable["selectionScore"] == pytest.approx(-0.07)
     assert stable["methodConvergenceLayers"] == []
     assert stable["methodConvergenceMet"] is False
 
@@ -5369,13 +5484,19 @@ def test_rectification_varga_score_uses_domain_house_structure(monkeypatch) -> N
         ledger=ledger,
     )["evidenceScores"][0]
 
-    assert activated["score"] - inactive["score"] == pytest.approx(0.08)
-    assert inactive["contradictionScore"] == 0.0
+    assert activated["score"] - inactive["score"] == pytest.approx(0.11)
+    assert inactive["contradictionScore"] == pytest.approx(0.07)
+    assert inactive["selectionContradictionScore"] == pytest.approx(0.07)
     assert any(
         item["observationId"].endswith("d10.activation_not_observed")
         and item["outcome"] == "missing"
         for item in inactive["observations"]
     )
+    contradictions = [
+        item for item in inactive["observations"] if item["outcome"] == "contradiction"
+    ]
+    assert {item["component"] for item in contradictions} == {"dasha", "varga"}
+    assert all(item["details"]["hardElimination"] is False for item in contradictions)
     varga_observation = next(
         item
         for item in activated["observations"]
@@ -5440,7 +5561,9 @@ def test_rectification_kp_sub_lord_alone_is_suppressed(monkeypatch) -> None:
         "kp_sub_lord_requires_corroboration_from_dasha_varga_or_double_transit"
     )
     assert score["supportScore"] == 0.0
-    assert score["score"] == 0.0
+    assert score["contradictionScore"] == pytest.approx(0.07)
+    assert score["selectionScore"] == pytest.approx(-0.07)
+    assert score["score"] == pytest.approx(-0.07)
 
 
 def test_rectification_kp_sub_lord_is_audited_but_cannot_change_selection(monkeypatch) -> None:
@@ -5544,8 +5667,9 @@ def test_auxiliary_transits_cannot_rank_a_candidate_without_primary_support(monk
         + RECTIFICATION_SCORING_POLICY.sade_sati_support_weight
     )
     assert score["selectionSupportScore"] == 0.0
-    assert score["selectionScore"] == 0.0
-    assert result["aggregateScore"] == 0.0
+    assert score["selectionContradictionScore"] == pytest.approx(0.07)
+    assert score["selectionScore"] == pytest.approx(-0.07)
+    assert result["aggregateScore"] == pytest.approx(-0.07)
 
 
 def test_rectification_kp_sub_lord_alone_is_suppressed_omits_kp_rule_id(monkeypatch) -> None:

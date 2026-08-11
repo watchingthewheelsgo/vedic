@@ -29,6 +29,7 @@ from app.schemas import (
 from app.calculator.provenance import calculation_runtime_provenance
 from app.services.life_event_rectification import (
     candidate_event_period_fingerprint,
+    decode_life_event_evidence,
     parse_life_event_ledger,
     score_candidate_events,
 )
@@ -423,21 +424,13 @@ class VedicCalculator:
         time_window = self._time_window(payload, intake.birth_time_precision, intake.time_source)
         place_radius = round(float(place.radius_km), 3)
         place_sensitivity_scan_allowed = self._place_sensitivity_scan_allowed(place)
-        raw_semantic_evidence = str(payload.get("life_event_facts") or "").strip()
-        try:
-            parsed_semantic_evidence = (
-                json.loads(raw_semantic_evidence) if raw_semantic_evidence else []
-            )
-        except json.JSONDecodeError:
-            parsed_semantic_evidence = []
-        semantic_evidence = (
-            [item for item in parsed_semantic_evidence if isinstance(item, dict)]
-            if isinstance(parsed_semantic_evidence, list)
-            else []
+        semantic_evidence, structured_authority = decode_life_event_evidence(
+            str(payload.get("life_event_facts") or "")
         )
         life_event_ledger = parse_life_event_ledger(
             str(payload.get("life_events") or ""),
             semantic_evidence=semantic_evidence,
+            structured_authority=structured_authority,
         )
         return {
             "schemaVersion": "birth-input-context/v1",
@@ -478,6 +471,7 @@ class VedicCalculator:
             },
             "lifeEvents": life_event_ledger,
             "lifeEventSemantics": semantic_evidence,
+            "lifeEventEvidenceAuthority": life_event_ledger["evidenceAuthority"],
             "constraints": {
                 "timeSearchMustStayWithinReportedWindow": True,
                 "placeSearchMustStayWithinRadiusKm": place_radius,

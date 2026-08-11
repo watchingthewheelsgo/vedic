@@ -201,7 +201,7 @@ def test_rectification_runtime_artifacts_have_strict_client_projections(tmp_path
                 }
             ],
             "rectificationConclusion": {
-                "schemaVersion": "vedicdust-rectification-conclusion/1.1.0",
+                "schemaVersion": "vedicdust-rectification-conclusion/1.2.0",
                 "status": "ready_for_confirmation",
                 "chartRevision": 2,
                 "candidateId": "A",
@@ -599,6 +599,95 @@ def test_legacy_rectification_vote_artifacts_are_not_active_runtime_files(
     assert "rectification_answer_batch.json" not in visible
     assert "rectification_question_set.json" not in internal
     assert "rectification_answer_batch.json" not in internal
+
+
+def test_life_event_evidence_audit_is_internal_only(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(
+        session_id,
+        "life_event_evidence_validation.json",
+        '{"source":"agent_semantic_enrichment"}\n',
+    )
+
+    public_paths = {artifact.path for artifact in workspace.read_artifacts(session_id)}
+    internal_paths = {
+        artifact.path for artifact in workspace.read_artifacts(session_id, include_internal=True)
+    }
+    assert "life_event_evidence_validation.json" not in public_paths
+    assert "life_event_evidence_validation.json" in internal_paths
+
+
+def test_rectification_transaction_recovers_archived_revision_after_interruption(
+    tmp_path: Path,
+) -> None:
+    settings = SimpleNamespace(project_root=tmp_path)
+    workspace = SkillWorkspace(settings)  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(session_id, "chart_record.json", '{"revision":1}\n')
+    workspace.write_artifact(
+        session_id,
+        "chart_rectification_state.json",
+        '{"status":"collecting_evidence","revision":1}\n',
+    )
+    workspace.write_session_manifest(session_id)
+    workspace.mark_artifact_checkpoint(
+        session_id,
+        "chart_record.json",
+        producer="test-fixture",
+    )
+
+    workspace.begin_rectification_transaction(session_id)
+    workspace.write_artifact(
+        session_id,
+        ".runtime/chart_revisions/rev_1/chart_record.json",
+        '{"revision":1}\n',
+    )
+    workspace.write_artifact(
+        session_id,
+        ".runtime/chart_revisions/rev_1/chart_rectification_state.json",
+        '{"status":"collecting_evidence","revision":1}\n',
+    )
+    session_dir = workspace.require_session_dir(session_id)
+    workspace.write_artifact(
+        session_id,
+        ".runtime/chart_revisions/rev_1/.meta/session.json",
+        (session_dir / ".meta/session.json").read_text(encoding="utf-8"),
+    )
+    checkpoint_relative_path = workspace.artifact_checkpoint_relative_path("chart_record.json")
+    workspace.write_artifact(
+        session_id,
+        f".runtime/chart_revisions/rev_1/{checkpoint_relative_path}",
+        (session_dir / checkpoint_relative_path).read_text(encoding="utf-8"),
+    )
+    workspace.mark_rectification_transaction_archive_ready(session_id)
+    workspace.write_artifact(session_id, "chart_record.json", '{"revision":2}\n')
+    workspace.write_artifact(
+        session_id,
+        "chart_rectification_state.json",
+        '{"status":"corrected_chart_ready","revision":2}\n',
+    )
+    workspace.write_session_manifest(session_id)
+    workspace.mark_artifact_checkpoint(
+        session_id,
+        "chart_record.json",
+        producer="new-fixture",
+    )
+
+    recovered_workspace = SkillWorkspace(settings)  # type: ignore[arg-type]
+    assert recovered_workspace.read_artifact_text(session_id, "chart_record.json") == (
+        '{"revision":1}\n'
+    )
+    assert (
+        recovered_workspace.read_artifact_text(session_id, "chart_rectification_state.json")
+        == '{"status":"collecting_evidence","revision":1}\n'
+    )
+    assert recovered_workspace.read_session_locale(session_id) == "en"
+    assert recovered_workspace.artifact_checkpoint_valid(
+        session_id,
+        "chart_record.json",
+        producer="test-fixture",
+    )
 
 
 def test_judgement_prefers_active_rectified_sensitivity(tmp_path: Path) -> None:

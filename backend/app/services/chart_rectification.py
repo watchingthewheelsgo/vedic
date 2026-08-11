@@ -10,6 +10,7 @@ from app.schemas import BirthInput, ReaderRelationship
 from app.services.life_event_rectification import (
     MAX_RECTIFICATION_EVENTS,
     build_life_event_focus,
+    encode_structured_life_event_evidence,
 )
 from app.services.rectification_confirmation import build_rectification_conclusion
 from app.vedicdust.rectification_policy import (
@@ -1131,9 +1132,8 @@ class ChartRectificationService:
             timeSource=self._rectified_time_source(time_context.get("source")),
             readingFocus=str(birth_input_context.get("readingFocus") or ""),
             lifeEvents=str(life_event_context.get("raw") or ""),
-            lifeEventFacts=json.dumps(
-                birth_input_context.get("lifeEventSemantics") or [],
-                ensure_ascii=False,
+            lifeEventFacts=encode_structured_life_event_evidence(
+                birth_input_context.get("lifeEventSemantics") or []
             ),
             utcOffsetSeconds=(
                 int(candidate["utcOffsetSeconds"])
@@ -1185,9 +1185,8 @@ class ChartRectificationService:
             timeSource=str(time_context.get("source") or "未追问"),
             readingFocus=str(birth_input_context.get("readingFocus") or ""),
             lifeEvents=life_events,
-            lifeEventFacts=json.dumps(
-                birth_input_context.get("lifeEventSemantics") or [],
-                ensure_ascii=False,
+            lifeEventFacts=encode_structured_life_event_evidence(
+                birth_input_context.get("lifeEventSemantics") or []
             ),
             utcOffsetSeconds=int(utc_offset) if utc_offset is not None else None,
             locale=locale,

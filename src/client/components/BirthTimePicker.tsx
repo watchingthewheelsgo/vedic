@@ -15,7 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const ALL_MINUTES = Array.from({ length: 60 }, (_, i) => i);
-const QUARTER_MINUTES = [0, 15, 30, 45];
 
 export function BirthTimePicker({
   value,
@@ -33,8 +32,7 @@ export function BirthTimePicker({
   const disabled = precision === "unknown";
   const selectedHour = value?.getHours() ?? null;
   const selectedMinute = value ? normalizeMinuteForPrecision(value.getMinutes(), precision) : null;
-  const minuteOptions =
-    precision === "part_of_day" ? [0] : precision === "approximate" ? QUARTER_MINUTES : ALL_MINUTES;
+  const minuteOptions = precision === "part_of_day" ? [0] : ALL_MINUTES;
 
   function commit(hour: number, minute: number) {
     onChange(makeBirthTime(hour, normalizeMinuteForPrecision(minute, precision)));

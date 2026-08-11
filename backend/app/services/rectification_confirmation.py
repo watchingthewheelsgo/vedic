@@ -5,7 +5,7 @@ from typing import Any
 from app.schemas import BirthInput
 
 
-CONFIRMATION_SCHEMA_VERSION = "vedicdust-rectification-conclusion/1.1.0"
+CONFIRMATION_SCHEMA_VERSION = "vedicdust-rectification-conclusion/1.2.0"
 
 
 def build_rectification_conclusion(
@@ -16,9 +16,10 @@ def build_rectification_conclusion(
 ) -> dict[str, Any]:
     """Create the user-facing checkpoint after deterministic selection.
 
-    The checkpoint asks only for acknowledgement of the bounded corrected time.
-    It never invents a chart-derived life event or presents submitted evidence
-    as independent validation.
+    The checkpoint includes one corrected-time review and up to two explicit
+    rechecks of facts the user already submitted. Those rechecks make the
+    transition auditable without pretending that a repeated user fact is an
+    independent chart prediction.
     """
 
     selected_id = str(state.get("selectedCandidateId") or "")
@@ -32,8 +33,11 @@ def build_rectification_conclusion(
     )
     interval = candidate.get("interval") if isinstance(candidate.get("interval"), dict) else {}
     timezone_id = _timezone_id(candidate)
-    examples = [_input_review_example(rectified_input, interval)]
     evidence_highlights = _evidence_highlights(state, candidate)
+    examples = [
+        _input_review_example(rectified_input, interval),
+        *_submitted_evidence_examples(evidence_highlights, rectified_input.locale),
+    ]
     evidence = state.get("selectionEvidence")
     evidence = evidence if isinstance(evidence, dict) else {}
     method_maturity = str(state.get("methodMaturity") or "product_hypothesis")
@@ -83,12 +87,13 @@ def build_rectification_conclusion(
         "evidenceHighlights": evidence_highlights,
         "examples": examples,
         "generation": {
-            "source": "deterministic_input_review",
+            "source": "deterministic_evidence_review",
             "postSelectionOnly": True,
             "usedForSelection": False,
             "disclaimer": (
-                "This fallback only asks the user to review the bounded corrected time. "
-                "It is not independent validation and does not raise confidence."
+                "The corrected-time card and evidence cards are post-selection checks. "
+                "Evidence cards repeat submitted facts for confirmation; they are not "
+                "independent chart predictions and do not raise confidence."
             ),
         },
         "confirmation": {"status": "pending", "responses": []},
@@ -198,6 +203,53 @@ def _input_review_example(
         "source": "deterministic_input_review",
         "usedForSelection": False,
     }
+
+
+def _submitted_evidence_examples(
+    highlights: list[dict[str, Any]],
+    locale: str,
+) -> list[dict[str, Any]]:
+    """Turn released evidence highlights into explicit fact-recheck cards.
+
+    This intentionally uses only facts already accepted into the ledger. It is
+    a user-memory confirmation step, not a place to synthesize new predictions.
+    """
+
+    examples: list[dict[str, Any]] = []
+    for index, highlight in enumerate(highlights[:2], start=1):
+        date_value = str(highlight.get("date") or "")
+        description = str(highlight.get("description") or "").strip()
+        category = str(highlight.get("category") or "unknown")
+        role = str(highlight.get("role") or "calibration")
+        if locale == "zh":
+            prompt = (
+                f"你记录的这件事是：{date_value}，{description}。请确认事件本身和时间范围是否准确；"
+                "这只是对已提交事实的回看，不是系统新预测。"
+            )
+        elif locale == "ja":
+            prompt = (
+                f"記録された出来事は {date_value} の「{description}」です。出来事と時期が正しいか確認してください。"
+                "これは提出済みの事実の再確認であり、新しい予測ではありません。"
+            )
+        else:
+            prompt = (
+                f"You recorded this event: {date_value}, {description}. Confirm that the event and "
+                "its time range are correct. This rechecks a submitted fact; it is not a new chart prediction."
+            )
+        examples.append(
+            {
+                "exampleId": f"submitted-evidence-{index}",
+                "startDate": date_value,
+                "endDate": date_value,
+                "category": category,
+                "prompt": prompt,
+                "description": prompt,
+                "source": "submitted_evidence",
+                "usedForSelection": False,
+                "role": role,
+            }
+        )
+    return examples
 
 
 def _bounded_interval_text(locale: str, start: str, end: str, fallback: str) -> str:

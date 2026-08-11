@@ -3,22 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import re
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, cast
-from urllib.parse import urlparse
 
 from app.settings import Settings
-from app.services.place_entity_matching import matches_place_entity, place_category_in_text
 
 
 logger = logging.getLogger(__name__)
 place_trace_logger = logging.getLogger("uvicorn.error")
 
 AgentEffort = Literal["low", "medium", "high", "xhigh", "max"]
-AgentProvenance = Literal["tool_observation", "agent_final"]
+AgentProvenance = Literal["tool_observation", "agent_grounded", "agent_final"]
 
 
 @dataclass(frozen=True)
@@ -30,10 +28,11 @@ class AgentRunResult:
     total_cost_usd: float | None = None
     stop_reason: str | None = None
     model: str | None = None
-    # A place candidate is trusted by the business service only when the runtime
-    # built it from an SDK PostToolUse observation. The model's final prose is
-    # intentionally a separate, non-authoritative provenance.
+    # Place lookup is product-eligible only when the same Agent turn observed a
+    # WebSearch/WebFetch result. The Agent remains responsible for interpreting
+    # that evidence and returning the typed decision.
     provenance: AgentProvenance = "agent_final"
+    tool_queries: tuple[str, ...] = ()
 
 
 class ClaudeRuntime:
@@ -161,17 +160,66 @@ class ClaudeRuntime:
                 return candidate
         return self.settings.anthropic_model
 
+    async def run_structured_reasoning_task(
+        self,
+        task_name: str,
+        prompt: str,
+        *,
+        schema: dict[str, Any],
+        max_turns: int | None = None,
+    ) -> AgentRunResult:
+        """Run a bounded semantic decision without file, shell, or web access."""
+
+        if not self.is_configured():
+            raise RuntimeError("Claude Agent SDK runtime is not configured")
+
+        from claude_agent_sdk import ClaudeAgentOptions
+
+        model_name = self.settings.anthropic_default_haiku_model or self.settings.anthropic_model
+        options = ClaudeAgentOptions(
+            tools=[],
+            allowed_tools=[],
+            disallowed_tools=[
+                "Bash",
+                "Read",
+                "Write",
+                "Edit",
+                "Glob",
+                "Grep",
+                "WebFetch",
+                "WebSearch",
+            ],
+            permission_mode="dontAsk",
+            setting_sources=["project"],
+            cwd=Path.cwd(),
+            add_dirs=[Path.cwd()],
+            env=self._agent_env(),
+            model=model_name,
+            max_turns=max_turns or min(3, self.settings.agent_max_turns),
+            effort="low",
+            output_format={"type": "json_schema", "schema": schema},
+            system_prompt=(
+                "You are a bounded semantic decision maker. Follow the supplied ontology and "
+                "return only the requested structured decision. Do not invent identifiers or "
+                "infer facts that are not present in the supplied text."
+            ),
+        )
+        return await self._run_query(
+            task_name,
+            prompt,
+            options,
+            model_name=model_name,
+        )
+
     async def run_place_lookup_task(
         self,
         *,
         query: str,
         city_label: str,
         selected_scope_label: str | None = None,
-        city_lat: float,
-        city_lon: float,
-        max_distance_km: float,
+        locale: Literal["zh", "en", "ja"] = "en",
         max_results: int = 5,
-        search_queries: list[str] | None = None,
+        progress_callback: Callable[[str, dict[str, object]], Awaitable[None]] | None = None,
     ) -> AgentRunResult:
         if not self.is_configured():
             raise RuntimeError("Claude Agent SDK runtime is not configured")
@@ -179,10 +227,6 @@ class ClaudeRuntime:
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
         tool_observations: list[dict[str, Any]] = []
-        tool_state: dict[str, Any] = {
-            "tool_count": 0,
-            "verified_json": None,
-        }
 
         async def trace_place_tool_use(
             hook_input: object, tool_use_id: str | None, context: object
@@ -191,14 +235,10 @@ class ClaudeRuntime:
                 hook_input,
                 tool_use_id,
                 context,
-                query=query,
                 city_label=city_label,
-                city_lat=city_lat,
-                city_lon=city_lon,
-                max_distance_km=max_distance_km,
-                max_results=max_results,
                 tool_observations=tool_observations,
-                tool_state=tool_state,
+                selected_scope_label=selected_scope_label or city_label,
+                progress_callback=progress_callback,
             )
 
         model_name = self.settings.anthropic_default_haiku_model or self.settings.anthropic_model
@@ -221,6 +261,7 @@ class ClaudeRuntime:
             model=model_name,
             max_turns=self.settings.place_lookup_agent_max_turns,
             effort="low",
+            output_format={"type": "json_schema", "schema": self._place_lookup_schema()},
             hooks={
                 "PreToolUse": [HookMatcher(matcher=None, hooks=[trace_place_tool_use])],
                 "PostToolUse": [HookMatcher(matcher=None, hooks=[trace_place_tool_use])],
@@ -228,19 +269,12 @@ class ClaudeRuntime:
             },
             include_hook_events=self.settings.place_lookup_trace_enabled,
             system_prompt=(
-                "You are a precise geocoding evidence collector. Use Claude Code SDK WebSearch "
-                "and, only when necessary, WebFetch to find candidate WGS84 coordinates for a "
-                "named hospital, district, landmark, or address. Do not decide final validity; "
-                "the backend will verify distance against the selected city. Return JSON only."
+                "You are the geocoding decision maker. Use WebSearch and WebFetch as needed, "
+                "reason over their returned evidence, decide whether each result is the requested "
+                "place inside the selected administrative scope, and return the required JSON. "
+                "The application will not reinterpret place names, addresses, aliases, or scope "
+                "membership after your answer."
             ),
-        )
-        controlled_queries = search_queries or [
-            f"{query} {selected_scope_label or city_label} latitude longitude coordinates",
-            f"{query} {selected_scope_label or city_label} 经纬度 坐标",
-        ]
-        controlled_query_block = "\n".join(
-            f"{index}. {search_query}"
-            for index, search_query in enumerate(controlled_queries, start=1)
         )
         self._log_place_trace(
             "start",
@@ -248,11 +282,7 @@ class ClaudeRuntime:
                 "query": query,
                 "city_label": city_label,
                 "selected_scope_label": selected_scope_label,
-                "city_lat": city_lat,
-                "city_lon": city_lon,
-                "max_distance_km": max_distance_km,
                 "max_results": max_results,
-                "controlled_queries": controlled_queries,
             },
         )
         prompt = f"""
@@ -261,90 +291,31 @@ Find candidate WGS84 coordinates for this place query.
 Query: {query}
 Selected city baseline: {city_label}
 Selected place scope: {selected_scope_label or city_label}
-City/admin baseline center: lat={city_lat}, lon={city_lon}
-Administrative verification distance: {max_distance_km} km
+Response locale: {locale}
 Max candidates: {max_results}
 
-Controlled WebSearch queries, in priority order:
-{controlled_query_block}
+Use the tools and choose the search queries yourself. Continue searching while the evidence is
+insufficient; stop immediately when you can make the requested decision reliably. Optimize for
+latency: do not fetch another page or seek a more authoritative source merely to repeat evidence
+that already supports the structured decision. For every candidate, decide:
+- whether it is the place the user meant, including aliases, translated names, branches, and typos;
+- whether its address belongs to the selected administrative scope;
+- whether the coordinates are WGS84/EPSG:4326 and represent the POI, address, or administrative area;
+- whether multiple in-scope results genuinely require a user choice.
 
-Rules:
-- Start with one query copied verbatim from the controlled list above.
-- If the result does not contain coordinates for the named place, you may use another controlled
-  query or one WebFetch for a specific promising URL.
-- Evidence is sufficient as soon as one result contains the target name or a clear alias, the
-  selected city/administrative context, and a legal latitude/longitude pair.
-- When evidence is sufficient, stop using tools immediately and return the JSON candidate.
-- Do not keep searching merely to find a more authoritative source after sufficient evidence exists.
-- If the available results name only the city/district but not the target place, do not return a
-  POI candidate from those city coordinates.
-- Prefer official or map/knowledge-panel evidence when available.
-- Include candidates that plausibly refer to the query inside the selected city or its
-  administrative counties/districts.
-- If the selected place scope is narrower than the city baseline, return only candidates whose
-  address or evidence names that selected scope. If no candidate matches that scope, return an
-  empty candidates array instead of mixing nearby districts or campuses.
-- Do not reject a credible POI merely because it is far from the city-center point; the
-  backend will verify administrative scope and distance.
-- If evidence lists longitude before latitude, normalize output to latitude then longitude.
-- Only return coordinates when the source is WGS84/EPSG:4326. If the source uses GCJ-02, BD-09,
-  or does not identify the datum, leave the candidate out rather than silently relabeling it.
-- Preserve the source's original place name in `label`; do not replace a Chinese name with an
-  English translation. The backend uses the label/address/evidence to verify entity identity.
-- If you cannot find credible coordinates, return an empty candidates array.
-- Return valid JSON only, no markdown fences.
-
-Schema:
-{{
-  "candidates": [
-    {{
-      "label": "place name",
-      "address": "short address or locality",
-      "latitude": 31.0,
-      "longitude": 121.0,
-      "coordinateSystem": "WGS84",
-      "accuracy": "poi",
-      "sourceUrl": "https://...",
-      "rawEvidence": "short quote or summary of where the coordinates came from",
-      "confidence": "high"
-    }}
-  ],
-  "notes": ["optional short notes"]
-}}
+Return only in-scope candidates supported by web evidence. If evidence conflicts or remains
+insufficient, return no candidate and explain why in `notes`. Preserve source names and addresses.
+Do not substitute city-center coordinates for a requested POI. Keep `label` and `address` as the
+source identifies them; provide `displayLabel` and `displayAddress` in the response locale when a
+natural localized form is available.
 """
-        try:
-            result = await self._run_query(
-                "precise-place-agent-lookup",
-                prompt.strip(),
-                options,
-                trace_label="place_lookup",
-                model_name=model_name,
-            )
-        except Exception:
-            fallback_json = self._place_lookup_json_from_tool_observations(
-                query=query,
-                city_label=city_label,
-                city_lat=city_lat,
-                city_lon=city_lon,
-                max_distance_km=max_distance_km,
-                max_results=max_results,
-                observations=tool_observations,
-            )
-            if not fallback_json:
-                raise
-            self._log_place_trace(
-                "final_from_tool_evidence",
-                {
-                    "observation_count": len(tool_observations),
-                    "raw_text": fallback_json,
-                },
-            )
-            return AgentRunResult(
-                mode="claude",
-                raw_text=fallback_json,
-                model=model_name,
-                provenance="tool_observation",
-            )
+        result = await self._run_query(
+            "precise-place-agent-lookup",
+            prompt.strip(),
+            options,
+            trace_label="place_lookup",
+            model_name=model_name,
+        )
         self._log_place_trace(
             "final",
             {
@@ -354,38 +325,31 @@ Schema:
                 "raw_text": result.raw_text,
             },
         )
-        verified_json = tool_state.get("verified_json")
-        if isinstance(verified_json, str) and verified_json.strip():
+        tool_queries = tuple(
+            query_text
+            for observation in tool_observations
+            if (query_text := self._observation_query(observation))
+        )
+        if tool_observations:
             self._log_place_trace(
-                "final_from_tool_evidence",
+                "agent_final_grounded",
                 {
-                    "reason": "tool_evidence_authoritative",
+                    "observation_count": len(tool_observations),
                     "session_id": result.session_id,
-                    "raw_text": verified_json,
                 },
             )
-            return self._finalize_place_lookup_result(result, verified_json)
+            return AgentRunResult(
+                mode=result.mode,
+                raw_text=result.raw_text,
+                session_id=result.session_id,
+                duration_ms=result.duration_ms,
+                total_cost_usd=result.total_cost_usd,
+                stop_reason=result.stop_reason,
+                model=result.model,
+                provenance="agent_grounded",
+                tool_queries=tool_queries,
+            )
         return result
-
-    @staticmethod
-    def _finalize_place_lookup_result(
-        result: AgentRunResult,
-        verified_json: str | None,
-    ) -> AgentRunResult:
-        """Make the backend evidence gate, not the Agent prose, the source of truth."""
-
-        if not isinstance(verified_json, str) or not verified_json.strip():
-            return result
-        return AgentRunResult(
-            mode=result.mode,
-            raw_text=verified_json,
-            session_id=result.session_id,
-            duration_ms=result.duration_ms,
-            total_cost_usd=result.total_cost_usd,
-            stop_reason=result.stop_reason,
-            model=result.model,
-            provenance="tool_observation",
-        )
 
     async def _trace_place_tool_use(
         self,
@@ -393,49 +357,25 @@ Schema:
         tool_use_id: str | None,
         _context: object,
         *,
-        query: str | None = None,
         city_label: str | None = None,
-        city_lat: float | None = None,
-        city_lon: float | None = None,
-        max_distance_km: float | None = None,
-        max_results: int = 5,
         tool_observations: list[dict[str, Any]] | None = None,
-        tool_state: dict[str, Any] | None = None,
+        selected_scope_label: str | None = None,
+        progress_callback: Callable[[str, dict[str, object]], Awaitable[None]] | None = None,
     ) -> dict[str, object]:
         payload = self._hook_input_payload(hook_input)
         event_name = payload.get("hook_event_name") or payload.get("hookEventName")
         tool_name = payload.get("tool_name") or payload.get("toolName")
-        if event_name == "PreToolUse" and tool_state is not None:
-            tool_state["tool_count"] = int(tool_state.get("tool_count") or 0) + 1
-            deny_reason = ""
-            if tool_state.get("verified_json"):
-                deny_reason = (
-                    "Sufficient place-coordinate evidence was already found. "
-                    "Stop using tools and return the JSON candidate now."
-                )
-            elif int(tool_state["tool_count"]) > 6:
-                deny_reason = (
-                    "Place lookup tool budget reached. Return JSON using evidence already found, "
-                    "or an empty candidates array if no place-coordinate evidence exists."
-                )
-            if deny_reason:
-                self._log_place_trace(
-                    "tool_denied",
-                    {
-                        "tool_name": tool_name,
-                        "tool_use_id": tool_use_id or payload.get("tool_use_id"),
-                        "reason": deny_reason,
-                    },
-                )
-                return {
-                    "continue_": True,
-                    "suppressOutput": False,
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": deny_reason,
-                    },
-                }
+        evidence_tool = tool_name in {"WebSearch", "WebFetch"}
+        if event_name == "PreToolUse" and evidence_tool:
+            await self._emit_place_progress(
+                progress_callback,
+                "searching",
+                {
+                    "tool": str(tool_name or ""),
+                    "query": self._tool_query(payload),
+                    "scope": selected_scope_label or city_label or "",
+                },
+            )
         self._log_place_trace(
             str(event_name or "tool"),
             {
@@ -446,7 +386,16 @@ Schema:
                 "error": payload.get("error"),
             },
         )
-        if event_name == "PostToolUse" and tool_observations is not None:
+        if event_name == "PostToolUse" and evidence_tool and tool_observations is not None:
+            await self._emit_place_progress(
+                progress_callback,
+                "verifying",
+                {
+                    "tool": str(tool_name or ""),
+                    "query": self._tool_query(payload),
+                    "scope": selected_scope_label or city_label or "",
+                },
+            )
             tool_observations.append(
                 {
                     "tool_name": tool_name,
@@ -455,246 +404,104 @@ Schema:
                     "tool_response": payload.get("tool_response"),
                 }
             )
-            if (
-                query is not None
-                and city_label is not None
-                and city_lat is not None
-                and city_lon is not None
-                and max_distance_km is not None
-                and tool_state is not None
-            ):
-                verified_json = self._place_lookup_json_from_tool_observations(
-                    query=query,
-                    city_label=city_label,
-                    city_lat=city_lat,
-                    city_lon=city_lon,
-                    max_distance_km=max_distance_km,
-                    max_results=max_results,
-                    observations=tool_observations,
-                )
-                if verified_json and self._place_lookup_result_has_wgs84_coordinates(verified_json):
-                    tool_state["verified_json"] = verified_json
-                    self._log_place_trace(
-                        "evidence_gate_updated",
-                        {
-                            "tool_name": tool_name,
-                            "tool_use_id": tool_use_id or payload.get("tool_use_id"),
-                            "raw_text": verified_json,
-                        },
-                    )
-                    # The backend has a terminal, validated candidate. Stop the SDK turn here;
-                    # run_place_lookup_task will return the structured evidence through its
-                    # fallback path if the SDK does not emit a final assistant message.
-                    return {
-                        "continue_": False,
-                        "stopReason": "validated place-coordinate evidence collected",
-                        "suppressOutput": False,
-                    }
         return {"continue_": True, "suppressOutput": False}
 
-    def _place_lookup_json_from_tool_observations(
-        self,
-        *,
-        query: str,
-        city_label: str,
-        city_lat: float,
-        city_lon: float,
-        max_distance_km: float,
-        max_results: int,
-        observations: list[dict[str, Any]],
-    ) -> str | None:
-        candidates: list[dict[str, object]] = []
-        seen: set[tuple[float, float]] = set()
-        for observation in observations:
-            text = self._json_preview(observation)
-            for evidence in self._observation_evidence_units(observation):
-                full_text = evidence["text"]
-                coordinate_pairs = self._extract_coordinate_pairs(full_text, city_lat, city_lon)
-                for lat, lon in coordinate_pairs:
-                    key = (round(lat, 5), round(lon, 5))
-                    if key in seen:
-                        continue
-                    gate = self._place_evidence_gate(
-                        query=query,
-                        city_label=city_label,
-                        text=full_text,
-                        lat=lat,
-                        lon=lon,
-                        city_lat=city_lat,
-                        city_lon=city_lon,
-                        max_distance_km=max_distance_km,
-                    )
-                    if not gate["accepted"]:
-                        continue
-                    seen.add(key)
-                    coordinate_context = self._coordinate_context(full_text, lat, lon)
-                    label = self._label_from_place_evidence(query, coordinate_context)
-                    address = self._address_from_place_evidence(coordinate_context) or city_label
-                    candidates.append(
-                        {
-                            "label": label,
-                            "address": address,
-                            "latitude": lat,
-                            "longitude": lon,
-                            "accuracy": "poi",
-                            "coordinateSystem": self._coordinate_system_for_evidence(
-                                evidence,
-                                coordinate_context,
-                            ),
-                            "sourceUrl": self._source_url_for_evidence(
-                                evidence,
-                                coordinate_context,
-                                coordinate_count=len(coordinate_pairs),
-                            ),
-                            "rawEvidence": self._evidence_snippet(full_text, lat, lon) or text,
-                            "confidence": gate["confidence"],
-                        }
-                    )
-        if not candidates:
-            return None
-        payload = {
-            "candidates": candidates[: max(1, max_results)],
-            "notes": [
-                "Structured from WebSearch/WebFetch evidence after place evidence gate passed."
-            ],
-        }
-        return json.dumps(payload, ensure_ascii=False)
-
     @staticmethod
-    def _coordinate_system_for_evidence(evidence: dict[str, str], coordinate_context: str) -> str:
-        text = f"{evidence.get('sourceUrl', '')} {coordinate_context}"
-        if re.search(
-            r"wgs\s*84|epsg\s*:?\s*4326|openstreetmap|mapcarta|geonames|"
-            r"google\s*maps?|maps\.google|bing\s*maps?|here\s*maps?",
-            text,
-            re.I,
-        ):
-            return "WGS84"
-        hostname = urlparse(evidence.get("sourceUrl", "")).hostname or ""
-        if hostname.lower().endswith(
-            (
-                "wikipedia.org",
-                "wikidata.org",
-                "latlong.net",
-                "google.com",
-                "googleusercontent.com",
-                "bing.com",
-                "here.com",
-            )
-        ):
-            return "WGS84"
-        # Do not silently label coordinates from an unknown map datum as WGS84.
-        return "unknown"
-
-    def _observation_evidence_units(self, observation: dict[str, Any]) -> list[dict[str, str]]:
-        """Keep coordinates associated with the result block that supplied them."""
-
-        response = observation.get("tool_response")
-        if response is None:
-            response = observation
-        if not isinstance(response, dict):
-            text = self._observation_text(observation)
-            return [{"text": text, "sourceUrl": self._first_url(text) or ""}] if text else []
-
-        units: list[dict[str, str]] = []
-        response_url = str(response.get("url") or "").strip()
-        results = response.get("results")
-        result_urls: list[str] = []
-        if isinstance(results, list):
-            for result in results:
-                if not isinstance(result, dict):
-                    continue
-                result_text = self._observation_text(result)
-                result_url = str(result.get("url") or "").strip()
-                if result_url:
-                    result_urls.append(result_url)
-                if result_text:
-                    units.append(
-                        {
-                            "text": result_text,
-                            "sourceUrl": result_url or response_url,
-                        }
-                    )
-
-        summary_source_url = response_url
-        if not summary_source_url and len(result_urls) == 1:
-            summary_source_url = result_urls[0]
-        for key in ("summary", "result", "text", "message", "content", "answer", "output"):
-            value = response.get(key)
-            if value is None:
-                continue
-            text = "\n".join(self._text_fragments(value)).strip()
-            if text:
-                units.append(
-                    {
-                        "text": text,
-                        "sourceUrl": summary_source_url or self._first_url(text) or "",
-                    }
-                )
-
-        # Some SDK adapters attach the search engine's natural-language summary under a
-        # provider-specific key. It is useful only when it carries an explicit coordinate
-        # signal; ignore ordinary metadata such as query, duration, and result counts.
-        known_keys = {
-            "query",
-            "results",
-            "url",
-            "summary",
-            "result",
-            "text",
-            "message",
-            "content",
-            "answer",
-            "output",
-        }
-        for key, value in response.items():
-            if key in known_keys:
-                continue
-            text = "\n".join(self._text_fragments(value)).strip()
-            if text and self._has_coordinate_signal(text):
-                units.append(
-                    {
-                        "text": text,
-                        "sourceUrl": summary_source_url or self._first_url(text) or "",
-                    }
-                )
-
-        if not units:
-            text = self._observation_text(observation)
-            if text:
-                units.append(
-                    {
-                        "text": text,
-                        "sourceUrl": summary_source_url or self._first_url(text) or "",
-                    }
-                )
-        return units
-
-    @staticmethod
-    def _has_coordinate_signal(text: str) -> bool:
-        return bool(
-            re.search(
-                r"纬度|经度|经纬度|坐标|latitude|longitude|coordinates|wgs84",
-                text,
-                re.I,
-            )
-        )
-
-    def _source_url_for_evidence(
-        self,
-        evidence: dict[str, str],
-        coordinate_context: str,
-        *,
-        coordinate_count: int,
-    ) -> str:
-        local_url = self._first_url(coordinate_context)
-        if local_url:
-            return local_url
-        # A summary containing several coordinate pairs cannot safely attribute its first URL
-        # to every candidate. Leave the source unset rather than publishing a false citation.
-        if coordinate_count > 1:
+    def _observation_query(observation: dict[str, Any]) -> str:
+        tool_input = observation.get("tool_input")
+        if not isinstance(tool_input, dict):
             return ""
-        return evidence.get("sourceUrl", "")
+        return str(tool_input.get("query") or tool_input.get("url") or "").strip()
+
+    @staticmethod
+    def _place_lookup_schema() -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "label": {"type": "string"},
+                            "address": {"type": "string"},
+                            "displayLabel": {"type": "string"},
+                            "displayAddress": {"type": "string"},
+                            "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+                            "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+                            "coordinateSystem": {
+                                "type": "string",
+                                "enum": ["WGS84", "EPSG:4326"],
+                            },
+                            "locationType": {
+                                "type": "string",
+                                "enum": [
+                                    "poi",
+                                    "address",
+                                    "district",
+                                    "county",
+                                    "town",
+                                    "village",
+                                    "landmark",
+                                ],
+                            },
+                            "sourceUrl": {"type": "string"},
+                            "rawEvidence": {"type": "string"},
+                            "confidence": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low"],
+                            },
+                            "scopeAssessment": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": ["match", "conflict", "uncertain"],
+                                    },
+                                    "reason": {"type": "string"},
+                                },
+                                "required": ["status", "reason"],
+                            },
+                        },
+                        "required": [
+                            "label",
+                            "address",
+                            "displayLabel",
+                            "displayAddress",
+                            "latitude",
+                            "longitude",
+                            "coordinateSystem",
+                            "locationType",
+                            "sourceUrl",
+                            "rawEvidence",
+                            "confidence",
+                            "scopeAssessment",
+                        ],
+                    },
+                },
+                "notes": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["candidates", "notes"],
+        }
+
+    @staticmethod
+    async def _emit_place_progress(
+        callback: Callable[[str, dict[str, object]], Awaitable[None]] | None,
+        stage: str,
+        payload: dict[str, object],
+    ) -> None:
+        if callback is not None:
+            await callback(stage, payload)
+
+    @staticmethod
+    def _tool_query(payload: dict[str, Any]) -> str:
+        tool_input = payload.get("tool_input")
+        if not isinstance(tool_input, dict):
+            return ""
+        return str(tool_input.get("query") or tool_input.get("url") or "").strip()
 
     @staticmethod
     def _place_lookup_result_has_candidates(raw_text: str) -> bool:
@@ -715,31 +522,6 @@ Schema:
         return isinstance(candidates, list) and len(candidates) > 0
 
     @classmethod
-    def _place_lookup_result_has_wgs84_coordinates(cls, raw_text: str) -> bool:
-        stripped = raw_text.strip()
-        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.S)
-        if fence:
-            stripped = fence.group(1)
-        if not stripped.startswith("{"):
-            start = stripped.find("{")
-            end = stripped.rfind("}")
-            if start >= 0 and end > start:
-                stripped = stripped[start : end + 1]
-        try:
-            payload = json.loads(stripped)
-        except Exception:
-            return False
-        candidates = payload.get("candidates") if isinstance(payload, dict) else None
-        if not isinstance(candidates, list) or not candidates:
-            return False
-        return all(
-            isinstance(candidate, dict)
-            and str(candidate.get("coordinateSystem") or "").upper()
-            in {"WGS84", "EPSG:4326", "EPSG4326"}
-            for candidate in candidates
-        )
-
-    @classmethod
     def _recover_place_lookup_result(cls, *values: object) -> str | None:
         """Recover a complete candidate payload from an SDK result/error boundary."""
 
@@ -748,261 +530,6 @@ Schema:
             if candidate and cls._place_lookup_result_has_candidates(candidate):
                 return candidate
         return None
-
-    def _place_evidence_gate(
-        self,
-        *,
-        query: str,
-        city_label: str,
-        text: str,
-        lat: float,
-        lon: float,
-        city_lat: float,
-        city_lon: float,
-        max_distance_km: float,
-    ) -> dict[str, object]:
-        if not self._valid_lat_lon(lat, lon):
-            return {"accepted": False, "confidence": "low"}
-        distance = self._distance_km(city_lat, city_lon, lat, lon)
-        if distance > max(max_distance_km, 35.0):
-            return {"accepted": False, "confidence": "low"}
-        entity_match = self._place_evidence_mentions_entity(query, city_label, text)
-        if not entity_match:
-            return {"accepted": False, "confidence": "low"}
-        if distance < 1.0 and self._looks_like_city_center_only(query, text):
-            return {"accepted": False, "confidence": "low"}
-        if distance > 35.0 and not self._place_evidence_has_admin_context(city_label, text):
-            return {"accepted": False, "confidence": "low"}
-        confidence = "high" if self._address_from_place_evidence(text) else "medium"
-        return {"accepted": True, "confidence": confidence}
-
-    def _place_evidence_mentions_entity(self, query: str, city_label: str, text: str) -> bool:
-        del city_label
-        if not matches_place_entity(query, text):
-            return False
-        if place_category_in_text(query) and not place_category_in_text(text):
-            return False
-        return True
-
-    def _place_evidence_has_admin_context(self, city_label: str, text: str) -> bool:
-        lowered = text.lower()
-        city_tokens = [
-            token
-            for token in re.findall(r"[a-z0-9]+", city_label.lower())
-            if len(token) >= 3 and token not in {"china", "city"}
-        ]
-        if any(token in lowered for token in city_tokens):
-            return True
-        return bool(
-            re.search(
-                r"[\u4e00-\u9fff]{1,12}(?:省|市|区|县|镇|路|号)|"
-                r"\b(?:province|prefecture|district|county|road|street)\b",
-                text,
-                re.I,
-            )
-        )
-
-    @staticmethod
-    def _place_category_in_text(text: str) -> bool:
-        return place_category_in_text(text)
-
-    def _looks_like_city_center_only(self, query: str, text: str) -> bool:
-        if self._place_category_in_text(query) and self._place_category_in_text(text):
-            return False
-        lowered = text.lower()
-        city_only_markers = ["city center", "general consensus coordinates", "municipal government"]
-        return any(marker in lowered for marker in city_only_markers)
-
-    def _extract_coordinate_pairs(
-        self, text: str, city_lat: float, city_lon: float
-    ) -> list[tuple[float, float]]:
-        pairs: list[tuple[float, float]] = []
-        decimal = r"([+-]?\d{1,3}\.\d{3,})"
-        lat_label = r"(?:纬度|北纬|latitude|lat)"
-        lon_label = r"(?:经度|东经|longitude|lng|lon)"
-        lat_mentions = [
-            (match.start(), float(match.group(1)))
-            for match in re.finditer(rf"{lat_label}[^0-9+\-]{{0,80}}{decimal}", text, re.I)
-        ]
-        lon_mentions = [
-            (match.start(), float(match.group(1)))
-            for match in re.finditer(rf"{lon_label}[^0-9+\-]{{0,80}}{decimal}", text, re.I)
-        ]
-        used_lon_positions: set[int] = set()
-        for lat_position, lat in lat_mentions:
-            nearby_lons = [
-                (lon_position, lon)
-                for lon_position, lon in lon_mentions
-                if lon_position not in used_lon_positions and 0 < lon_position - lat_position < 700
-            ]
-            if not nearby_lons:
-                continue
-            lon_position, lon = min(nearby_lons, key=lambda item: item[0] - lat_position)
-            if self._valid_lat_lon(lat, lon):
-                pairs.append((lat, lon))
-                used_lon_positions.add(lon_position)
-
-        for match in re.finditer(
-            r"(?<!\d)([+-]?\d{1,3}\.\d{3,})\s*[,，]\s*([+-]?\d{1,3}\.\d{3,})(?!\d)",
-            text,
-        ):
-            first = float(match.group(1))
-            second = float(match.group(2))
-            pair = self._normalize_coordinate_order(first, second, city_lat, city_lon)
-            if pair:
-                pairs.append(pair)
-
-        deduped: list[tuple[float, float]] = []
-        seen: set[tuple[float, float]] = set()
-        for lat, lon in pairs:
-            key = (round(lat, 6), round(lon, 6))
-            if key not in seen:
-                seen.add(key)
-                deduped.append((lat, lon))
-        return deduped
-
-    @staticmethod
-    def _coordinate_context(text: str, lat: float, lon: float) -> str:
-        needles = [
-            f"{lat:.6f}".rstrip("0").rstrip("."),
-            f"{lon:.6f}".rstrip("0").rstrip("."),
-            f"{lat:.5f}".rstrip("0").rstrip("."),
-            f"{lon:.5f}".rstrip("0").rstrip("."),
-        ]
-        positions = [text.find(needle) for needle in needles if text.find(needle) >= 0]
-        if not positions:
-            return text[:1000]
-        index = min(positions)
-        start = max(0, index - 260)
-        end = min(len(text), index + 420)
-        campus_markers = list(
-            re.finditer(
-                r"(?:^|\n|\s)(?:#{1,4}\s*)?(东院|西院|南院|北院|[一二三四五六七八九十]院区)", text
-            )
-        )
-        previous_markers = [marker for marker in campus_markers if marker.start() < index]
-        next_markers = [marker for marker in campus_markers if marker.start() > index]
-        if previous_markers:
-            start = max(start, previous_markers[-1].start())
-        if next_markers:
-            end = min(end, next_markers[0].start())
-        return re.sub(r"\s+", " ", text[start:end]).strip()
-
-    def _normalize_coordinate_order(
-        self, first: float, second: float, city_lat: float, city_lon: float
-    ) -> tuple[float, float] | None:
-        options = []
-        if self._valid_lat_lon(first, second):
-            options.append((first, second))
-        if self._valid_lat_lon(second, first):
-            options.append((second, first))
-        if not options:
-            return None
-        return min(
-            options, key=lambda pair: self._distance_km(city_lat, city_lon, pair[0], pair[1])
-        )
-
-    @staticmethod
-    def _valid_lat_lon(lat: float, lon: float) -> bool:
-        return -90 <= lat <= 90 and -180 <= lon <= 180
-
-    @staticmethod
-    def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        radius = 6371.0088
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        delta_phi = math.radians(lat2 - lat1)
-        delta_lambda = math.radians(lon2 - lon1)
-        value = (
-            math.sin(delta_phi / 2) ** 2
-            + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-        )
-        return 2 * radius * math.atan2(math.sqrt(value), math.sqrt(1 - value))
-
-    def _label_from_place_evidence(self, query: str, text: str) -> str:
-        campus = re.search(r"(东院|西院|南院|北院|[一二三四五六七八九十]院区)", text)
-        if campus and re.search(r"[\u4e00-\u9fff]", query) and campus.group(1) not in query:
-            return f"{query.strip()}{campus.group(1)}"
-        for pattern in [
-            r"([\u4e00-\u9fff]{2,32}(?:东院|西院|南院|北院|院区))",
-            r"([\u4e00-\u9fff]{2,24}(?:医院|保健院|卫生院|诊所))",
-            r"([A-Z][A-Za-z\s.'-]{2,80}(?:Hospital|Medical Center|Clinic))",
-        ]:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1).strip()
-        return query.strip()
-
-    @staticmethod
-    def _address_from_place_evidence(text: str) -> str | None:
-        for pattern in [
-            r"(?:地址|Address)[：:\s\"“”]*([^\n。；;|]{4,90})",
-            r"([\u4e00-\u9fff]{2,12}省[\u4e00-\u9fff]{2,12}市[^\n。；;|]{2,90})",
-        ]:
-            match = re.search(pattern, text, re.I)
-            if match:
-                return match.group(1).strip(" 。；;，,>\"'")
-        return None
-
-    @staticmethod
-    def _first_url(text: str) -> str | None:
-        match = re.search(r"https?://[^\s\"'<>，。)）]+", text)
-        return match.group(0) if match else None
-
-    @staticmethod
-    def _evidence_snippet(text: str, lat: float, lon: float) -> str | None:
-        lat_text = f"{lat:.4f}".rstrip("0").rstrip(".")
-        lon_text = f"{lon:.4f}".rstrip("0").rstrip(".")
-        compacted = re.sub(r"\s+", " ", text)
-        for needle in [lat_text, lon_text, "纬度", "Latitude", "coordinates", "坐标"]:
-            index = compacted.find(needle)
-            if index >= 0:
-                start = max(0, index - 140)
-                end = min(len(compacted), index + 260)
-                return compacted[start:end].strip()
-        return compacted[:360].strip() or None
-
-    @staticmethod
-    def _observation_text(observation: dict[str, Any]) -> str:
-        value = observation.get("tool_response")
-        if value is None:
-            value = observation
-        fragments = ClaudeRuntime._text_fragments(value)
-        if fragments:
-            text = "\n".join(fragments)
-            if isinstance(value, (dict, list)):
-                try:
-                    serialized = json.dumps(value, ensure_ascii=False, default=str)
-                except TypeError:
-                    serialized = ""
-                if re.search(
-                    r"\"(?:latitude|lat|longitude|lon|lng)\"\s*:",
-                    serialized,
-                    re.I,
-                ):
-                    return f"{text}\n{serialized}"
-            return text
-        try:
-            return json.dumps(value, ensure_ascii=False, default=str)
-        except TypeError:
-            return repr(value)
-
-    @staticmethod
-    def _text_fragments(value: object) -> list[str]:
-        if isinstance(value, str):
-            stripped = value.strip()
-            return [stripped] if stripped else []
-        if isinstance(value, dict):
-            fragments: list[str] = []
-            for item in value.values():
-                fragments.extend(ClaudeRuntime._text_fragments(item))
-            return fragments
-        if isinstance(value, list):
-            fragments = []
-            for item in value:
-                fragments.extend(ClaudeRuntime._text_fragments(item))
-            return fragments
-        return []
 
     def _hook_input_payload(self, hook_input: object) -> dict[str, Any]:
         if isinstance(hook_input, dict):
@@ -1088,6 +615,7 @@ Schema:
         duration_ms = None
         total_cost_usd = None
         stop_reason = None
+        structured_output: object | None = None
 
         async with asyncio.timeout(self.settings.agent_timeout_ms / 1000):
             async for message in query(prompt=prompt, options=options):
@@ -1109,6 +637,7 @@ Schema:
                     duration_ms = getattr(message, "duration_ms", None)
                     total_cost_usd = getattr(message, "total_cost_usd", None)
                     stop_reason = getattr(message, "stop_reason", None)
+                    structured_output = getattr(message, "structured_output", None)
                     if getattr(message, "is_error", False):
                         # A tool-use stop can mark the SDK result as an error even after the
                         # model has emitted a complete place candidate. Preserve that bounded
@@ -1130,6 +659,8 @@ Schema:
                     if getattr(message, "result", None):
                         result_text = str(message.result)
 
+        if structured_output is not None:
+            result_text = json.dumps(structured_output, ensure_ascii=False)
         raw_text = (result_text or "\n".join(assistant_parts)).strip()
         if not raw_text:
             raise RuntimeError(f"Claude Agent SDK {task_name} returned no text")

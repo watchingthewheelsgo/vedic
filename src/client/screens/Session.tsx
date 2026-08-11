@@ -33,7 +33,7 @@ import {
   Workflow,
   type LucideIcon
 } from "lucide-react";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { AccountCenter } from "../components/AccountCenter";
 import { ChartRevealProgress } from "../components/ChartRevealProgress";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
@@ -892,6 +892,12 @@ type RectificationInterviewAction = {
   availableCategories?: RectificationLifeEventCategory[];
 };
 
+type RectificationClarification = {
+  questionId: string;
+  reasonCode: string;
+  message: string;
+};
+
 type RectificationInterviewQuestion = {
   questionId: string;
   category: RectificationLifeEventCategory;
@@ -938,6 +944,21 @@ function sanitizeUserMessage(message: string | null | undefined, fallback: strin
   return trimmed;
 }
 
+function rectificationClarificationFromError(caught: unknown): RectificationClarification | null {
+  if (!(caught instanceof ApiError) || caught.status !== 409) return null;
+  const detail = caught.detail;
+  if (!detail || typeof detail !== "object") return null;
+  const record = detail as Record<string, unknown>;
+  if (record.code !== "rectification_evidence_clarification_required") return null;
+  const message = String(record.message || caught.message || "").trim();
+  if (!message) return null;
+  return {
+    questionId: String(record.questionId || ""),
+    reasonCode: String(record.reasonCode || "event_not_confirmed"),
+    message
+  };
+}
+
 export function Session() {
   const { id = "" } = useParams();
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
@@ -951,6 +972,8 @@ export function Session() {
   const [session, setSession] = useState<SkillSessionResponse | null>(null);
   const [coreJob, setCoreJob] = useState<CoreJobResponse | null>(null);
   const [error, setError] = useState("");
+  const [rectificationClarification, setRectificationClarification] =
+    useState<RectificationClarification | null>(null);
   const [activeSection, setActiveSection] = useState(0);
   const [selectedStageId, setSelectedStageId] = useState("src");
   const [readerRunning, setReaderRunning] = useState(false);
@@ -1294,6 +1317,7 @@ export function Session() {
       return;
     }
     setError("");
+    setRectificationClarification(null);
     setSubmittingLifeEvents(true);
     try {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
@@ -1312,7 +1336,13 @@ export function Session() {
       else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
-      setError(userFacingError(caught, "Could not save these life events. Please try again."));
+      const clarification = rectificationClarificationFromError(caught);
+      if (clarification) {
+        setRectificationClarification(clarification);
+        setError("");
+      } else {
+        setError(userFacingError(caught, "Could not save these life events. Please try again."));
+      }
     } finally {
       setSubmittingLifeEvents(false);
     }
@@ -1328,6 +1358,7 @@ export function Session() {
       return;
     }
     setError("");
+    setRectificationClarification(null);
     setSubmittingLifeEvents(true);
     try {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
@@ -1358,6 +1389,7 @@ export function Session() {
       return;
     }
     setError("");
+    setRectificationClarification(null);
     setSubmittingRectificationConfirmation(true);
     try {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
@@ -1474,6 +1506,7 @@ export function Session() {
             validationFeedback={validationFeedback}
             submittingFeedback={submittingFeedback}
             submittingLifeEvents={submittingLifeEvents}
+            rectificationClarification={rectificationClarification}
             submittingRectificationConfirmation={submittingRectificationConfirmation}
             preparingRectificationInterview={preparingRectificationInterview}
             onValidationFeedbackChange={setValidationFeedback}
@@ -2212,6 +2245,7 @@ function WorkshopDetailPanel({
   validationFeedback,
   submittingFeedback,
   submittingLifeEvents,
+  rectificationClarification,
   submittingRectificationConfirmation,
   preparingRectificationInterview,
   onValidationFeedbackChange,
@@ -2240,6 +2274,7 @@ function WorkshopDetailPanel({
   validationFeedback: string;
   submittingFeedback: boolean;
   submittingLifeEvents: boolean;
+  rectificationClarification: RectificationClarification | null;
   submittingRectificationConfirmation: boolean;
   preparingRectificationInterview: boolean;
   onValidationFeedbackChange: (value: string) => void;
@@ -2317,6 +2352,7 @@ function WorkshopDetailPanel({
           validationFeedback={validationFeedback}
           submittingFeedback={submittingFeedback}
           submittingLifeEvents={submittingLifeEvents}
+          rectificationClarification={rectificationClarification}
           submittingRectificationConfirmation={submittingRectificationConfirmation}
           preparingRectificationInterview={preparingRectificationInterview}
           onValidationFeedbackChange={onValidationFeedbackChange}
@@ -3117,6 +3153,7 @@ function LifeEventCollector({
   interviewContent,
   lifeStage,
   birthDate,
+  clarification,
   preparing,
   onPrepare,
   submitting,
@@ -3129,6 +3166,7 @@ function LifeEventCollector({
   interviewContent: string;
   lifeStage: string;
   birthDate: string;
+  clarification: RectificationClarification | null;
   preparing: boolean;
   onPrepare: (action?: RectificationInterviewAction) => Promise<void>;
   submitting: boolean;
@@ -3445,6 +3483,27 @@ function LifeEventCollector({
         submitCurrent(currentAnswer, selectedChoice);
       }}
     >
+      {clarification && (
+        <div
+          className="rounded-xl border border-red/25 bg-red/8 px-4 py-3 text-[12.5px] leading-6 text-body"
+          role="alert"
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-1 size-4 shrink-0 text-red" />
+            <div>
+              <strong className="font-semibold text-ink">
+                {locale === "zh"
+                  ? "这件经历需要重新确认"
+                  : locale === "ja"
+                    ? "この出来事をもう一度確認してください"
+                    : "This event needs one more confirmation"}
+              </strong>
+              <p className="m-0 mt-1">{clarification.message}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="flex flex-col gap-4 border-b border-gold/20 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="mb-1 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
@@ -4211,6 +4270,7 @@ function ReaderDetail({
   validationFeedback,
   submittingFeedback,
   submittingLifeEvents,
+  rectificationClarification,
   submittingRectificationConfirmation,
   preparingRectificationInterview,
   onValidationFeedbackChange,
@@ -4229,6 +4289,7 @@ function ReaderDetail({
   validationFeedback: string;
   submittingFeedback: boolean;
   submittingLifeEvents: boolean;
+  rectificationClarification: RectificationClarification | null;
   submittingRectificationConfirmation: boolean;
   preparingRectificationInterview: boolean;
   onValidationFeedbackChange: (value: string) => void;
@@ -4380,6 +4441,7 @@ function ReaderDetail({
           submitting={submittingLifeEvents}
           onSubmit={onSubmitLifeEvents}
           onReset={onResetLifeEvents}
+          clarification={rectificationClarification}
           authLoaded={authLoaded}
           isSignedIn={isSignedIn}
         />

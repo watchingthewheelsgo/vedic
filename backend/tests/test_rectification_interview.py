@@ -15,6 +15,7 @@ from app.schemas import (
     RectificationLifeEventInput,
 )
 from app.services.rectification_interview import (
+    RectificationEvidenceClarificationRequired,
     build_rectification_interview,
     validate_agent_event_evidence,
     validate_agent_question_wording,
@@ -298,6 +299,38 @@ def test_agent_event_evidence_failure_falls_back_to_backend_binding() -> None:
     assert result["results"][0]["accepted"] is True
     assert result["results"][0]["eventFacts"]["impact"] == "unknown"
     assert result["agentFallbackReason"] == "temporary model outage"
+
+
+def test_agent_event_evidence_failure_pauses_optional_note_instead_of_accepting_it() -> None:
+    class FailingAgentRuntime:
+        def is_configured(self) -> bool:
+            return True
+
+        async def run_skill_prompt_task(self, *_args: object, **_kwargs: object):
+            raise RuntimeError("temporary model outage")
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    runtime.agent_runtime = FailingAgentRuntime()  # type: ignore[assignment]
+
+    result = asyncio.run(
+        runtime._validate_rectification_event_evidence(
+            [
+                {
+                    "questionId": "q-career",
+                    "category": "career",
+                    "eventSubtype": "job_change",
+                    "date": "2018",
+                    "description": "Changed employer (the exact month is uncertain)",
+                }
+            ]
+        )
+    )
+
+    audited = result["results"][0]
+    assert audited["accepted"] is False
+    assert audited["clarificationRequired"] is True
+    assert audited["clarificationReasonCode"] == "semantic_review_unavailable"
+    assert "optional note" in audited["clarificationQuestion"]
 
 
 def test_underdetermined_state_requests_round_four_until_maximum_evidence() -> None:
@@ -819,7 +852,7 @@ def test_agent_may_rephrase_but_not_change_question_identity() -> None:
         validate_agent_question_wording(brief, proposed)
 
 
-def test_agent_cannot_switch_to_a_lower_ranked_pool_question() -> None:
+def test_agent_may_choose_from_the_backend_approved_question_pool() -> None:
     brief = build_rectification_interview(
         _state(fields=["d10Lagna", "d4Structure"]),
         session_id="session-test",
@@ -839,7 +872,31 @@ def test_agent_cannot_switch_to_a_lower_ranked_pool_question() -> None:
         ]
     }
 
-    with pytest.raises(ValueError, match="backend question set"):
+    accepted = validate_agent_question_wording(brief, proposed)
+    assert accepted["source"] == "agent_wording"
+    assert accepted["questions"][0]["questionId"] == selected["questionId"]
+
+
+def test_agent_cannot_choose_a_question_outside_the_approved_pool() -> None:
+    brief = build_rectification_interview(
+        _state(fields=["d10Lagna", "d4Structure"]),
+        session_id="session-test",
+        locale="en",
+    )
+    proposed = {
+        "questions": [
+            {
+                "questionId": "rectify.r1.q9.unknown",
+                "category": "career",
+                "title": "An unapproved question",
+                "prompt": "Which dated event do you remember?",
+                "whyWeAsk": "A dated event helps compare the remaining time ranges.",
+                "detailsPlaceholder": "Describe the factual change.",
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="unapproved question pool"):
         validate_agent_question_wording(brief, proposed)
 
 
@@ -1067,11 +1124,11 @@ def test_agent_cannot_duplicate_the_single_backend_question() -> None:
         "detailsPlaceholder": "Choose the event and add a short factual note.",
     }
 
-    with pytest.raises(ValueError, match="exactly once"):
+    with pytest.raises(ValueError, match="exactly one approved question"):
         validate_agent_question_wording(brief, {"questions": [wording, wording]})
 
 
-def test_agent_event_audit_must_account_for_every_event_without_owning_acceptance() -> None:
+def test_agent_event_audit_can_pause_ambiguous_evidence_without_changing_binding() -> None:
     events = [
         {
             "questionId": "rectify.r1.q1.career",
@@ -1109,6 +1166,9 @@ def test_agent_event_audit_must_account_for_every_event_without_owning_acceptanc
                     "questionId": "rectify.r1.q1.career",
                     "category": "career",
                     "accepted": False,
+                    "assessment": "needs_clarification",
+                    "clarificationReasonCode": "description_conflicts_with_selection",
+                    "clarificationQuestion": "Was this a job change rather than a property purchase?",
                     "reason": "This describes an unrelated purchase.",
                     "eventFacts": {
                         "occurrence": "uncertain",
@@ -1120,14 +1180,51 @@ def test_agent_event_audit_must_account_for_every_event_without_owning_acceptanc
             ]
         },
     )
-    assert advisory_rejection[0]["accepted"] is True
-    assert advisory_rejection[0]["semanticAssessment"] == "agent_advisory_ignored"
+    assert advisory_rejection[0]["accepted"] is False
+    assert advisory_rejection[0]["semanticAssessment"] == "needs_clarification"
+    assert advisory_rejection[0]["clarificationRequired"] is True
+    assert advisory_rejection[0]["clarificationReasonCode"] == (
+        "description_conflicts_with_selection"
+    )
     assert advisory_rejection[0]["eventFacts"] == {
-        "occurrence": "occurred",
-        "agency": "unknown",
-        "impact": "unknown",
-        "dateConfidence": "unknown",
+        "occurrence": "uncertain",
+        "agency": "active",
+        "impact": "major",
+        "dateConfidence": "year",
     }
+
+    error = RectificationEvidenceClarificationRequired(advisory_rejection[0])
+    assert error.api_detail() == {
+        "code": "rectification_evidence_clarification_required",
+        "message": "Was this a job change rather than a property purchase?",
+        "questionId": "rectify.r1.q1.career",
+        "reasonCode": "description_conflicts_with_selection",
+    }
+
+
+def test_agent_event_audit_rejects_uncertain_occurrence_without_clarification() -> None:
+    event = {
+        "questionId": "rectify.r1.q1.career",
+        "category": "career",
+        "eventSubtype": "job_change",
+        "date": "2018",
+        "description": "I may have changed roles",
+    }
+    with pytest.raises(ValueError, match="requires clarification"):
+        validate_agent_event_evidence(
+            [event],
+            {
+                "results": [
+                    {
+                        "questionId": event["questionId"],
+                        "category": event["category"],
+                        "eventSubtype": event["eventSubtype"],
+                        "assessment": "clear",
+                        "eventFacts": {"occurrence": "uncertain"},
+                    }
+                ]
+            },
+        )
 
 
 def test_semantic_event_facts_are_attached_to_the_deterministic_ledger() -> None:

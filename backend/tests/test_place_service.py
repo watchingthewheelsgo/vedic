@@ -30,7 +30,7 @@ def test_city_search_options_include_coordinates_and_timezone(
     assert option.timezone == "Asia/Shanghai"
 
 
-def test_city_search_supports_chinese_suzhou_anhui_alias(
+def test_city_search_supports_dataset_alternate_name(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     geonames = tmp_path / "geonames.csv"
@@ -49,6 +49,150 @@ def test_city_search_supports_chinese_suzhou_anhui_alias(
     assert response.options[0].birth_place == "Suzhou, Anhui, China"
     assert response.options[0].latitude == 33.63611
     assert response.options[0].longitude == 116.97889
+
+
+def test_china_catalog_filters_cities_by_region(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Suzhou,Suzhou,Anhui,China,33.63611,116.97889,8\n",
+        encoding="utf-8",
+    )
+    service = PlaceService(SimpleNamespace(geonames_path=lambda: geonames))
+    monkeypatch.setattr(service, "_timezone_for_coordinates", lambda lat, lon: "Asia/Shanghai")
+
+    regions = service.search("region", country="China", query="安徽", limit=5)
+
+    assert len(regions.options) == 1
+    region = regions.options[0]
+    assert region.value == "CN-340000"
+    assert region.label == "安徽省"
+    assert region.birth_place == "CN-340000"
+    assert region.latitude == 31.734559
+    assert region.longitude == 117.330139
+    assert region.timezone == "Asia/Shanghai"
+
+    cities = service.search("city", country="China", region=region.value, query="宿州", limit=5)
+
+    assert len(cities.options) == 1
+    city = cities.options[0]
+    assert city.value == "CN-341300"
+    assert city.label == "宿州市"
+    assert city.birth_place == "CN-341300"
+    assert city.latitude == 33.647726
+    assert city.longitude == 116.96419
+    assert city.timezone == "Asia/Shanghai"
+
+
+def test_china_catalog_localizes_labels_without_changing_stable_ids(tmp_path) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
+        "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n",
+        encoding="utf-8",
+    )
+    service = PlaceService(SimpleNamespace(geonames_path=lambda: geonames))
+
+    zh_country = service.search("country", query="", locale="zh", limit=500).options
+    en_country = service.search("country", query="", locale="en", limit=500).options
+    ja_country = service.search("country", query="", locale="ja", limit=500).options
+    assert next(option for option in zh_country if option.value == "China").label == "中国"
+    assert next(option for option in en_country if option.value == "China").label == "China"
+    assert next(option for option in ja_country if option.value == "China").label == "中国"
+
+    zh_region = service.search("region", country="China", query="", locale="zh", limit=80).options[
+        0
+    ]
+    en_regions = service.search("region", country="China", query="", locale="en", limit=80).options
+    en_region = next(option for option in en_regions if option.value == zh_region.value)
+    assert zh_region.value == en_region.value
+    assert zh_region.label != en_region.label
+    assert "(" in en_region.label
+
+    zh_units = service.search(
+        "city", country="China", region="CN-310000", query="", locale="zh", limit=500
+    ).options
+    en_units = service.search(
+        "city", country="China", region="CN-310000", query="", locale="en", limit=500
+    ).options
+    zh_pudong = next(option for option in zh_units if option.value == "CN-310115")
+    en_pudong = next(option for option in en_units if option.value == "CN-310115")
+    assert zh_pudong.label == "浦东新区"
+    assert en_pudong.label == "Pudong (浦东新区)"
+
+
+def test_china_catalog_city_id_resolves_for_chart_calculation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    geonames = tmp_path / "geonames.csv"
+    geonames.write_text(
+        "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n",
+        encoding="utf-8",
+    )
+    service = PlaceService(SimpleNamespace(geonames_path=lambda: geonames))
+    monkeypatch.setattr(service, "_timezone_for_coordinates", lambda lat, lon: "Asia/Shanghai")
+
+    place = service.resolve("CN-341300")
+
+    assert place.source == "china-administrative-catalog"
+    assert place.label == "宿州市, 安徽省, China"
+    assert place.lat == 33.647726
+    assert place.lon == 116.96419
+    assert place.timezone == "Asia/Shanghai"
+    assert place.matched == {
+        "placeName": "宿州市",
+        "alternateNames": "宿州|宿州市|suzhou",
+        "state": "安徽省",
+        "country": "China",
+        "administrativeCode": "341300",
+        "regionCode": "340000",
+        "administrativeLevel": "2",
+        "administrativeType": "city",
+    }
+
+
+def test_china_catalog_supports_region_and_direct_district_selection() -> None:
+    service = PlaceService(SimpleNamespace())
+
+    shanghai = service.resolve("CN-310000")
+    pudong = service.resolve("CN-310115")
+
+    assert shanghai.label == "上海市, China"
+    assert shanghai.matched["administrativeType"] == "province"
+    assert shanghai.matched["administrativeLevel"] == "1"
+    assert pudong.label == "浦东新区, 上海市, China"
+    assert pudong.matched["administrativeType"] == "district"
+    assert pudong.matched["administrativeLevel"] == "3"
+
+
+def test_china_catalog_has_stable_hierarchy_and_coordinates() -> None:
+    service = PlaceService(SimpleNamespace())
+
+    regions = service.china_regions
+    region_ids = [region.id for region in regions]
+    city_ids = [city.id for region in regions for city in region.children]
+
+    assert len(regions) == 34
+    assert len(set(region_ids)) == len(region_ids)
+    assert len(set(city_ids)) == len(city_ids)
+    assert all(region.children for region in regions)
+    assert all(
+        city.region_id == region.id and -90 <= city.latitude <= 90 and -180 <= city.longitude <= 180
+        for region in regions
+        for city in region.children
+    )
+
+    response = service.search("region", country="China", query="", limit=80)
+    assert len(response.options) == 34
+
+    shanghai_units = service.search(
+        "city", country="China", region="CN-310000", query="", limit=500
+    )
+    assert len(shanghai_units.options) == 16
+    assert any(
+        option.value == "CN-310115" and option.label == "浦东新区"
+        for option in shanghai_units.options
+    )
 
 
 def test_precise_search_uses_local_city_index_first(tmp_path) -> None:
@@ -137,17 +281,19 @@ def test_precise_search_falls_back_when_candidate_conflicts_with_selected_distri
                     "上海市第一妇婴保健院西院, Shanghai, Shanghai, China | "
                     "lat=31.22217, lon=121.45168, source=agent, accuracy=poi"
                 ),
+                scopeMatchStatus="conflict",
+                scopeMatchReason="静安区不属于用户选择的浦东新区。",
             )
         ],
         agent_enabled=True,
         agent_attempted=True,
     )
 
-    assert response.verification_base == "Shanghai, Shanghai, China"
-    assert response.rejected_count == 0
+    assert response.verification_base == "Pudong, Shanghai, China"
+    assert response.rejected_count == 1
     assert response.options[0].verification_status == "city-fallback"
-    assert response.options[0].city_label == "Shanghai, Shanghai, China"
-    assert "Could not verify detailed address coordinates" in (
+    assert response.options[0].city_label == "Pudong, Shanghai, China"
+    assert "No precise candidate stayed within the selected city scope" in (
         response.options[0].verification_reason or ""
     )
 
@@ -190,6 +336,8 @@ def test_precise_search_rejects_explicit_conflicting_campus_in_selected_district
                     "lat=31.22217, lon=121.45168, source=agent, accuracy=poi"
                 ),
                 rawEvidence="上海市第一妇婴保健院西院，静安区长乐路536号。",
+                scopeMatchStatus="conflict",
+                scopeMatchReason="静安区不属于用户选择的浦东新区。",
             )
         ],
         agent_enabled=True,
@@ -198,10 +346,10 @@ def test_precise_search_rejects_explicit_conflicting_campus_in_selected_district
 
     assert len(response.options) == 1
     assert response.options[0].verification_status == "city-fallback"
-    assert response.options[0].label == "Shanghai, Shanghai, China"
+    assert response.options[0].label == "Pudong, Shanghai, China"
 
 
-def test_precise_search_city_fallback_uses_parent_city_for_chinese_municipality_district(
+def test_precise_search_city_fallback_keeps_selected_chinese_municipality_district(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     geonames = tmp_path / "geonames.csv"
@@ -228,10 +376,10 @@ def test_precise_search_city_fallback_uses_parent_city_for_chinese_municipality_
         agent_error="agent place lookup timed out",
     )
 
-    assert response.verification_base == "Shanghai, Shanghai, China"
+    assert response.verification_base == "Pudong, Shanghai, China"
     assert response.agent_error == "agent place lookup timed out"
     assert response.options[0].verification_status == "city-fallback"
-    assert response.options[0].label == "Shanghai, Shanghai, China"
+    assert response.options[0].label == "Pudong, Shanghai, China"
 
 
 def test_precise_search_prefers_selected_district_for_broad_municipality_poi(
@@ -241,7 +389,7 @@ def test_precise_search_prefers_selected_district_for_broad_municipality_poi(
     geonames.write_text(
         "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
         "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n"
-        "Pudong,P'u-tung|Pudong|pu dong xin qu|shang hai pu dong,Shanghai,China,31.23995,121.50094,8\n",
+        "Pudong,浦东|浦东新区|P'u-tung|Pudong|pu dong xin qu|shang hai pu dong,Shanghai,China,31.23995,121.50094,8\n",
         encoding="utf-8",
     )
     service = PlaceService(
@@ -272,6 +420,8 @@ def test_precise_search_prefers_selected_district_for_broad_municipality_poi(
                     "lat=31.22217, lon=121.45168, source=agent, accuracy=poi"
                 ),
                 rawEvidence="上海市第一妇婴保健院西院，静安区长乐路536号。",
+                scopeMatchStatus="conflict",
+                scopeMatchReason="静安区不属于用户选择的浦东新区。",
             ),
             PrecisePlaceOption(
                 id="agent:east",
@@ -288,25 +438,27 @@ def test_precise_search_prefers_selected_district_for_broad_municipality_poi(
                     "lat=31.19174, lon=121.54581, source=agent, accuracy=poi"
                 ),
                 rawEvidence="上海市第一妇婴保健院东院，浦东新区高科西路2699号。",
+                scopeMatchStatus="match",
+                scopeMatchReason="地址明确位于用户选择的浦东新区。",
             ),
         ],
         agent_enabled=True,
         agent_attempted=True,
     )
 
-    assert response.verification_base == "Shanghai, Shanghai, China"
-    assert response.rejected_count == 0
+    assert response.verification_base == "Pudong, Shanghai, China"
+    assert response.rejected_count == 1
     assert len(response.options) == 1
     assert response.options[0].label == "上海市第一妇婴保健院东院"
     assert response.options[0].verification_status == "verified"
 
 
-def test_resolve_accepts_chinese_pudong_alias(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_resolve_accepts_dataset_alternate_name(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     geonames = tmp_path / "geonames.csv"
     geonames.write_text(
         "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
         "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n"
-        "Pudong,P'u-tung|Pudong|pu dong xin qu|shang hai pu dong,Shanghai,China,31.23995,121.50094,8\n",
+        "Pudong,浦东|浦东新区|P'u-tung|Pudong|pu dong xin qu|shang hai pu dong,Shanghai,China,31.23995,121.50094,8\n",
         encoding="utf-8",
     )
     service = PlaceService(
@@ -318,7 +470,7 @@ def test_resolve_accepts_chinese_pudong_alias(monkeypatch: pytest.MonkeyPatch, t
     )
     monkeypatch.setattr(service, "_timezone_for", lambda lat, lon, hours: "Asia/Shanghai")
 
-    place = service.resolve("浦东, 上海, 中国")
+    place = service.resolve("浦东, Shanghai, China")
 
     assert place.label == "Pudong, Shanghai, China"
 
@@ -360,6 +512,8 @@ def test_precise_search_accepts_chinese_prefecture_county_poi_with_scope_evidenc
                     "lat=33.50117, lon=117.88762, source=agent, accuracy=poi"
                 ),
                 rawEvidence="泗县人民医院位于安徽省宿州市泗县，坐标 33.50117, 117.88762。",
+                scopeMatchStatus="match",
+                scopeMatchReason="泗县属于用户选择的宿州市行政范围。",
             )
         ],
         agent_enabled=True,
@@ -372,7 +526,7 @@ def test_precise_search_accepts_chinese_prefecture_county_poi_with_scope_evidenc
     assert response.options[0].verification_status == "verified"
     assert response.options[0].distance_from_city_km is not None
     assert response.options[0].distance_from_city_km > 80
-    assert "administrative scope" in (response.options[0].verification_reason or "")
+    assert "泗县属于用户选择的宿州市行政范围" in (response.options[0].verification_reason or "")
 
 
 def test_precise_search_rejects_distant_chinese_poi_without_scope_evidence(

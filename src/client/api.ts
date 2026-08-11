@@ -1,4 +1,5 @@
 import type {
+  AppLocale,
   AccountProfileResponse,
   AdminSessionDetailResponse,
   AdminSessionListResponse,
@@ -13,6 +14,7 @@ import type {
   CoreJobResponse,
   PlaceSearchLevel,
   PlaceSearchResponse,
+  PrecisePlaceLookupProgress,
   PrecisePlaceSearchResponse,
   RectificationConfirmationInput,
   RectificationInterviewInput,
@@ -179,6 +181,7 @@ export const api = {
       q?: string;
       country?: string;
       region?: string;
+      locale?: AppLocale;
       limit?: number;
     },
     signal?: AbortSignal
@@ -188,15 +191,83 @@ export const api = {
     if (input.q) params.set("q", input.q);
     if (input.country) params.set("country", input.country);
     if (input.region) params.set("region", input.region);
+    if (input.locale) params.set("locale", input.locale);
     if (input.limit) params.set("limit", String(input.limit));
     return getJson<PlaceSearchResponse>(`/api/places?${params.toString()}`, signal);
   },
-  searchPrecisePlaces(input: { q: string; city?: string; limit?: number }, signal?: AbortSignal) {
+  searchPrecisePlaces(
+    input: { q: string; city?: string; locale?: AppLocale; limit?: number },
+    signal?: AbortSignal
+  ) {
     const params = new URLSearchParams();
     params.set("q", input.q);
     if (input.city) params.set("city", input.city);
+    if (input.locale) params.set("locale", input.locale);
     if (input.limit) params.set("limit", String(input.limit));
     return getJson<PrecisePlaceSearchResponse>(`/api/precise-places?${params.toString()}`, signal);
+  },
+  async searchPrecisePlacesStream(
+    input: { q: string; city?: string; locale?: AppLocale; limit?: number },
+    onProgress: (progress: PrecisePlaceLookupProgress) => void,
+    signal?: AbortSignal
+  ) {
+    const params = new URLSearchParams();
+    params.set("q", input.q);
+    if (input.city) params.set("city", input.city);
+    if (input.locale) params.set("locale", input.locale);
+    if (input.limit) params.set("limit", String(input.limit));
+    const response = await fetch(`/api/precise-places/stream?${params.toString()}`, {
+      headers: await authHeaders(),
+      signal
+    });
+    if (!response.ok) await throwApiError(response);
+    if (!response.body) {
+      return getJson<PrecisePlaceSearchResponse>(
+        `/api/precise-places?${params.toString()}`,
+        signal
+      );
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result: PrecisePlaceSearchResponse | null = null;
+
+    function consumeLine(line: string) {
+      if (!line.trim()) return;
+      const event = JSON.parse(line) as {
+        type: "progress" | "result" | "error";
+        stage?: PrecisePlaceLookupProgress["stage"];
+        query?: string | null;
+        tool?: string | null;
+        data?: PrecisePlaceSearchResponse;
+        status?: number;
+        detail?: string;
+      };
+      if (event.type === "progress" && event.stage) {
+        onProgress({ stage: event.stage, query: event.query, tool: event.tool });
+      } else if (event.type === "result" && event.data) {
+        result = event.data;
+      } else if (event.type === "error") {
+        throw new ApiError(
+          event.detail || "Could not search precise places.",
+          event.status || 500,
+          event
+        );
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
+      if (done) break;
+    }
+    consumeLine(buffer);
+    if (!result) throw new ApiError("Precise place stream ended without a result.", 500, null);
+    return result;
   },
   createSkillSession(input: SkillBirthInput) {
     return postJson<SkillSessionResponse, SkillBirthInput>("/api/skill-sessions", input);

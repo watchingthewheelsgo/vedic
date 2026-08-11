@@ -1656,6 +1656,7 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     localized_context = build_judgement_context(
         localized,
         load_rule_catalog(),
+        requested_topics=["career"],
         now=reference_time,
     )
     localized_career = next(

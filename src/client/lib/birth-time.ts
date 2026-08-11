@@ -27,7 +27,6 @@ export function normalizeTimeForPrecision(
 
 export function normalizeMinuteForPrecision(minute: number, precision: BirthTimePrecision): number {
   if (precision === "part_of_day") return 0;
-  if (precision === "approximate") return Math.min(45, Math.round(minute / 15) * 15);
   return Math.max(0, Math.min(59, minute));
 }
 

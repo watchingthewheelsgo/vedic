@@ -128,6 +128,7 @@ def test_api_endpoint_auth_dependency_matrix() -> None:
         "/api/health": [],
         "/api/places": [],
         "/api/precise-places": [],
+        "/api/precise-places/stream": [],
         "/api/admin/sessions": ["require_user"],
         "/api/admin/sessions/{session_id}": ["require_user"],
         "/api/me": ["require_user"],

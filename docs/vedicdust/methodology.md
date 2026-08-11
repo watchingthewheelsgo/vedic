@@ -241,7 +241,7 @@ a twelve-hour grid and is withheld within one degree of a sign ingress.
 Diagnostic Chara Dasha is deferred during the adaptive interview and can be
 requested separately for audit, but remains non-selecting. These
 transparent ranking features use
-`vedicdust-rectification-event-ranking/1.25.0`: correlated matches within one
+`vedicdust-rectification-event-ranking/1.26.0`: correlated matches within one
 Dasha level contribute that level's weight once, and overlapping reported date
 intervals form one independently counted Life Episode. Varga-domain selection
 uses `vedicdust-varga-domain-policy/1.0.0`, pinned to P.V.R. Narasimha Rao's
@@ -250,9 +250,12 @@ _Vedic Astrology: An Integrated Approach_ (first published 2000; author update
 identity and selects the versioned `vedicdust-rectification-event-map/1.8.0`
 mapping for every concrete user-facing subtype; `other` deliberately retains the
 category rule. Free text and Agent output cannot change it. Event-house and karaka mappings and all numerical weights
-remain VedicDust product hypotheses. An unmatched
-activation is neutral missing evidence, not a contradiction, because the
-versioned event map is not an exhaustive causal theory. Only Dasha lords whose
+remain VedicDust product hypotheses. Individual unmatched activations remain neutral
+missing evidence because the versioned event map is not an exhaustive causal theory.
+Only when the complete stable MD/AD/PD hierarchy has no mapped activation at all does
+the Dasha layer record a bounded 0.04 contradiction penalty; the relevant Varga uses
+the same rule with a bounded 0.03 penalty. These penalties affect relative ranking but
+never hard-eliminate a candidate. Only Dasha lords whose
 exact half-open period covers the user's complete reported date interval,
 including the whole day when no event time was supplied, are eligible.
 A period level crossed by the reported interval is withheld. A provider response

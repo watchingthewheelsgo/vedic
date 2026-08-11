@@ -52,7 +52,7 @@ from app.vedicdust.professional_review import (
 )
 from app.vedicdust.chart_record_builder import _candidate_evidence_score, _rectification
 from app.vedicdust.claims import build_claim_graph
-from app.vedicdust.judgement import TOPICS, _normalize_requested_topics, build_judgement_context
+from app.vedicdust.judgement import TOPICS, _validate_requested_topic_ids, build_judgement_context
 from app.vedicdust.orchestrator import audit_chart_record
 from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_RULES
 from app.vedicdust.reporting import (
@@ -77,14 +77,12 @@ from app.vedicdust.sensitivity import (
 )
 
 
-def test_requested_topic_matching_prefers_specific_phrases_without_losing_real_multi_topic_input() -> (
-    None
-):
-    assert _normalize_requested_topics(["原生家庭"]) == {"family"}
-    assert _normalize_requested_topics(["原生家庭与房产"]) == {"family", "home"}
-    assert _normalize_requested_topics(["事业与婚姻"]) == {"career", "relationship"}
-    assert _normalize_requested_topics(["career and finance"]) == {"career", "finance"}
-    assert _normalize_requested_topics(["homework"]) == set()
+def test_requested_topics_accept_only_agent_selected_ontology_ids() -> None:
+    assert _validate_requested_topic_ids(["family", "home", "family"]) == {
+        "family",
+        "home",
+    }
+    assert _validate_requested_topic_ids(["原生家庭", "career and finance", "homework"]) == set()
 
 
 from app.vedicdust.validation import (
@@ -420,7 +418,7 @@ def test_unresolved_sensitivity_scan_is_a_blocking_chart_state() -> None:
     assert rectification is not None
     assert rectification.decision.status == "input_resolution_required"
     assert rectification.decision.confidence == ConfidenceGrade.UNAVAILABLE
-    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.25.0"
+    assert rectification.selection_policy_id == "vedicdust-rectification-event-ranking/1.26.0"
     assert rectification.event_mapping_id == "vedicdust-rectification-event-map/1.8.0"
     assert rectification.holdout_policy_id == "vedicdust-rectification-holdout/1.5.0"
     assert rectification.method_maturity == "product_hypothesis"

@@ -17,6 +17,35 @@ from app.vedicdust.rectification_policy import (
 
 
 INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.8.0"
+_CLARIFICATION_REASON_CODES = frozenset(
+    {
+        "event_not_confirmed",
+        "description_conflicts_with_selection",
+        "date_or_occurrence_uncertain",
+        "semantic_review_unavailable",
+    }
+)
+
+
+class RectificationEvidenceClarificationRequired(ValueError):
+    """Tell the client to clarify one answer without accepting or scoring it."""
+
+    def __init__(self, result: dict[str, Any]):
+        self.question_id = str(result.get("questionId") or "")
+        self.reason_code = str(result.get("clarificationReasonCode") or "event_not_confirmed")
+        self.clarification_question = str(result.get("clarificationQuestion") or "").strip()
+        message = self.clarification_question or (
+            "Please confirm that the selected event occurred and that the date and event type are correct."
+        )
+        super().__init__(message)
+
+    def api_detail(self) -> dict[str, str]:
+        return {
+            "code": "rectification_evidence_clarification_required",
+            "message": str(self),
+            "questionId": self.question_id,
+            "reasonCode": self.reason_code,
+        }
 
 
 _FIELD_CATEGORY_PRIORITY: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -246,8 +275,9 @@ def build_rectification_interview(
             categories = [category for category in categories if category in available_categories]
     # One question is a complete interaction round. The answer is recalculated
     # before the next question is selected from the updated candidate state. The
-    # backend selects one question from its private ranking. The Agent may
-    # only rewrite that selected question; it cannot choose a different category.
+    # backend owns the bounded pool; the Agent may choose one item from that pool
+    # after the answer state has been recalculated, but it cannot invent a new
+    # category or question identity.
     pool_categories = categories[: min(3, remaining)]
     copy = _COPY.get(locale, _COPY["en"])
     target = min(MAX_RECTIFICATION_EVENTS, max(MIN_RECTIFICATION_EVENTS, len(existing) + 1))
@@ -329,8 +359,12 @@ def validate_agent_question_wording(
     proposed = payload.get("questions")
     if not isinstance(proposed, list):
         raise ValueError("rectification interview response must contain questions")
+    raw_pool_items = brief.get("questionPool")
+    pool_items = raw_pool_items if isinstance(raw_pool_items, list) else []
     raw_expected_items = brief.get("questions")
-    expected_items = raw_expected_items if isinstance(raw_expected_items, list) else []
+    expected_items = pool_items or (
+        raw_expected_items if isinstance(raw_expected_items, list) else []
+    )
     expected = {
         str(item["questionId"]): item
         for item in expected_items
@@ -341,10 +375,10 @@ def validate_agent_question_wording(
         for item in proposed
         if isinstance(item, dict) and item.get("questionId")
     }
-    if len(proposed) != len(expected) or len(proposed_ids) != len(proposed):
-        raise ValueError("rectification interview must return each backend question exactly once")
-    if proposed_ids != set(expected):
-        raise ValueError("rectification interview changed the backend question set")
+    if len(proposed) != 1 or len(proposed_ids) != 1:
+        raise ValueError("rectification interview must return exactly one approved question")
+    if not proposed_ids.issubset(set(expected)):
+        raise ValueError("rectification interview selected an unapproved question pool item")
     result = {
         **brief,
         "source": "agent_wording",
@@ -509,7 +543,7 @@ def validate_agent_event_evidence(
     expected_events: list[dict[str, Any]],
     payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Apply optional Agent semantics without delegating event acceptance to the model."""
+    """Apply bounded Agent semantics and surface ambiguity before event acceptance."""
 
     raw_results = payload.get("results")
     if not isinstance(raw_results, list):
@@ -539,7 +573,22 @@ def validate_agent_event_evidence(
     normalized: list[dict[str, Any]] = []
     for question_id, item in observed.items():
         expected_event = expected_by_question[question_id]
-        agent_rejected = item.get("accepted") is False
+        assessment = str(item.get("assessment") or "").strip().casefold()
+        if not assessment:
+            assessment = "needs_clarification" if item.get("accepted") is False else "clear"
+        if assessment not in {"clear", "needs_clarification"}:
+            raise ValueError("life event evidence audit has an invalid assessment")
+        clarification_required = assessment == "needs_clarification"
+        reason_code = str(item.get("clarificationReasonCode") or "").strip()
+        clarification_question = str(item.get("clarificationQuestion") or "").strip()
+        if clarification_required:
+            if reason_code not in _CLARIFICATION_REASON_CODES:
+                raise ValueError("life event evidence audit has an invalid clarification reason")
+            if not clarification_question or len(clarification_question) > 240:
+                raise ValueError("life event evidence audit has an invalid clarification question")
+        facts = _normalize_event_facts(item.get("eventFacts"))
+        if facts["occurrence"] == "uncertain" and not clarification_required:
+            raise ValueError("uncertain event occurrence requires clarification")
         normalized.append(
             {
                 "questionId": question_id,
@@ -547,14 +596,17 @@ def validate_agent_event_evidence(
                 "eventSubtype": expected[question_id]["eventSubtype"],
                 "date": str(expected_event.get("date") or ""),
                 "description": str(expected_event.get("description") or ""),
-                "accepted": True,
-                "reason": "Backend-issued question, subtype, and category binding validated.",
-                "eventFacts": _normalize_event_facts(
-                    None if agent_rejected else item.get("eventFacts")
+                "accepted": not clarification_required,
+                "reason": (
+                    "Agent found a bounded ambiguity that requires user clarification."
+                    if clarification_required
+                    else "Backend binding and Agent semantic review passed."
                 ),
-                "semanticAssessment": (
-                    "agent_advisory_ignored" if agent_rejected else "agent_semantics_applied"
-                ),
+                "eventFacts": facts,
+                "semanticAssessment": assessment,
+                "clarificationRequired": clarification_required,
+                "clarificationReasonCode": reason_code if clarification_required else None,
+                "clarificationQuestion": clarification_question if clarification_required else None,
                 "agentReason": str(item.get("reason") or "")[:500],
             }
         )

@@ -100,7 +100,10 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
     assert conclusion["examples"][0]["source"] == "deterministic_input_review"
     assert conclusion["examples"][0]["usedForSelection"] is False
     assert "Submitted marriage event" not in conclusion["examples"][0]["prompt"]
+    assert conclusion["generation"]["source"] == "deterministic_evidence_review"
     assert conclusion["generation"]["usedForSelection"] is False
+    assert conclusion["examples"][1]["source"] == "submitted_evidence"
+    assert "Submitted marriage event" in conclusion["examples"][1]["prompt"]
     assert conclusion["selectedInterval"]["boundarySemantics"] == ("start_inclusive_end_exclusive")
     assert "to before 1990-01-01 08:25" in conclusion["examples"][0]["prompt"]
     assert conclusion["methodAssurance"] == {
@@ -143,7 +146,9 @@ def test_confirmation_checkpoint_does_not_generate_agent_life_events() -> None:
         "status": "rectification_confirmation_required",
         "rectificationConclusion": {
             "generation": {"source": "deterministic_input_review"},
-            "examples": [{"source": "deterministic_input_review"}],
+            "examples": [
+                {"exampleId": "corrected-time-review", "source": "deterministic_input_review"}
+            ],
         },
     }
 
@@ -151,7 +156,7 @@ def test_confirmation_checkpoint_does_not_generate_agent_life_events() -> None:
 
     assert prepared is state
     assert prepared["rectificationConclusion"]["examples"] == [
-        {"source": "deterministic_input_review"}
+        {"exampleId": "corrected-time-review", "source": "deterministic_input_review"}
     ]
 
 

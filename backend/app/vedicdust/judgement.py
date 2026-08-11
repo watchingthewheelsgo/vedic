@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -35,7 +34,6 @@ class TopicDefinition:
     karakas: tuple[str, ...]
     vargas: tuple[str, ...]
     rule_id: str
-    aliases: tuple[str, ...] = ()
 
 
 TOPICS = (
@@ -48,7 +46,6 @@ TOPICS = (
         ("Sun", "Moon"),
         ("D9",),
         "judge.foundation.integrated",
-        ("core", "overview", "基础", "整体"),
     ),
     TopicDefinition(
         "identity",
@@ -59,7 +56,6 @@ TOPICS = (
         ("Sun", "Moon", "Jupiter"),
         ("D9",),
         "judge.identity.integrated",
-        ("self", "personality", "性格", "自我", "人生"),
     ),
     TopicDefinition(
         "career",
@@ -70,7 +66,6 @@ TOPICS = (
         ("Sun", "Mercury", "Jupiter", "Saturn"),
         ("D10",),
         "judge.career.d1-d10",
-        ("work", "job", "事业", "职业", "工作"),
     ),
     TopicDefinition(
         "finance",
@@ -81,7 +76,6 @@ TOPICS = (
         ("Jupiter", "Venus", "Mercury"),
         ("D2", "D4"),
         "judge.finance.d1-d2-d4",
-        ("money", "wealth", "财务", "财富", "收入"),
     ),
     TopicDefinition(
         "relationship",
@@ -92,7 +86,6 @@ TOPICS = (
         ("Venus", "Jupiter", "Mars"),
         ("D9",),
         "judge.relationship.d1-d9",
-        ("love", "marriage", "感情", "婚姻", "关系"),
     ),
     TopicDefinition(
         "home",
@@ -103,7 +96,6 @@ TOPICS = (
         ("Moon", "Venus", "Mars"),
         ("D4",),
         "judge.home.d1-d4",
-        ("property", "relocation", "家庭", "房产", "搬迁", "居住"),
     ),
     TopicDefinition(
         "learning",
@@ -114,7 +106,6 @@ TOPICS = (
         ("Mercury", "Jupiter"),
         ("D24",),
         "judge.learning.d1-d24",
-        ("education", "study", "学习", "教育", "学业"),
     ),
     TopicDefinition(
         "children",
@@ -125,7 +116,6 @@ TOPICS = (
         ("Jupiter", "Moon"),
         ("D7",),
         "judge.children.d1-d7",
-        ("child", "kids", "子女", "孩子", "生育"),
     ),
     TopicDefinition(
         "health",
@@ -136,7 +126,6 @@ TOPICS = (
         ("Sun", "Moon", "Mars", "Saturn"),
         ("D30",),
         "judge.health.d1-d30",
-        ("wellbeing", "身体", "健康", "疾病"),
     ),
     TopicDefinition(
         "dharma",
@@ -147,7 +136,6 @@ TOPICS = (
         ("Jupiter", "Ketu", "Sun"),
         ("D9", "D20"),
         "judge.dharma.d1-d9-d20",
-        ("spirituality", "purpose", "精神", "灵性", "意义"),
     ),
     TopicDefinition(
         "family",
@@ -158,7 +146,6 @@ TOPICS = (
         ("Sun", "Moon", "Jupiter"),
         ("D12",),
         "judge.family.d1-d12",
-        ("parents", "parent", "父母", "原生家庭", "家族"),
     ),
 )
 
@@ -186,9 +173,7 @@ def build_judgement_context(
     eligible_vargas = {
         chart.varga_id for chart in record.charts if chart.eligible_as_primary_evidence
     }
-    requested = _normalize_requested_topics(
-        [*record.subject.consultation_topics, *(requested_topics or [])]
-    )
+    requested = _validate_requested_topic_ids(requested_topics or [])
     reference_time = now or datetime.now(timezone.utc)
     relevant_period_ids = _relevant_period_ids(record, reference_time)
     periods_by_id = {period.period_id: period for period in record.timing_periods}
@@ -610,36 +595,11 @@ def _varga_fact_matches_topic(
     return f"D1.{subject}" in graha_refs
 
 
-def _normalize_requested_topics(values: list[str]) -> set[str]:
-    normalized: set[str] = set()
-    for raw in values:
-        value = raw.strip().lower()
-        matches: list[tuple[int, int, str, str]] = []
-        for topic in TOPICS:
-            for phrase in (topic.topic_id, *topic.aliases):
-                escaped = re.escape(phrase)
-                pattern = rf"(?<![a-z0-9]){escaped}(?![a-z0-9])" if phrase.isascii() else escaped
-                matches.extend(
-                    (match.start(), match.end(), topic.topic_id, phrase)
-                    for match in re.finditer(pattern, value)
-                )
-        accepted: list[tuple[int, int, str, str]] = []
-        for match in sorted(
-            matches,
-            key=lambda item: (-(item[1] - item[0]), item[0], item[2], item[3]),
-        ):
-            start, end, topic_id, _ = match
-            shadowed = any(
-                outer_topic_id != topic_id
-                and outer_start <= start
-                and end <= outer_end
-                and (outer_start, outer_end) != (start, end)
-                for outer_start, outer_end, outer_topic_id, _ in accepted
-            )
-            if not shadowed:
-                accepted.append(match)
-        normalized.update(topic_id for _, _, topic_id, _ in accepted)
-    return normalized
+def _validate_requested_topic_ids(values: list[str]) -> set[str]:
+    """Accept canonical ontology IDs; natural-language classification is Agent-owned."""
+
+    allowed = {topic.topic_id for topic in TOPICS}
+    return {value.strip() for value in values if value.strip() in allowed}
 
 
 def _relevant_period_ids(record: ChartRecord, now: datetime) -> list[str]:

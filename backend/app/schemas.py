@@ -276,6 +276,7 @@ class PlaceOption(ApiModel):
     latitude: float | None = None
     longitude: float | None = None
     timezone: str | None = None
+    search_text: str | None = Field(default=None, alias="searchText")
 
 
 class PlaceSearchResponse(ApiModel):
@@ -301,6 +302,11 @@ class PrecisePlaceOption(ApiModel):
     city_label: str | None = Field(default=None, alias="cityLabel")
     source_url: str | None = Field(default=None, alias="sourceUrl")
     raw_evidence: str | None = Field(default=None, alias="rawEvidence")
+    location_type: str | None = Field(default=None, alias="locationType")
+    scope_match_status: Literal["match", "conflict", "uncertain"] | None = Field(
+        default=None, alias="scopeMatchStatus"
+    )
+    scope_match_reason: str | None = Field(default=None, alias="scopeMatchReason")
 
 
 class PrecisePlaceSearchResponse(ApiModel):
