@@ -133,6 +133,7 @@ export type BillingPortalResponse = {
 };
 
 export type BirthInput = {
+  displayName?: string;
   birthDate: string;
   birthTime: string;
   birthPlace: string;
@@ -140,7 +141,7 @@ export type BirthInput = {
   reportedTimeWindow?: ReportedTimeWindow;
   gender: string;
   relationship: string;
-  timeSource: string;
+  timeSource?: string;
   readingFocus?: string;
   lifeEvents?: string;
   readerRelationship?: "self" | "parent" | "partner" | "family" | "professional";
@@ -148,7 +149,11 @@ export type BirthInput = {
   locale?: AppLocale;
 };
 
-export type SkillBirthInput = BirthInput;
+export type SkillBirthInput = BirthInput & {
+  displayName: string;
+  gender: string;
+  relationship: string;
+};
 
 export type RectificationLifeEventCategory =
   | "education"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clock3 } from "lucide-react";
 import type { BirthTimePrecision } from "../../shared/domain";
 import { useI18n } from "../i18n/provider";
@@ -11,10 +11,10 @@ import {
 import { cn } from "../lib/cn";
 import { Button } from "./ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const ALL_MINUTES = Array.from({ length: 60 }, (_, i) => i);
+const WHEEL_ITEM_HEIGHT = 42;
 
 export function BirthTimePicker({
   value,
@@ -33,24 +33,20 @@ export function BirthTimePicker({
   const selectedHour = value?.getHours() ?? null;
   const selectedMinute = value ? normalizeMinuteForPrecision(value.getMinutes(), precision) : null;
   const minuteOptions = precision === "part_of_day" ? [0] : ALL_MINUTES;
+  const [draftHour, setDraftHour] = useState(selectedHour ?? 12);
+  const [draftMinute, setDraftMinute] = useState(selectedMinute ?? 0);
 
-  function commit(hour: number, minute: number) {
-    onChange(makeBirthTime(hour, normalizeMinuteForPrecision(minute, precision)));
-  }
-
-  function selectHour(hour: number) {
-    commit(hour, selectedMinute ?? 0);
-    if (precision === "part_of_day") setOpen(false);
-  }
-
-  function selectMinute(minute: number) {
-    commit(selectedHour ?? 0, minute);
-    setOpen(false);
+  function changeOpen(nextOpen: boolean) {
+    if (nextOpen) {
+      setDraftHour(selectedHour ?? 12);
+      setDraftMinute(selectedMinute ?? 0);
+    }
+    setOpen(nextOpen);
   }
 
   return (
     <div>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={changeOpen}>
         <PopoverTrigger asChild>
           <Button
             type="button"
@@ -80,22 +76,20 @@ export function BirthTimePicker({
         </PopoverTrigger>
 
         {!disabled && (
-          <PopoverContent className="w-[min(92vw,280px)] p-3" align="start">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-              <TimeSelect
+          <PopoverContent className="w-[min(92vw,320px)] p-3" align="start">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <TimeWheel
                 title={t("time.hour")}
                 values={HOURS}
-                value={selectedHour}
-                placeholder="HH"
-                onSelect={selectHour}
+                value={draftHour}
+                onSelect={setDraftHour}
               />
-              <div className="pb-2 text-sm text-muted">:</div>
-              <TimeSelect
+              <div className="pt-6 text-lg font-medium text-gold-light/65">:</div>
+              <TimeWheel
                 title={t("time.minute")}
                 values={minuteOptions}
-                value={precision === "part_of_day" ? 0 : selectedMinute}
-                placeholder="MM"
-                onSelect={selectMinute}
+                value={precision === "part_of_day" ? 0 : draftMinute}
+                onSelect={setDraftMinute}
                 disabled={precision === "part_of_day"}
               />
             </div>
@@ -111,7 +105,16 @@ export function BirthTimePicker({
               >
                 {t("common.clear")}
               </button>
-              <Button type="button" size="sm" onClick={() => setOpen(false)}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  onChange(
+                    makeBirthTime(draftHour, normalizeMinuteForPrecision(draftMinute, precision))
+                  );
+                  setOpen(false);
+                }}
+              >
                 {t("common.done")}
               </Button>
             </div>
@@ -122,42 +125,126 @@ export function BirthTimePicker({
   );
 }
 
-function TimeSelect({
+function TimeWheel({
   title,
   values,
   value,
-  placeholder,
   disabled = false,
   onSelect
 }: {
   title: string;
   values: number[];
-  value: number | null;
-  placeholder: string;
+  value: number;
   disabled?: boolean;
   onSelect: (value: number) => void;
 }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const selectedIndex = Math.max(0, values.indexOf(value));
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const target = selectedIndex * WHEEL_ITEM_HEIGHT;
+    if (Math.abs(viewport.scrollTop - target) > 1) viewport.scrollTop = target;
+  }, [selectedIndex]);
+
+  useEffect(
+    () => () => {
+      if (animationFrameRef.current !== null) {
+        window.cancelAnimationFrame(animationFrameRef.current);
+      }
+    },
+    []
+  );
+
+  function selectIndex(nextIndex: number, behavior: ScrollBehavior = "smooth") {
+    const boundedIndex = Math.max(0, Math.min(values.length - 1, nextIndex));
+    onSelect(values[boundedIndex]);
+    viewportRef.current?.scrollTo({
+      top: boundedIndex * WHEEL_ITEM_HEIGHT,
+      behavior
+    });
+  }
+
+  function handleScroll() {
+    if (disabled || !viewportRef.current) return;
+    if (animationFrameRef.current !== null) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+    }
+    animationFrameRef.current = window.requestAnimationFrame(() => {
+      const nextIndex = Math.max(
+        0,
+        Math.min(values.length - 1, Math.round(viewportRef.current!.scrollTop / WHEEL_ITEM_HEIGHT))
+      );
+      if (values[nextIndex] !== value) onSelect(values[nextIndex]);
+    });
+  }
+
   return (
-    <div>
-      <div className="mb-1.5 text-[11px] text-muted">{title}</div>
-      <Select
-        value={value === null ? "" : String(value)}
-        onValueChange={(next) => onSelect(Number(next))}
-        disabled={disabled}
-      >
-        <SelectTrigger className="h-10 rounded-md px-3 text-sm tabular-nums">
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent className="max-h-64">
-          {values.map((value) => {
-            return (
-              <SelectItem key={value} value={String(value)} className="tabular-nums">
-                {padTimeUnit(value)}
-              </SelectItem>
-            );
-          })}
-        </SelectContent>
-      </Select>
+    <div className={cn("min-w-0", disabled && "opacity-45")}>
+      <div className="mb-1.5 text-center text-[11px] font-medium text-muted">{title}</div>
+      <div className="relative h-[210px] overflow-hidden rounded-[10px] border border-gold/20 bg-black/20">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 top-[84px] z-10 h-[42px] rounded-md border-y border-gold/35 bg-gold/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[72px] bg-gradient-to-b from-[rgba(16,12,22,0.98)] to-transparent"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[72px] bg-gradient-to-t from-[rgba(16,12,22,0.98)] to-transparent"
+        />
+        <div
+          ref={viewportRef}
+          role="listbox"
+          aria-label={title}
+          aria-disabled={disabled}
+          tabIndex={disabled ? -1 : 0}
+          onScroll={handleScroll}
+          onKeyDown={(event) => {
+            if (disabled) return;
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              selectIndex(selectedIndex - 1);
+            } else if (event.key === "ArrowDown") {
+              event.preventDefault();
+              selectIndex(selectedIndex + 1);
+            } else if (event.key === "Home") {
+              event.preventDefault();
+              selectIndex(0);
+            } else if (event.key === "End") {
+              event.preventDefault();
+              selectIndex(values.length - 1);
+            }
+          }}
+          className={cn(
+            "h-full snap-y snap-mandatory overflow-y-auto overscroll-contain py-[84px] outline-none [scrollbar-width:none] focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-gold/15 [&::-webkit-scrollbar]:hidden",
+            disabled && "overflow-hidden"
+          )}
+        >
+          {values.map((option, index) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={option === value}
+              key={option}
+              disabled={disabled}
+              onClick={() => selectIndex(index)}
+              className={cn(
+                "flex h-[42px] w-full snap-center items-center justify-center text-base tabular-nums transition-[color,transform] focus-visible:outline-none",
+                option === value
+                  ? "scale-105 font-semibold text-cream"
+                  : "text-cream/35 hover:text-cream/65"
+              )}
+            >
+              {padTimeUnit(option)}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

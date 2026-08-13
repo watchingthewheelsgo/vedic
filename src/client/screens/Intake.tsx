@@ -28,8 +28,7 @@ import {
   BirthGenderField,
   BirthNameField,
   BirthPlaceField,
-  BirthTimePrecisionField,
-  BirthTimeSourceField
+  BirthTimePrecisionField
 } from "../components/BirthDetailsFields";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { Button } from "../components/ui/button";
@@ -42,18 +41,26 @@ import {
   SelectValue
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
-import { formatBirthDate, TIME_SOURCE_OPTIONS } from "../lib/birth-details";
+import { formatBirthDate, REQUIRED_GENDER_OPTIONS } from "../lib/birth-details";
 import { formatBirthTime, normalizeTimeForPrecision } from "../lib/birth-time";
 import { useI18n } from "../i18n/provider";
 import { cn } from "../lib/cn";
-import type { AppLocale, BirthInput, BirthTimePrecision } from "../../shared/domain";
+import type { AppLocale, BirthTimePrecision, SkillBirthInput } from "../../shared/domain";
 
 type SelectOption<T extends string = string> = {
   value: T;
   labelKey: string;
 };
 
-type FieldKey = "birthDate" | "birthTime" | "timePrecision" | "place" | "submit";
+type FieldKey =
+  | "birthDate"
+  | "birthTime"
+  | "timePrecision"
+  | "place"
+  | "name"
+  | "gender"
+  | "relationship"
+  | "submit";
 type FormErrors = Partial<Record<FieldKey, string>>;
 type AmbiguousTimeChoice = {
   utcOffsetSeconds: number;
@@ -71,7 +78,8 @@ const RELATIONSHIP_OPTIONS: SelectOption[] = [
   { value: "单身", labelKey: "intake.relationship.single" },
   { value: "恋爱中", labelKey: "intake.relationship.dating" },
   { value: "已婚", labelKey: "intake.relationship.married" },
-  { value: "未提供", labelKey: "common.notProvided" }
+  { value: "分居或离异", labelKey: "intake.relationship.separated" },
+  { value: "丧偶", labelKey: "intake.relationship.widowed" }
 ];
 
 export function Intake() {
@@ -85,7 +93,6 @@ export function Intake() {
   const [relationship, setRelationship] = useState("");
   const [readingFocus, setReadingFocus] = useState("");
   const [timePrecision, setTimePrecision] = useState<BirthTimePrecision | "">("");
-  const [timeSource, setTimeSource] = useState("");
   const [utcOffsetSeconds, setUtcOffsetSeconds] = useState<number | null>(null);
   const [ambiguousTime, setAmbiguousTime] = useState<AmbiguousTimeDetail | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -99,6 +106,7 @@ export function Intake() {
   const currentBirth = useMemo(
     () =>
       buildBirthInput({
+        name,
         birthDate,
         birthTime,
         place,
@@ -106,7 +114,6 @@ export function Intake() {
         gender,
         relationship,
         readingFocus,
-        timeSource,
         utcOffsetSeconds,
         locale
       }),
@@ -114,12 +121,12 @@ export function Intake() {
       birthDate,
       birthTime,
       gender,
+      name,
       readingFocus,
       locale,
       place,
       relationship,
       timePrecision,
-      timeSource,
       utcOffsetSeconds
     ]
   );
@@ -128,7 +135,7 @@ export function Intake() {
   const birthMomentReady = Boolean(birthDate) && birthTimeReady;
   const locationReady = Boolean(place);
   const locationComplete = locationReady && locationConfirmed;
-  const optionalProfileTouched = Boolean(name || gender || relationship || readingFocus.trim());
+  const profileComplete = Boolean(name.trim() && gender && relationship);
   const currentStep = !birthMomentReady ? 1 : !locationComplete ? 2 : 3;
   const birthMomentSummary = birthDate
     ? `${formatDate(birthDate, { year: "numeric", month: "short", day: "numeric" })} · ${
@@ -139,13 +146,7 @@ export function Intake() {
             : ""
       }`
     : "";
-  const timeSourceOption = TIME_SOURCE_OPTIONS.find((option) => option.value === timeSource);
-  const birthMomentDetail = [
-    timePrecision ? t(`intake.precision.${timePrecision}.label`) : "",
-    timeSourceOption?.labelKey ? t(timeSourceOption.labelKey) : ""
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const birthMomentDetail = timePrecision ? t(`intake.precision.${timePrecision}.label`) : "";
   const locationSummary = visualLocation?.label || place.split("|", 1)[0]?.trim() || "";
   const locationDetail = visualLocation
     ? t(visualLocation.exact ? "place.readout.status.precise" : "place.readout.status.city")
@@ -163,6 +164,9 @@ export function Intake() {
         timePrecision === "part_of_day" ? t("intake.error.birthHour") : t("intake.error.birthTime");
     }
     if (!place) nextErrors.place = t("intake.error.place");
+    if (!name.trim()) nextErrors.name = t("intake.error.name");
+    if (!gender) nextErrors.gender = t("intake.error.gender");
+    if (!relationship) nextErrors.relationship = t("intake.error.relationship");
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -270,10 +274,7 @@ export function Intake() {
               setUtcOffsetSeconds(null);
               setAmbiguousTime(null);
               setBirthTime((current) => normalizeTimeForPrecision(current, next));
-              if (next === "unknown") {
-                setTimeSource("");
-                clearError(setErrors, "birthTime");
-              }
+              if (next === "unknown") clearError(setErrors, "birthTime");
               clearError(setErrors, "timePrecision");
             }}
           />
@@ -333,42 +334,85 @@ export function Intake() {
             body={t("intake.flow.profile.body")}
             icon={<Sparkles size={17} />}
             active
-            complete={optionalProfileTouched}
+            complete={profileComplete}
           >
-            <BirthNameField value={name} onChange={setName} />
+            <div className="rounded-[12px] border border-gold/18 bg-white/[0.025] p-4 sm:p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <p className="m-0 text-[12px] font-semibold text-cream/72">
+                  {t("intake.profile.required")}
+                </p>
+                <span
+                  className={cn(
+                    "shrink-0 text-[11px] font-medium",
+                    profileComplete ? "text-green" : "text-gold-dim"
+                  )}
+                >
+                  {profileComplete
+                    ? t("intake.profile.ready")
+                    : t("intake.profile.progress", {
+                        completed: [name.trim(), gender, relationship].filter(Boolean).length
+                      })}
+                </span>
+              </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <BirthGenderField value={gender} onChange={setGender} />
+              <BirthNameField
+                value={name}
+                error={errors.name}
+                required
+                onChange={(value) => {
+                  setName(value);
+                  if (value.trim()) clearError(setErrors, "name");
+                }}
+              />
 
-              <Field
-                label={t("intake.relationship.label")}
-                hint={t("intake.relationship.hint")}
-                hintDisplay="tooltip"
-                className="mb-0"
-              >
-                <Select value={relationship} onValueChange={setRelationship}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("intake.select")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RELATIONSHIP_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {t(option.labelKey)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <BirthGenderField
+                  value={gender}
+                  error={errors.gender}
+                  required
+                  options={REQUIRED_GENDER_OPTIONS}
+                  onChange={(value) => {
+                    setGender(value);
+                    clearError(setErrors, "gender");
+                  }}
+                />
+
+                <Field
+                  label={t("intake.relationship.label")}
+                  hint={t("intake.relationship.hint")}
+                  hintDisplay="tooltip"
+                  className="mb-0"
+                  error={errors.relationship}
+                  required
+                >
+                  <Select
+                    value={relationship}
+                    onValueChange={(value) => {
+                      setRelationship(value);
+                      clearError(setErrors, "relationship");
+                    }}
+                  >
+                    <SelectTrigger aria-invalid={Boolean(errors.relationship)} aria-required="true">
+                      <SelectValue placeholder={t("intake.select")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RELATIONSHIP_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {t(option.labelKey)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
             </div>
 
-            <details className="rounded-[12px] border border-gold/18 bg-white/[0.025] p-3.5">
-              <summary className="cursor-pointer select-none text-[12px] font-semibold uppercase tracking-[1.4px] text-gold-light outline-none">
-                {t("intake.flow.profile.optional")}
+            <details className="group rounded-[12px] border border-gold/12 bg-black/10 px-4 py-3.5 open:border-gold/22 open:bg-white/[0.025]">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] font-medium text-cream/62 outline-none transition-colors hover:text-cream [&::-webkit-details-marker]:hidden">
+                <span>{t("intake.flow.profile.optional")}</span>
+                <ChevronDown className="size-4 text-gold-dim transition-transform group-open:rotate-180" />
               </summary>
               <div className="mt-4 grid gap-4">
-                {timePrecision !== "unknown" && (
-                  <BirthTimeSourceField value={timeSource} onChange={setTimeSource} />
-                )}
                 <Field
                   label={t("intake.lifeEvents.label")}
                   hint={t("intake.lifeEvents.hint")}
@@ -579,6 +623,7 @@ function clearError(setErrors: (value: SetStateAction<FormErrors>) => void, key:
 }
 
 function buildBirthInput({
+  name,
   birthDate,
   birthTime,
   place,
@@ -586,10 +631,10 @@ function buildBirthInput({
   gender,
   relationship,
   readingFocus,
-  timeSource,
   utcOffsetSeconds,
   locale
 }: {
+  name: string;
   birthDate: Date | null;
   birthTime: Date | null;
   place: string;
@@ -597,15 +642,17 @@ function buildBirthInput({
   gender: string;
   relationship: string;
   readingFocus: string;
-  timeSource: string;
   utcOffsetSeconds: number | null;
   locale: AppLocale;
-}): BirthInput | null {
+}): SkillBirthInput | null {
   if (!birthDate) return null;
   if (!place) return null;
   if (!timePrecision) return null;
   if (timePrecision !== "unknown" && !birthTime) return null;
+  const displayName = name.trim();
+  if (!displayName || !gender || !relationship) return null;
   return {
+    displayName,
     birthDate: formatBirthDate(birthDate),
     birthTime: timePrecision === "unknown" ? "" : formatBirthTime(birthTime, timePrecision),
     birthPlace: place,
@@ -613,12 +660,11 @@ function buildBirthInput({
     ...(timePrecision !== "unknown"
       ? { reportedTimeWindow: reportedTimeWindowFor(timePrecision) }
       : {}),
-    gender: gender || "未提供",
-    relationship: relationship || "未提供",
+    gender,
+    relationship,
     readingFocus: readingFocus.trim(),
     lifeEvents: "",
     readerRelationship: "self",
-    timeSource: timePrecision === "unknown" ? "时间未知" : timeSource || "未提供",
     ...(utcOffsetSeconds !== null ? { utcOffsetSeconds } : {}),
     locale
   };

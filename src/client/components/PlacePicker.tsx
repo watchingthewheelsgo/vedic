@@ -467,7 +467,7 @@ export function PlacePicker({
       <div className="grid gap-3">
         {mode === "city" ? (
           <div className="grid gap-4">
-            <div className="grid gap-3">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.15fr)] sm:items-end">
               <PlaceSearchBox
                 label={t("place.country.label")}
                 placeholder={t("place.country.placeholder")}
@@ -862,7 +862,7 @@ function PlaceSearchBox({
 
   return (
     <div className="grid min-w-0 gap-1.5">
-      <span className="text-[11px] font-medium text-cream/52">{label}</span>
+      <span className="min-w-0 truncate text-[11px] font-medium text-cream/52">{label}</span>
       <Popover open={open && !disabled} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
@@ -872,7 +872,7 @@ function PlaceSearchBox({
             role="combobox"
             aria-expanded={open}
             className={cn(
-              "birth-input-field-shell flex h-[50px] w-full items-center gap-3 rounded-[10px] border border-gold/30 bg-white/5 px-3 text-left text-cream/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] outline-none transition hover:border-gold/45 hover:bg-white/[0.075] focus-visible:border-gold focus-visible:ring-4 focus-visible:ring-gold/15",
+              "birth-input-field-shell flex h-[50px] min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-[10px] border border-gold/30 bg-white/5 px-3 text-left text-cream/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] outline-none transition hover:border-gold/45 hover:bg-white/[0.075] focus-visible:border-gold focus-visible:ring-4 focus-visible:ring-gold/15",
               selected && "text-cream",
               disabled && "cursor-not-allowed opacity-45"
             )}
@@ -890,7 +890,7 @@ function PlaceSearchBox({
           </button>
         </PopoverTrigger>
         <PopoverContent
-          className="w-[var(--radix-popover-trigger-width)] p-2"
+          className="w-[min(22rem,calc(100vw-2rem))] p-2"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             window.requestAnimationFrame(() => inputRef.current?.focus());

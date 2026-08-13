@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.vedicdust.rectification_policy import RECTIFICATION_EVENT_SUBTYPES
 
@@ -54,6 +54,7 @@ class ReportedTimeWindow(ApiModel):
 
 
 class BirthInput(ApiModel):
+    display_name: str | None = Field(default=None, alias="displayName", max_length=120)
     birth_date: str = Field(alias="birthDate", min_length=8, max_length=20)
     birth_time: str = Field(default="", alias="birthTime", max_length=20)
     birth_place: str = Field(alias="birthPlace", min_length=2, max_length=160)
@@ -64,7 +65,7 @@ class BirthInput(ApiModel):
     )
     gender: str = Field(default="[待填]", max_length=80)
     relationship: str = Field(default="[待填]", max_length=120)
-    time_source: str = Field(default="未追问", alias="timeSource", max_length=120)
+    time_source: str = Field(default="user_reported_time", alias="timeSource", max_length=120)
     reading_focus: str = Field(default="", alias="readingFocus", max_length=1000)
     life_events: str = Field(default="", alias="lifeEvents", max_length=4000)
     life_event_facts: str = Field(default="", alias="lifeEventFacts", max_length=16000)
@@ -82,7 +83,21 @@ class BirthInput(ApiModel):
 
 
 class SkillBirthInput(BirthInput):
-    pass
+    display_name: str = Field(alias="displayName", min_length=1, max_length=120)
+    gender: str = Field(min_length=1, max_length=80)
+    relationship: str = Field(min_length=1, max_length=120)
+    time_source: Literal["user_reported_time"] = Field(
+        default="user_reported_time",
+        alias="timeSource",
+    )
+
+    @field_validator("display_name", "gender", "relationship")
+    @classmethod
+    def require_profile_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("required profile field cannot be blank")
+        return normalized
 
 
 class RectificationLifeEventInput(ApiModel):

@@ -1115,6 +1115,7 @@ class ChartRectificationService:
             return None
 
         return BirthInput(
+            displayName=str(subject.get("displayName") or "").strip() or None,
             birthDate=birth_date,
             birthTime=birth_time,
             birthPlace=birth_place,
@@ -1174,6 +1175,7 @@ class ChartRectificationService:
             raise ValueError("session is missing the reported birth date or place")
         utc_offset = time_context.get("utcOffsetSeconds")
         return BirthInput(
+            displayName=str(subject.get("displayName") or "").strip() or None,
             birthDate=birth_date,
             birthTime=str(assertion.get("reportedLocalTime") or time_context.get("reported") or ""),
             birthPlace=birth_place,

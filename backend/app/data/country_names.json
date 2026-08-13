@@ -1,0 +1,2577 @@
+{
+  "schemaVersion": "vedicdust.country-names.v1",
+  "source": {
+    "provider": "Unicode Consortium",
+    "dataset": "Unicode CLDR JSON territory names",
+    "repository": "https://github.com/unicode-org/cldr-json",
+    "revision": "a79b499916d486dca4b0f74fe423ea457705fdd9",
+    "locales": ["en", "zh", "ja"],
+    "note": "GeoNames English names remain stable values; CLDR names are display labels."
+  },
+  "countries": [
+    {
+      "sourceName": "Afghanistan",
+      "territoryCode": "AF",
+      "names": {
+        "en": "Afghanistan",
+        "zh": "阿富汗",
+        "ja": "アフガニスタン"
+      },
+      "searchNames": ["Afghanistan", "AF", "阿富汗", "アフガニスタン"]
+    },
+    {
+      "sourceName": "Aland Islands",
+      "territoryCode": "AX",
+      "names": {
+        "en": "Åland Islands",
+        "zh": "奥兰群岛",
+        "ja": "オーランド諸島"
+      },
+      "searchNames": ["Aland Islands", "AX", "Åland Islands", "奥兰群岛", "オーランド諸島"]
+    },
+    {
+      "sourceName": "Albania",
+      "territoryCode": "AL",
+      "names": {
+        "en": "Albania",
+        "zh": "阿尔巴尼亚",
+        "ja": "アルバニア"
+      },
+      "searchNames": ["Albania", "AL", "阿尔巴尼亚", "アルバニア"]
+    },
+    {
+      "sourceName": "Algeria",
+      "territoryCode": "DZ",
+      "names": {
+        "en": "Algeria",
+        "zh": "阿尔及利亚",
+        "ja": "アルジェリア"
+      },
+      "searchNames": ["Algeria", "DZ", "阿尔及利亚", "アルジェリア"]
+    },
+    {
+      "sourceName": "American Samoa",
+      "territoryCode": "AS",
+      "names": {
+        "en": "American Samoa",
+        "zh": "美属萨摩亚",
+        "ja": "米領サモア"
+      },
+      "searchNames": ["American Samoa", "AS", "美属萨摩亚", "米領サモア"]
+    },
+    {
+      "sourceName": "Andorra",
+      "territoryCode": "AD",
+      "names": {
+        "en": "Andorra",
+        "zh": "安道尔",
+        "ja": "アンドラ"
+      },
+      "searchNames": ["Andorra", "AD", "安道尔", "アンドラ"]
+    },
+    {
+      "sourceName": "Angola",
+      "territoryCode": "AO",
+      "names": {
+        "en": "Angola",
+        "zh": "安哥拉",
+        "ja": "アンゴラ"
+      },
+      "searchNames": ["Angola", "AO", "安哥拉", "アンゴラ"]
+    },
+    {
+      "sourceName": "Anguilla",
+      "territoryCode": "AI",
+      "names": {
+        "en": "Anguilla",
+        "zh": "安圭拉",
+        "ja": "アンギラ"
+      },
+      "searchNames": ["Anguilla", "AI", "安圭拉", "アンギラ"]
+    },
+    {
+      "sourceName": "Antigua and Barbuda",
+      "territoryCode": "AG",
+      "names": {
+        "en": "Antigua & Barbuda",
+        "zh": "安提瓜和巴布达",
+        "ja": "アンティグア・バーブーダ"
+      },
+      "searchNames": [
+        "Antigua and Barbuda",
+        "AG",
+        "Antigua & Barbuda",
+        "安提瓜和巴布达",
+        "アンティグア・バーブーダ"
+      ]
+    },
+    {
+      "sourceName": "Argentina",
+      "territoryCode": "AR",
+      "names": {
+        "en": "Argentina",
+        "zh": "阿根廷",
+        "ja": "アルゼンチン"
+      },
+      "searchNames": ["Argentina", "AR", "阿根廷", "アルゼンチン"]
+    },
+    {
+      "sourceName": "Armenia",
+      "territoryCode": "AM",
+      "names": {
+        "en": "Armenia",
+        "zh": "亚美尼亚",
+        "ja": "アルメニア"
+      },
+      "searchNames": ["Armenia", "AM", "亚美尼亚", "アルメニア"]
+    },
+    {
+      "sourceName": "Aruba",
+      "territoryCode": "AW",
+      "names": {
+        "en": "Aruba",
+        "zh": "阿鲁巴",
+        "ja": "アルバ"
+      },
+      "searchNames": ["Aruba", "AW", "阿鲁巴", "アルバ"]
+    },
+    {
+      "sourceName": "Australia",
+      "territoryCode": "AU",
+      "names": {
+        "en": "Australia",
+        "zh": "澳大利亚",
+        "ja": "オーストラリア"
+      },
+      "searchNames": ["Australia", "AU", "澳大利亚", "オーストラリア"]
+    },
+    {
+      "sourceName": "Austria",
+      "territoryCode": "AT",
+      "names": {
+        "en": "Austria",
+        "zh": "奥地利",
+        "ja": "オーストリア"
+      },
+      "searchNames": ["Austria", "AT", "奥地利", "オーストリア"]
+    },
+    {
+      "sourceName": "Azerbaijan",
+      "territoryCode": "AZ",
+      "names": {
+        "en": "Azerbaijan",
+        "zh": "阿塞拜疆",
+        "ja": "アゼルバイジャン"
+      },
+      "searchNames": ["Azerbaijan", "AZ", "阿塞拜疆", "アゼルバイジャン"]
+    },
+    {
+      "sourceName": "Bahamas",
+      "territoryCode": "BS",
+      "names": {
+        "en": "Bahamas",
+        "zh": "巴哈马",
+        "ja": "バハマ"
+      },
+      "searchNames": ["Bahamas", "BS", "巴哈马", "バハマ"]
+    },
+    {
+      "sourceName": "Bahrain",
+      "territoryCode": "BH",
+      "names": {
+        "en": "Bahrain",
+        "zh": "巴林",
+        "ja": "バーレーン"
+      },
+      "searchNames": ["Bahrain", "BH", "巴林", "バーレーン"]
+    },
+    {
+      "sourceName": "Bangladesh",
+      "territoryCode": "BD",
+      "names": {
+        "en": "Bangladesh",
+        "zh": "孟加拉国",
+        "ja": "バングラデシュ"
+      },
+      "searchNames": ["Bangladesh", "BD", "孟加拉国", "バングラデシュ"]
+    },
+    {
+      "sourceName": "Barbados",
+      "territoryCode": "BB",
+      "names": {
+        "en": "Barbados",
+        "zh": "巴巴多斯",
+        "ja": "バルバドス"
+      },
+      "searchNames": ["Barbados", "BB", "巴巴多斯", "バルバドス"]
+    },
+    {
+      "sourceName": "Belarus",
+      "territoryCode": "BY",
+      "names": {
+        "en": "Belarus",
+        "zh": "白俄罗斯",
+        "ja": "ベラルーシ"
+      },
+      "searchNames": ["Belarus", "BY", "白俄罗斯", "ベラルーシ"]
+    },
+    {
+      "sourceName": "Belgium",
+      "territoryCode": "BE",
+      "names": {
+        "en": "Belgium",
+        "zh": "比利时",
+        "ja": "ベルギー"
+      },
+      "searchNames": ["Belgium", "BE", "比利时", "ベルギー"]
+    },
+    {
+      "sourceName": "Belize",
+      "territoryCode": "BZ",
+      "names": {
+        "en": "Belize",
+        "zh": "伯利兹",
+        "ja": "ベリーズ"
+      },
+      "searchNames": ["Belize", "BZ", "伯利兹", "ベリーズ"]
+    },
+    {
+      "sourceName": "Benin",
+      "territoryCode": "BJ",
+      "names": {
+        "en": "Benin",
+        "zh": "贝宁",
+        "ja": "ベナン"
+      },
+      "searchNames": ["Benin", "BJ", "贝宁", "ベナン"]
+    },
+    {
+      "sourceName": "Bermuda",
+      "territoryCode": "BM",
+      "names": {
+        "en": "Bermuda",
+        "zh": "百慕大",
+        "ja": "バミューダ"
+      },
+      "searchNames": ["Bermuda", "BM", "百慕大", "バミューダ"]
+    },
+    {
+      "sourceName": "Bhutan",
+      "territoryCode": "BT",
+      "names": {
+        "en": "Bhutan",
+        "zh": "不丹",
+        "ja": "ブータン"
+      },
+      "searchNames": ["Bhutan", "BT", "不丹", "ブータン"]
+    },
+    {
+      "sourceName": "Bolivia",
+      "territoryCode": "BO",
+      "names": {
+        "en": "Bolivia",
+        "zh": "玻利维亚",
+        "ja": "ボリビア"
+      },
+      "searchNames": ["Bolivia", "BO", "玻利维亚", "ボリビア"]
+    },
+    {
+      "sourceName": "Bonaire, Saint Eustatius and Saba",
+      "territoryCode": "BQ",
+      "names": {
+        "en": "Caribbean Netherlands",
+        "zh": "荷属加勒比区",
+        "ja": "オランダ領カリブ"
+      },
+      "searchNames": [
+        "Bonaire, Saint Eustatius and Saba",
+        "BQ",
+        "Caribbean Netherlands",
+        "荷属加勒比区",
+        "オランダ領カリブ"
+      ]
+    },
+    {
+      "sourceName": "Bosnia and Herzegovina",
+      "territoryCode": "BA",
+      "names": {
+        "en": "Bosnia & Herzegovina",
+        "zh": "波斯尼亚和黑塞哥维那",
+        "ja": "ボスニア・ヘルツェゴビナ"
+      },
+      "searchNames": [
+        "Bosnia and Herzegovina",
+        "BA",
+        "Bosnia & Herzegovina",
+        "波斯尼亚和黑塞哥维那",
+        "ボスニア・ヘルツェゴビナ"
+      ]
+    },
+    {
+      "sourceName": "Botswana",
+      "territoryCode": "BW",
+      "names": {
+        "en": "Botswana",
+        "zh": "博茨瓦纳",
+        "ja": "ボツワナ"
+      },
+      "searchNames": ["Botswana", "BW", "博茨瓦纳", "ボツワナ"]
+    },
+    {
+      "sourceName": "Brazil",
+      "territoryCode": "BR",
+      "names": {
+        "en": "Brazil",
+        "zh": "巴西",
+        "ja": "ブラジル"
+      },
+      "searchNames": ["Brazil", "BR", "巴西", "ブラジル"]
+    },
+    {
+      "sourceName": "British Virgin Islands",
+      "territoryCode": "VG",
+      "names": {
+        "en": "British Virgin Islands",
+        "zh": "英属维尔京群岛",
+        "ja": "英領ヴァージン諸島"
+      },
+      "searchNames": ["British Virgin Islands", "VG", "英属维尔京群岛", "英領ヴァージン諸島"]
+    },
+    {
+      "sourceName": "Brunei",
+      "territoryCode": "BN",
+      "names": {
+        "en": "Brunei",
+        "zh": "文莱",
+        "ja": "ブルネイ"
+      },
+      "searchNames": ["Brunei", "BN", "文莱", "ブルネイ"]
+    },
+    {
+      "sourceName": "Bulgaria",
+      "territoryCode": "BG",
+      "names": {
+        "en": "Bulgaria",
+        "zh": "保加利亚",
+        "ja": "ブルガリア"
+      },
+      "searchNames": ["Bulgaria", "BG", "保加利亚", "ブルガリア"]
+    },
+    {
+      "sourceName": "Burkina Faso",
+      "territoryCode": "BF",
+      "names": {
+        "en": "Burkina Faso",
+        "zh": "布基纳法索",
+        "ja": "ブルキナファソ"
+      },
+      "searchNames": ["Burkina Faso", "BF", "布基纳法索", "ブルキナファソ"]
+    },
+    {
+      "sourceName": "Burundi",
+      "territoryCode": "BI",
+      "names": {
+        "en": "Burundi",
+        "zh": "布隆迪",
+        "ja": "ブルンジ"
+      },
+      "searchNames": ["Burundi", "BI", "布隆迪", "ブルンジ"]
+    },
+    {
+      "sourceName": "Cabo Verde",
+      "territoryCode": "CV",
+      "names": {
+        "en": "Cape Verde",
+        "zh": "佛得角",
+        "ja": "カーボベルデ"
+      },
+      "searchNames": ["Cabo Verde", "CV", "Cape Verde", "佛得角", "カーボベルデ"]
+    },
+    {
+      "sourceName": "Cambodia",
+      "territoryCode": "KH",
+      "names": {
+        "en": "Cambodia",
+        "zh": "柬埔寨",
+        "ja": "カンボジア"
+      },
+      "searchNames": ["Cambodia", "KH", "柬埔寨", "カンボジア"]
+    },
+    {
+      "sourceName": "Cameroon",
+      "territoryCode": "CM",
+      "names": {
+        "en": "Cameroon",
+        "zh": "喀麦隆",
+        "ja": "カメルーン"
+      },
+      "searchNames": ["Cameroon", "CM", "喀麦隆", "カメルーン"]
+    },
+    {
+      "sourceName": "Canada",
+      "territoryCode": "CA",
+      "names": {
+        "en": "Canada",
+        "zh": "加拿大",
+        "ja": "カナダ"
+      },
+      "searchNames": ["Canada", "CA", "加拿大", "カナダ"]
+    },
+    {
+      "sourceName": "Cayman Islands",
+      "territoryCode": "KY",
+      "names": {
+        "en": "Cayman Islands",
+        "zh": "开曼群岛",
+        "ja": "ケイマン諸島"
+      },
+      "searchNames": ["Cayman Islands", "KY", "开曼群岛", "ケイマン諸島"]
+    },
+    {
+      "sourceName": "Central African Republic",
+      "territoryCode": "CF",
+      "names": {
+        "en": "Central African Republic",
+        "zh": "中非共和国",
+        "ja": "中央アフリカ共和国"
+      },
+      "searchNames": ["Central African Republic", "CF", "中非共和国", "中央アフリカ共和国"]
+    },
+    {
+      "sourceName": "Chad",
+      "territoryCode": "TD",
+      "names": {
+        "en": "Chad",
+        "zh": "乍得",
+        "ja": "チャド"
+      },
+      "searchNames": ["Chad", "TD", "乍得", "チャド"]
+    },
+    {
+      "sourceName": "Chile",
+      "territoryCode": "CL",
+      "names": {
+        "en": "Chile",
+        "zh": "智利",
+        "ja": "チリ"
+      },
+      "searchNames": ["Chile", "CL", "智利", "チリ"]
+    },
+    {
+      "sourceName": "China",
+      "territoryCode": "CN",
+      "names": {
+        "en": "China",
+        "zh": "中国",
+        "ja": "中国"
+      },
+      "searchNames": ["China", "CN", "中国"]
+    },
+    {
+      "sourceName": "Christmas Island",
+      "territoryCode": "CX",
+      "names": {
+        "en": "Christmas Island",
+        "zh": "圣诞岛",
+        "ja": "クリスマス島"
+      },
+      "searchNames": ["Christmas Island", "CX", "圣诞岛", "クリスマス島"]
+    },
+    {
+      "sourceName": "Cocos Islands",
+      "territoryCode": "CC",
+      "names": {
+        "en": "Cocos (Keeling) Islands",
+        "zh": "科科斯（基林）群岛",
+        "ja": "ココス(キーリング)諸島"
+      },
+      "searchNames": [
+        "Cocos Islands",
+        "CC",
+        "Cocos (Keeling) Islands",
+        "科科斯（基林）群岛",
+        "ココス(キーリング)諸島"
+      ]
+    },
+    {
+      "sourceName": "Colombia",
+      "territoryCode": "CO",
+      "names": {
+        "en": "Colombia",
+        "zh": "哥伦比亚",
+        "ja": "コロンビア"
+      },
+      "searchNames": ["Colombia", "CO", "哥伦比亚", "コロンビア"]
+    },
+    {
+      "sourceName": "Comoros",
+      "territoryCode": "KM",
+      "names": {
+        "en": "Comoros",
+        "zh": "科摩罗",
+        "ja": "コモロ"
+      },
+      "searchNames": ["Comoros", "KM", "科摩罗", "コモロ"]
+    },
+    {
+      "sourceName": "Cook Islands",
+      "territoryCode": "CK",
+      "names": {
+        "en": "Cook Islands",
+        "zh": "库克群岛",
+        "ja": "クック諸島"
+      },
+      "searchNames": ["Cook Islands", "CK", "库克群岛", "クック諸島"]
+    },
+    {
+      "sourceName": "Costa Rica",
+      "territoryCode": "CR",
+      "names": {
+        "en": "Costa Rica",
+        "zh": "哥斯达黎加",
+        "ja": "コスタリカ"
+      },
+      "searchNames": ["Costa Rica", "CR", "哥斯达黎加", "コスタリカ"]
+    },
+    {
+      "sourceName": "Croatia",
+      "territoryCode": "HR",
+      "names": {
+        "en": "Croatia",
+        "zh": "克罗地亚",
+        "ja": "クロアチア"
+      },
+      "searchNames": ["Croatia", "HR", "克罗地亚", "クロアチア"]
+    },
+    {
+      "sourceName": "Cuba",
+      "territoryCode": "CU",
+      "names": {
+        "en": "Cuba",
+        "zh": "古巴",
+        "ja": "キューバ"
+      },
+      "searchNames": ["Cuba", "CU", "古巴", "キューバ"]
+    },
+    {
+      "sourceName": "Curacao",
+      "territoryCode": "CW",
+      "names": {
+        "en": "Curaçao",
+        "zh": "库拉索",
+        "ja": "キュラソー"
+      },
+      "searchNames": ["Curacao", "CW", "Curaçao", "库拉索", "キュラソー"]
+    },
+    {
+      "sourceName": "Cyprus",
+      "territoryCode": "CY",
+      "names": {
+        "en": "Cyprus",
+        "zh": "塞浦路斯",
+        "ja": "キプロス"
+      },
+      "searchNames": ["Cyprus", "CY", "塞浦路斯", "キプロス"]
+    },
+    {
+      "sourceName": "Czechia",
+      "territoryCode": "CZ",
+      "names": {
+        "en": "Czechia",
+        "zh": "捷克",
+        "ja": "チェコ"
+      },
+      "searchNames": ["Czechia", "CZ", "捷克", "チェコ"]
+    },
+    {
+      "sourceName": "Democratic Republic of the Congo",
+      "territoryCode": "CD",
+      "names": {
+        "en": "Congo - Kinshasa",
+        "zh": "刚果（金）",
+        "ja": "コンゴ民主共和国(キンシャサ)"
+      },
+      "searchNames": [
+        "Democratic Republic of the Congo",
+        "CD",
+        "Congo - Kinshasa",
+        "刚果（金）",
+        "コンゴ民主共和国(キンシャサ)"
+      ]
+    },
+    {
+      "sourceName": "Denmark",
+      "territoryCode": "DK",
+      "names": {
+        "en": "Denmark",
+        "zh": "丹麦",
+        "ja": "デンマーク"
+      },
+      "searchNames": ["Denmark", "DK", "丹麦", "デンマーク"]
+    },
+    {
+      "sourceName": "Djibouti",
+      "territoryCode": "DJ",
+      "names": {
+        "en": "Djibouti",
+        "zh": "吉布提",
+        "ja": "ジブチ"
+      },
+      "searchNames": ["Djibouti", "DJ", "吉布提", "ジブチ"]
+    },
+    {
+      "sourceName": "Dominica",
+      "territoryCode": "DM",
+      "names": {
+        "en": "Dominica",
+        "zh": "多米尼克",
+        "ja": "ドミニカ国"
+      },
+      "searchNames": ["Dominica", "DM", "多米尼克", "ドミニカ国"]
+    },
+    {
+      "sourceName": "Dominican Republic",
+      "territoryCode": "DO",
+      "names": {
+        "en": "Dominican Republic",
+        "zh": "多米尼加共和国",
+        "ja": "ドミニカ共和国"
+      },
+      "searchNames": ["Dominican Republic", "DO", "多米尼加共和国", "ドミニカ共和国"]
+    },
+    {
+      "sourceName": "Ecuador",
+      "territoryCode": "EC",
+      "names": {
+        "en": "Ecuador",
+        "zh": "厄瓜多尔",
+        "ja": "エクアドル"
+      },
+      "searchNames": ["Ecuador", "EC", "厄瓜多尔", "エクアドル"]
+    },
+    {
+      "sourceName": "Egypt",
+      "territoryCode": "EG",
+      "names": {
+        "en": "Egypt",
+        "zh": "埃及",
+        "ja": "エジプト"
+      },
+      "searchNames": ["Egypt", "EG", "埃及", "エジプト"]
+    },
+    {
+      "sourceName": "El Salvador",
+      "territoryCode": "SV",
+      "names": {
+        "en": "El Salvador",
+        "zh": "萨尔瓦多",
+        "ja": "エルサルバドル"
+      },
+      "searchNames": ["El Salvador", "SV", "萨尔瓦多", "エルサルバドル"]
+    },
+    {
+      "sourceName": "Equatorial Guinea",
+      "territoryCode": "GQ",
+      "names": {
+        "en": "Equatorial Guinea",
+        "zh": "赤道几内亚",
+        "ja": "赤道ギニア"
+      },
+      "searchNames": ["Equatorial Guinea", "GQ", "赤道几内亚", "赤道ギニア"]
+    },
+    {
+      "sourceName": "Eritrea",
+      "territoryCode": "ER",
+      "names": {
+        "en": "Eritrea",
+        "zh": "厄立特里亚",
+        "ja": "エリトリア"
+      },
+      "searchNames": ["Eritrea", "ER", "厄立特里亚", "エリトリア"]
+    },
+    {
+      "sourceName": "Estonia",
+      "territoryCode": "EE",
+      "names": {
+        "en": "Estonia",
+        "zh": "爱沙尼亚",
+        "ja": "エストニア"
+      },
+      "searchNames": ["Estonia", "EE", "爱沙尼亚", "エストニア"]
+    },
+    {
+      "sourceName": "Eswatini",
+      "territoryCode": "SZ",
+      "names": {
+        "en": "Eswatini",
+        "zh": "斯威士兰",
+        "ja": "エスワティニ"
+      },
+      "searchNames": ["Eswatini", "SZ", "斯威士兰", "エスワティニ"]
+    },
+    {
+      "sourceName": "Ethiopia",
+      "territoryCode": "ET",
+      "names": {
+        "en": "Ethiopia",
+        "zh": "埃塞俄比亚",
+        "ja": "エチオピア"
+      },
+      "searchNames": ["Ethiopia", "ET", "埃塞俄比亚", "エチオピア"]
+    },
+    {
+      "sourceName": "Falkland Islands",
+      "territoryCode": "FK",
+      "names": {
+        "en": "Falkland Islands",
+        "zh": "福克兰群岛",
+        "ja": "フォークランド諸島"
+      },
+      "searchNames": ["Falkland Islands", "FK", "福克兰群岛", "フォークランド諸島"]
+    },
+    {
+      "sourceName": "Faroe Islands",
+      "territoryCode": "FO",
+      "names": {
+        "en": "Faroe Islands",
+        "zh": "法罗群岛",
+        "ja": "フェロー諸島"
+      },
+      "searchNames": ["Faroe Islands", "FO", "法罗群岛", "フェロー諸島"]
+    },
+    {
+      "sourceName": "Fiji",
+      "territoryCode": "FJ",
+      "names": {
+        "en": "Fiji",
+        "zh": "斐济",
+        "ja": "フィジー"
+      },
+      "searchNames": ["Fiji", "FJ", "斐济", "フィジー"]
+    },
+    {
+      "sourceName": "Finland",
+      "territoryCode": "FI",
+      "names": {
+        "en": "Finland",
+        "zh": "芬兰",
+        "ja": "フィンランド"
+      },
+      "searchNames": ["Finland", "FI", "芬兰", "フィンランド"]
+    },
+    {
+      "sourceName": "France",
+      "territoryCode": "FR",
+      "names": {
+        "en": "France",
+        "zh": "法国",
+        "ja": "フランス"
+      },
+      "searchNames": ["France", "FR", "法国", "フランス"]
+    },
+    {
+      "sourceName": "French Guiana",
+      "territoryCode": "GF",
+      "names": {
+        "en": "French Guiana",
+        "zh": "法属圭亚那",
+        "ja": "仏領ギアナ"
+      },
+      "searchNames": ["French Guiana", "GF", "法属圭亚那", "仏領ギアナ"]
+    },
+    {
+      "sourceName": "French Polynesia",
+      "territoryCode": "PF",
+      "names": {
+        "en": "French Polynesia",
+        "zh": "法属波利尼西亚",
+        "ja": "仏領ポリネシア"
+      },
+      "searchNames": ["French Polynesia", "PF", "法属波利尼西亚", "仏領ポリネシア"]
+    },
+    {
+      "sourceName": "French Southern Territories",
+      "territoryCode": "TF",
+      "names": {
+        "en": "French Southern Territories",
+        "zh": "法属南部领地",
+        "ja": "仏領極南諸島"
+      },
+      "searchNames": ["French Southern Territories", "TF", "法属南部领地", "仏領極南諸島"]
+    },
+    {
+      "sourceName": "Gabon",
+      "territoryCode": "GA",
+      "names": {
+        "en": "Gabon",
+        "zh": "加蓬",
+        "ja": "ガボン"
+      },
+      "searchNames": ["Gabon", "GA", "加蓬", "ガボン"]
+    },
+    {
+      "sourceName": "Gambia",
+      "territoryCode": "GM",
+      "names": {
+        "en": "Gambia",
+        "zh": "冈比亚",
+        "ja": "ガンビア"
+      },
+      "searchNames": ["Gambia", "GM", "冈比亚", "ガンビア"]
+    },
+    {
+      "sourceName": "Georgia",
+      "territoryCode": "GE",
+      "names": {
+        "en": "Georgia",
+        "zh": "格鲁吉亚",
+        "ja": "ジョージア"
+      },
+      "searchNames": ["Georgia", "GE", "格鲁吉亚", "ジョージア"]
+    },
+    {
+      "sourceName": "Germany",
+      "territoryCode": "DE",
+      "names": {
+        "en": "Germany",
+        "zh": "德国",
+        "ja": "ドイツ"
+      },
+      "searchNames": ["Germany", "DE", "德国", "ドイツ"]
+    },
+    {
+      "sourceName": "Ghana",
+      "territoryCode": "GH",
+      "names": {
+        "en": "Ghana",
+        "zh": "加纳",
+        "ja": "ガーナ"
+      },
+      "searchNames": ["Ghana", "GH", "加纳", "ガーナ"]
+    },
+    {
+      "sourceName": "Gibraltar",
+      "territoryCode": "GI",
+      "names": {
+        "en": "Gibraltar",
+        "zh": "直布罗陀",
+        "ja": "ジブラルタル"
+      },
+      "searchNames": ["Gibraltar", "GI", "直布罗陀", "ジブラルタル"]
+    },
+    {
+      "sourceName": "Greece",
+      "territoryCode": "GR",
+      "names": {
+        "en": "Greece",
+        "zh": "希腊",
+        "ja": "ギリシャ"
+      },
+      "searchNames": ["Greece", "GR", "希腊", "ギリシャ"]
+    },
+    {
+      "sourceName": "Greenland",
+      "territoryCode": "GL",
+      "names": {
+        "en": "Greenland",
+        "zh": "格陵兰",
+        "ja": "グリーンランド"
+      },
+      "searchNames": ["Greenland", "GL", "格陵兰", "グリーンランド"]
+    },
+    {
+      "sourceName": "Grenada",
+      "territoryCode": "GD",
+      "names": {
+        "en": "Grenada",
+        "zh": "格林纳达",
+        "ja": "グレナダ"
+      },
+      "searchNames": ["Grenada", "GD", "格林纳达", "グレナダ"]
+    },
+    {
+      "sourceName": "Guadeloupe",
+      "territoryCode": "GP",
+      "names": {
+        "en": "Guadeloupe",
+        "zh": "瓜德罗普",
+        "ja": "グアドループ"
+      },
+      "searchNames": ["Guadeloupe", "GP", "瓜德罗普", "グアドループ"]
+    },
+    {
+      "sourceName": "Guam",
+      "territoryCode": "GU",
+      "names": {
+        "en": "Guam",
+        "zh": "关岛",
+        "ja": "グアム"
+      },
+      "searchNames": ["Guam", "GU", "关岛", "グアム"]
+    },
+    {
+      "sourceName": "Guatemala",
+      "territoryCode": "GT",
+      "names": {
+        "en": "Guatemala",
+        "zh": "危地马拉",
+        "ja": "グアテマラ"
+      },
+      "searchNames": ["Guatemala", "GT", "危地马拉", "グアテマラ"]
+    },
+    {
+      "sourceName": "Guernsey",
+      "territoryCode": "GG",
+      "names": {
+        "en": "Guernsey",
+        "zh": "根西岛",
+        "ja": "ガーンジー"
+      },
+      "searchNames": ["Guernsey", "GG", "根西岛", "ガーンジー"]
+    },
+    {
+      "sourceName": "Guinea",
+      "territoryCode": "GN",
+      "names": {
+        "en": "Guinea",
+        "zh": "几内亚",
+        "ja": "ギニア"
+      },
+      "searchNames": ["Guinea", "GN", "几内亚", "ギニア"]
+    },
+    {
+      "sourceName": "Guinea-Bissau",
+      "territoryCode": "GW",
+      "names": {
+        "en": "Guinea-Bissau",
+        "zh": "几内亚比绍",
+        "ja": "ギニアビサウ"
+      },
+      "searchNames": ["Guinea-Bissau", "GW", "几内亚比绍", "ギニアビサウ"]
+    },
+    {
+      "sourceName": "Guyana",
+      "territoryCode": "GY",
+      "names": {
+        "en": "Guyana",
+        "zh": "圭亚那",
+        "ja": "ガイアナ"
+      },
+      "searchNames": ["Guyana", "GY", "圭亚那", "ガイアナ"]
+    },
+    {
+      "sourceName": "Haiti",
+      "territoryCode": "HT",
+      "names": {
+        "en": "Haiti",
+        "zh": "海地",
+        "ja": "ハイチ"
+      },
+      "searchNames": ["Haiti", "HT", "海地", "ハイチ"]
+    },
+    {
+      "sourceName": "Honduras",
+      "territoryCode": "HN",
+      "names": {
+        "en": "Honduras",
+        "zh": "洪都拉斯",
+        "ja": "ホンジュラス"
+      },
+      "searchNames": ["Honduras", "HN", "洪都拉斯", "ホンジュラス"]
+    },
+    {
+      "sourceName": "Hong Kong",
+      "territoryCode": "HK",
+      "names": {
+        "en": "Hong Kong SAR China",
+        "zh": "中国香港特别行政区",
+        "ja": "中華人民共和国香港特別行政区"
+      },
+      "searchNames": [
+        "Hong Kong",
+        "HK",
+        "Hong Kong SAR China",
+        "中国香港特别行政区",
+        "中華人民共和国香港特別行政区"
+      ]
+    },
+    {
+      "sourceName": "Hungary",
+      "territoryCode": "HU",
+      "names": {
+        "en": "Hungary",
+        "zh": "匈牙利",
+        "ja": "ハンガリー"
+      },
+      "searchNames": ["Hungary", "HU", "匈牙利", "ハンガリー"]
+    },
+    {
+      "sourceName": "Iceland",
+      "territoryCode": "IS",
+      "names": {
+        "en": "Iceland",
+        "zh": "冰岛",
+        "ja": "アイスランド"
+      },
+      "searchNames": ["Iceland", "IS", "冰岛", "アイスランド"]
+    },
+    {
+      "sourceName": "India",
+      "territoryCode": "IN",
+      "names": {
+        "en": "India",
+        "zh": "印度",
+        "ja": "インド"
+      },
+      "searchNames": ["India", "IN", "印度", "インド"]
+    },
+    {
+      "sourceName": "Indonesia",
+      "territoryCode": "ID",
+      "names": {
+        "en": "Indonesia",
+        "zh": "印度尼西亚",
+        "ja": "インドネシア"
+      },
+      "searchNames": ["Indonesia", "ID", "印度尼西亚", "インドネシア"]
+    },
+    {
+      "sourceName": "Iran",
+      "territoryCode": "IR",
+      "names": {
+        "en": "Iran",
+        "zh": "伊朗",
+        "ja": "イラン"
+      },
+      "searchNames": ["Iran", "IR", "伊朗", "イラン"]
+    },
+    {
+      "sourceName": "Iraq",
+      "territoryCode": "IQ",
+      "names": {
+        "en": "Iraq",
+        "zh": "伊拉克",
+        "ja": "イラク"
+      },
+      "searchNames": ["Iraq", "IQ", "伊拉克", "イラク"]
+    },
+    {
+      "sourceName": "Ireland",
+      "territoryCode": "IE",
+      "names": {
+        "en": "Ireland",
+        "zh": "爱尔兰",
+        "ja": "アイルランド"
+      },
+      "searchNames": ["Ireland", "IE", "爱尔兰", "アイルランド"]
+    },
+    {
+      "sourceName": "Isle of Man",
+      "territoryCode": "IM",
+      "names": {
+        "en": "Isle of Man",
+        "zh": "马恩岛",
+        "ja": "マン島"
+      },
+      "searchNames": ["Isle of Man", "IM", "马恩岛", "マン島"]
+    },
+    {
+      "sourceName": "Israel",
+      "territoryCode": "IL",
+      "names": {
+        "en": "Israel",
+        "zh": "以色列",
+        "ja": "イスラエル"
+      },
+      "searchNames": ["Israel", "IL", "以色列", "イスラエル"]
+    },
+    {
+      "sourceName": "Italy",
+      "territoryCode": "IT",
+      "names": {
+        "en": "Italy",
+        "zh": "意大利",
+        "ja": "イタリア"
+      },
+      "searchNames": ["Italy", "IT", "意大利", "イタリア"]
+    },
+    {
+      "sourceName": "Ivory Coast",
+      "territoryCode": "CI",
+      "names": {
+        "en": "Côte d’Ivoire",
+        "zh": "科特迪瓦",
+        "ja": "コートジボワール"
+      },
+      "searchNames": ["Ivory Coast", "CI", "Côte d’Ivoire", "科特迪瓦", "コートジボワール"]
+    },
+    {
+      "sourceName": "Jamaica",
+      "territoryCode": "JM",
+      "names": {
+        "en": "Jamaica",
+        "zh": "牙买加",
+        "ja": "ジャマイカ"
+      },
+      "searchNames": ["Jamaica", "JM", "牙买加", "ジャマイカ"]
+    },
+    {
+      "sourceName": "Japan",
+      "territoryCode": "JP",
+      "names": {
+        "en": "Japan",
+        "zh": "日本",
+        "ja": "日本"
+      },
+      "searchNames": ["Japan", "JP", "日本"]
+    },
+    {
+      "sourceName": "Jersey",
+      "territoryCode": "JE",
+      "names": {
+        "en": "Jersey",
+        "zh": "泽西岛",
+        "ja": "ジャージー"
+      },
+      "searchNames": ["Jersey", "JE", "泽西岛", "ジャージー"]
+    },
+    {
+      "sourceName": "Jordan",
+      "territoryCode": "JO",
+      "names": {
+        "en": "Jordan",
+        "zh": "约旦",
+        "ja": "ヨルダン"
+      },
+      "searchNames": ["Jordan", "JO", "约旦", "ヨルダン"]
+    },
+    {
+      "sourceName": "Kazakhstan",
+      "territoryCode": "KZ",
+      "names": {
+        "en": "Kazakhstan",
+        "zh": "哈萨克斯坦",
+        "ja": "カザフスタン"
+      },
+      "searchNames": ["Kazakhstan", "KZ", "哈萨克斯坦", "カザフスタン"]
+    },
+    {
+      "sourceName": "Kenya",
+      "territoryCode": "KE",
+      "names": {
+        "en": "Kenya",
+        "zh": "肯尼亚",
+        "ja": "ケニア"
+      },
+      "searchNames": ["Kenya", "KE", "肯尼亚", "ケニア"]
+    },
+    {
+      "sourceName": "Kiribati",
+      "territoryCode": "KI",
+      "names": {
+        "en": "Kiribati",
+        "zh": "基里巴斯",
+        "ja": "キリバス"
+      },
+      "searchNames": ["Kiribati", "KI", "基里巴斯", "キリバス"]
+    },
+    {
+      "sourceName": "Kosovo",
+      "territoryCode": "XK",
+      "names": {
+        "en": "Kosovo",
+        "zh": "科索沃",
+        "ja": "コソボ"
+      },
+      "searchNames": ["Kosovo", "XK", "科索沃", "コソボ"]
+    },
+    {
+      "sourceName": "Kuwait",
+      "territoryCode": "KW",
+      "names": {
+        "en": "Kuwait",
+        "zh": "科威特",
+        "ja": "クウェート"
+      },
+      "searchNames": ["Kuwait", "KW", "科威特", "クウェート"]
+    },
+    {
+      "sourceName": "Kyrgyzstan",
+      "territoryCode": "KG",
+      "names": {
+        "en": "Kyrgyzstan",
+        "zh": "吉尔吉斯斯坦",
+        "ja": "キルギス"
+      },
+      "searchNames": ["Kyrgyzstan", "KG", "吉尔吉斯斯坦", "キルギス"]
+    },
+    {
+      "sourceName": "Laos",
+      "territoryCode": "LA",
+      "names": {
+        "en": "Laos",
+        "zh": "老挝",
+        "ja": "ラオス"
+      },
+      "searchNames": ["Laos", "LA", "老挝", "ラオス"]
+    },
+    {
+      "sourceName": "Latvia",
+      "territoryCode": "LV",
+      "names": {
+        "en": "Latvia",
+        "zh": "拉脱维亚",
+        "ja": "ラトビア"
+      },
+      "searchNames": ["Latvia", "LV", "拉脱维亚", "ラトビア"]
+    },
+    {
+      "sourceName": "Lebanon",
+      "territoryCode": "LB",
+      "names": {
+        "en": "Lebanon",
+        "zh": "黎巴嫩",
+        "ja": "レバノン"
+      },
+      "searchNames": ["Lebanon", "LB", "黎巴嫩", "レバノン"]
+    },
+    {
+      "sourceName": "Lesotho",
+      "territoryCode": "LS",
+      "names": {
+        "en": "Lesotho",
+        "zh": "莱索托",
+        "ja": "レソト"
+      },
+      "searchNames": ["Lesotho", "LS", "莱索托", "レソト"]
+    },
+    {
+      "sourceName": "Liberia",
+      "territoryCode": "LR",
+      "names": {
+        "en": "Liberia",
+        "zh": "利比里亚",
+        "ja": "リベリア"
+      },
+      "searchNames": ["Liberia", "LR", "利比里亚", "リベリア"]
+    },
+    {
+      "sourceName": "Libya",
+      "territoryCode": "LY",
+      "names": {
+        "en": "Libya",
+        "zh": "利比亚",
+        "ja": "リビア"
+      },
+      "searchNames": ["Libya", "LY", "利比亚", "リビア"]
+    },
+    {
+      "sourceName": "Liechtenstein",
+      "territoryCode": "LI",
+      "names": {
+        "en": "Liechtenstein",
+        "zh": "列支敦士登",
+        "ja": "リヒテンシュタイン"
+      },
+      "searchNames": ["Liechtenstein", "LI", "列支敦士登", "リヒテンシュタイン"]
+    },
+    {
+      "sourceName": "Lithuania",
+      "territoryCode": "LT",
+      "names": {
+        "en": "Lithuania",
+        "zh": "立陶宛",
+        "ja": "リトアニア"
+      },
+      "searchNames": ["Lithuania", "LT", "立陶宛", "リトアニア"]
+    },
+    {
+      "sourceName": "Luxembourg",
+      "territoryCode": "LU",
+      "names": {
+        "en": "Luxembourg",
+        "zh": "卢森堡",
+        "ja": "ルクセンブルク"
+      },
+      "searchNames": ["Luxembourg", "LU", "卢森堡", "ルクセンブルク"]
+    },
+    {
+      "sourceName": "Macao",
+      "territoryCode": "MO",
+      "names": {
+        "en": "Macao SAR China",
+        "zh": "中国澳门特别行政区",
+        "ja": "中華人民共和国マカオ特別行政区"
+      },
+      "searchNames": [
+        "Macao",
+        "MO",
+        "Macao SAR China",
+        "中国澳门特别行政区",
+        "中華人民共和国マカオ特別行政区"
+      ]
+    },
+    {
+      "sourceName": "Madagascar",
+      "territoryCode": "MG",
+      "names": {
+        "en": "Madagascar",
+        "zh": "马达加斯加",
+        "ja": "マダガスカル"
+      },
+      "searchNames": ["Madagascar", "MG", "马达加斯加", "マダガスカル"]
+    },
+    {
+      "sourceName": "Malawi",
+      "territoryCode": "MW",
+      "names": {
+        "en": "Malawi",
+        "zh": "马拉维",
+        "ja": "マラウイ"
+      },
+      "searchNames": ["Malawi", "MW", "马拉维", "マラウイ"]
+    },
+    {
+      "sourceName": "Malaysia",
+      "territoryCode": "MY",
+      "names": {
+        "en": "Malaysia",
+        "zh": "马来西亚",
+        "ja": "マレーシア"
+      },
+      "searchNames": ["Malaysia", "MY", "马来西亚", "マレーシア"]
+    },
+    {
+      "sourceName": "Maldives",
+      "territoryCode": "MV",
+      "names": {
+        "en": "Maldives",
+        "zh": "马尔代夫",
+        "ja": "モルディブ"
+      },
+      "searchNames": ["Maldives", "MV", "马尔代夫", "モルディブ"]
+    },
+    {
+      "sourceName": "Mali",
+      "territoryCode": "ML",
+      "names": {
+        "en": "Mali",
+        "zh": "马里",
+        "ja": "マリ"
+      },
+      "searchNames": ["Mali", "ML", "马里", "マリ"]
+    },
+    {
+      "sourceName": "Malta",
+      "territoryCode": "MT",
+      "names": {
+        "en": "Malta",
+        "zh": "马耳他",
+        "ja": "マルタ"
+      },
+      "searchNames": ["Malta", "MT", "马耳他", "マルタ"]
+    },
+    {
+      "sourceName": "Marshall Islands",
+      "territoryCode": "MH",
+      "names": {
+        "en": "Marshall Islands",
+        "zh": "马绍尔群岛",
+        "ja": "マーシャル諸島"
+      },
+      "searchNames": ["Marshall Islands", "MH", "马绍尔群岛", "マーシャル諸島"]
+    },
+    {
+      "sourceName": "Martinique",
+      "territoryCode": "MQ",
+      "names": {
+        "en": "Martinique",
+        "zh": "马提尼克",
+        "ja": "マルティニーク"
+      },
+      "searchNames": ["Martinique", "MQ", "马提尼克", "マルティニーク"]
+    },
+    {
+      "sourceName": "Mauritania",
+      "territoryCode": "MR",
+      "names": {
+        "en": "Mauritania",
+        "zh": "毛里塔尼亚",
+        "ja": "モーリタニア"
+      },
+      "searchNames": ["Mauritania", "MR", "毛里塔尼亚", "モーリタニア"]
+    },
+    {
+      "sourceName": "Mauritius",
+      "territoryCode": "MU",
+      "names": {
+        "en": "Mauritius",
+        "zh": "毛里求斯",
+        "ja": "モーリシャス"
+      },
+      "searchNames": ["Mauritius", "MU", "毛里求斯", "モーリシャス"]
+    },
+    {
+      "sourceName": "Mayotte",
+      "territoryCode": "YT",
+      "names": {
+        "en": "Mayotte",
+        "zh": "马约特",
+        "ja": "マヨット"
+      },
+      "searchNames": ["Mayotte", "YT", "马约特", "マヨット"]
+    },
+    {
+      "sourceName": "Mexico",
+      "territoryCode": "MX",
+      "names": {
+        "en": "Mexico",
+        "zh": "墨西哥",
+        "ja": "メキシコ"
+      },
+      "searchNames": ["Mexico", "MX", "墨西哥", "メキシコ"]
+    },
+    {
+      "sourceName": "Micronesia",
+      "territoryCode": "FM",
+      "names": {
+        "en": "Micronesia",
+        "zh": "密克罗尼西亚",
+        "ja": "ミクロネシア連邦"
+      },
+      "searchNames": ["Micronesia", "FM", "密克罗尼西亚", "ミクロネシア連邦"]
+    },
+    {
+      "sourceName": "Moldova",
+      "territoryCode": "MD",
+      "names": {
+        "en": "Moldova",
+        "zh": "摩尔多瓦",
+        "ja": "モルドバ"
+      },
+      "searchNames": ["Moldova", "MD", "摩尔多瓦", "モルドバ"]
+    },
+    {
+      "sourceName": "Monaco",
+      "territoryCode": "MC",
+      "names": {
+        "en": "Monaco",
+        "zh": "摩纳哥",
+        "ja": "モナコ"
+      },
+      "searchNames": ["Monaco", "MC", "摩纳哥", "モナコ"]
+    },
+    {
+      "sourceName": "Mongolia",
+      "territoryCode": "MN",
+      "names": {
+        "en": "Mongolia",
+        "zh": "蒙古",
+        "ja": "モンゴル"
+      },
+      "searchNames": ["Mongolia", "MN", "蒙古", "モンゴル"]
+    },
+    {
+      "sourceName": "Montenegro",
+      "territoryCode": "ME",
+      "names": {
+        "en": "Montenegro",
+        "zh": "黑山",
+        "ja": "モンテネグロ"
+      },
+      "searchNames": ["Montenegro", "ME", "黑山", "モンテネグロ"]
+    },
+    {
+      "sourceName": "Montserrat",
+      "territoryCode": "MS",
+      "names": {
+        "en": "Montserrat",
+        "zh": "蒙特塞拉特",
+        "ja": "モントセラト"
+      },
+      "searchNames": ["Montserrat", "MS", "蒙特塞拉特", "モントセラト"]
+    },
+    {
+      "sourceName": "Morocco",
+      "territoryCode": "MA",
+      "names": {
+        "en": "Morocco",
+        "zh": "摩洛哥",
+        "ja": "モロッコ"
+      },
+      "searchNames": ["Morocco", "MA", "摩洛哥", "モロッコ"]
+    },
+    {
+      "sourceName": "Mozambique",
+      "territoryCode": "MZ",
+      "names": {
+        "en": "Mozambique",
+        "zh": "莫桑比克",
+        "ja": "モザンビーク"
+      },
+      "searchNames": ["Mozambique", "MZ", "莫桑比克", "モザンビーク"]
+    },
+    {
+      "sourceName": "Myanmar",
+      "territoryCode": "MM",
+      "names": {
+        "en": "Myanmar (Burma)",
+        "zh": "缅甸",
+        "ja": "ミャンマー (ビルマ)"
+      },
+      "searchNames": ["Myanmar", "MM", "Myanmar (Burma)", "缅甸", "ミャンマー (ビルマ)"]
+    },
+    {
+      "sourceName": "Namibia",
+      "territoryCode": "NA",
+      "names": {
+        "en": "Namibia",
+        "zh": "纳米比亚",
+        "ja": "ナミビア"
+      },
+      "searchNames": ["Namibia", "NA", "纳米比亚", "ナミビア"]
+    },
+    {
+      "sourceName": "Nauru",
+      "territoryCode": "NR",
+      "names": {
+        "en": "Nauru",
+        "zh": "瑙鲁",
+        "ja": "ナウル"
+      },
+      "searchNames": ["Nauru", "NR", "瑙鲁", "ナウル"]
+    },
+    {
+      "sourceName": "Nepal",
+      "territoryCode": "NP",
+      "names": {
+        "en": "Nepal",
+        "zh": "尼泊尔",
+        "ja": "ネパール"
+      },
+      "searchNames": ["Nepal", "NP", "尼泊尔", "ネパール"]
+    },
+    {
+      "sourceName": "New Caledonia",
+      "territoryCode": "NC",
+      "names": {
+        "en": "New Caledonia",
+        "zh": "新喀里多尼亚",
+        "ja": "ニューカレドニア"
+      },
+      "searchNames": ["New Caledonia", "NC", "新喀里多尼亚", "ニューカレドニア"]
+    },
+    {
+      "sourceName": "New Zealand",
+      "territoryCode": "NZ",
+      "names": {
+        "en": "New Zealand",
+        "zh": "新西兰",
+        "ja": "ニュージーランド"
+      },
+      "searchNames": ["New Zealand", "NZ", "新西兰", "ニュージーランド"]
+    },
+    {
+      "sourceName": "Nicaragua",
+      "territoryCode": "NI",
+      "names": {
+        "en": "Nicaragua",
+        "zh": "尼加拉瓜",
+        "ja": "ニカラグア"
+      },
+      "searchNames": ["Nicaragua", "NI", "尼加拉瓜", "ニカラグア"]
+    },
+    {
+      "sourceName": "Niger",
+      "territoryCode": "NE",
+      "names": {
+        "en": "Niger",
+        "zh": "尼日尔",
+        "ja": "ニジェール"
+      },
+      "searchNames": ["Niger", "NE", "尼日尔", "ニジェール"]
+    },
+    {
+      "sourceName": "Nigeria",
+      "territoryCode": "NG",
+      "names": {
+        "en": "Nigeria",
+        "zh": "尼日利亚",
+        "ja": "ナイジェリア"
+      },
+      "searchNames": ["Nigeria", "NG", "尼日利亚", "ナイジェリア"]
+    },
+    {
+      "sourceName": "Niue",
+      "territoryCode": "NU",
+      "names": {
+        "en": "Niue",
+        "zh": "纽埃",
+        "ja": "ニウエ"
+      },
+      "searchNames": ["Niue", "NU", "纽埃", "ニウエ"]
+    },
+    {
+      "sourceName": "Norfolk Island",
+      "territoryCode": "NF",
+      "names": {
+        "en": "Norfolk Island",
+        "zh": "诺福克岛",
+        "ja": "ノーフォーク島"
+      },
+      "searchNames": ["Norfolk Island", "NF", "诺福克岛", "ノーフォーク島"]
+    },
+    {
+      "sourceName": "North Korea",
+      "territoryCode": "KP",
+      "names": {
+        "en": "North Korea",
+        "zh": "朝鲜",
+        "ja": "北朝鮮"
+      },
+      "searchNames": ["North Korea", "KP", "朝鲜", "北朝鮮"]
+    },
+    {
+      "sourceName": "North Macedonia",
+      "territoryCode": "MK",
+      "names": {
+        "en": "North Macedonia",
+        "zh": "北马其顿",
+        "ja": "北マケドニア"
+      },
+      "searchNames": ["North Macedonia", "MK", "北马其顿", "北マケドニア"]
+    },
+    {
+      "sourceName": "Northern Mariana Islands",
+      "territoryCode": "MP",
+      "names": {
+        "en": "Northern Mariana Islands",
+        "zh": "北马里亚纳群岛",
+        "ja": "北マリアナ諸島"
+      },
+      "searchNames": ["Northern Mariana Islands", "MP", "北马里亚纳群岛", "北マリアナ諸島"]
+    },
+    {
+      "sourceName": "Norway",
+      "territoryCode": "NO",
+      "names": {
+        "en": "Norway",
+        "zh": "挪威",
+        "ja": "ノルウェー"
+      },
+      "searchNames": ["Norway", "NO", "挪威", "ノルウェー"]
+    },
+    {
+      "sourceName": "Oman",
+      "territoryCode": "OM",
+      "names": {
+        "en": "Oman",
+        "zh": "阿曼",
+        "ja": "オマーン"
+      },
+      "searchNames": ["Oman", "OM", "阿曼", "オマーン"]
+    },
+    {
+      "sourceName": "Pakistan",
+      "territoryCode": "PK",
+      "names": {
+        "en": "Pakistan",
+        "zh": "巴基斯坦",
+        "ja": "パキスタン"
+      },
+      "searchNames": ["Pakistan", "PK", "巴基斯坦", "パキスタン"]
+    },
+    {
+      "sourceName": "Palau",
+      "territoryCode": "PW",
+      "names": {
+        "en": "Palau",
+        "zh": "帕劳",
+        "ja": "パラオ"
+      },
+      "searchNames": ["Palau", "PW", "帕劳", "パラオ"]
+    },
+    {
+      "sourceName": "Palestinian Territory",
+      "territoryCode": "PS",
+      "names": {
+        "en": "Palestinian Territories",
+        "zh": "巴勒斯坦领土",
+        "ja": "パレスチナ自治区"
+      },
+      "searchNames": [
+        "Palestinian Territory",
+        "PS",
+        "Palestinian Territories",
+        "巴勒斯坦领土",
+        "パレスチナ自治区"
+      ]
+    },
+    {
+      "sourceName": "Panama",
+      "territoryCode": "PA",
+      "names": {
+        "en": "Panama",
+        "zh": "巴拿马",
+        "ja": "パナマ"
+      },
+      "searchNames": ["Panama", "PA", "巴拿马", "パナマ"]
+    },
+    {
+      "sourceName": "Papua New Guinea",
+      "territoryCode": "PG",
+      "names": {
+        "en": "Papua New Guinea",
+        "zh": "巴布亚新几内亚",
+        "ja": "パプアニューギニア"
+      },
+      "searchNames": ["Papua New Guinea", "PG", "巴布亚新几内亚", "パプアニューギニア"]
+    },
+    {
+      "sourceName": "Paraguay",
+      "territoryCode": "PY",
+      "names": {
+        "en": "Paraguay",
+        "zh": "巴拉圭",
+        "ja": "パラグアイ"
+      },
+      "searchNames": ["Paraguay", "PY", "巴拉圭", "パラグアイ"]
+    },
+    {
+      "sourceName": "Peru",
+      "territoryCode": "PE",
+      "names": {
+        "en": "Peru",
+        "zh": "秘鲁",
+        "ja": "ペルー"
+      },
+      "searchNames": ["Peru", "PE", "秘鲁", "ペルー"]
+    },
+    {
+      "sourceName": "Philippines",
+      "territoryCode": "PH",
+      "names": {
+        "en": "Philippines",
+        "zh": "菲律宾",
+        "ja": "フィリピン"
+      },
+      "searchNames": ["Philippines", "PH", "菲律宾", "フィリピン"]
+    },
+    {
+      "sourceName": "Pitcairn",
+      "territoryCode": "PN",
+      "names": {
+        "en": "Pitcairn Islands",
+        "zh": "皮特凯恩群岛",
+        "ja": "ピトケアン諸島"
+      },
+      "searchNames": ["Pitcairn", "PN", "Pitcairn Islands", "皮特凯恩群岛", "ピトケアン諸島"]
+    },
+    {
+      "sourceName": "Poland",
+      "territoryCode": "PL",
+      "names": {
+        "en": "Poland",
+        "zh": "波兰",
+        "ja": "ポーランド"
+      },
+      "searchNames": ["Poland", "PL", "波兰", "ポーランド"]
+    },
+    {
+      "sourceName": "Portugal",
+      "territoryCode": "PT",
+      "names": {
+        "en": "Portugal",
+        "zh": "葡萄牙",
+        "ja": "ポルトガル"
+      },
+      "searchNames": ["Portugal", "PT", "葡萄牙", "ポルトガル"]
+    },
+    {
+      "sourceName": "Puerto Rico",
+      "territoryCode": "PR",
+      "names": {
+        "en": "Puerto Rico",
+        "zh": "波多黎各",
+        "ja": "プエルトリコ"
+      },
+      "searchNames": ["Puerto Rico", "PR", "波多黎各", "プエルトリコ"]
+    },
+    {
+      "sourceName": "Qatar",
+      "territoryCode": "QA",
+      "names": {
+        "en": "Qatar",
+        "zh": "卡塔尔",
+        "ja": "カタール"
+      },
+      "searchNames": ["Qatar", "QA", "卡塔尔", "カタール"]
+    },
+    {
+      "sourceName": "Republic of the Congo",
+      "territoryCode": "CG",
+      "names": {
+        "en": "Congo - Brazzaville",
+        "zh": "刚果（布）",
+        "ja": "コンゴ共和国(ブラザビル)"
+      },
+      "searchNames": [
+        "Republic of the Congo",
+        "CG",
+        "Congo - Brazzaville",
+        "刚果（布）",
+        "コンゴ共和国(ブラザビル)"
+      ]
+    },
+    {
+      "sourceName": "Reunion",
+      "territoryCode": "RE",
+      "names": {
+        "en": "Réunion",
+        "zh": "留尼汪",
+        "ja": "レユニオン"
+      },
+      "searchNames": ["Reunion", "RE", "Réunion", "留尼汪", "レユニオン"]
+    },
+    {
+      "sourceName": "Romania",
+      "territoryCode": "RO",
+      "names": {
+        "en": "Romania",
+        "zh": "罗马尼亚",
+        "ja": "ルーマニア"
+      },
+      "searchNames": ["Romania", "RO", "罗马尼亚", "ルーマニア"]
+    },
+    {
+      "sourceName": "Russia",
+      "territoryCode": "RU",
+      "names": {
+        "en": "Russia",
+        "zh": "俄罗斯",
+        "ja": "ロシア"
+      },
+      "searchNames": ["Russia", "RU", "俄罗斯", "ロシア"]
+    },
+    {
+      "sourceName": "Rwanda",
+      "territoryCode": "RW",
+      "names": {
+        "en": "Rwanda",
+        "zh": "卢旺达",
+        "ja": "ルワンダ"
+      },
+      "searchNames": ["Rwanda", "RW", "卢旺达", "ルワンダ"]
+    },
+    {
+      "sourceName": "Saint Barthelemy",
+      "territoryCode": "BL",
+      "names": {
+        "en": "St. Barthélemy",
+        "zh": "圣巴泰勒米",
+        "ja": "サン・バルテルミー"
+      },
+      "searchNames": [
+        "Saint Barthelemy",
+        "BL",
+        "St. Barthélemy",
+        "圣巴泰勒米",
+        "サン・バルテルミー"
+      ]
+    },
+    {
+      "sourceName": "Saint Helena",
+      "territoryCode": "SH",
+      "names": {
+        "en": "St. Helena",
+        "zh": "圣赫勒拿",
+        "ja": "セントヘレナ"
+      },
+      "searchNames": ["Saint Helena", "SH", "St. Helena", "圣赫勒拿", "セントヘレナ"]
+    },
+    {
+      "sourceName": "Saint Kitts and Nevis",
+      "territoryCode": "KN",
+      "names": {
+        "en": "St. Kitts & Nevis",
+        "zh": "圣基茨和尼维斯",
+        "ja": "セントクリストファー・ネーヴィス"
+      },
+      "searchNames": [
+        "Saint Kitts and Nevis",
+        "KN",
+        "St. Kitts & Nevis",
+        "圣基茨和尼维斯",
+        "セントクリストファー・ネーヴィス"
+      ]
+    },
+    {
+      "sourceName": "Saint Lucia",
+      "territoryCode": "LC",
+      "names": {
+        "en": "St. Lucia",
+        "zh": "圣卢西亚",
+        "ja": "セントルシア"
+      },
+      "searchNames": ["Saint Lucia", "LC", "St. Lucia", "圣卢西亚", "セントルシア"]
+    },
+    {
+      "sourceName": "Saint Martin",
+      "territoryCode": "MF",
+      "names": {
+        "en": "St. Martin",
+        "zh": "法属圣马丁",
+        "ja": "サン・マルタン"
+      },
+      "searchNames": ["Saint Martin", "MF", "St. Martin", "法属圣马丁", "サン・マルタン"]
+    },
+    {
+      "sourceName": "Saint Pierre and Miquelon",
+      "territoryCode": "PM",
+      "names": {
+        "en": "St. Pierre & Miquelon",
+        "zh": "圣皮埃尔和密克隆群岛",
+        "ja": "サンピエール島・ミクロン島"
+      },
+      "searchNames": [
+        "Saint Pierre and Miquelon",
+        "PM",
+        "St. Pierre & Miquelon",
+        "圣皮埃尔和密克隆群岛",
+        "サンピエール島・ミクロン島"
+      ]
+    },
+    {
+      "sourceName": "Saint Vincent and the Grenadines",
+      "territoryCode": "VC",
+      "names": {
+        "en": "St. Vincent & Grenadines",
+        "zh": "圣文森特和格林纳丁斯",
+        "ja": "セントビンセント及びグレナディーン諸島"
+      },
+      "searchNames": [
+        "Saint Vincent and the Grenadines",
+        "VC",
+        "St. Vincent & Grenadines",
+        "圣文森特和格林纳丁斯",
+        "セントビンセント及びグレナディーン諸島"
+      ]
+    },
+    {
+      "sourceName": "Samoa",
+      "territoryCode": "WS",
+      "names": {
+        "en": "Samoa",
+        "zh": "萨摩亚",
+        "ja": "サモア"
+      },
+      "searchNames": ["Samoa", "WS", "萨摩亚", "サモア"]
+    },
+    {
+      "sourceName": "San Marino",
+      "territoryCode": "SM",
+      "names": {
+        "en": "San Marino",
+        "zh": "圣马力诺",
+        "ja": "サンマリノ"
+      },
+      "searchNames": ["San Marino", "SM", "圣马力诺", "サンマリノ"]
+    },
+    {
+      "sourceName": "Sao Tome and Principe",
+      "territoryCode": "ST",
+      "names": {
+        "en": "São Tomé & Príncipe",
+        "zh": "圣多美和普林西比",
+        "ja": "サントメ・プリンシペ"
+      },
+      "searchNames": [
+        "Sao Tome and Principe",
+        "ST",
+        "São Tomé & Príncipe",
+        "圣多美和普林西比",
+        "サントメ・プリンシペ"
+      ]
+    },
+    {
+      "sourceName": "Saudi Arabia",
+      "territoryCode": "SA",
+      "names": {
+        "en": "Saudi Arabia",
+        "zh": "沙特阿拉伯",
+        "ja": "サウジアラビア"
+      },
+      "searchNames": ["Saudi Arabia", "SA", "沙特阿拉伯", "サウジアラビア"]
+    },
+    {
+      "sourceName": "Senegal",
+      "territoryCode": "SN",
+      "names": {
+        "en": "Senegal",
+        "zh": "塞内加尔",
+        "ja": "セネガル"
+      },
+      "searchNames": ["Senegal", "SN", "塞内加尔", "セネガル"]
+    },
+    {
+      "sourceName": "Serbia",
+      "territoryCode": "RS",
+      "names": {
+        "en": "Serbia",
+        "zh": "塞尔维亚",
+        "ja": "セルビア"
+      },
+      "searchNames": ["Serbia", "RS", "塞尔维亚", "セルビア"]
+    },
+    {
+      "sourceName": "Seychelles",
+      "territoryCode": "SC",
+      "names": {
+        "en": "Seychelles",
+        "zh": "塞舌尔",
+        "ja": "セーシェル"
+      },
+      "searchNames": ["Seychelles", "SC", "塞舌尔", "セーシェル"]
+    },
+    {
+      "sourceName": "Sierra Leone",
+      "territoryCode": "SL",
+      "names": {
+        "en": "Sierra Leone",
+        "zh": "塞拉利昂",
+        "ja": "シエラレオネ"
+      },
+      "searchNames": ["Sierra Leone", "SL", "塞拉利昂", "シエラレオネ"]
+    },
+    {
+      "sourceName": "Singapore",
+      "territoryCode": "SG",
+      "names": {
+        "en": "Singapore",
+        "zh": "新加坡",
+        "ja": "シンガポール"
+      },
+      "searchNames": ["Singapore", "SG", "新加坡", "シンガポール"]
+    },
+    {
+      "sourceName": "Sint Maarten",
+      "territoryCode": "SX",
+      "names": {
+        "en": "Sint Maarten",
+        "zh": "荷属圣马丁",
+        "ja": "シント・マールテン"
+      },
+      "searchNames": ["Sint Maarten", "SX", "荷属圣马丁", "シント・マールテン"]
+    },
+    {
+      "sourceName": "Slovakia",
+      "territoryCode": "SK",
+      "names": {
+        "en": "Slovakia",
+        "zh": "斯洛伐克",
+        "ja": "スロバキア"
+      },
+      "searchNames": ["Slovakia", "SK", "斯洛伐克", "スロバキア"]
+    },
+    {
+      "sourceName": "Slovenia",
+      "territoryCode": "SI",
+      "names": {
+        "en": "Slovenia",
+        "zh": "斯洛文尼亚",
+        "ja": "スロベニア"
+      },
+      "searchNames": ["Slovenia", "SI", "斯洛文尼亚", "スロベニア"]
+    },
+    {
+      "sourceName": "Solomon Islands",
+      "territoryCode": "SB",
+      "names": {
+        "en": "Solomon Islands",
+        "zh": "所罗门群岛",
+        "ja": "ソロモン諸島"
+      },
+      "searchNames": ["Solomon Islands", "SB", "所罗门群岛", "ソロモン諸島"]
+    },
+    {
+      "sourceName": "Somalia",
+      "territoryCode": "SO",
+      "names": {
+        "en": "Somalia",
+        "zh": "索马里",
+        "ja": "ソマリア"
+      },
+      "searchNames": ["Somalia", "SO", "索马里", "ソマリア"]
+    },
+    {
+      "sourceName": "South Africa",
+      "territoryCode": "ZA",
+      "names": {
+        "en": "South Africa",
+        "zh": "南非",
+        "ja": "南アフリカ"
+      },
+      "searchNames": ["South Africa", "ZA", "南非", "南アフリカ"]
+    },
+    {
+      "sourceName": "South Georgia and the South Sandwich Islands",
+      "territoryCode": "GS",
+      "names": {
+        "en": "South Georgia & South Sandwich Islands",
+        "zh": "南乔治亚和南桑威奇群岛",
+        "ja": "サウスジョージア・サウスサンドウィッチ諸島"
+      },
+      "searchNames": [
+        "South Georgia and the South Sandwich Islands",
+        "GS",
+        "South Georgia & South Sandwich Islands",
+        "南乔治亚和南桑威奇群岛",
+        "サウスジョージア・サウスサンドウィッチ諸島"
+      ]
+    },
+    {
+      "sourceName": "South Korea",
+      "territoryCode": "KR",
+      "names": {
+        "en": "South Korea",
+        "zh": "韩国",
+        "ja": "韓国"
+      },
+      "searchNames": ["South Korea", "KR", "韩国", "韓国"]
+    },
+    {
+      "sourceName": "South Sudan",
+      "territoryCode": "SS",
+      "names": {
+        "en": "South Sudan",
+        "zh": "南苏丹",
+        "ja": "南スーダン"
+      },
+      "searchNames": ["South Sudan", "SS", "南苏丹", "南スーダン"]
+    },
+    {
+      "sourceName": "Spain",
+      "territoryCode": "ES",
+      "names": {
+        "en": "Spain",
+        "zh": "西班牙",
+        "ja": "スペイン"
+      },
+      "searchNames": ["Spain", "ES", "西班牙", "スペイン"]
+    },
+    {
+      "sourceName": "Sri Lanka",
+      "territoryCode": "LK",
+      "names": {
+        "en": "Sri Lanka",
+        "zh": "斯里兰卡",
+        "ja": "スリランカ"
+      },
+      "searchNames": ["Sri Lanka", "LK", "斯里兰卡", "スリランカ"]
+    },
+    {
+      "sourceName": "Sudan",
+      "territoryCode": "SD",
+      "names": {
+        "en": "Sudan",
+        "zh": "苏丹",
+        "ja": "スーダン"
+      },
+      "searchNames": ["Sudan", "SD", "苏丹", "スーダン"]
+    },
+    {
+      "sourceName": "Suriname",
+      "territoryCode": "SR",
+      "names": {
+        "en": "Suriname",
+        "zh": "苏里南",
+        "ja": "スリナム"
+      },
+      "searchNames": ["Suriname", "SR", "苏里南", "スリナム"]
+    },
+    {
+      "sourceName": "Svalbard and Jan Mayen",
+      "territoryCode": "SJ",
+      "names": {
+        "en": "Svalbard & Jan Mayen",
+        "zh": "斯瓦尔巴和扬马延",
+        "ja": "スバールバル諸島・ヤンマイエン島"
+      },
+      "searchNames": [
+        "Svalbard and Jan Mayen",
+        "SJ",
+        "Svalbard & Jan Mayen",
+        "斯瓦尔巴和扬马延",
+        "スバールバル諸島・ヤンマイエン島"
+      ]
+    },
+    {
+      "sourceName": "Sweden",
+      "territoryCode": "SE",
+      "names": {
+        "en": "Sweden",
+        "zh": "瑞典",
+        "ja": "スウェーデン"
+      },
+      "searchNames": ["Sweden", "SE", "瑞典", "スウェーデン"]
+    },
+    {
+      "sourceName": "Switzerland",
+      "territoryCode": "CH",
+      "names": {
+        "en": "Switzerland",
+        "zh": "瑞士",
+        "ja": "スイス"
+      },
+      "searchNames": ["Switzerland", "CH", "瑞士", "スイス"]
+    },
+    {
+      "sourceName": "Syria",
+      "territoryCode": "SY",
+      "names": {
+        "en": "Syria",
+        "zh": "叙利亚",
+        "ja": "シリア"
+      },
+      "searchNames": ["Syria", "SY", "叙利亚", "シリア"]
+    },
+    {
+      "sourceName": "Taiwan",
+      "territoryCode": "TW",
+      "names": {
+        "en": "Taiwan",
+        "zh": "台湾",
+        "ja": "台湾"
+      },
+      "searchNames": ["Taiwan", "TW", "台湾"]
+    },
+    {
+      "sourceName": "Tajikistan",
+      "territoryCode": "TJ",
+      "names": {
+        "en": "Tajikistan",
+        "zh": "塔吉克斯坦",
+        "ja": "タジキスタン"
+      },
+      "searchNames": ["Tajikistan", "TJ", "塔吉克斯坦", "タジキスタン"]
+    },
+    {
+      "sourceName": "Tanzania",
+      "territoryCode": "TZ",
+      "names": {
+        "en": "Tanzania",
+        "zh": "坦桑尼亚",
+        "ja": "タンザニア"
+      },
+      "searchNames": ["Tanzania", "TZ", "坦桑尼亚", "タンザニア"]
+    },
+    {
+      "sourceName": "Thailand",
+      "territoryCode": "TH",
+      "names": {
+        "en": "Thailand",
+        "zh": "泰国",
+        "ja": "タイ"
+      },
+      "searchNames": ["Thailand", "TH", "泰国", "タイ"]
+    },
+    {
+      "sourceName": "The Netherlands",
+      "territoryCode": "NL",
+      "names": {
+        "en": "Netherlands",
+        "zh": "荷兰",
+        "ja": "オランダ"
+      },
+      "searchNames": ["The Netherlands", "NL", "Netherlands", "荷兰", "オランダ"]
+    },
+    {
+      "sourceName": "Timor Leste",
+      "territoryCode": "TL",
+      "names": {
+        "en": "Timor-Leste",
+        "zh": "东帝汶",
+        "ja": "東ティモール"
+      },
+      "searchNames": ["Timor Leste", "TL", "Timor-Leste", "东帝汶", "東ティモール"]
+    },
+    {
+      "sourceName": "Togo",
+      "territoryCode": "TG",
+      "names": {
+        "en": "Togo",
+        "zh": "多哥",
+        "ja": "トーゴ"
+      },
+      "searchNames": ["Togo", "TG", "多哥", "トーゴ"]
+    },
+    {
+      "sourceName": "Tokelau",
+      "territoryCode": "TK",
+      "names": {
+        "en": "Tokelau",
+        "zh": "托克劳",
+        "ja": "トケラウ"
+      },
+      "searchNames": ["Tokelau", "TK", "托克劳", "トケラウ"]
+    },
+    {
+      "sourceName": "Tonga",
+      "territoryCode": "TO",
+      "names": {
+        "en": "Tonga",
+        "zh": "汤加",
+        "ja": "トンガ"
+      },
+      "searchNames": ["Tonga", "TO", "汤加", "トンガ"]
+    },
+    {
+      "sourceName": "Trinidad and Tobago",
+      "territoryCode": "TT",
+      "names": {
+        "en": "Trinidad & Tobago",
+        "zh": "特立尼达和多巴哥",
+        "ja": "トリニダード・トバゴ"
+      },
+      "searchNames": [
+        "Trinidad and Tobago",
+        "TT",
+        "Trinidad & Tobago",
+        "特立尼达和多巴哥",
+        "トリニダード・トバゴ"
+      ]
+    },
+    {
+      "sourceName": "Tunisia",
+      "territoryCode": "TN",
+      "names": {
+        "en": "Tunisia",
+        "zh": "突尼斯",
+        "ja": "チュニジア"
+      },
+      "searchNames": ["Tunisia", "TN", "突尼斯", "チュニジア"]
+    },
+    {
+      "sourceName": "Turkey",
+      "territoryCode": "TR",
+      "names": {
+        "en": "Türkiye",
+        "zh": "土耳其",
+        "ja": "トルコ"
+      },
+      "searchNames": ["Turkey", "TR", "Türkiye", "土耳其", "トルコ"]
+    },
+    {
+      "sourceName": "Turkmenistan",
+      "territoryCode": "TM",
+      "names": {
+        "en": "Turkmenistan",
+        "zh": "土库曼斯坦",
+        "ja": "トルクメニスタン"
+      },
+      "searchNames": ["Turkmenistan", "TM", "土库曼斯坦", "トルクメニスタン"]
+    },
+    {
+      "sourceName": "Turks and Caicos Islands",
+      "territoryCode": "TC",
+      "names": {
+        "en": "Turks & Caicos Islands",
+        "zh": "特克斯和凯科斯群岛",
+        "ja": "タークス・カイコス諸島"
+      },
+      "searchNames": [
+        "Turks and Caicos Islands",
+        "TC",
+        "Turks & Caicos Islands",
+        "特克斯和凯科斯群岛",
+        "タークス・カイコス諸島"
+      ]
+    },
+    {
+      "sourceName": "Tuvalu",
+      "territoryCode": "TV",
+      "names": {
+        "en": "Tuvalu",
+        "zh": "图瓦卢",
+        "ja": "ツバル"
+      },
+      "searchNames": ["Tuvalu", "TV", "图瓦卢", "ツバル"]
+    },
+    {
+      "sourceName": "U.S. Virgin Islands",
+      "territoryCode": "VI",
+      "names": {
+        "en": "U.S. Virgin Islands",
+        "zh": "美属维尔京群岛",
+        "ja": "米領ヴァージン諸島"
+      },
+      "searchNames": ["U.S. Virgin Islands", "VI", "美属维尔京群岛", "米領ヴァージン諸島"]
+    },
+    {
+      "sourceName": "Uganda",
+      "territoryCode": "UG",
+      "names": {
+        "en": "Uganda",
+        "zh": "乌干达",
+        "ja": "ウガンダ"
+      },
+      "searchNames": ["Uganda", "UG", "乌干达", "ウガンダ"]
+    },
+    {
+      "sourceName": "Ukraine",
+      "territoryCode": "UA",
+      "names": {
+        "en": "Ukraine",
+        "zh": "乌克兰",
+        "ja": "ウクライナ"
+      },
+      "searchNames": ["Ukraine", "UA", "乌克兰", "ウクライナ"]
+    },
+    {
+      "sourceName": "United Arab Emirates",
+      "territoryCode": "AE",
+      "names": {
+        "en": "United Arab Emirates",
+        "zh": "阿拉伯联合酋长国",
+        "ja": "アラブ首長国連邦"
+      },
+      "searchNames": ["United Arab Emirates", "AE", "阿拉伯联合酋长国", "アラブ首長国連邦"]
+    },
+    {
+      "sourceName": "United Kingdom",
+      "territoryCode": "GB",
+      "names": {
+        "en": "United Kingdom",
+        "zh": "英国",
+        "ja": "イギリス"
+      },
+      "searchNames": ["United Kingdom", "GB", "英国", "イギリス"]
+    },
+    {
+      "sourceName": "United States",
+      "territoryCode": "US",
+      "names": {
+        "en": "United States",
+        "zh": "美国",
+        "ja": "アメリカ合衆国"
+      },
+      "searchNames": ["United States", "US", "美国", "アメリカ合衆国"]
+    },
+    {
+      "sourceName": "Uruguay",
+      "territoryCode": "UY",
+      "names": {
+        "en": "Uruguay",
+        "zh": "乌拉圭",
+        "ja": "ウルグアイ"
+      },
+      "searchNames": ["Uruguay", "UY", "乌拉圭", "ウルグアイ"]
+    },
+    {
+      "sourceName": "Uzbekistan",
+      "territoryCode": "UZ",
+      "names": {
+        "en": "Uzbekistan",
+        "zh": "乌兹别克斯坦",
+        "ja": "ウズベキスタン"
+      },
+      "searchNames": ["Uzbekistan", "UZ", "乌兹别克斯坦", "ウズベキスタン"]
+    },
+    {
+      "sourceName": "Vanuatu",
+      "territoryCode": "VU",
+      "names": {
+        "en": "Vanuatu",
+        "zh": "瓦努阿图",
+        "ja": "バヌアツ"
+      },
+      "searchNames": ["Vanuatu", "VU", "瓦努阿图", "バヌアツ"]
+    },
+    {
+      "sourceName": "Vatican",
+      "territoryCode": "VA",
+      "names": {
+        "en": "Vatican City",
+        "zh": "梵蒂冈",
+        "ja": "バチカン市国"
+      },
+      "searchNames": ["Vatican", "VA", "Vatican City", "梵蒂冈", "バチカン市国"]
+    },
+    {
+      "sourceName": "Venezuela",
+      "territoryCode": "VE",
+      "names": {
+        "en": "Venezuela",
+        "zh": "委内瑞拉",
+        "ja": "ベネズエラ"
+      },
+      "searchNames": ["Venezuela", "VE", "委内瑞拉", "ベネズエラ"]
+    },
+    {
+      "sourceName": "Vietnam",
+      "territoryCode": "VN",
+      "names": {
+        "en": "Vietnam",
+        "zh": "越南",
+        "ja": "ベトナム"
+      },
+      "searchNames": ["Vietnam", "VN", "越南", "ベトナム"]
+    },
+    {
+      "sourceName": "Wallis and Futuna",
+      "territoryCode": "WF",
+      "names": {
+        "en": "Wallis & Futuna",
+        "zh": "瓦利斯和富图纳",
+        "ja": "ウォリス・フツナ"
+      },
+      "searchNames": [
+        "Wallis and Futuna",
+        "WF",
+        "Wallis & Futuna",
+        "瓦利斯和富图纳",
+        "ウォリス・フツナ"
+      ]
+    },
+    {
+      "sourceName": "Western Sahara",
+      "territoryCode": "EH",
+      "names": {
+        "en": "Western Sahara",
+        "zh": "西撒哈拉",
+        "ja": "西サハラ"
+      },
+      "searchNames": ["Western Sahara", "EH", "西撒哈拉", "西サハラ"]
+    },
+    {
+      "sourceName": "Yemen",
+      "territoryCode": "YE",
+      "names": {
+        "en": "Yemen",
+        "zh": "也门",
+        "ja": "イエメン"
+      },
+      "searchNames": ["Yemen", "YE", "也门", "イエメン"]
+    },
+    {
+      "sourceName": "Zambia",
+      "territoryCode": "ZM",
+      "names": {
+        "en": "Zambia",
+        "zh": "赞比亚",
+        "ja": "ザンビア"
+      },
+      "searchNames": ["Zambia", "ZM", "赞比亚", "ザンビア"]
+    },
+    {
+      "sourceName": "Zimbabwe",
+      "territoryCode": "ZW",
+      "names": {
+        "en": "Zimbabwe",
+        "zh": "津巴布韦",
+        "ja": "ジンバブエ"
+      },
+      "searchNames": ["Zimbabwe", "ZW", "津巴布韦", "ジンバブエ"]
+    }
+  ]
+}

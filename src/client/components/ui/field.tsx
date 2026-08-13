@@ -7,6 +7,7 @@ export function Field({
   hint,
   error,
   icon,
+  required = false,
   children,
   className,
   hintDisplay = "below"
@@ -15,6 +16,7 @@ export function Field({
   hint?: string;
   error?: string;
   icon?: ReactNode;
+  required?: boolean;
   children: ReactNode;
   className?: string;
   hintDisplay?: "below" | "tooltip";
@@ -25,6 +27,11 @@ export function Field({
         <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[1.1px] text-muted">
           {icon ? <span className="text-gold-dim [&_svg]:size-4">{icon}</span> : null}
           <span>{label}</span>
+          {required ? (
+            <span aria-hidden="true" className="text-[13px] leading-none text-gold-light">
+              *
+            </span>
+          ) : null}
           {hint && hintDisplay === "tooltip" ? <FieldHint text={hint} /> : null}
         </div>
       ) : null}

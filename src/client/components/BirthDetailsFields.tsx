@@ -5,7 +5,6 @@ import { useI18n } from "../i18n/provider";
 import {
   OPTIONAL_GENDER_OPTIONS,
   TIME_PRECISION_OPTIONS,
-  TIME_SOURCE_OPTIONS,
   type BirthDetailsErrors,
   type BirthSelectOption
 } from "../lib/birth-details";
@@ -127,41 +126,6 @@ export function BirthTimePrecisionField({
   );
 }
 
-export function BirthTimeSourceField({
-  value,
-  error,
-  onChange
-}: {
-  value: string;
-  error?: string;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useI18n();
-
-  return (
-    <Field
-      label={t("intake.source.label")}
-      hint={t("intake.source.hint")}
-      hintDisplay="below"
-      className="mb-0"
-      error={error}
-    >
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger aria-invalid={Boolean(error)}>
-          <SelectValue placeholder={t("intake.source.placeholder")} />
-        </SelectTrigger>
-        <SelectContent>
-          {TIME_SOURCE_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {labelForOption(option, t)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
-  );
-}
-
 export function BirthPlaceField({
   value,
   error,
@@ -185,9 +149,13 @@ export function BirthPlaceField({
 
 export function BirthNameField({
   value,
+  error,
+  required = false,
   onChange
 }: {
   value: string;
+  error?: string;
+  required?: boolean;
   onChange: (value: string) => void;
 }) {
   const { t } = useI18n();
@@ -198,9 +166,15 @@ export function BirthNameField({
       hint={t("intake.name.hint")}
       hintDisplay="tooltip"
       className="mb-0"
+      error={error}
+      required={required}
     >
       <Input
         value={value}
+        required={required}
+        aria-invalid={Boolean(error)}
+        autoComplete="name"
+        maxLength={120}
         onChange={(event) => onChange(event.target.value)}
         placeholder={t("intake.name.placeholder")}
       />
@@ -212,12 +186,14 @@ export function BirthGenderField({
   value,
   error,
   hint,
+  required = false,
   options = OPTIONAL_GENDER_OPTIONS,
   onChange
 }: {
   value: string;
   error?: string;
   hint?: string;
+  required?: boolean;
   options?: BirthSelectOption[];
   onChange: (value: string) => void;
 }) {
@@ -231,9 +207,10 @@ export function BirthGenderField({
       hintDisplay="tooltip"
       className="mb-0"
       error={error}
+      required={required}
     >
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger aria-invalid={Boolean(error)}>
+        <SelectTrigger aria-invalid={Boolean(error)} aria-required={required}>
           <SelectValue placeholder={t("intake.select")} />
         </SelectTrigger>
         <SelectContent>

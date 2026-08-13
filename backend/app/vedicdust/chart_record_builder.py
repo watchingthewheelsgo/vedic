@@ -108,6 +108,7 @@ class ChartRecordBuildInput:
     reading_session_id: str
     revision: int
     subject_id: str
+    display_name: str | None
     created_at: datetime
     locale: str
     birth_date: str
@@ -236,6 +237,7 @@ def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
         created_at=source.created_at,
         subject=SubjectContext(
             subject_id=source.subject_id,
+            display_name=source.display_name,
             locale=source.locale if source.locale in {"zh", "en", "ja"} else "en",
             current_age=_age_on(date.fromisoformat(source.birth_date), source.created_at.date()),
             life_stage=_life_stage(

@@ -108,11 +108,12 @@ UTC offset is validated against the zone, persisted in the Canonical Birth Momen
 and reused by Swiss Ephemeris, PyJHora adapters, independent-reference selection,
 and any later rectified chart revision.
 
-The stated precision controls the search radius. The time source is retained as
-provenance for audit and conversation context, but it does not narrow or widen
-the candidate window and never shifts the reported time. A hospital record,
-certificate, and family memory can all contain human recording error; VedicDust
-does not impose an unvalidated reliability hierarchy between them.
+The stated precision controls the search radius. The intake does not ask users
+to classify where the remembered time came from: hospital records, certificates,
+and family memory can all contain human recording error, and an unvalidated source
+label must not imply reliability. The system records `user_reported_time` only as
+internal provenance; it does not narrow or widen the candidate window, shift the
+reported time, or appear as an intake question.
 
 ### 2. Calculation qualification
 

@@ -1,7 +1,7 @@
 import type { BirthTimePrecision } from "../../shared/domain";
 
 export type BirthDetailsErrorKey =
-  "birthDate" | "birthTime" | "timePrecision" | "timeSource" | "place" | "gender";
+  "birthDate" | "birthTime" | "timePrecision" | "place" | "name" | "gender" | "relationship";
 
 export type BirthDetailsErrors = Partial<Record<BirthDetailsErrorKey, string>>;
 
@@ -28,12 +28,6 @@ export const TIME_PRECISION_OPTIONS: Array<BirthSelectOption<BirthTimePrecision>
     value: "unknown",
     labelKey: "intake.precision.unknown.label"
   }
-];
-
-export const TIME_SOURCE_OPTIONS: BirthSelectOption[] = [
-  { value: "出生证/医院记录", labelKey: "intake.source.certificate" },
-  { value: "家人明确记忆", labelKey: "intake.source.familyClear" },
-  { value: "家人大概回忆", labelKey: "intake.source.familyApprox" }
 ];
 
 export const REQUIRED_GENDER_OPTIONS: BirthSelectOption[] = [

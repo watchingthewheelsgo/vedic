@@ -6,6 +6,7 @@ import pytest
 
 from app.schemas import PrecisePlaceOption
 from app.services.place_service import PlaceService
+from app.settings import Settings
 
 
 def test_city_search_options_include_coordinates_and_timezone(
@@ -88,7 +89,11 @@ def test_china_catalog_localizes_labels_without_changing_stable_ids(tmp_path) ->
     geonames = tmp_path / "geonames.csv"
     geonames.write_text(
         "place_name,alternate_names,state,country,latitude,longitude,timezone_hours\n"
-        "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n",
+        "Shanghai,上海|Shanghai,Shanghai,China,31.22222,121.45806,8\n"
+        "Paris,Paris,Ile-de-France,France,48.8566,2.3522,1\n"
+        "Tokyo,Tokyo,Tokyo,Japan,35.6762,139.6503,9\n"
+        "Berlin,Berlin,Berlin,Germany,52.52,13.405,1\n"
+        "New York,New York,New York,United States,40.7128,-74.006,-5\n",
         encoding="utf-8",
     )
     service = PlaceService(SimpleNamespace(geonames_path=lambda: geonames))
@@ -99,6 +104,13 @@ def test_china_catalog_localizes_labels_without_changing_stable_ids(tmp_path) ->
     assert next(option for option in zh_country if option.value == "China").label == "中国"
     assert next(option for option in en_country if option.value == "China").label == "China"
     assert next(option for option in ja_country if option.value == "China").label == "中国"
+    assert next(option for option in zh_country if option.value == "France").label == "法国"
+    assert next(option for option in zh_country if option.value == "Japan").label == "日本"
+    assert next(option for option in zh_country if option.value == "United States").label == "美国"
+    assert next(option for option in ja_country if option.value == "France").label == "フランス"
+
+    zh_germany = service.search("country", query="德国", locale="zh", limit=500).options
+    assert [option.value for option in zh_germany] == ["Germany"]
 
     zh_region = service.search("region", country="China", query="", locale="zh", limit=80).options[
         0
@@ -119,6 +131,12 @@ def test_china_catalog_localizes_labels_without_changing_stable_ids(tmp_path) ->
     en_pudong = next(option for option in en_units if option.value == "CN-310115")
     assert zh_pudong.label == "浦东新区"
     assert en_pudong.label == "Pudong (浦东新区)"
+
+
+def test_country_name_catalog_covers_the_runtime_geonames_dataset() -> None:
+    service = PlaceService(Settings())
+
+    assert set(service.country_counts) == set(service.country_names)
 
 
 def test_china_catalog_city_id_resolves_for_chart_calculation(

@@ -79,6 +79,7 @@ type NavState = { name?: string; birth?: BirthInput; concern?: string } | null;
 const CHART_RECORD_JSON = "chart_record.json";
 
 type BirthInfo = {
+  name: string;
   date: string;
   time: string;
   place: string;
@@ -87,7 +88,6 @@ type BirthInfo = {
   gender: string;
   relationship: string;
   timePrecision: string;
-  timeSource: string;
   effectivePrecision: string;
   concern: string;
 };
@@ -382,13 +382,6 @@ const PRECISION_LABELS: Record<string, string> = {
   未知出生时间: "Unknown"
 };
 
-const TIME_SOURCE_LABELS: Record<string, string> = {
-  "出生证/医院记录": "Birth certificate / hospital record",
-  家人明确记忆: "Clear family memory",
-  家人大概回忆: "Approximate family memory",
-  未追问: "Not asked"
-};
-
 const GENDER_LABELS: Record<string, string> = {
   女: "Female",
   男: "Male",
@@ -399,6 +392,8 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
   单身: "Single",
   恋爱中: "Dating / in a relationship",
   已婚: "Married",
+  分居或离异: "Separated / divorced",
+  丧偶: "Widowed",
   未提供: "Prefer not to say"
 };
 
@@ -2514,13 +2509,13 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
   return (
     <>
       <div className="my-4">
+        <InfoRow label={t("session.birth.name")} value={birthInfo.name} />
         <InfoRow label={t("session.birth.date")} value={birthInfo.date} />
         <InfoRow label={t("session.birth.time")} value={birthInfo.time} />
         <InfoRow label={t("session.birth.place")} value={birthInfo.place} />
         <InfoRow label={t("session.birth.latitude")} value={birthInfo.latitude} />
         <InfoRow label={t("session.birth.longitude")} value={birthInfo.longitude} />
         <InfoRow label={t("session.birth.precision")} value={birthInfo.timePrecision} />
-        <InfoRow label={t("session.birth.source")} value={birthInfo.timeSource} />
         <InfoRow label={t("session.birth.effective")} value={birthInfo.effectivePrecision} />
         {birthInfo.gender && <InfoRow label={t("session.birth.gender")} value={birthInfo.gender} />}
         {birthInfo.relationship && (
@@ -5524,6 +5519,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
   const coordinates = resolveBirthCoordinates(session, navState?.birth?.birthPlace);
   if (navState?.birth) {
     return {
+      name: navState.birth.displayName || navState.name?.trim() || "—",
       date: navState.birth.birthDate,
       time: navState.birth.birthTime || "Unknown birth time",
       place: navState.birth.birthPlace,
@@ -5534,7 +5530,6 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
         RELATIONSHIP_LABELS[navState.birth.relationship] ?? navState.birth.relationship
       ),
       timePrecision: displayMappedValue(navState.birth.birthTimePrecision, PRECISION_LABELS),
-      timeSource: displayMappedValue(navState.birth.timeSource || "未追问", TIME_SOURCE_LABELS),
       effectivePrecision: reportedTimeWindowLabel(
         navState.birth.birthTimePrecision,
         navState.birth.reportedTimeWindow
@@ -5553,6 +5548,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
       session?.artifacts.find((a) => a.path === "bazi_report_context.md")?.content ?? "";
     const topic = context.match(/- Topic priority:\s*(.+)/)?.[1]?.trim() ?? "";
     return {
+      name: navState?.name?.trim() || "—",
       date: birthMatch?.[1] ?? birth,
       time: birthMatch?.[2] ?? "—",
       place: grabBazi("Place"),
@@ -5561,7 +5557,6 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
       gender: displayCollected(grabBazi("Gender")),
       relationship: displayCollected(context.match(/- Relationship:\s*(.+)/)?.[1]?.trim()),
       timePrecision: displayMappedValue(grabBazi("Time precision"), PRECISION_LABELS),
-      timeSource: "BaZi workshop",
       effectivePrecision: grabBazi("Solar time applied"),
       concern: topic === "[not provided]" ? "" : topic
     };
@@ -5573,8 +5568,6 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
   const inputContext = parseJsonArtifact(session, "birth_input_context.json");
   const timeContext = objectValue(inputContext, "time");
   const reportedWindow = objectValue(timeContext, "window");
-  const birthEvidence = Array.isArray(birthAssertion?.evidence) ? birthAssertion.evidence : [];
-  const firstEvidence = objectFromUnknown(birthEvidence[0]);
   const timeCertainty = String(birthAssertion?.timeCertainty ?? "unknown");
   const normalizedPrecision =
     {
@@ -5585,6 +5578,7 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     }[timeCertainty] ?? timeCertainty;
   const feedback = session?.artifacts.find((a) => a.path === "user_context.md")?.content ?? "";
   return {
+    name: String(subject?.displayName ?? "—"),
     date: String(birthAssertion?.localDate ?? "—"),
     time: String(birthAssertion?.reportedLocalTime ?? "—"),
     place: String(birthAssertion?.reportedPlace ?? "—"),
@@ -5593,7 +5587,6 @@ function resolveBirthInfo(navState: NavState, session: SkillSessionResponse | nu
     gender: displayCollected(String(subject?.genderContext ?? "")),
     relationship: displayCollected(String(subject?.relationshipStatus ?? "")),
     timePrecision: displayMappedValue(normalizedPrecision, PRECISION_LABELS),
-    timeSource: displayMappedValue(String(firstEvidence?.sourceLabel ?? ""), TIME_SOURCE_LABELS),
     effectivePrecision: reportedTimeWindowLabel(normalizedPrecision, reportedWindow),
     concern: extractConcern(feedback)
   };

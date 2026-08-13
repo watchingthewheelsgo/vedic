@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.services.skill_runtime import SkillRuntime
-from app.schemas import BirthInput, RectificationLifeEventsInput, SkillRunInput
+from app.schemas import BirthInput, RectificationLifeEventsInput, SkillBirthInput, SkillRunInput
 from app.vedicdust.models import (
     AstronomySnapshot,
     AuditFinding,
@@ -239,6 +239,37 @@ def test_reading_focus_is_not_rectification_evidence() -> None:
     assert input_data.reading_focus == "Career direction and relationship timing"
     assert input_data.life_events == ""
     assert input_data.reader_relationship == "parent"
+
+
+@pytest.mark.parametrize("field", ["displayName", "gender", "relationship"])
+def test_vedic_session_requires_basic_profile(field: str) -> None:
+    payload = {
+        "displayName": "Asha",
+        "birthDate": "1990-01-01",
+        "birthTime": "08:30",
+        "birthPlace": "Shanghai, China",
+        "birthTimePrecision": "approximate",
+        "gender": "女",
+        "relationship": "单身",
+    }
+    payload[field] = "   "
+
+    with pytest.raises(ValidationError, match="required profile field cannot be blank"):
+        SkillBirthInput.model_validate(payload)
+
+
+def test_vedic_session_uses_internal_time_source_when_user_does_not_supply_one() -> None:
+    input_data = SkillBirthInput(
+        displayName="Asha",
+        birthDate="1990-01-01",
+        birthTime="08:30",
+        birthPlace="Shanghai, China",
+        birthTimePrecision="approximate",
+        gender="女",
+        relationship="单身",
+    )
+
+    assert input_data.time_source == "user_reported_time"
 
 
 def test_rectification_decision_requires_reproducible_bounded_result() -> None:

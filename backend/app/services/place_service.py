@@ -90,6 +90,17 @@ class PlaceService:
         self.settings = settings
 
     @cached_property
+    def country_names(self) -> dict[str, dict[str, object]]:
+        catalog_path = Path(__file__).resolve().parents[1] / "data" / "country_names.json"
+        with catalog_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return {
+            str(item["sourceName"]): item
+            for item in payload.get("countries", [])
+            if isinstance(item, dict) and item.get("sourceName")
+        }
+
+    @cached_property
     def geonames_path(self) -> Path:
         return self.settings.geonames_path()
 
@@ -390,7 +401,9 @@ class PlaceService:
         items = []
         for country, count in self.country_counts.items():
             label = self._country_display_name(country, locale)
-            search_text = self.normalize("|".join((country, label)))
+            country_record = self.country_names.get(country, {})
+            search_names = country_record.get("searchNames", [country, label])
+            search_text = self.normalize("|".join(map(str, search_names)))
             score = self._label_score(label, search_text, variants)
             if score <= 0:
                 continue
@@ -569,11 +582,14 @@ class PlaceService:
             return full_name
         return f"{pinyin.title()} ({full_name})"
 
-    @staticmethod
-    def _country_display_name(country: str, locale: Literal["zh", "en", "ja"]) -> str:
-        if country != "China":
-            return country
-        return "China" if locale == "en" else "中国"
+    def _country_display_name(self, country: str, locale: Literal["zh", "en", "ja"]) -> str:
+        record = self.country_names.get(country)
+        names = record.get("names") if record else None
+        if isinstance(names, dict):
+            label = names.get(locale)
+            if isinstance(label, str) and label.strip():
+                return label
+        return country
 
     @staticmethod
     def _place_count_label(count: int, locale: Literal["zh", "en", "ja"]) -> str:

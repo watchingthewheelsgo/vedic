@@ -1140,6 +1140,7 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
             reading_session_id=f"session.{case['id']}",
             revision=1,
             subject_id=f"subject.{case['id']}",
+            display_name="Reference subject",
             created_at=datetime.now(timezone.utc),
             locale="en",
             birth_date=birth_date,
@@ -1182,6 +1183,7 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
             },
         )
     )
+    assert result.subject.display_name == "Reference subject"
 
     assert result.status == "ready_for_judgement"
     assert result.astronomy is not None
