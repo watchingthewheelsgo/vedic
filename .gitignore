@@ -10,6 +10,7 @@ backend/data/exports/*
 .playwright-cli/
 output/
 tmp/
+/vedic-landing-en-v*.html
 __pycache__
 *.pyc
 *.egg-info/

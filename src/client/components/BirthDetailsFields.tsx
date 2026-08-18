@@ -21,7 +21,8 @@ export function BirthDateTimeFields({
   timePrecision,
   errors = {},
   onBirthDateChange,
-  onBirthTimeChange
+  onBirthTimeChange,
+  onBirthTimePreviewChange
 }: {
   birthDate: Date | null;
   birthTime: Date | null;
@@ -29,6 +30,7 @@ export function BirthDateTimeFields({
   errors?: Pick<BirthDetailsErrors, "birthDate" | "birthTime">;
   onBirthDateChange: (date: Date | null) => void;
   onBirthTimeChange: (date: Date | null) => void;
+  onBirthTimePreviewChange?: (date: Date | null) => void;
 }) {
   const { locale, t } = useI18n();
   const calendarLocale = locale === "zh" ? zhCN : locale === "ja" ? ja : enUS;
@@ -74,6 +76,7 @@ export function BirthDateTimeFields({
           precision={timePrecision}
           invalid={Boolean(errors.birthTime)}
           onChange={onBirthTimeChange}
+          onPreviewChange={onBirthTimePreviewChange}
         />
       </Field>
     </div>

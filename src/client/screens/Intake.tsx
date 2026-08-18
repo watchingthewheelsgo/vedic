@@ -87,6 +87,7 @@ export function Intake() {
   const { formatDate, locale, t } = useI18n();
   const [birthDate, setBirthDate] = useState<Date | null>(null);
   const [birthTime, setBirthTime] = useState<Date | null>(null);
+  const [visualBirthTime, setVisualBirthTime] = useState<Date | null>(null);
   const [place, setPlace] = useState("");
   const [name, setName] = useState("");
   const [gender, setGender] = useState("");
@@ -147,11 +148,18 @@ export function Intake() {
       }`
     : "";
   const birthMomentDetail = timePrecision ? t(`intake.precision.${timePrecision}.label`) : "";
+  const visualBirthMomentSummary =
+    birthDate && visualBirthTime
+      ? `${formatDate(birthDate, { year: "numeric", month: "short", day: "numeric" })} · ${formatBirthTime(
+          visualBirthTime,
+          timePrecision || "approximate"
+        )}`
+      : "";
   const locationSummary = visualLocation?.label || place.split("|", 1)[0]?.trim() || "";
   const locationDetail = visualLocation
     ? t(visualLocation.exact ? "place.readout.status.precise" : "place.readout.status.city")
     : "";
-  const visualTimeReady = Boolean(birthDate) && birthTimeReady;
+  const visualTimeReady = Boolean(birthDate && visualBirthTime);
 
   async function onStart(event: FormEvent) {
     event.preventDefault();
@@ -224,13 +232,13 @@ export function Intake() {
         <BirthInputAstroVisual
           theme="cosmic"
           embedded
-          birthDate={visualTimeReady ? birthDate : null}
-          birthTime={birthTime}
+          birthDate={birthDate}
+          birthTime={visualBirthTime}
           timePrecision={timePrecision || "approximate"}
           location={visualLocation}
           timeTitle={t("intake.step.birth")}
           locationTitle={t("intake.step.location")}
-          timeLabel={visualTimeReady ? birthMomentSummary : undefined}
+          timeLabel={visualTimeReady ? visualBirthMomentSummary : undefined}
           locationLabel={visualLocation?.label || locationSummary || undefined}
         />
       }
@@ -260,10 +268,12 @@ export function Intake() {
             }}
             onBirthTimeChange={(date) => {
               setBirthTime(date);
+              setVisualBirthTime(date);
               setUtcOffsetSeconds(null);
               setAmbiguousTime(null);
               clearError(setErrors, "birthTime");
             }}
+            onBirthTimePreviewChange={setVisualBirthTime}
           />
 
           <BirthTimePrecisionField
@@ -273,7 +283,9 @@ export function Intake() {
               setTimePrecision(next);
               setUtcOffsetSeconds(null);
               setAmbiguousTime(null);
-              setBirthTime((current) => normalizeTimeForPrecision(current, next));
+              const normalized = normalizeTimeForPrecision(birthTime, next);
+              setBirthTime(normalized);
+              setVisualBirthTime(normalized);
               if (next === "unknown") clearError(setErrors, "birthTime");
               clearError(setErrors, "timePrecision");
             }}

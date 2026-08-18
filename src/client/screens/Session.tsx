@@ -1477,17 +1477,37 @@ export function Session() {
         </div>
       )}
 
-      <ReadingJourneyBar phases={productPhases} />
+      {!calibrationFocus && <ReadingJourneyBar phases={productPhases} />}
 
       {tab === "reading" ? (
         <div
           className={cn(
             "min-h-0 flex-1 bg-night",
             calibrationFocus
-              ? "overflow-y-auto px-4 py-6 sm:px-6 sm:py-9"
-              : "grid grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(440px,0.78fr)_minmax(520px,1fr)] lg:overflow-hidden 2xl:grid-cols-[560px_1fr]"
+              ? "relative isolate overflow-y-auto px-4 py-5 sm:px-6 sm:py-6"
+              : "grid grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(360px,430px)] lg:overflow-hidden"
           )}
         >
+          {calibrationFocus && (
+            <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden>
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(201,169,110,0.17),transparent_34%),radial-gradient(circle_at_82%_36%,rgba(105,72,142,0.16),transparent_34%),linear-gradient(180deg,#08070d_0%,#120d17_58%,#08070d_100%)]" />
+              <div className="absolute left-1/2 top-24 size-[680px] -translate-x-1/2 rounded-full border border-gold/8 shadow-[0_0_120px_rgba(201,169,110,0.08)]" />
+              <div className="absolute left-[14%] top-[22%] size-1 rounded-full bg-gold/45 shadow-[180px_110px_0_rgba(237,217,163,0.22),620px_70px_0_rgba(201,169,110,0.2),850px_260px_0_rgba(237,217,163,0.16)]" />
+            </div>
+          )}
+          {!calibrationFocus && (
+            <ReadingRevealPanel
+              session={session}
+              pipelineData={pipelineData}
+              selectedStageId={selectedStageId}
+              stages={pipelineStages}
+              baziMode={baziMode}
+              reportReady={complete && reportSections.length > 0}
+              reportSectionCount={reportSections.length}
+              onOpenReport={() => setTab("report")}
+              onSelectStage={setSelectedStageId}
+            />
+          )}
           <WorkshopDetailPanel
             selectedStageId={selectedStageId}
             stages={pipelineStages}
@@ -1517,17 +1537,8 @@ export function Session() {
             authLoaded={authLoaded}
             isSignedIn={Boolean(isSignedIn)}
             focused={calibrationFocus}
+            secondary={!calibrationFocus}
           />
-          {!calibrationFocus && (
-            <ReadingRevealPanel
-              session={session}
-              pipelineData={pipelineData}
-              selectedStageId={selectedStageId}
-              stages={pipelineStages}
-              baziMode={baziMode}
-              onSelectStage={setSelectedStageId}
-            />
-          )}
         </div>
       ) : complete && reportSections.length > 0 ? (
         <div className="report-doc grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_260px]">
@@ -1950,6 +1961,9 @@ function ReadingRevealPanel({
   selectedStageId,
   stages,
   baziMode,
+  reportReady,
+  reportSectionCount,
+  onOpenReport,
   onSelectStage
 }: {
   session: SkillSessionResponse | null;
@@ -1957,6 +1971,9 @@ function ReadingRevealPanel({
   selectedStageId: string;
   stages: StageDef[];
   baziMode: boolean;
+  reportReady: boolean;
+  reportSectionCount: number;
+  onOpenReport: () => void;
   onSelectStage: (stageId: string) => void;
 }) {
   const { t } = useI18n();
@@ -1987,9 +2004,21 @@ function ReadingRevealPanel({
   const caption = revealState?.caption ?? baziReveal?.caption ?? "";
   const progressLabel = revealState?.progressLabel ?? baziReveal?.progressLabel ?? "0/0";
   const percent = pipelineData?.percent ?? 0;
+  const readyCopy = {
+    eyebrow: t("session.reveal.readyEyebrow"),
+    title: t("session.reveal.readyTitle"),
+    body: t("session.reveal.readyBody", { count: reportSectionCount }),
+    cta: t("session.reveal.readyCta"),
+    detail: t("session.reveal.readyDetail")
+  };
 
   return (
-    <section className="relative min-w-0 overflow-hidden bg-night text-cream max-lg:min-h-[720px] lg:min-h-0">
+    <section
+      className={cn(
+        "relative min-w-0 overflow-hidden bg-night text-cream max-lg:min-h-[720px] lg:order-1 lg:min-h-0",
+        reportReady ? "order-1" : "order-2"
+      )}
+    >
       <div className="pointer-events-none absolute inset-0 opacity-90">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(201,169,110,0.16),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(237,217,163,0.08),transparent_28%),linear-gradient(180deg,rgba(15,12,9,0.78),rgba(28,22,16,0.96))]" />
         <div className="absolute left-1/2 top-[48%] h-[720px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold/10 shadow-[0_0_120px_rgba(201,169,110,0.08)]" />
@@ -1999,13 +2028,21 @@ function ReadingRevealPanel({
       <div className="relative z-[1] mx-auto flex min-h-full max-w-[760px] flex-col justify-center gap-6 px-5 py-8 sm:px-8 lg:h-full lg:overflow-y-auto">
         <div className="text-center">
           <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold/72">
-            {t("session.reveal.eyebrow")}
+            {reportReady ? readyCopy.eyebrow : t("session.reveal.eyebrow")}
           </div>
           <h2 className="mx-auto max-w-[620px] text-[25px] font-light leading-tight tracking-normal text-cream sm:text-[32px]">
-            {baziMode ? t("session.reveal.baziTitle") : t("session.reveal.title")}
+            {reportReady
+              ? readyCopy.title
+              : baziMode
+                ? t("session.reveal.baziTitle")
+                : t("session.reveal.title")}
           </h2>
           <p className="mx-auto mt-3 max-w-[520px] text-[13.5px] leading-[1.8] text-cream/62">
-            {baziMode ? t("session.reveal.baziBody") : t("session.reveal.body")}
+            {reportReady
+              ? readyCopy.body
+              : baziMode
+                ? t("session.reveal.baziBody")
+                : t("session.reveal.body")}
           </p>
         </div>
 
@@ -2061,6 +2098,21 @@ function ReadingRevealPanel({
             </div>
           </div>
         </div>
+
+        {reportReady && (
+          <div className="rounded-[18px] border border-gold/40 bg-gold/12 p-5 text-center shadow-[0_24px_80px_rgba(201,169,110,0.12)] backdrop-blur-xl">
+            <div className="mx-auto grid size-10 place-items-center rounded-full border border-gold/45 bg-gold text-night">
+              <CheckCircle2 className="size-5" aria-hidden="true" />
+            </div>
+            <p className="mx-auto mb-4 mt-3 max-w-[520px] text-[13px] leading-6 text-cream/62">
+              {readyCopy.detail}
+            </p>
+            <Button size="lg" onClick={onOpenReport}>
+              <BookOpen className="size-4" aria-hidden="true" />
+              {readyCopy.cta}
+            </Button>
+          </div>
+        )}
 
         {pipelineData && stageAgg && (
           <details className="rounded-[18px] border border-gold/18 bg-[rgba(16,12,22,0.46)] p-4 backdrop-blur-xl">
@@ -2255,7 +2307,8 @@ function WorkshopDetailPanel({
   baziRunning,
   authLoaded,
   isSignedIn,
-  focused = false
+  focused = false,
+  secondary = false
 }: {
   selectedStageId: string;
   stages: StageDef[];
@@ -2287,6 +2340,7 @@ function WorkshopDetailPanel({
   authLoaded: boolean;
   isSignedIn: boolean;
   focused?: boolean;
+  secondary?: boolean;
 }) {
   const { t } = useI18n();
   const stage = stages.find((item) => item.id === selectedStageId) ?? stages[0];
@@ -2298,16 +2352,32 @@ function WorkshopDetailPanel({
     : null;
   const status = stage.seed ? "done" : (stageAgg?.status ?? "pending");
   const focusedCalibration = focused && stage.id === "reader";
+  const rectificationState = focusedCalibration
+    ? parseRectificationState(
+        findArtifact(session, "chart_rectification_state.json")?.content ?? ""
+      )
+    : null;
 
   return (
     <aside
       className={cn(
-        "relative bg-cream px-6 py-7",
+        "relative px-6 py-7",
         focused
-          ? "mx-auto w-full max-w-[820px] rounded-[20px] border border-gold/22 shadow-[0_30px_100px_rgba(0,0,0,0.32)] sm:px-9 sm:py-9"
-          : "border-r border-gold/25 max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto"
+          ? focusedCalibration
+            ? "mx-auto w-full max-w-[780px] bg-transparent sm:px-8 sm:py-5"
+            : "mx-auto w-full max-w-[780px] rounded-[22px] border border-gold/24 bg-cream shadow-[0_32px_100px_rgba(0,0,0,0.42)] sm:px-8 sm:py-7"
+          : secondary
+            ? "order-1 border-t border-gold/20 bg-cream max-lg:border-t lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+            : "border-r border-gold/25 bg-cream max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto"
       )}
     >
+      {focusedCalibration && (
+        <RectificationFocusHeader
+          state={rectificationState}
+          birthInfo={birthInfo}
+          readerRunning={readerRunning || preparingRectificationInterview}
+        />
+      )}
       {!focused && !focusedCalibration && (
         <StageInfoPopover stageLabel={stageLabel} copy={copy} className="absolute right-6 top-7" />
       )}
@@ -2323,53 +2393,222 @@ function WorkshopDetailPanel({
         </>
       )}
 
-      {stage.id === "src" ? (
-        <BirthDetail birthInfo={birthInfo} />
-      ) : stage.id === "chart" ? (
-        <ChartFactsDetail session={session} status={status} birthInfo={birthInfo} />
-      ) : baziMode ? (
-        <BaziStageDetail
-          stageId={stage.id}
-          session={session}
-          nodes={nodes}
-          status={status}
-          baziRunning={baziRunning}
-          onStartBaziReport={onStartBaziReport}
-          authLoaded={authLoaded}
-          isSignedIn={isSignedIn}
-        />
-      ) : stage.id === "reader" ? (
-        <ReaderDetail
-          session={session}
-          readerRunning={readerRunning}
-          readerStartedAt={readerStartedAt}
-          now={now}
-          validationFeedback={validationFeedback}
-          submittingFeedback={submittingFeedback}
-          submittingLifeEvents={submittingLifeEvents}
-          rectificationClarification={rectificationClarification}
-          submittingRectificationConfirmation={submittingRectificationConfirmation}
-          preparingRectificationInterview={preparingRectificationInterview}
-          onValidationFeedbackChange={onValidationFeedbackChange}
-          onSubmitFeedback={onSubmitFeedback}
-          onSubmitLifeEvents={onSubmitLifeEvents}
-          onResetLifeEvents={onResetLifeEvents}
-          onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
-          onPrepareRectificationInterview={onPrepareRectificationInterview}
-          authLoaded={authLoaded}
-          isSignedIn={isSignedIn}
-        />
-      ) : (
-        <CoreStageDetail
-          stageId={stage.id}
-          session={session}
-          nodes={nodes}
-          status={status}
-          onResumeCoreReport={onResumeCoreReport}
-          coreInterrupted={coreInterrupted}
-        />
-      )}
+      <div
+        className={cn(
+          focusedCalibration &&
+            "rounded-[22px] border border-gold/24 bg-cream px-5 py-5 shadow-[0_32px_100px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.55)] sm:px-7"
+        )}
+      >
+        {stage.id === "src" ? (
+          <BirthDetail birthInfo={birthInfo} />
+        ) : stage.id === "chart" ? (
+          <ChartFactsDetail session={session} status={status} birthInfo={birthInfo} />
+        ) : baziMode ? (
+          <BaziStageDetail
+            stageId={stage.id}
+            session={session}
+            nodes={nodes}
+            status={status}
+            baziRunning={baziRunning}
+            onStartBaziReport={onStartBaziReport}
+            authLoaded={authLoaded}
+            isSignedIn={isSignedIn}
+          />
+        ) : stage.id === "reader" ? (
+          <ReaderDetail
+            session={session}
+            readerRunning={readerRunning}
+            readerStartedAt={readerStartedAt}
+            now={now}
+            validationFeedback={validationFeedback}
+            submittingFeedback={submittingFeedback}
+            submittingLifeEvents={submittingLifeEvents}
+            rectificationClarification={rectificationClarification}
+            submittingRectificationConfirmation={submittingRectificationConfirmation}
+            preparingRectificationInterview={preparingRectificationInterview}
+            onValidationFeedbackChange={onValidationFeedbackChange}
+            onSubmitFeedback={onSubmitFeedback}
+            onSubmitLifeEvents={onSubmitLifeEvents}
+            onResetLifeEvents={onResetLifeEvents}
+            onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
+            onPrepareRectificationInterview={onPrepareRectificationInterview}
+            authLoaded={authLoaded}
+            isSignedIn={isSignedIn}
+          />
+        ) : (
+          <CoreStageDetail
+            stageId={stage.id}
+            session={session}
+            nodes={nodes}
+            status={status}
+            onResumeCoreReport={onResumeCoreReport}
+            coreInterrupted={coreInterrupted}
+          />
+        )}
+      </div>
     </aside>
+  );
+}
+
+function compactBirthTimeRangeParts(
+  start?: string,
+  end?: string
+): { start: string; end?: string } | null {
+  if (!start) return null;
+
+  const parseLocalDateTime = (value: string) => {
+    const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/);
+    return match ? { date: match[1], time: match[2] } : null;
+  };
+  const startParts = parseLocalDateTime(start);
+
+  if (!end || end === start) return { start: startParts?.time ?? start };
+
+  const endParts = parseLocalDateTime(end);
+  if (startParts && endParts && startParts.date === endParts.date) {
+    return { start: startParts.time, end: endParts.time };
+  }
+  return { start, end };
+}
+
+function RectificationFocusHeader({
+  state,
+  birthInfo,
+  readerRunning
+}: {
+  state: RectificationState | null;
+  birthInfo: BirthInfo;
+  readerRunning: boolean;
+}) {
+  const { t } = useI18n();
+  const conclusion =
+    state?.status === "rectification_confirmation_required" &&
+    state.rectificationConclusion?.confirmation?.status !== "rejected"
+      ? state.rectificationConclusion
+      : undefined;
+  const corrected = conclusion?.correctedBirthTime;
+  const interval = conclusion?.selectedInterval;
+  const evidenceCount =
+    state?.selectionEvidence?.calibrationEpisodeCount ??
+    state?.selectionEvidence?.calibrationEventCount ??
+    state?.lifeEventLedger?.independentEpisodeCount ??
+    state?.lifeEventLedger?.events?.length ??
+    0;
+  const resolved = Boolean(conclusion);
+  const comparing =
+    readerRunning || state?.status === "collecting_evidence" || state?.status === "underdetermined";
+  const displayTime = corrected?.localTime || birthInfo.time || "—";
+  const compactInterval = compactBirthTimeRangeParts(interval?.start, interval?.end);
+  const displayRange = compactInterval
+    ? compactInterval.end
+      ? interval?.boundarySemantics === "start_inclusive_end_exclusive"
+        ? t("session.rectification.conclusion.rangeExclusive", compactInterval)
+        : `${compactInterval.start} – ${compactInterval.end}`
+      : compactInterval.start
+    : displayTime;
+  const copy = {
+    eyebrow: t("session.rectification.focus.eyebrow"),
+    title: t(
+      resolved
+        ? "session.rectification.focus.titleReady"
+        : "session.rectification.focus.titleCollecting"
+    ),
+    body: t(
+      resolved
+        ? "session.rectification.focus.bodyReady"
+        : "session.rectification.focus.bodyCollecting"
+    ),
+    dial: t(
+      resolved
+        ? "session.rectification.focus.dialReady"
+        : comparing
+          ? "session.rectification.focus.dialComparing"
+          : "session.rectification.focus.dialReported"
+    ),
+    evidence: t("session.rectification.focus.evidence", { count: evidenceCount }),
+    action: t(
+      resolved
+        ? "session.rectification.focus.actionReady"
+        : "session.rectification.focus.actionCollecting"
+    )
+  };
+
+  return (
+    <header className="mb-4 text-center text-cream" aria-live="polite">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-normal text-gold-light/70">
+        {copy.eyebrow}
+      </div>
+      <h1 className="mx-auto max-w-[620px] text-[26px] font-light leading-tight tracking-normal text-cream sm:text-[32px]">
+        {copy.title}
+      </h1>
+      <p className="mx-auto mt-2 max-w-[600px] text-[12.5px] leading-5 text-cream/58">
+        {copy.body}
+      </p>
+
+      <div className="relative mx-auto mt-2 h-[112px] w-full max-w-[380px] overflow-hidden">
+        <svg viewBox="0 0 420 180" className="absolute inset-0 size-full" aria-hidden>
+          <defs>
+            <linearGradient id="rectification-focus-gradient" x1="0" x2="1">
+              <stop offset="0" stopColor="rgba(201,169,110,0.18)" />
+              <stop offset="0.5" stopColor="rgba(237,217,163,0.95)" />
+              <stop offset="1" stopColor="rgba(201,169,110,0.18)" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M 38 154 A 172 132 0 0 1 382 154"
+            fill="none"
+            stroke="rgba(201,169,110,0.16)"
+            strokeWidth="9"
+            strokeLinecap="round"
+            pathLength="100"
+          />
+          <path
+            d="M 38 154 A 172 132 0 0 1 382 154"
+            fill="none"
+            stroke="url(#rectification-focus-gradient)"
+            strokeWidth="9"
+            strokeLinecap="round"
+            pathLength="100"
+            className={cn(
+              "transition-opacity duration-700",
+              resolved ? "opacity-100" : "opacity-45",
+              comparing && !resolved && "animate-pulse"
+            )}
+          />
+          {Array.from({ length: 13 }, (_, index) => {
+            const angle = Math.PI - (Math.PI * index) / 12;
+            const x1 = 210 + Math.cos(angle) * 156;
+            const y1 = 154 - Math.sin(angle) * 120;
+            const x2 = 210 + Math.cos(angle) * 166;
+            const y2 = 154 - Math.sin(angle) * 128;
+            return (
+              <line
+                key={index}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke="rgba(237,217,163,0.34)"
+                strokeWidth={index % 3 === 0 ? 2 : 1}
+              />
+            );
+          })}
+        </svg>
+        <div className="absolute inset-x-8 bottom-0 text-center">
+          <div className="text-[10px] uppercase tracking-normal text-gold-light/55">
+            {copy.dial}
+          </div>
+          <div className="mx-auto mt-0.5 max-w-[320px] break-words text-[15px] font-semibold leading-5 tabular-nums text-cream sm:text-base">
+            {displayRange}
+          </div>
+          <div className="mt-0.5 flex items-center justify-center gap-2 text-[10.5px] text-cream/42">
+            <span>{copy.evidence}</span>
+            <span aria-hidden>·</span>
+            <span>{copy.action}</span>
+          </div>
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -3976,6 +4215,16 @@ function RectificationConclusion({
     if (!local) return "—";
     return corrected?.timezoneId ? `${local} · ${corrected.timezoneId}` : local;
   };
+  const evidenceValue = t("session.rectification.conclusion.evidenceValue", {
+    events: evidence?.calibrationEpisodeCount ?? evidence?.calibrationEventCount ?? 0,
+    categories: evidence?.calibrationCategoryCount ?? 0,
+    holdout: evidence?.holdoutEpisodeCount ?? evidence?.holdoutEventCount ?? 0
+  });
+  const checkpointCopy = {
+    title: t("session.rectification.conclusion.checkpointTitle"),
+    body: t("session.rectification.conclusion.checkpointBody"),
+    technical: t("session.rectification.conclusion.technicalDetails")
+  };
 
   function submit() {
     if (!allAnswered || submitting) return;
@@ -3989,55 +4238,60 @@ function RectificationConclusion({
 
   return (
     <section className="mt-5 grid gap-5" aria-live="polite">
-      <header className="border-b border-gold/20 pb-4">
-        <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.5px] text-gold-dim">
-          <Clock3 className="size-4" />
+      <header className="text-center">
+        <div className="mx-auto mb-3 grid size-11 place-items-center rounded-full border border-gold/35 bg-gold/12 text-gold-dim">
+          <CheckCircle2 className="size-5" aria-hidden="true" />
+        </div>
+        <div className="mb-1 text-[11px] font-bold uppercase tracking-normal text-gold-dim">
           {t("session.rectification.conclusion.eyebrow")}
         </div>
-        <h3 className="m-0 text-xl font-semibold tracking-normal text-ink">
-          {t("session.rectification.conclusion.title")}
+        <h3 className="m-0 text-[24px] font-semibold leading-tight tracking-normal text-ink">
+          {checkpointCopy.title}
         </h3>
-        <p className="m-0 mt-2 text-[13px] leading-6 text-body">
-          {t("session.rectification.conclusion.body")}
+        <p className="mx-auto mb-0 mt-2 max-w-[540px] text-[13px] leading-6 text-body">
+          {checkpointCopy.body}
         </p>
       </header>
 
-      <section className="rounded-2xl border border-gold/35 bg-gold/10 p-5 shadow-[0_18px_50px_rgba(201,169,110,0.12)]">
-        <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.4px] text-gold-dim">
-          <CheckCircle2 className="size-4" />
-          {t("session.rectification.conclusion.resultTitle")}
+      <section className="overflow-hidden rounded-2xl border border-gold/35 bg-[linear-gradient(145deg,rgba(201,169,110,0.16),rgba(255,255,255,0.52))] shadow-[0_18px_50px_rgba(201,169,110,0.12)]">
+        <div className="border-b border-gold/20 px-5 py-5 text-center">
+          <div className="text-[10px] uppercase tracking-normal text-gold-dim">
+            {t("session.rectification.conclusion.correctedTime")}
+          </div>
+          <div className="mt-1 text-[22px] font-semibold leading-tight tracking-normal text-ink sm:text-[26px]">
+            {formatCorrectedTime()}
+          </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
-            <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
+        <div className="grid divide-y divide-gold/18 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <div className="px-4 py-4 text-center">
+            <div className="text-[10px] uppercase tracking-normal text-muted">
               {t("session.rectification.conclusion.range")}
             </div>
-            <div className="mt-1 text-sm font-semibold leading-6 text-ink">
+            <div className="mt-1 text-[13px] font-semibold leading-6 text-ink">
               {formatRange(interval?.start, interval?.end)}
             </div>
           </div>
-          <div className="rounded-xl border border-gold/20 bg-cream/70 px-3.5 py-3">
-            <div className="text-[10px] uppercase tracking-[1.3px] text-muted">
-              {t("session.rectification.conclusion.correctedTime")}
+          <div className="px-4 py-4 text-center">
+            <div className="text-[10px] uppercase tracking-normal text-muted">
+              {t("session.rectification.conclusion.confidence")}
             </div>
-            <div className="mt-1 text-sm font-semibold leading-6 text-ink">
-              {formatCorrectedTime()}
+            <div className="mt-1 text-[13px] font-semibold leading-6 text-ink">
+              {confidenceLabel}
             </div>
           </div>
         </div>
-        <div className="mt-3 grid gap-2 text-[12.5px] leading-6 text-body">
-          <InfoRow
-            label={t("session.rectification.conclusion.confidence")}
-            value={confidenceLabel}
+      </section>
+
+      <details className="group rounded-xl border border-gold/18 bg-cream-2 px-4 py-3.5">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg text-[12.5px] font-semibold text-body outline-none focus-visible:ring-4 focus-visible:ring-gold/15 [&::-webkit-details-marker]:hidden">
+          <span>{checkpointCopy.technical}</span>
+          <ChevronRight
+            className="size-4 text-gold-dim transition-transform group-open:rotate-90"
+            aria-hidden="true"
           />
-          <InfoRow
-            label={t("session.rectification.conclusion.evidence")}
-            value={t("session.rectification.conclusion.evidenceValue", {
-              events: evidence?.calibrationEpisodeCount ?? evidence?.calibrationEventCount ?? 0,
-              categories: evidence?.calibrationCategoryCount ?? 0,
-              holdout: evidence?.holdoutEpisodeCount ?? evidence?.holdoutEventCount ?? 0
-            })}
-          />
+        </summary>
+        <div className="mt-3 grid gap-2 border-t border-gold/15 pt-3 text-[12.5px] leading-6 text-body">
+          <InfoRow label={t("session.rectification.conclusion.evidence")} value={evidenceValue} />
           <InfoRow
             label={t("session.rectification.conclusion.methodStatus")}
             value={
@@ -4047,19 +4301,25 @@ function RectificationConclusion({
             }
           />
         </div>
-      </section>
+      </details>
 
       {evidenceHighlights.length > 0 && (
-        <section className="grid gap-3 border-y border-gold/18 py-4">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-[1.4px] text-gold-dim">
-              {t("session.rectification.conclusion.explanationTitle")}
-            </div>
-            <p className="m-0 mt-1 text-[12.5px] leading-6 text-body">
-              {t("session.rectification.conclusion.explanationBody")}
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+        <details className="group rounded-xl border border-gold/18 bg-white/35 px-4 py-3.5">
+          <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-lg outline-none focus-visible:ring-4 focus-visible:ring-gold/15 [&::-webkit-details-marker]:hidden">
+            <span>
+              <span className="block text-[12.5px] font-semibold text-body">
+                {t("session.rectification.conclusion.explanationTitle")}
+              </span>
+              <span className="mt-1 block text-[11.5px] font-normal leading-5 text-muted">
+                {t("session.rectification.conclusion.explanationBody")}
+              </span>
+            </span>
+            <ChevronRight
+              className="mt-0.5 size-4 shrink-0 text-gold-dim transition-transform group-open:rotate-90"
+              aria-hidden="true"
+            />
+          </summary>
+          <div className="mt-3 grid gap-2 border-t border-gold/15 pt-3 sm:grid-cols-2">
             {evidenceHighlights.map((highlight, index) => (
               <article
                 key={`${highlight.role}-${highlight.date}-${index}`}
@@ -4090,7 +4350,7 @@ function RectificationConclusion({
               </article>
             ))}
           </div>
-        </section>
+        </details>
       )}
 
       <section className="grid gap-3">

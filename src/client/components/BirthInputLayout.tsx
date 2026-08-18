@@ -16,7 +16,7 @@ export function BirthInputLayout({
   badge,
   steps,
   visual,
-  maxWidthClass = "max-w-[500px]",
+  maxWidthClass = "max-w-[560px]",
   children,
   onBack
 }: {
@@ -57,14 +57,14 @@ export function BirthInputLayout({
       <main className="relative z-10 min-h-[calc(100vh-64px)] px-5 py-5 sm:px-10 sm:py-6 xl:px-16">
         <div
           className={cn(
-            "mx-auto w-full max-w-[1200px]",
+            "mx-auto w-full max-w-[1240px]",
             visual &&
-              "lg:grid lg:grid-cols-[minmax(440px,500px)_minmax(0,620px)] lg:items-start lg:justify-center lg:gap-8"
+              "lg:grid lg:grid-cols-[minmax(480px,560px)_minmax(0,600px)] lg:items-start lg:justify-center lg:gap-6 xl:gap-8"
           )}
         >
           <section
             className={cn(
-              "birth-input-form-panel mx-auto w-full rounded-[18px] border p-5 backdrop-blur-[26px] sm:p-6 lg:mx-0 lg:min-h-[620px]",
+              "birth-input-form-panel mx-auto w-full rounded-[18px] border p-5 backdrop-blur-[26px] sm:p-6 lg:mx-0 lg:min-h-[660px]",
               "border-gold/25 bg-[rgba(16,12,22,0.44)] text-cream shadow-[0_30px_100px_rgba(0,0,0,0.50),0_0_60px_rgba(201,169,110,0.06),inset_0_1px_0_rgba(255,255,255,0.07)]",
               maxWidthClass
             )}
@@ -90,7 +90,7 @@ export function BirthInputLayout({
             {children}
           </section>
           {visual ? (
-            <aside className="birth-input-visual sticky top-[88px] hidden w-full max-w-[560px] min-w-0 -translate-x-4 self-start lg:block">
+            <aside className="birth-input-visual sticky top-[84px] hidden w-full max-w-[600px] min-w-0 self-start lg:block">
               {visual}
             </aside>
           ) : null}

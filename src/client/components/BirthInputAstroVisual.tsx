@@ -7,6 +7,20 @@ type AstroVisualPlacement = "default" | "right";
 
 const ZODIAC = "♈♉♊♋♌♍♎♏♐♑♒♓".split("");
 const TAU = Math.PI * 2;
+type ColorTriplet = [number, number, number];
+
+function timeOfDayPalette(hour: number): { inner: ColorTriplet; outer: ColorTriplet } {
+  if (hour >= 5 && hour < 8) return { inner: [96, 68, 42], outer: [18, 13, 10] };
+  if (hour >= 8 && hour < 17) return { inner: [120, 92, 50], outer: [20, 15, 10] };
+  if (hour >= 17 && hour < 20) return { inner: [110, 62, 34], outer: [20, 11, 8] };
+  return { inner: [36, 30, 26], outer: [10, 8, 7] };
+}
+
+function blendColor(current: ColorTriplet, target: ColorTriplet, amount: number): ColorTriplet {
+  return current.map((channel, index) =>
+    Math.round(channel + (target[index] - channel) * amount)
+  ) as ColorTriplet;
+}
 
 type Star = {
   x: number;
@@ -61,6 +75,16 @@ export function BirthInputAstroVisual({
   locationLabel?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const timeMotionRef = useRef({ angle: 0, velocity: 0, hasTarget: false });
+  const birthDateRef = useRef(birthDate);
+  const birthTimeRef = useRef(birthTime);
+  const timePrecisionRef = useRef(timePrecision);
+
+  useEffect(() => {
+    birthDateRef.current = birthDate;
+    birthTimeRef.current = birthTime;
+    timePrecisionRef.current = timePrecision;
+  }, [birthDate, birthTime, timePrecision]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -76,10 +100,14 @@ export function BirthInputAstroVisual({
     let dpr = 1;
     let last = performance.now();
     let time = 0;
+    let timeReveal = 0;
+    let phaseInner: ColorTriplet = [42, 32, 24];
+    let phaseOuter: ColorTriplet = [15, 12, 9];
     let stars: Star[] = [];
     let edges: Array<[Star, Star]> = [];
     const meteors: Meteor[] = [];
     const globePoints: Array<[number, number]> = [];
+    const timeMotion = timeMotionRef.current;
     let cityInfo: CityInfo | null = location;
     const motion = {
       spin: 0,
@@ -217,8 +245,61 @@ export function BirthInputAstroVisual({
       motion.panY += (motion.panYTarget - motion.panY) * ease;
       motion.warp += (0 - motion.warp) * Math.min(dt * 1.6, 1);
       motion.marker += (0 - motion.marker) * Math.min(dt * 1.1, 1);
+      const currentBirthDate = birthDateRef.current;
+      const currentBirthTime = birthTimeRef.current;
+      const currentTimePrecision = timePrecisionRef.current;
+      const timeIsKnown = Boolean(currentBirthTime && currentTimePrecision !== "unknown");
+      timeReveal += ((timeIsKnown ? 1 : 0) - timeReveal) * Math.min(dt * 4.8, 1);
+
+      let timeSeeking = false;
+      if (currentBirthTime && currentTimePrecision !== "unknown") {
+        const minutes = currentBirthTime.getHours() * 60 + currentBirthTime.getMinutes();
+        const targetAngle = (minutes / 1440) * TAU - Math.PI / 2;
+        if (!timeMotion.hasTarget) timeMotion.hasTarget = true;
+        let difference = targetAngle - timeMotion.angle;
+        difference = ((((difference + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+        timeMotion.velocity += difference * 38 * dt;
+        timeMotion.velocity *= Math.pow(0.05, dt);
+        timeMotion.angle += timeMotion.velocity * dt;
+        timeSeeking = Math.abs(timeMotion.velocity) > 0.04 || Math.abs(difference) > 0.01;
+
+        const palette = timeOfDayPalette(minutes / 60);
+        const paletteEase = Math.min(dt * 1.2, 1);
+        phaseInner = blendColor(phaseInner, palette.inner, paletteEase);
+        phaseOuter = blendColor(phaseOuter, palette.outer, paletteEase);
+      } else {
+        timeMotion.hasTarget = false;
+        timeMotion.velocity *= Math.pow(0.05, dt);
+        const paletteEase = Math.min(dt * 1.2, 1);
+        phaseInner = blendColor(phaseInner, [42, 32, 24], paletteEase);
+        phaseOuter = blendColor(phaseOuter, [15, 12, 9], paletteEase);
+      }
 
       ctx.clearRect(0, 0, width, height);
+
+      if (currentBirthDate) {
+        const phaseGlow = ctx.createRadialGradient(
+          centerX,
+          centerY,
+          ringRadius * 0.08,
+          centerX,
+          centerY,
+          ringRadius * 1.32
+        );
+        phaseGlow.addColorStop(
+          0,
+          `rgba(${phaseInner[0]},${phaseInner[1]},${phaseInner[2]},${dark ? 0.72 : 0.34})`
+        );
+        phaseGlow.addColorStop(
+          0.72,
+          `rgba(${phaseOuter[0]},${phaseOuter[1]},${phaseOuter[2]},${dark ? 0.62 : 0.24})`
+        );
+        phaseGlow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = phaseGlow;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, ringRadius * 1.32, 0, TAU);
+        ctx.fill();
+      }
 
       ctx.lineWidth = dpr * 0.5;
       for (const [a, b] of edges) {
@@ -304,11 +385,21 @@ export function BirthInputAstroVisual({
       ctx.stroke();
       ctx.restore();
 
-      if (birthDate) {
+      if (currentBirthDate) {
         const outerRadius = ringRadius * 1.08;
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.lineCap = "round";
+
+        const sunriseAngle = (6 / 24) * TAU - Math.PI / 2;
+        const sunsetAngle = (18 / 24) * TAU - Math.PI / 2;
+        ctx.strokeStyle = dark ? "rgba(237,217,163,0.17)" : "rgba(154,122,74,0.15)";
+        ctx.lineWidth = 0.8 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(sunriseAngle) * outerRadius, Math.sin(sunriseAngle) * outerRadius);
+        ctx.lineTo(Math.cos(sunsetAngle) * outerRadius, Math.sin(sunsetAngle) * outerRadius);
+        ctx.stroke();
+
         for (let hour = 0; hour < 24; hour += 1) {
           const angle = (hour / 24) * TAU - Math.PI / 2;
           const major = hour % 6 === 0;
@@ -323,20 +414,112 @@ export function BirthInputAstroVisual({
           ctx.stroke();
         }
 
-        if (birthTime && timePrecision !== "unknown") {
-          const minutes = birthTime.getHours() * 60 + birthTime.getMinutes();
-          const angle = (minutes / 1440) * TAU - Math.PI / 2;
-          const pulse = 0.72 + Math.sin(time * 2.2) * 0.12;
-          ctx.strokeStyle = `rgba(245,220,158,${pulse})`;
-          ctx.lineWidth = 1.5 * dpr;
+        if (currentBirthTime && currentTimePrecision !== "unknown") {
+          const minutes = currentBirthTime.getHours() * 60 + currentBirthTime.getMinutes();
+          const angle = timeMotion.angle;
+          const hour = minutes / 60;
+          const isDay = hour >= 6 && hour < 18;
+          const tone = isDay ? "245,220,158" : "190,190,205";
+          const pulse =
+            (timeSeeking ? 0.85 + Math.sin(time * 10) * 0.15 : 0.75 + Math.sin(time * 2.4) * 0.2) *
+            timeReveal;
+          const tipX = Math.cos(angle) * outerRadius * 0.98;
+          const tipY = Math.sin(angle) * outerRadius * 0.98;
+          const perpendicularX = -Math.sin(angle);
+          const perpendicularY = Math.cos(angle);
+
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const beamGlow = ctx.createLinearGradient(0, 0, tipX, tipY);
+          beamGlow.addColorStop(0, `rgba(${tone},0)`);
+          beamGlow.addColorStop(0.58, `rgba(${tone},${0.08 * pulse})`);
+          beamGlow.addColorStop(1, `rgba(${tone},${0.34 * pulse})`);
+          ctx.fillStyle = beamGlow;
           ctx.beginPath();
-          ctx.moveTo(Math.cos(angle) * globeRadius * 1.04, Math.sin(angle) * globeRadius * 1.04);
-          ctx.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
-          ctx.stroke();
-          ctx.fillStyle = "rgba(255,242,205,0.95)";
-          ctx.beginPath();
-          ctx.arc(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius, 3.2 * dpr, 0, TAU);
+          ctx.moveTo(perpendicularX * dpr, perpendicularY * dpr);
+          ctx.lineTo(tipX + perpendicularX * 8 * dpr, tipY + perpendicularY * 8 * dpr);
+          ctx.lineTo(tipX - perpendicularX * 8 * dpr, tipY - perpendicularY * 8 * dpr);
+          ctx.lineTo(-perpendicularX * dpr, -perpendicularY * dpr);
+          ctx.closePath();
           ctx.fill();
+          ctx.restore();
+
+          const beam = ctx.createLinearGradient(0, 0, tipX, tipY);
+          beam.addColorStop(0, `rgba(${tone},${0.04 * timeReveal})`);
+          beam.addColorStop(0.55, `rgba(${tone},${0.5 * pulse})`);
+          beam.addColorStop(1, `rgba(${tone},${pulse})`);
+          const hubWidth = 0.5 * dpr;
+          const tipWidth = (isDay ? 3.3 : 1.9) * dpr;
+          ctx.fillStyle = beam;
+          ctx.beginPath();
+          ctx.moveTo(perpendicularX * hubWidth, perpendicularY * hubWidth);
+          ctx.lineTo(tipX + perpendicularX * tipWidth, tipY + perpendicularY * tipWidth);
+          ctx.lineTo(tipX - perpendicularX * tipWidth, tipY - perpendicularY * tipWidth);
+          ctx.lineTo(-perpendicularX * hubWidth, -perpendicularY * hubWidth);
+          ctx.closePath();
+          ctx.fill();
+
+          for (let mote = 0; mote < 3; mote += 1) {
+            const progress = (time * 0.32 + mote / 3) % 1;
+            const alpha = Math.sin(progress * Math.PI) * 0.55 * pulse;
+            ctx.fillStyle = `rgba(${tone},${alpha})`;
+            ctx.beginPath();
+            ctx.arc(tipX * progress, tipY * progress, (1.2 - progress * 0.5) * dpr, 0, TAU);
+            ctx.fill();
+          }
+
+          ctx.strokeStyle = `rgba(237,217,163,${0.28 * timeReveal})`;
+          ctx.lineWidth = dpr;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-tipX * 0.24, -tipY * 0.24);
+          ctx.stroke();
+
+          ctx.fillStyle = `rgba(237,217,163,${0.96 * timeReveal})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, 3.2 * dpr, 0, TAU);
+          ctx.fill();
+
+          const haloRadius = (10 + Math.sin(time * 3) * 2) * dpr * timeReveal;
+          ctx.fillStyle = `rgba(${tone},${0.2 * pulse})`;
+          ctx.beginPath();
+          ctx.arc(tipX, tipY, haloRadius, 0, TAU);
+          ctx.fill();
+
+          ctx.save();
+          ctx.translate(tipX, tipY);
+          const iconRadius = 4.2 * dpr * timeReveal;
+          if (isDay) {
+            ctx.fillStyle = `rgba(${tone},${0.98 * timeReveal})`;
+            ctx.beginPath();
+            ctx.arc(0, 0, iconRadius, 0, TAU);
+            ctx.fill();
+            ctx.strokeStyle = `rgba(${tone},${0.8 * timeReveal})`;
+            ctx.lineWidth = dpr;
+            for (let ray = 0; ray < 8; ray += 1) {
+              const rayAngle = (ray / 8) * TAU + time * 0.45;
+              ctx.beginPath();
+              ctx.moveTo(
+                Math.cos(rayAngle) * iconRadius * 1.5,
+                Math.sin(rayAngle) * iconRadius * 1.5
+              );
+              ctx.lineTo(
+                Math.cos(rayAngle) * iconRadius * 2.2,
+                Math.sin(rayAngle) * iconRadius * 2.2
+              );
+              ctx.stroke();
+            }
+          } else {
+            ctx.fillStyle = `rgba(${tone},${0.98 * timeReveal})`;
+            ctx.beginPath();
+            ctx.arc(0, 0, iconRadius * 1.12, 0, TAU);
+            ctx.fill();
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.beginPath();
+            ctx.arc(iconRadius * 0.62, -iconRadius * 0.15, iconRadius, 0, TAU);
+            ctx.fill();
+          }
+          ctx.restore();
         }
         ctx.restore();
       }
@@ -464,7 +647,7 @@ export function BirthInputAstroVisual({
       window.removeEventListener("resize", rebuild);
       window.removeEventListener("birth-place-coordinates", onCity);
     };
-  }, [birthDate, birthTime, embedded, location, placement, theme, timePrecision]);
+  }, [embedded, location, placement, theme]);
 
   const canvas = (
     <canvas
@@ -494,7 +677,7 @@ export function BirthInputAstroVisual({
       <div className="pointer-events-none absolute inset-x-8 bottom-8 flex items-end justify-between gap-6">
         <VisualReadout
           icon={<Clock3 size={14} />}
-          active={Boolean(birthDate)}
+          active={Boolean(timeLabel)}
           label={timeTitle}
           value={timeLabel}
         />

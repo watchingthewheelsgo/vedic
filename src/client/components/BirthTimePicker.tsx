@@ -20,12 +20,14 @@ export function BirthTimePicker({
   value,
   precision,
   invalid,
-  onChange
+  onChange,
+  onPreviewChange
 }: {
   value: Date | null;
   precision: BirthTimePrecision;
   invalid: boolean;
   onChange: (date: Date | null) => void;
+  onPreviewChange?: (date: Date | null) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -38,8 +40,15 @@ export function BirthTimePicker({
 
   function changeOpen(nextOpen: boolean) {
     if (nextOpen) {
-      setDraftHour(selectedHour ?? 12);
-      setDraftMinute(selectedMinute ?? 0);
+      const nextHour = selectedHour ?? 12;
+      const nextMinute = selectedMinute ?? 0;
+      setDraftHour(nextHour);
+      setDraftMinute(nextMinute);
+      onPreviewChange?.(
+        makeBirthTime(nextHour, normalizeMinuteForPrecision(nextMinute, precision))
+      );
+    } else {
+      onPreviewChange?.(value);
     }
     setOpen(nextOpen);
   }
@@ -82,14 +91,24 @@ export function BirthTimePicker({
                 title={t("time.hour")}
                 values={HOURS}
                 value={draftHour}
-                onSelect={setDraftHour}
+                onSelect={(nextHour) => {
+                  setDraftHour(nextHour);
+                  onPreviewChange?.(
+                    makeBirthTime(nextHour, normalizeMinuteForPrecision(draftMinute, precision))
+                  );
+                }}
               />
               <div className="pt-6 text-lg font-medium text-gold-light/65">:</div>
               <TimeWheel
                 title={t("time.minute")}
                 values={minuteOptions}
                 value={precision === "part_of_day" ? 0 : draftMinute}
-                onSelect={setDraftMinute}
+                onSelect={(nextMinute) => {
+                  setDraftMinute(nextMinute);
+                  onPreviewChange?.(
+                    makeBirthTime(draftHour, normalizeMinuteForPrecision(nextMinute, precision))
+                  );
+                }}
                 disabled={precision === "part_of_day"}
               />
             </div>
@@ -99,6 +118,7 @@ export function BirthTimePicker({
                 type="button"
                 className="text-xs text-cream/50 transition hover:text-cream focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15"
                 onClick={() => {
+                  onPreviewChange?.(null);
                   onChange(null);
                   setOpen(false);
                 }}
@@ -109,9 +129,12 @@ export function BirthTimePicker({
                 type="button"
                 size="sm"
                 onClick={() => {
-                  onChange(
-                    makeBirthTime(draftHour, normalizeMinuteForPrecision(draftMinute, precision))
+                  const nextValue = makeBirthTime(
+                    draftHour,
+                    normalizeMinuteForPrecision(draftMinute, precision)
                   );
+                  onPreviewChange?.(nextValue);
+                  onChange(nextValue);
                   setOpen(false);
                 }}
               >
