@@ -64,7 +64,7 @@ export function BirthTimePicker({
             disabled={disabled}
             aria-invalid={invalid}
             className={cn(
-              "birth-input-field-shell w-full justify-start border-gold/30 bg-white/5 px-4 text-left font-normal text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-gold/50 hover:bg-white/10 data-[state=open]:border-gold data-[state=open]:bg-white/10 data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
+              "birth-input-field-shell w-full justify-start border-white/12 bg-white/[0.035] px-4 text-left font-normal text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:border-white/20 hover:bg-white/[0.055] data-[state=open]:border-gold/70 data-[state=open]:bg-white/[0.055] data-[state=open]:ring-2 data-[state=open]:ring-gold/15",
               invalid && "border-red bg-red/5 hover:border-red"
             )}
           >
@@ -98,7 +98,7 @@ export function BirthTimePicker({
                   );
                 }}
               />
-              <div className="pt-6 text-lg font-medium text-gold-light/65">:</div>
+              <div className="pt-6 text-lg font-medium text-cream/32">:</div>
               <TimeWheel
                 title={t("time.minute")}
                 values={minuteOptions}
@@ -207,18 +207,18 @@ function TimeWheel({
   return (
     <div className={cn("min-w-0", disabled && "opacity-45")}>
       <div className="mb-1.5 text-center text-[11px] font-medium text-muted">{title}</div>
-      <div className="relative h-[210px] overflow-hidden rounded-[10px] border border-gold/20 bg-black/20">
+      <div className="relative h-[210px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-black/20">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-1 top-[84px] z-10 h-[42px] rounded-md border-y border-gold/35 bg-gold/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+          className="pointer-events-none absolute inset-x-1 top-[84px] z-10 h-[42px] rounded-[6px] border-y border-gold/30 bg-gold/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[72px] bg-gradient-to-b from-[rgba(16,12,22,0.98)] to-transparent"
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[72px] bg-gradient-to-b from-[#151312] to-transparent"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[72px] bg-gradient-to-t from-[rgba(16,12,22,0.98)] to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[72px] bg-gradient-to-t from-[#151312] to-transparent"
         />
         <div
           ref={viewportRef}

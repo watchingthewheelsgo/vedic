@@ -292,7 +292,7 @@ export function Intake() {
           />
 
           {timePrecision === "unknown" && (
-            <div className="rounded-[12px] border border-gold/25 bg-gold/10 px-4 py-3 text-[13px] leading-relaxed text-body">
+            <div className="rounded-[9px] border border-white/10 bg-white/[0.035] px-4 py-3 text-[13px] leading-relaxed text-body">
               {t("intake.unknownNotice")}
             </div>
           )}
@@ -322,7 +322,7 @@ export function Intake() {
               error={errors.place}
             />
             {locationReady && (
-              <div className="flex flex-col gap-3 border-t border-gold/18 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="m-0 text-xs leading-relaxed text-cream/45">
                   {t("intake.flow.place.next")}
                 </p>
@@ -348,8 +348,8 @@ export function Intake() {
             active
             complete={profileComplete}
           >
-            <div className="rounded-[12px] border border-gold/18 bg-white/[0.025] p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="border-b border-white/[0.08] pb-5">
+              <div className="mb-5 flex items-center justify-between gap-3">
                 <p className="m-0 text-[12px] font-semibold text-cream/72">
                   {t("intake.profile.required")}
                 </p>
@@ -419,7 +419,7 @@ export function Intake() {
               </div>
             </div>
 
-            <details className="group rounded-[12px] border border-gold/12 bg-black/10 px-4 py-3.5 open:border-gold/22 open:bg-white/[0.025]">
+            <details className="group rounded-[9px] border border-white/[0.08] bg-white/[0.02] px-4 py-3.5 open:border-white/[0.13] open:bg-white/[0.03]">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] font-medium text-cream/62 outline-none transition-colors hover:text-cream [&::-webkit-details-marker]:hidden">
                 <span>{t("intake.flow.profile.optional")}</span>
                 <ChevronDown className="size-4 text-gold-dim transition-transform group-open:rotate-180" />
@@ -536,20 +536,18 @@ function IntakeFlowSection({
     <>
       <div
         className={cn(
-          "grid size-9 shrink-0 place-items-center rounded-full border text-[13px] font-semibold tabular-nums",
-          complete
-            ? "border-gold/35 bg-gold text-night"
-            : active
-              ? "border-gold/45 bg-gold/15 text-gold-light"
-              : "border-gold/18 bg-white/[0.035] text-cream/42"
+          "flex w-7 shrink-0 items-center justify-center pt-0.5 text-[11px] font-semibold tabular-nums",
+          complete || active ? "text-gold-light/80" : "text-cream/32"
         )}
       >
-        {complete ? <CheckCircle2 className="size-4" /> : index}
+        {complete ? <CheckCircle2 className="size-[17px]" /> : `0${index}`}
       </div>
       <div className="min-w-0 flex-1 text-left">
-        <div className="mb-1 flex flex-wrap items-center gap-2">
-          <span className="text-gold-light">{icon}</span>
-          <h2 className="m-0 text-base font-semibold tracking-normal text-cream">{title}</h2>
+        <div className="mb-1 flex flex-wrap items-center gap-2.5">
+          <span className="text-gold-light/72 [&_svg]:size-4">{icon}</span>
+          <h2 className="birth-input-display m-0 text-[20px] font-normal leading-tight text-cream">
+            {title}
+          </h2>
           <FieldHint text={body} />
         </div>
         {collapsed && summary ? (
@@ -575,9 +573,9 @@ function IntakeFlowSection({
   return (
     <section
       className={cn(
-        "border-t border-gold/18 pt-5 transition duration-300",
-        active && "border-gold/30",
-        complete && "border-gold/24"
+        "border-t border-white/[0.08] pt-5 transition duration-300",
+        active && "border-white/[0.13]",
+        complete && "border-white/[0.1]"
       )}
     >
       {collapsible ? (

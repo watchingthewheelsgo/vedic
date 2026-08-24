@@ -44,7 +44,7 @@ export function DatePicker({
           size="lg"
           aria-invalid={invalid}
           className={cn(
-            "birth-input-field-shell w-full justify-start border-gold/30 bg-white/5 px-4 text-left font-normal text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-gold/50 hover:bg-white/10 data-[state=open]:border-gold data-[state=open]:bg-white/10 data-[state=open]:ring-4 data-[state=open]:ring-gold/15",
+            "birth-input-field-shell w-full justify-start border-white/12 bg-white/[0.035] px-4 text-left font-normal text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:border-white/20 hover:bg-white/[0.055] data-[state=open]:border-gold/70 data-[state=open]:bg-white/[0.055] data-[state=open]:ring-2 data-[state=open]:ring-gold/15",
             invalid && "border-red bg-red/5 hover:border-red",
             className
           )}

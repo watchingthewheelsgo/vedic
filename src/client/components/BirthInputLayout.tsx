@@ -39,13 +39,13 @@ export function BirthInputLayout({
     >
       <nav
         className={cn(
-          "sticky top-0 z-50 border-b px-6 backdrop-blur-xl sm:px-10",
-          "border-gold/20 bg-night/90"
+          "sticky top-0 z-50 border-b px-5 backdrop-blur-xl sm:px-8",
+          "border-white/[0.07] bg-[#0c0b0b]/92"
         )}
       >
-        <div className="mx-auto flex h-16 max-w-[1100px] items-center justify-between">
+        <div className="mx-auto flex h-[68px] max-w-[1280px] items-center justify-between">
           <button
-            className="border-0 bg-transparent text-[15px] font-bold uppercase tracking-[2px] text-cream"
+            className="border-0 bg-transparent text-[15px] font-semibold uppercase tracking-[1.8px] text-cream"
             onClick={onBack}
           >
             Vedic<span>Dust</span>
@@ -54,19 +54,21 @@ export function BirthInputLayout({
         </div>
       </nav>
 
-      <main className="relative z-10 min-h-[calc(100vh-64px)] px-5 py-5 sm:px-10 sm:py-6 xl:px-16">
+      <main className="relative z-10 min-h-[calc(100vh-68px)] px-4 py-5 sm:px-7 sm:py-7 xl:px-10">
         <div
           className={cn(
-            "mx-auto w-full max-w-[1240px]",
+            "mx-auto w-full max-w-[1280px]",
             visual &&
-              "lg:grid lg:grid-cols-[minmax(480px,560px)_minmax(0,600px)] lg:items-start lg:justify-center lg:gap-6 xl:gap-8"
+              "birth-input-workspace overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#11100f]/80 shadow-[0_32px_90px_rgba(0,0,0,0.38)] lg:grid lg:grid-cols-[minmax(440px,0.92fr)_minmax(0,1.08fr)] lg:items-stretch"
           )}
         >
           <section
             className={cn(
-              "birth-input-form-panel mx-auto w-full rounded-[18px] border p-5 backdrop-blur-[26px] sm:p-6 lg:mx-0 lg:min-h-[660px]",
-              "border-gold/25 bg-[rgba(16,12,22,0.44)] text-cream shadow-[0_30px_100px_rgba(0,0,0,0.50),0_0_60px_rgba(201,169,110,0.06),inset_0_1px_0_rgba(255,255,255,0.07)]",
-              maxWidthClass
+              "birth-input-form-panel mx-auto flex w-full flex-col p-5 text-cream sm:p-8",
+              visual
+                ? "max-w-[680px] lg:min-h-[680px] lg:max-w-none lg:border-r lg:border-white/[0.07] lg:px-10 lg:py-9 xl:px-12"
+                : "rounded-[14px] border border-white/[0.08] bg-[#11100f]/88 shadow-[0_28px_80px_rgba(0,0,0,0.36)]",
+              !visual && maxWidthClass
             )}
           >
             {badge ? (
@@ -75,13 +77,15 @@ export function BirthInputLayout({
 
             {steps?.length ? <BirthInputProgress steps={steps} /> : null}
 
-            <div className="mb-6 flex items-start gap-3.5">
-              <div className="grid size-[38px] shrink-0 place-items-center rounded-[10px] border border-gold/30 bg-cream/10 text-gold shadow-[0_10px_28px_rgba(0,0,0,0.28)]">
+            <div className="mb-7 flex items-start gap-3.5">
+              <div className="mt-1 grid size-8 shrink-0 place-items-center text-gold-light/85">
                 {icon}
               </div>
               <div>
-                <h1 className="mb-1 text-[25px] font-light tracking-normal text-cream">{title}</h1>
-                <p className="max-w-[440px] text-[13px] leading-relaxed text-cream/55">
+                <h1 className="birth-input-display mb-1 text-[29px] font-normal leading-tight text-cream">
+                  {title}
+                </h1>
+                <p className="max-w-[470px] text-[13px] leading-relaxed text-cream/50">
                   {subtitle}
                 </p>
               </div>
@@ -90,7 +94,7 @@ export function BirthInputLayout({
             {children}
           </section>
           {visual ? (
-            <aside className="birth-input-visual sticky top-[84px] hidden w-full max-w-[600px] min-w-0 self-start lg:block">
+            <aside className="birth-input-visual hidden min-h-[680px] w-full min-w-0 place-items-center bg-[#0c0b0b]/45 lg:grid">
               {visual}
             </aside>
           ) : null}
@@ -107,26 +111,38 @@ function BirthInputProgress({ steps }: { steps: BirthInputStep[] }) {
   const percent = Math.round(((activeIndex + 1) / steps.length) * 100);
 
   return (
-    <div className="mb-5 px-0.5 py-1">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2" aria-hidden>
-          {steps.map((step) => (
-            <span
-              key={step.index}
+    <div className="mb-7" aria-label={`${activeStep.label}, ${activeStep.index}/${steps.length}`}>
+      <div className="grid grid-cols-3 gap-3">
+        {steps.map((step) => (
+          <div
+            key={step.index}
+            className={cn(
+              "border-b pb-2.5 transition-colors",
+              step.active ? "border-gold" : step.complete ? "border-gold/45" : "border-white/10"
+            )}
+          >
+            <div
               className={cn(
-                "size-1.5 rounded-full transition",
-                step.active || step.complete ? "bg-gold" : "bg-cream/18"
+                "mb-0.5 text-[10px] font-semibold tabular-nums",
+                step.active || step.complete ? "text-gold-light/80" : "text-cream/28"
               )}
-            />
-          ))}
-        </div>
-        <div className="text-xs text-cream/52">
-          {activeStep.label} · {activeStep.index}/{steps.length}
-        </div>
+            >
+              0{step.index}
+            </div>
+            <div
+              className={cn(
+                "truncate text-[11.5px] font-medium",
+                step.active ? "text-cream" : step.complete ? "text-cream/58" : "text-cream/32"
+              )}
+            >
+              {step.label}
+            </div>
+          </div>
+        ))}
       </div>
-      <div className="mt-2 h-0.5 overflow-hidden rounded-full bg-white/8">
+      <div className="sr-only mt-2 h-0.5 overflow-hidden bg-white/8">
         <div
-          className="h-full rounded-full bg-gold transition-[width] duration-300"
+          className="h-full bg-gold transition-[width] duration-300"
           style={{ width: `${percent}%` }}
         />
       </div>

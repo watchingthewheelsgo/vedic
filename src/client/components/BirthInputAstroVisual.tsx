@@ -5,7 +5,7 @@ import { Clock3, MapPin } from "lucide-react";
 type BirthInputTheme = "classic" | "cosmic";
 type AstroVisualPlacement = "default" | "right";
 
-const ZODIAC = "♈♉♊♋♌♍♎♏♐♑♒♓".split("");
+const ZODIAC = ["♈︎", "♉︎", "♊︎", "♋︎", "♌︎", "♍︎", "♎︎", "♏︎", "♐︎", "♑︎", "♒︎", "♓︎"];
 const TAU = Math.PI * 2;
 type ColorTriplet = [number, number, number];
 
@@ -154,7 +154,7 @@ export function BirthInputAstroVisual({
       stars = Array.from({ length: count }, () => {
         const toneRoll = Math.random();
         const cosmicTone =
-          toneRoll < 0.16 ? "237,217,163" : toneRoll < 0.26 ? "176,146,224" : "245,239,230";
+          toneRoll < 0.16 ? "237,217,163" : toneRoll < 0.28 ? "188,181,169" : "245,239,230";
         const classicTone =
           toneRoll < 0.22 ? "201,169,110" : toneRoll < 0.36 ? "154,122,74" : "112,94,70";
         return {
@@ -350,7 +350,7 @@ export function BirthInputAstroVisual({
       ctx.save();
       ctx.translate(centerX, centerY);
       const halo = ctx.createRadialGradient(0, 0, globeRadius * 0.15, 0, 0, globeRadius * 1.2);
-      halo.addColorStop(0, dark ? "rgba(120,90,180,0.12)" : "rgba(201,169,110,0.10)");
+      halo.addColorStop(0, dark ? "rgba(201,169,110,0.08)" : "rgba(201,169,110,0.10)");
       halo.addColorStop(0.65, dark ? "rgba(201,169,110,0.05)" : "rgba(154,122,74,0.04)");
       halo.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = halo;
@@ -372,7 +372,7 @@ export function BirthInputAstroVisual({
           : 0.1 * (0.5 + 0.5 * (rotatedZ + 1));
         ctx.fillStyle = front
           ? `rgba(201,169,110,${alpha})`
-          : `rgba(${dark ? "128,108,150" : "154,122,74"},${alpha})`;
+          : `rgba(${dark ? "126,120,111" : "154,122,74"},${alpha})`;
         ctx.beginPath();
         ctx.arc(x * globeRadius, -rotatedY * globeRadius, (front ? 1.5 : 1.0) * dpr, 0, TAU);
         ctx.fill();
@@ -535,7 +535,7 @@ export function BirthInputAstroVisual({
       ctx.beginPath();
       ctx.arc(0, 0, ringRadius * 0.93, 0, TAU);
       ctx.stroke();
-      ctx.font = `${18 * dpr}px Georgia, serif`;
+      ctx.font = `${18 * dpr}px "Times New Roman", "Noto Serif Symbols", serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       for (let index = 0; index < 12; index += 1) {
@@ -664,13 +664,9 @@ export function BirthInputAstroVisual({
   if (!embedded) return canvas;
 
   return (
-    <div
-      className="relative mx-auto aspect-square w-full"
-      style={{ maxWidth: "min(640px, calc(100vh - 112px))" }}
-      aria-live="polite"
-    >
+    <div className="relative h-full min-h-[620px] w-full" aria-live="polite">
       {canvas}
-      <div className="pointer-events-none absolute inset-x-8 top-7 flex items-center justify-between text-[10px] font-medium uppercase tracking-[1.8px] text-gold/60">
+      <div className="pointer-events-none absolute inset-x-8 top-7 flex items-center justify-between text-[11px] font-medium text-cream/36">
         <span>01 · {timeTitle || "Time"}</span>
         <span>02 · {locationTitle || "Place"}</span>
       </div>
@@ -710,7 +706,7 @@ function VisualReadout({
     <div className={align === "right" ? "min-w-0 text-right" : "min-w-0 text-left"}>
       <div
         className={
-          "mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-[1.4px] " +
+          "mb-1 flex items-center gap-1.5 text-[11px] font-medium " +
           (active ? "text-gold-light" : "text-cream/30") +
           (align === "right" ? " justify-end" : "")
         }

@@ -64,10 +64,16 @@
 
   .birth-input-screen {
     position: relative;
+    background: linear-gradient(180deg, #0b0a0a 0%, #12100e 100%);
+  }
+
+  .birth-input-display {
+    font-family: "Iowan Old Style", Baskerville, "Noto Serif SC", "Songti SC", serif;
+    letter-spacing: 0;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel label {
-    color: rgb(201 169 110 / 72%) !important;
+    color: rgb(245 239 230 / 62%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .text-muted {
@@ -87,31 +93,29 @@
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel [role="combobox"],
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel button[aria-invalid],
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-field-shell {
-    background: rgb(255 255 255 / 5%) !important;
-    border-color: rgb(201 169 110 / 24%) !important;
+    background: rgb(255 255 255 / 3.5%) !important;
+    border-color: rgb(255 255 255 / 12%) !important;
     color: theme(colors.cream) !important;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%) !important;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel input::placeholder,
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel textarea::placeholder {
-    color: rgb(245 239 230 / 34%) !important;
+    color: rgb(245 239 230 / 30%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel input:focus,
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel textarea:focus,
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel [role="combobox"]:focus,
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel button[aria-invalid]:focus {
-    background: rgb(255 255 255 / 9%) !important;
-    border-color: theme(colors.gold) !important;
-    box-shadow:
-      0 0 0 3px rgb(201 169 110 / 16%),
-      0 0 22px rgb(201 169 110 / 16%) !important;
+    background: rgb(255 255 255 / 5.5%) !important;
+    border-color: rgb(201 169 110 / 72%) !important;
+    box-shadow: 0 0 0 2px rgb(201 169 110 / 14%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-readout {
-    background: rgb(201 169 110 / 8%) !important;
-    border-color: rgb(201 169 110 / 22%) !important;
+    background: rgb(255 255 255 / 3.5%) !important;
+    border-color: rgb(255 255 255 / 11%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-readout .text-ink {
@@ -119,8 +123,8 @@
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-mode-switch {
-    background: rgb(255 255 255 / 5%) !important;
-    border-color: rgb(201 169 110 / 24%) !important;
+    background: rgb(255 255 255 / 3.5%) !important;
+    border-color: rgb(255 255 255 / 11%) !important;
   }
 
   .birth-input-readout {
@@ -129,20 +133,7 @@
   }
 
   .birth-input-readout::before {
-    animation: birth-readout-sweep 5s linear infinite;
-    background: linear-gradient(90deg, transparent, rgb(237 217 163 / 16%), transparent);
-    content: "";
-    height: 100%;
-    left: -100%;
-    position: absolute;
-    top: 0;
-    width: 55%;
-  }
-
-  @keyframes birth-readout-sweep {
-    to {
-      left: 150%;
-    }
+    display: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -467,7 +467,7 @@ export function PlacePicker({
       <div className="grid gap-3">
         {mode === "city" ? (
           <div className="grid gap-4">
-            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.15fr)] sm:items-end">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.15fr)]">
               <PlaceSearchBox
                 label={t("place.country.label")}
                 placeholder={t("place.country.placeholder")}
@@ -489,17 +489,19 @@ export function PlacePicker({
                 disabledText={t("place.region.requiresCountry")}
                 onSelect={selectRegion}
               />
-              <PlaceSearchBox
-                label={t("place.city.label")}
-                placeholder={t("place.city.placeholder")}
-                resultsLabel={t("place.city.results")}
-                selected={city}
-                options={cityOptions}
-                loading={cityLoading}
-                disabled={!country || !region}
-                disabledText={t("place.city.requiresRegion")}
-                onSelect={selectCity}
-              />
+              <div className="sm:col-span-2 xl:col-span-1">
+                <PlaceSearchBox
+                  label={t("place.city.label")}
+                  placeholder={t("place.city.placeholder")}
+                  resultsLabel={t("place.city.results")}
+                  selected={city}
+                  options={cityOptions}
+                  loading={cityLoading}
+                  disabled={!country || !region}
+                  disabledText={t("place.city.requiresRegion")}
+                  onSelect={selectCity}
+                />
+              </div>
             </div>
 
             {locationReady && readout ? <PlaceCoordinateReadout readout={readout} t={t} /> : null}
@@ -513,9 +515,9 @@ export function PlacePicker({
                   t={t}
                 />
               ) : (
-                <div className="grid gap-3 border-t border-gold/18 pt-4">
+                <div className="grid gap-3 border-t border-white/[0.08] pt-4">
                   <div className="flex items-start gap-3">
-                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gold/10 text-gold-light">
+                    <span className="grid size-8 shrink-0 place-items-center text-gold-light/75">
                       <Crosshair className="size-4" />
                     </span>
                     <div className="min-w-0">
@@ -532,7 +534,7 @@ export function PlacePicker({
                   </div>
                   <label className="grid min-w-0 gap-2">
                     <span className="sr-only">{t("place.poi.label")}</span>
-                    <div className="flex min-h-[54px] items-center gap-3 rounded-[12px] border border-gold/25 bg-white/[0.055] px-4 text-cream/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition focus-within:border-gold focus-within:bg-white/10 focus-within:ring-4 focus-within:ring-gold/15">
+                    <div className="flex min-h-[54px] items-center gap-3 rounded-[9px] border border-white/12 bg-white/[0.035] px-4 text-cream/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition focus-within:border-gold/70 focus-within:bg-white/[0.055] focus-within:ring-2 focus-within:ring-gold/15">
                       <Crosshair className="size-[18px] shrink-0 text-gold-dim" />
                       <input
                         name="birthPoi"
@@ -557,7 +559,7 @@ export function PlacePicker({
                         type="button"
                         onClick={runPoiLookup}
                         disabled={!canSearchPoi}
-                        className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-full border border-gold/30 bg-gold/12 px-3.5 text-xs font-medium text-gold-light transition hover:border-gold/50 hover:bg-gold/18 disabled:cursor-not-allowed disabled:border-gold/10 disabled:bg-white/[0.03] disabled:text-cream/30 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15"
+                        className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-gold bg-gold px-3.5 text-xs font-medium text-[#17120b] transition hover:border-gold-light hover:bg-gold-light disabled:cursor-not-allowed disabled:border-white/[0.06] disabled:bg-white/[0.035] disabled:text-cream/28 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/20"
                       >
                         {poiLoading ? (
                           <LoaderCircle className="size-3.5 animate-spin" />
@@ -1101,7 +1103,7 @@ function PlaceCoordinateReadout({ readout, t }: { readout: PlaceReadout | null; 
   const statusKey = readout ? `place.readout.status.${readout.kind}` : "place.readout.status.empty";
 
   return (
-    <div className="birth-input-readout rounded-[12px] border border-gold/18 bg-white/[0.035] px-3.5 py-3">
+    <div className="birth-input-readout rounded-[9px] border border-white/10 bg-white/[0.03] px-3.5 py-3">
       <div className="mb-2.5 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-cream/70">
           <LocateFixed className="size-3.5 shrink-0 text-gold-dim" />
@@ -1133,7 +1135,7 @@ function PlaceCoordinateReadout({ readout, t }: { readout: PlaceReadout | null; 
 function ReadoutCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1 text-[10px] uppercase tracking-[1px] text-cream/40">{label}</div>
+      <div className="mb-1 text-[10px] font-medium text-cream/40">{label}</div>
       <div className="truncate font-mono text-[12px] text-cream">{value}</div>
     </div>
   );
