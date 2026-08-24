@@ -29,7 +29,61 @@ def test_grounding_audit_prefers_a_distinct_configured_model() -> None:
     )
 
     assert runtime._prompt_task_model("vedicdust-consultation") == "writer-model"
+    assert runtime._prompt_task_model("vedic-reader") == "audit-model"
     assert runtime._prompt_task_model("vedicdust-consultation-grounding-audit") == "audit-model"
+
+
+def test_direct_prompt_task_disables_thinking_and_uses_fast_model(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "id": "message-1",
+                "model": "fast-model",
+                "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": '{"artifacts":[]}'}],
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured["client"] = kwargs
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, **kwargs: object) -> FakeResponse:
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    settings = SimpleNamespace(
+        vedic_ai_mode="claude",
+        anthropic_base_url="https://example.invalid/anthropic",
+        anthropic_model="writer-model",
+        anthropic_default_haiku_model="fast-model",
+        agent_timeout_ms=5_000,
+        get_agent_auth_token=lambda: "test-token",
+    )
+    runtime = ClaudeRuntime(settings)
+    monkeypatch.setattr("app.agents.claude_runtime.httpx.AsyncClient", FakeClient)
+
+    result = asyncio.run(runtime.run_direct_prompt_task("vedic-reader", "bounded prompt"))
+
+    request = captured["json"]
+    assert isinstance(request, dict)
+    assert request["model"] == "fast-model"
+    assert request["thinking"] == {"type": "disabled"}
+    assert request["max_tokens"] == 1800
+    assert captured["url"] == "https://example.invalid/anthropic/v1/messages"
+    assert result.raw_text == '{"artifacts":[]}'
+    assert result.stop_reason == "end_turn"
 
 
 def test_place_lookup_final_candidate_detection() -> None:

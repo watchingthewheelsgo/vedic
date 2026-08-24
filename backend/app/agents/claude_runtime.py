@@ -4,16 +4,20 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, cast
+
+import httpx
 
 from app.settings import Settings
 
 
 logger = logging.getLogger(__name__)
 place_trace_logger = logging.getLogger("uvicorn.error")
+performance_logger = logging.getLogger("uvicorn.error")
 
 AgentEffort = Literal["low", "medium", "high", "xhigh", "max"]
 AgentProvenance = Literal["tool_observation", "agent_grounded", "agent_final"]
@@ -107,6 +111,7 @@ class ClaudeRuntime:
         skills: list[str],
         max_turns: int | None = None,
         allow_file_tools: bool = True,
+        effort: AgentEffort | None = None,
     ) -> AgentRunResult:
         if not self.is_configured():
             raise RuntimeError("Claude Agent SDK runtime is not configured")
@@ -131,7 +136,7 @@ class ClaudeRuntime:
             env=self._agent_env(),
             model=model_name,
             max_turns=max_turns or self.settings.agent_max_turns,
-            effort=cast(AgentEffort, self._agent_effort()),
+            effort=cast(AgentEffort, effort or self._agent_effort()),
             skills=skills,
             system_prompt=(
                 "You are adapting a repo-local astrology skill workflow into file artifacts. "
@@ -149,7 +154,136 @@ class ClaudeRuntime:
             model_name=model_name,
         )
 
+    async def run_direct_prompt_task(
+        self,
+        task_name: str,
+        prompt: str,
+        *,
+        model_name: str | None = None,
+        max_tokens: int = 1800,
+    ) -> AgentRunResult:
+        """Run a bounded no-tool prompt without starting an Agent SDK session."""
+
+        if not self.is_configured():
+            raise RuntimeError("Claude runtime is not configured")
+
+        model = model_name or self.settings.anthropic_default_haiku_model
+        model = model or self.settings.anthropic_model
+        token = self.settings.get_agent_auth_token()
+        started_perf = time.perf_counter()
+        performance_logger.info(
+            "agent_timing event=start task=%s transport=messages_api model=%s effort=none "
+            "max_turns=1 prompt_chars=%s",
+            task_name,
+            model,
+            len(prompt),
+        )
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.agent_timeout_ms / 1000) as client:
+                response = await client.post(
+                    self.settings.anthropic_base_url.rstrip("/") + "/v1/messages",
+                    headers={
+                        "x-api-key": token,
+                        "authorization": f"Bearer {token}",
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": max_tokens,
+                        "temperature": 0.2,
+                        "thinking": {"type": "disabled"},
+                        "system": (
+                            "You are executing one bounded astrology evidence-writing task. "
+                            "Use only the supplied evidence, obey its stability restrictions, "
+                            "and return only the requested JSON contract. You have no tools and "
+                            "must not request files or continue researching."
+                        ),
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except BaseException as exc:
+            performance_logger.warning(
+                "agent_timing event=failed task=%s transport=messages_api model=%s "
+                "prompt_chars=%s wall_ms=%s error_type=%s",
+                task_name,
+                model,
+                len(prompt),
+                round((time.perf_counter() - started_perf) * 1000),
+                type(exc).__name__,
+            )
+            raise
+
+        content = payload.get("content") if isinstance(payload, dict) else None
+        text_parts = (
+            [
+                str(item.get("text"))
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+            ]
+            if isinstance(content, list)
+            else []
+        )
+        raw_text = "\n".join(text_parts).strip()
+        if not raw_text:
+            block_types = (
+                [
+                    str(item.get("type"))
+                    for item in content
+                    if isinstance(item, dict) and item.get("type")
+                ]
+                if isinstance(content, list)
+                else []
+            )
+            performance_logger.warning(
+                "agent_timing event=empty task=%s transport=messages_api model=%s "
+                "prompt_chars=%s wall_ms=%s stop_reason=%s block_types=%s",
+                task_name,
+                model,
+                len(prompt),
+                round((time.perf_counter() - started_perf) * 1000),
+                payload.get("stop_reason") if isinstance(payload, dict) else None,
+                ",".join(block_types),
+            )
+            raise RuntimeError(f"Messages API {task_name} returned no text")
+
+        duration_ms = round((time.perf_counter() - started_perf) * 1000)
+        performance_logger.info(
+            "agent_timing event=finish task=%s transport=messages_api model=%s effort=none "
+            "max_turns=1 prompt_chars=%s output_chars=%s wall_ms=%s sdk_ms=%s "
+            "stop_reason=%s cost_usd=unknown",
+            task_name,
+            model,
+            len(prompt),
+            len(raw_text),
+            duration_ms,
+            duration_ms,
+            payload.get("stop_reason") if isinstance(payload, dict) else None,
+        )
+        return AgentRunResult(
+            mode="claude",
+            raw_text=raw_text,
+            session_id=(
+                str(payload.get("id")) if isinstance(payload, dict) and payload.get("id") else None
+            ),
+            duration_ms=duration_ms,
+            stop_reason=(
+                str(payload.get("stop_reason"))
+                if isinstance(payload, dict) and payload.get("stop_reason")
+                else None
+            ),
+            model=(
+                str(payload.get("model"))
+                if isinstance(payload, dict) and payload.get("model")
+                else model
+            ),
+        )
+
     def _prompt_task_model(self, task_name: str) -> str:
+        if task_name == "vedic-reader":
+            return self.settings.anthropic_default_haiku_model or self.settings.anthropic_model
         if "grounding-audit" not in task_name:
             return self.settings.anthropic_model
         for candidate in (
@@ -616,54 +750,97 @@ natural localized form is available.
         total_cost_usd = None
         stop_reason = None
         structured_output: object | None = None
+        started_perf = time.perf_counter()
+        prompt_chars = len(prompt)
+        configured_effort = getattr(options, "effort", None)
+        configured_turns = getattr(options, "max_turns", None)
+        performance_logger.info(
+            "agent_timing event=start task=%s model=%s effort=%s max_turns=%s prompt_chars=%s",
+            task_name,
+            model_name,
+            configured_effort,
+            configured_turns,
+            prompt_chars,
+        )
 
-        async with asyncio.timeout(self.settings.agent_timeout_ms / 1000):
-            async for message in query(prompt=prompt, options=options):
-                if isinstance(message, AssistantMessage):
-                    if trace_label:
-                        self._trace_message_blocks(trace_label, message)
-                    for block in message.content:
-                        text = getattr(block, "text", None)
-                        if text:
-                            assistant_parts.append(str(text))
-                elif isinstance(message, HookEventMessage):
-                    if trace_label == "place_lookup":
-                        self._log_place_trace(
-                            "hook_event_message",
-                            self._hook_input_payload(message),
-                        )
-                elif isinstance(message, ResultMessage):
-                    session_id = getattr(message, "session_id", None)
-                    duration_ms = getattr(message, "duration_ms", None)
-                    total_cost_usd = getattr(message, "total_cost_usd", None)
-                    stop_reason = getattr(message, "stop_reason", None)
-                    structured_output = getattr(message, "structured_output", None)
-                    if getattr(message, "is_error", False):
-                        # A tool-use stop can mark the SDK result as an error even after the
-                        # model has emitted a complete place candidate. Preserve that bounded
-                        # JSON so the deterministic place service can verify it instead of
-                        # converting a usable answer into a generic agent_error.
+        try:
+            async with asyncio.timeout(self.settings.agent_timeout_ms / 1000):
+                async for message in query(prompt=prompt, options=options):
+                    if isinstance(message, AssistantMessage):
+                        if trace_label:
+                            self._trace_message_blocks(trace_label, message)
+                        for block in message.content:
+                            text = getattr(block, "text", None)
+                            if text:
+                                assistant_parts.append(str(text))
+                    elif isinstance(message, HookEventMessage):
                         if trace_label == "place_lookup":
-                            recovered = self._recover_place_lookup_result(
-                                getattr(message, "result", ""),
-                                "\n".join(assistant_parts),
+                            self._log_place_trace(
+                                "hook_event_message",
+                                self._hook_input_payload(message),
                             )
-                            if recovered is not None:
-                                result_text = recovered
-                                continue
-                        raise RuntimeError(
-                            getattr(message, "result", None)
-                            or getattr(message, "stop_reason", None)
-                            or f"Claude Agent SDK {task_name} failed"
-                        )
-                    if getattr(message, "result", None):
-                        result_text = str(message.result)
+                    elif isinstance(message, ResultMessage):
+                        session_id = getattr(message, "session_id", None)
+                        duration_ms = getattr(message, "duration_ms", None)
+                        total_cost_usd = getattr(message, "total_cost_usd", None)
+                        stop_reason = getattr(message, "stop_reason", None)
+                        structured_output = getattr(message, "structured_output", None)
+                        if getattr(message, "is_error", False):
+                            # A tool-use stop can mark the SDK result as an error even after the
+                            # model has emitted a complete place candidate. Preserve that bounded
+                            # JSON so the deterministic place service can verify it instead of
+                            # converting a usable answer into a generic agent_error.
+                            if trace_label == "place_lookup":
+                                recovered = self._recover_place_lookup_result(
+                                    getattr(message, "result", ""),
+                                    "\n".join(assistant_parts),
+                                )
+                                if recovered is not None:
+                                    result_text = recovered
+                                    continue
+                            raise RuntimeError(
+                                getattr(message, "result", None)
+                                or getattr(message, "stop_reason", None)
+                                or f"Claude Agent SDK {task_name} failed"
+                            )
+                        if getattr(message, "result", None):
+                            result_text = str(message.result)
+        except BaseException as exc:
+            wall_duration_ms = round((time.perf_counter() - started_perf) * 1000)
+            performance_logger.warning(
+                "agent_timing event=failed task=%s model=%s effort=%s max_turns=%s "
+                "prompt_chars=%s wall_ms=%s error_type=%s",
+                task_name,
+                model_name,
+                configured_effort,
+                configured_turns,
+                prompt_chars,
+                wall_duration_ms,
+                type(exc).__name__,
+            )
+            raise
 
         if structured_output is not None:
             result_text = json.dumps(structured_output, ensure_ascii=False)
         raw_text = (result_text or "\n".join(assistant_parts)).strip()
         if not raw_text:
             raise RuntimeError(f"Claude Agent SDK {task_name} returned no text")
+
+        wall_duration_ms = round((time.perf_counter() - started_perf) * 1000)
+        performance_logger.info(
+            "agent_timing event=finish task=%s model=%s effort=%s max_turns=%s "
+            "prompt_chars=%s output_chars=%s wall_ms=%s sdk_ms=%s stop_reason=%s cost_usd=%s",
+            task_name,
+            model_name,
+            configured_effort,
+            configured_turns,
+            prompt_chars,
+            len(raw_text),
+            wall_duration_ms,
+            duration_ms,
+            stop_reason,
+            total_cost_usd,
+        )
 
         return AgentRunResult(
             mode="claude",

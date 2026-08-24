@@ -396,6 +396,79 @@ def test_reader_agent_view_is_minimal_and_blind_to_holdout_evidence() -> None:
     assert "consultation_report.md" not in visible
 
 
+def test_reader_agent_view_projects_report_scale_chart_to_bounded_evidence() -> None:
+    artifacts = {
+        "chart_record.json": json.dumps(
+            {
+                "schemaVersion": "vedicdust-chart-record/1.6.0",
+                "chartRecordId": "chart-1",
+                "subject": {"currentAge": 30, "lifeStage": "adult"},
+                "birthAssertion": {"localDate": "1996-01-01"},
+                "charts": [
+                    {
+                        "vargaId": "D1",
+                        "inputStability": "verified",
+                        "eligibleAsPrimaryEvidence": True,
+                    },
+                    {
+                        "vargaId": "D60",
+                        "inputStability": "provisional",
+                        "eligibleAsPrimaryEvidence": False,
+                        "payload": "x" * 100_000,
+                    },
+                ],
+                "facts": [
+                    {
+                        "factId": "fact.D1.Lagna.position",
+                        "factType": "rashi.lagna.position",
+                        "subjectRef": "D1.Lagna",
+                        "value": {"sign": "Aries"},
+                        "inputStability": "verified",
+                        "provenance": {"large": "x" * 100_000},
+                    },
+                    {
+                        "factId": "fact.D60.Lagna.position",
+                        "factType": "varga.lagna.position",
+                        "subjectRef": "D60.Lagna",
+                        "value": {"sign": "Virgo"},
+                        "inputStability": "provisional",
+                    },
+                ],
+                "timingPeriods": [
+                    {
+                        "periodId": "md-1",
+                        "system": "Vimshottari",
+                        "level": "mahadasha",
+                        "lords": ["Saturn"],
+                        "interval": {"start": "2010-01-01", "end": "2029-01-01"},
+                        "inputStability": "verified",
+                        "provenance": {"large": "x" * 100_000},
+                    },
+                    {
+                        "periodId": "pd-1",
+                        "system": "Vimshottari",
+                        "level": "pratyantardasha",
+                        "lords": ["Saturn", "Venus", "Moon"],
+                        "interval": {"start": "2024-01-01", "end": "2024-02-01"},
+                        "inputStability": "verified",
+                        "payload": "x" * 100_000,
+                    },
+                ],
+            }
+        )
+    }
+
+    visible = SkillRuntime._reader_agent_artifacts(artifacts)
+    projected = json.loads(visible["chart_record.json"])
+
+    assert projected["readerProjectionVersion"] == "vedicdust-reader-evidence/1.0.0"
+    assert [chart["vargaId"] for chart in projected["charts"]] == ["D1"]
+    assert [fact["factId"] for fact in projected["facts"]] == ["fact.D1.Lagna.position"]
+    assert [period["periodId"] for period in projected["timingPeriods"]] == ["md-1"]
+    assert "provenance" not in visible["chart_record.json"]
+    assert len(visible["chart_record.json"]) < 10_000
+
+
 def test_agent_prompts_and_result_metadata_are_persisted_but_not_public(
     tmp_path: Path,
 ) -> None:

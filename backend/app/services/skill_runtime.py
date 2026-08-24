@@ -5,7 +5,9 @@ import copy
 from contextlib import asynccontextmanager
 import hashlib
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,6 +84,8 @@ from app.vedicdust.validation import (
     validate_judgement_context,
 )
 
+performance_logger = logging.getLogger("uvicorn.error")
+
 CHART_RECORD_JSON = "chart_record.json"
 READING_SESSION_JSON = "reading_session.json"
 CHART_AUDIT_JSON = "chart_audit.json"
@@ -151,6 +155,27 @@ READER_AGENT_INPUT_ARTIFACTS = frozenset(
         "chart_rectification_state.json",
         "prevalidation_result.json",
         "user_context.md",
+    }
+)
+
+READER_EVENT_FACT_TYPES = frozenset(
+    {
+        "rashi.lagna.position",
+        "rashi.graha.position",
+        "rashi.house.occupant",
+        "rashi.house.lord",
+        "role.house_ownership",
+        "strength.dignity",
+        "strength.shadbala",
+        "strength.bhava_bala",
+        "aspect.graha_drishti",
+        "karaka.chara",
+        "relationship.same_sign",
+        "state.moon_phase",
+        "timing.transit.house",
+        "timing.transit.position",
+        "timing.transit.double_transit",
+        "timing.transit.sade_sati",
     }
 )
 
@@ -445,6 +470,7 @@ class SkillRuntime:
         self, input_data: SkillBirthInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
         session_id = make_id("session")
+        flow_started_perf = time.perf_counter()
         started = datetime.now(timezone.utc)
         identity = ChartRecordIdentity(
             reading_session_id=session_id,
@@ -460,8 +486,9 @@ class SkillRuntime:
             }
         )
         calculation = self.calculator.calculate(calculation_input, identity=identity)
+        calculator_finished_perf = time.perf_counter()
+        calculator_finished = datetime.now(timezone.utc)
         self.workspace.create_session(session_id)
-        finished = datetime.now(timezone.utc)
         self.workspace.write_artifact(
             session_id,
             "birth_input_context.json",
@@ -531,9 +558,22 @@ class SkillRuntime:
                     "status": "calculator_complete",
                     "calculator": {
                         "startedAt": started.isoformat(),
-                        "finishedAt": finished.isoformat(),
-                        "durationSeconds": round((finished - started).total_seconds(), 3),
+                        "finishedAt": calculator_finished.isoformat(),
+                        "durationSeconds": round(
+                            calculator_finished_perf - flow_started_perf,
+                            3,
+                        ),
                     },
+                    "sessionSetup": {
+                        "durationSeconds": round(
+                            time.perf_counter() - calculator_finished_perf,
+                            3,
+                        )
+                    },
+                    "totalDurationSeconds": round(
+                        time.perf_counter() - flow_started_perf,
+                        3,
+                    ),
                     "waves": [],
                     "nodes": [],
                 },
@@ -563,6 +603,14 @@ class SkillRuntime:
         )
         await self._sync_metadata(
             session_id, stage="reader_ready", status="draft", owner_user_id=owner_user_id
+        )
+        performance_logger.info(
+            "reader_flow_timing event=session_ready session_id=%s calculator_ms=%s "
+            "setup_ms=%s total_ms=%s",
+            session_id,
+            round((calculator_finished_perf - flow_started_perf) * 1000),
+            round((time.perf_counter() - calculator_finished_perf) * 1000),
+            round((time.perf_counter() - flow_started_perf) * 1000),
         )
 
         chat_message = (
@@ -1815,6 +1863,7 @@ class SkillRuntime:
     async def run_skill(
         self, input_data: SkillRunInput, *, owner_user_id: str | None = None
     ) -> SkillSessionResponse:
+        run_started_perf = time.perf_counter()
         self.workspace.require_session_dir(input_data.session_id)
         if input_data.skill == "vedic-core":
             return await self._run_core(input_data, owner_user_id=owner_user_id)
@@ -1836,9 +1885,20 @@ class SkillRuntime:
             "taskName": input_data.skill,
             "startedAt": datetime.now(timezone.utc).isoformat(),
             "attempts": trace_attempts,
+            "promptChars": len(base_prompt),
         }
+        performance_logger.info(
+            "reader_flow_timing event=skill_start session_id=%s skill=%s run_id=%s "
+            "prompt_chars=%s max_contract_attempts=%s",
+            input_data.session_id,
+            input_data.skill,
+            trace_run_id,
+            len(base_prompt),
+            max_contract_attempts,
+        )
         while True:
             attempt += 1
+            attempt_started_perf = time.perf_counter()
             prompt_path, prompt_sha256 = self._write_agent_prompt_trace(
                 input_data.session_id,
                 trace_run_id,
@@ -1852,13 +1912,23 @@ class SkillRuntime:
                 "startedAt": datetime.now(timezone.utc).isoformat(),
             }
             try:
-                result = await self.agent_runtime.run_skill_prompt_task(
-                    input_data.skill,
-                    prompt,
-                    skills=[input_data.skill],
-                    max_turns=self._max_turns_for(input_data.skill),
-                    allow_file_tools=input_data.skill != "vedic-reader",
-                )
+                direct_prompt_task = getattr(self.agent_runtime, "run_direct_prompt_task", None)
+                if input_data.skill == "vedic-reader" and callable(direct_prompt_task):
+                    result = await direct_prompt_task(
+                        input_data.skill,
+                        prompt,
+                        model_name=self.agent_runtime.settings.anthropic_default_haiku_model,
+                        max_tokens=1800,
+                    )
+                else:
+                    result = await self.agent_runtime.run_skill_prompt_task(
+                        input_data.skill,
+                        prompt,
+                        skills=[input_data.skill],
+                        max_turns=self._max_turns_for(input_data.skill),
+                        allow_file_tools=input_data.skill != "vedic-reader",
+                        effort="low" if input_data.skill == "vedic-reader" else None,
+                    )
             except Exception as exc:
                 retryable = self._is_transient_agent_error(exc)
                 will_retry = retryable and transient_failures < max_transient_retries
@@ -1870,6 +1940,9 @@ class SkillRuntime:
                         "retryable": retryable,
                         "willRetry": will_retry,
                         "retryDelayMs": delay_ms,
+                        "wallDurationMs": round(
+                            (time.perf_counter() - attempt_started_perf) * 1000
+                        ),
                         "finishedAt": datetime.now(timezone.utc).isoformat(),
                     }
                 )
@@ -1888,6 +1961,10 @@ class SkillRuntime:
                     continue
                 raise
             attempt_trace.update(self._agent_result_trace(result))
+            attempt_trace["wallDurationMs"] = round(
+                (time.perf_counter() - attempt_started_perf) * 1000
+            )
+            attempt_trace["outputChars"] = len(str(getattr(result, "raw_text", "")))
             try:
                 parsed = self._parse_artifact_response(result.raw_text)
                 self._validate_skill_artifacts(input_data.session_id, input_data.skill, parsed)
@@ -1949,6 +2026,23 @@ class SkillRuntime:
             stage=stage,
             status=self._status_for_stage(stage),
             owner_user_id=owner_user_id,
+        )
+        total_duration_ms = round((time.perf_counter() - run_started_perf) * 1000)
+        trace_execution["totalDurationMs"] = total_duration_ms
+        self._persist_agent_run_trace(
+            input_data.session_id,
+            "skill",
+            input_data.skill,
+            trace_execution,
+        )
+        performance_logger.info(
+            "reader_flow_timing event=skill_finish session_id=%s skill=%s run_id=%s "
+            "attempts=%s total_ms=%s",
+            input_data.session_id,
+            input_data.skill,
+            trace_run_id,
+            len(trace_attempts),
+            total_duration_ms,
         )
         artifacts = self.workspace.read_artifacts(input_data.session_id)
         return SkillSessionResponse(
@@ -4420,7 +4514,7 @@ Return JSON only:
 
     @classmethod
     def _reader_agent_artifacts(cls, artifacts: dict[str, str]) -> dict[str, str]:
-        """Build the minimal blind-calibration view supplied to the Reader Agent."""
+        """Build the bounded blind-calibration view supplied to the Reader Agent."""
 
         sanitized: dict[str, str] = {}
         for path, content in artifacts.items():
@@ -4435,15 +4529,188 @@ Return JSON only:
                 # Fail closed: malformed structured input cannot be proven free
                 # of reserved evidence and therefore is not Agent-visible.
                 continue
+            payload = cls._without_holdout_evidence(payload)
+            if path == CHART_RECORD_JSON:
+                payload = cls._reader_chart_record_projection(payload)
+            elif path == "sensitivity_scan.json":
+                payload = cls._reader_sensitivity_projection(payload)
+            elif path == "chart_rectification_state.json":
+                payload = cls._reader_rectification_projection(payload)
             sanitized[path] = (
                 json.dumps(
-                    cls._without_holdout_evidence(payload),
+                    payload,
                     ensure_ascii=False,
                     indent=2,
                 )
                 + "\n"
             )
         return sanitized
+
+    @classmethod
+    def _reader_chart_record_projection(cls, payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+
+        charts = payload.get("charts")
+        eligible_charts = (
+            [
+                chart
+                for chart in charts
+                if isinstance(chart, dict)
+                and (
+                    chart.get("eligibleAsPrimaryEvidence") is True
+                    or chart.get("inputStability") in {"verified", "corroborated"}
+                )
+            ]
+            if isinstance(charts, list)
+            else []
+        )
+
+        facts = payload.get("facts")
+        stable_facts = []
+        if isinstance(facts, list):
+            for fact in facts:
+                if not isinstance(fact, dict):
+                    continue
+                fact_type = str(fact.get("factType") or "")
+                if fact.get("inputStability") not in {"verified", "corroborated"}:
+                    continue
+                if fact_type not in READER_EVENT_FACT_TYPES and not fact_type.startswith("yoga."):
+                    continue
+                stable_facts.append(
+                    {
+                        key: fact.get(key)
+                        for key in ("factId", "factType", "subjectRef", "value", "inputStability")
+                    }
+                )
+
+        birth_assertion = payload.get("birthAssertion")
+        birth_year = cls._iso_year(
+            birth_assertion.get("localDate") if isinstance(birth_assertion, dict) else None
+        )
+        current_year = datetime.now(timezone.utc).year
+        timing_periods = payload.get("timingPeriods")
+        historical_timing = []
+        if isinstance(timing_periods, list):
+            for period in timing_periods:
+                if not isinstance(period, dict) or period.get("level") not in {
+                    "mahadasha",
+                    "antardasha",
+                }:
+                    continue
+                interval = period.get("interval")
+                if not isinstance(interval, dict):
+                    continue
+                start_year = cls._iso_year(interval.get("start"))
+                end_year = cls._iso_year(interval.get("end"))
+                if start_year is None or end_year is None:
+                    continue
+                if start_year > current_year or (birth_year is not None and end_year < birth_year):
+                    continue
+                historical_timing.append(
+                    {
+                        key: period.get(key)
+                        for key in (
+                            "periodId",
+                            "system",
+                            "level",
+                            "lords",
+                            "interval",
+                            "inputStability",
+                        )
+                    }
+                )
+
+        return {
+            "schemaVersion": payload.get("schemaVersion"),
+            "readerProjectionVersion": "vedicdust-reader-evidence/1.0.0",
+            "chartRecordId": payload.get("chartRecordId"),
+            "readingSessionId": payload.get("readingSessionId"),
+            "revision": payload.get("revision"),
+            "createdAt": payload.get("createdAt"),
+            "subject": payload.get("subject"),
+            "birthAssertion": birth_assertion,
+            "canonicalMoment": payload.get("canonicalMoment"),
+            "calculationProfile": payload.get("calculationProfile"),
+            "charts": eligible_charts,
+            "facts": stable_facts,
+            "timingPeriods": historical_timing,
+            "qualityChecks": payload.get("qualityChecks"),
+            "inputSensitivity": payload.get("inputSensitivity"),
+            "rectification": payload.get("rectification"),
+            "status": payload.get("status"),
+        }
+
+    @staticmethod
+    def _iso_year(value: Any) -> int | None:
+        match = re.match(r"^(\d{4})", str(value or ""))
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _reader_sensitivity_projection(payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        summary = payload.get("summary")
+        summary = summary if isinstance(summary, dict) else {}
+        confidence = summary.get("divisionalConfidence")
+        compact_confidence: dict[str, dict[str, Any]] = {}
+        if isinstance(confidence, dict):
+            for division, item in confidence.items():
+                if not isinstance(item, dict):
+                    continue
+                compact_confidence[str(division)] = {
+                    key: item.get(key)
+                    for key in (
+                        "division",
+                        "name",
+                        "role",
+                        "usageTier",
+                        "confidence",
+                        "changedInScan",
+                        "recommendedUse",
+                        "useAsPrimaryEvidence",
+                    )
+                }
+        stability = payload.get("stability")
+        stability = stability if isinstance(stability, dict) else {}
+        return {
+            "schemaVersion": payload.get("schemaVersion"),
+            "summary": {
+                "riskLevel": summary.get("riskLevel"),
+                "blockingChangedFields": summary.get("blockingChangedFields") or [],
+                "placeBlockingChangedFields": summary.get("placeBlockingChangedFields") or [],
+                "placeSensitivityRequiresInput": summary.get("placeSensitivityRequiresInput"),
+                "changedFields": summary.get("changedFields") or [],
+                "divisionalConfidence": compact_confidence,
+            },
+            "reportReadiness": payload.get("reportReadiness"),
+            "stability": {
+                "llmRestrictedEvidence": stability.get("llmRestrictedEvidence") or [],
+            },
+            "rectificationGuardrails": payload.get("rectificationGuardrails"),
+            "boundaryFlags": payload.get("boundaryFlags") or [],
+        }
+
+    @staticmethod
+    def _reader_rectification_projection(payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            key: payload.get(key)
+            for key in (
+                "schemaVersion",
+                "revision",
+                "status",
+                "riskLevel",
+                "scanChangedFields",
+                "reportReadinessMode",
+                "searchBounds",
+                "advancedVargaPolicy",
+                "reportGate",
+                "validationStatus",
+                "rectifiedInput",
+            )
+        }
 
     @classmethod
     def _without_holdout_evidence(cls, value: Any) -> Any:
@@ -5130,6 +5397,8 @@ Follow the active VedicDust reader contract, adapted for the web runtime:
 - Proceed only when chart_rectification_state.status is not_required. The bounded scan must be stable; do not use unstable fields as claims.
 - Birth-time candidate ranking, holdout evaluation, and chart recalculation are backend-owned. This skill cannot change them.
 - Use concrete, past, user-answerable facts as reading-quality checks. Generic personality, appearance, or preference questions remain weak testimony.
+- Every question must concern an event that could already have happened by today's date and the subject.currentAge in chart_record.json. Never ask about a future age or future year. If currentAge is 0, ask only already-observable pregnancy, birth, neonatal-care, or present family facts; do not ask about ages 1+ or school years.
+- Do not use the submitted birth place, recorded clock time, time precision, or birth document as a validation question. Those are inputs to be tested, not independent lived-event evidence.
 - Never restate submitted life events as if the user's confirmation were new independent evidence.
 - Stop analysis as soon as you have the required number of concrete, non-duplicative questions that satisfy the format contract. Do not keep expanding the visible reading after sufficient evidence exists.
 - Do not emit candidate IDs, event IDs, candidate scores, rectification mappings, times, or coordinates.

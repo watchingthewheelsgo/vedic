@@ -4549,6 +4549,8 @@ def test_reader_prompt_cannot_select_birth_time_candidates() -> None:
     assert "user-answerable lived-experience question" in prompt
     assert "Stop analysis as soon as" in prompt
     assert "For a minor" in prompt
+    assert "Never ask about a future age or future year" in prompt
+    assert "Those are inputs to be tested" in prompt
 
 
 def test_reader_readiness_rejects_rectification_candidate_state() -> None:
@@ -4740,6 +4742,7 @@ def test_reader_run_retries_once_after_output_contract_rejection() -> None:
     assert response.chat_message == "ready"
     assert len(runtime.agent_runtime.prompts) == 3
     assert all(call["allow_file_tools"] is False for call in runtime.agent_runtime.kwargs)
+    assert all(call["effort"] == "low" for call in runtime.agent_runtime.kwargs)
     assert runtime.agent_runtime.prompts[1] == "base prompt"
     assert "previous artifact was rejected" in runtime.agent_runtime.prompts[2]
     assert runtime.workspace.artifacts[0].content.strip() == valid_content.strip()
