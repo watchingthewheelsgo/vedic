@@ -128,8 +128,7 @@ class RectificationLifeEventInput(ApiModel):
 
 class RectificationLifeEventsInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
-    expected_chart_revision: int | None = Field(
-        default=None,
+    expected_chart_revision: int = Field(
         alias="expectedChartRevision",
         ge=1,
     )
@@ -166,8 +165,7 @@ class RectificationLifeEventsInput(ApiModel):
 
 class RectificationLifeEventsResetInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
-    expected_chart_revision: int | None = Field(
-        default=None,
+    expected_chart_revision: int = Field(
         alias="expectedChartRevision",
         ge=1,
     )
@@ -210,12 +208,11 @@ class RectificationConfirmationResponse(ApiModel):
 
 class RectificationConfirmationInput(ApiModel):
     session_id: str = Field(alias="sessionId", min_length=1)
-    expected_chart_revision: int | None = Field(
-        default=None,
+    expected_chart_revision: int = Field(
         alias="expectedChartRevision",
         ge=1,
     )
-    responses: list[RectificationConfirmationResponse] = Field(min_length=1, max_length=2)
+    responses: list[RectificationConfirmationResponse] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")
     def validate_unique_examples(self) -> RectificationConfirmationInput:

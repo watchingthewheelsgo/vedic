@@ -608,6 +608,10 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.preparingNext": "Preparing next card...",
     "session.rectification.continueCheck": "Continue time check",
     "session.rectification.reviewBirthWindow": "Review the reported birth-time range",
+    "session.rectification.evidenceReset.title": "One recorded event needs to be replaced",
+    "session.rectification.evidenceReset.body":
+      "That event participated in the previous comparison, so the result cannot be reused safely. Restart the event check before continuing to the report.",
+    "session.rectification.evidenceReset.action": "Restart event check",
     "session.rectification.stableReport": "View the stable shared reading",
     "session.rectification.advanced": "Advanced chart candidates",
     "session.rectification.baseCandidate": "base",
@@ -1439,6 +1443,10 @@ const zhOverrides: Dict = {
   "session.rectification.preparingNext": "正在准备下一张卡片...",
   "session.rectification.continueCheck": "继续生时校验",
   "session.rectification.reviewBirthWindow": "重新确认申报的出生时间范围",
+  "session.rectification.evidenceReset.title": "有一条经历需要重新填写",
+  "session.rectification.evidenceReset.body":
+    "这条经历参与过上一轮候选盘比较，因此旧结论不能继续使用。请重新开始经历校验，再进入正式报告。",
+  "session.rectification.evidenceReset.action": "重新开始经历校验",
   "session.rectification.stableReport": "查看共享稳定解读",
   "session.rectification.advanced": "高级候选盘",
   "session.rectification.baseCandidate": "基础盘",
@@ -2203,6 +2211,10 @@ const jaOverrides: Dict = {
   "session.rectification.preparingNext": "次のカードを準備中...",
   "session.rectification.continueCheck": "時刻確認を続ける",
   "session.rectification.reviewBirthWindow": "申告した出生時刻の範囲を見直す",
+  "session.rectification.evidenceReset.title": "記録した出来事を一件見直してください",
+  "session.rectification.evidenceReset.body":
+    "その出来事は前回の候補比較に使われたため、以前の結論は安全に再利用できません。レポートへ進む前に出来事の確認をやり直してください。",
+  "session.rectification.evidenceReset.action": "出来事の確認をやり直す",
   "session.rectification.stableReport": "共通して安定した解釈を見る",
   "session.rectification.advanced": "高度な候補チャート",
   "session.rectification.baseCandidate": "基準",

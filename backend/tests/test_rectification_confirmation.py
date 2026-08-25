@@ -113,6 +113,7 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
     }
     assert conclusion["evidenceHighlights"] == [
         {
+            "eventId": "event-calibration",
             "date": "2018",
             "datePrecision": None,
             "category": "relationship",
@@ -123,6 +124,7 @@ def test_deterministic_fallback_reviews_time_without_reusing_submitted_events() 
             "usedForSelection": True,
         },
         {
+            "eventId": "event-holdout",
             "date": "2022-06",
             "datePrecision": None,
             "category": "relocation",

@@ -179,14 +179,14 @@ export type RectificationLifeEventInput = {
 
 export type RectificationLifeEventsInput = {
   sessionId: string;
-  expectedChartRevision?: number;
+  expectedChartRevision: number;
   idempotencyKey?: string;
   events: RectificationLifeEventInput[];
 };
 
 export type RectificationLifeEventsResetInput = {
   sessionId: string;
-  expectedChartRevision?: number;
+  expectedChartRevision: number;
 };
 
 export type RectificationInterviewInput = {
@@ -208,7 +208,7 @@ export type RectificationConfirmationResponse = {
 
 export type RectificationConfirmationInput = {
   sessionId: string;
-  expectedChartRevision?: number;
+  expectedChartRevision: number;
   responses: RectificationConfirmationResponse[];
 };
 

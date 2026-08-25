@@ -416,6 +416,11 @@ def test_reader_agent_view_projects_report_scale_chart_to_bounded_evidence() -> 
                         "eligibleAsPrimaryEvidence": False,
                         "payload": "x" * 100_000,
                     },
+                    {
+                        "vargaId": "D10",
+                        "inputStability": "provisional",
+                        "eligibleAsPrimaryEvidence": True,
+                    },
                 ],
                 "facts": [
                     {
@@ -452,6 +457,14 @@ def test_reader_agent_view_projects_report_scale_chart_to_bounded_evidence() -> 
                         "interval": {"start": "2024-01-01", "end": "2024-02-01"},
                         "inputStability": "verified",
                         "payload": "x" * 100_000,
+                    },
+                    {
+                        "periodId": "md-unstable",
+                        "system": "Vimshottari",
+                        "level": "mahadasha",
+                        "lords": ["Mercury"],
+                        "interval": {"start": "2012-01-01", "end": "2030-01-01"},
+                        "inputStability": "provisional",
                     },
                 ],
             }
@@ -777,5 +790,42 @@ def test_judgement_prefers_active_rectified_sensitivity(tmp_path: Path) -> None:
         "active_chart_sensitivity.json",
         '{"source":"rectified-canonical-chart"}',
     )
+    workspace.write_artifact(session_id, "chart_record.json", '{"revision":2}')
+    workspace.write_artifact(
+        session_id,
+        "chart_rectification_state.json",
+        '{"status":"corrected_chart_ready"}',
+    )
+    workspace.mark_artifact_checkpoint(
+        session_id,
+        "active_chart_sensitivity.json",
+        producer="calculator:rectification-active-sensitivity",
+        dependency_paths=["chart_record.json"],
+    )
 
     assert runtime._judgement_sensitivity(session_id) == {"source": "rectified-canonical-chart"}
+
+    workspace.write_artifact(
+        session_id,
+        "active_chart_sensitivity.json",
+        '{"source":"tampered"}',
+    )
+    with pytest.raises(ValueError, match="stale or was modified"):
+        runtime._judgement_sensitivity(session_id)
+
+
+def test_judgement_rejects_corrected_chart_without_active_sensitivity(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(session_id, "chart_record.json", '{"revision":2}')
+    workspace.write_artifact(session_id, "sensitivity_scan.json", '{"source":"reported-window"}')
+    workspace.write_artifact(
+        session_id,
+        "chart_rectification_state.json",
+        '{"status":"corrected_chart_ready"}',
+    )
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.workspace = workspace
+
+    with pytest.raises(ValueError, match="missing its bounded sensitivity scan"):
+        runtime._judgement_sensitivity(session_id)

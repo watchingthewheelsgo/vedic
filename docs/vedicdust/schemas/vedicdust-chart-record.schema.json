@@ -1765,10 +1765,19 @@
           "default": null,
           "title": "Role"
         },
+        "candidateClassCount": {
+          "minimum": 0,
+          "title": "Candidateclasscount",
+          "type": "integer"
+        },
         "scoredCandidateClasses": {
           "minimum": 0,
           "title": "Scoredcandidateclasses",
           "type": "integer"
+        },
+        "completeCoverage": {
+          "title": "Completecoverage",
+          "type": "boolean"
         },
         "minimumScore": {
           "anyOf": [
@@ -1823,7 +1832,13 @@
           "type": "boolean"
         }
       },
-      "required": ["scoredCandidateClasses", "requiredSpread", "discriminating"],
+      "required": [
+        "candidateClassCount",
+        "scoredCandidateClasses",
+        "completeCoverage",
+        "requiredSpread",
+        "discriminating"
+      ],
       "title": "RectificationRoundEvidenceImpact",
       "type": "object"
     },

@@ -5,7 +5,7 @@ from typing import Any
 from app.schemas import BirthInput
 
 
-CONFIRMATION_SCHEMA_VERSION = "vedicdust-rectification-conclusion/1.2.0"
+CONFIRMATION_SCHEMA_VERSION = "vedicdust-rectification-conclusion/1.3.0"
 
 
 def build_rectification_conclusion(
@@ -132,6 +132,7 @@ def _evidence_highlights(
         role = str(event.get("role") or "calibration")
         highlights.append(
             {
+                "eventId": event.get("eventId"),
                 "date": event.get("date"),
                 "datePrecision": event.get("datePrecision"),
                 "category": event.get("category"),
@@ -239,6 +240,7 @@ def _submitted_evidence_examples(
         examples.append(
             {
                 "exampleId": f"submitted-evidence-{index}",
+                "eventId": highlight.get("eventId"),
                 "startDate": date_value,
                 "endDate": date_value,
                 "category": category,

@@ -510,16 +510,13 @@ class ChartRectificationService:
 
     @staticmethod
     def _event_score_impact(raw_candidates: object, event_id: str) -> dict[str, Any]:
+        representatives = ChartRectificationService._candidate_representatives(
+            ChartRectificationService._candidate_score_state(raw_candidates)
+        )
+        expected_classes = len(representatives)
         scores: list[float] = []
-        seen_classes: set[str] = set()
         role = None
-        for candidate in ChartRectificationService._candidate_score_state(raw_candidates):
-            class_id = str(
-                candidate.get("equivalenceClassId") or candidate.get("candidateId") or ""
-            )
-            if class_id in seen_classes:
-                continue
-            seen_classes.add(class_id)
+        for candidate in representatives:
             for item in candidate.get("evidenceScores") or []:
                 if not isinstance(item, dict) or str(item.get("eventId") or "") != event_id:
                     continue
@@ -532,7 +529,9 @@ class ChartRectificationService:
             return {
                 "eventId": event_id or None,
                 "role": role,
+                "candidateClassCount": expected_classes,
                 "scoredCandidateClasses": 0,
+                "completeCoverage": False,
                 "minimumScore": None,
                 "maximumScore": None,
                 "scoreSpread": None,
@@ -540,16 +539,19 @@ class ChartRectificationService:
                 "discriminating": False,
             }
         spread = round(max(scores) - min(scores), 3)
+        complete_coverage = expected_classes >= 2 and len(scores) == expected_classes
         return {
             "eventId": event_id,
             "role": role,
+            "candidateClassCount": expected_classes,
             "scoredCandidateClasses": len(scores),
+            "completeCoverage": complete_coverage,
             "minimumScore": round(min(scores), 3),
             "maximumScore": round(max(scores), 3),
             "scoreSpread": spread,
             "requiredSpread": RECTIFICATION_SCORING_POLICY.event_discrimination_min_margin,
-            "discriminating": spread
-            >= RECTIFICATION_SCORING_POLICY.event_discrimination_min_margin,
+            "discriminating": complete_coverage
+            and spread >= RECTIFICATION_SCORING_POLICY.event_discrimination_min_margin,
         }
 
     @staticmethod
@@ -714,15 +716,10 @@ class ChartRectificationService:
     def _calibration_event_discrimination(
         candidates: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        representatives = ChartRectificationService._candidate_representatives(candidates)
+        expected_classes = len(representatives)
         scores_by_event: dict[str, list[float]] = {}
-        seen_classes: set[str] = set()
-        for candidate in candidates:
-            class_id = str(
-                candidate.get("equivalenceClassId") or candidate.get("candidateId") or ""
-            )
-            if class_id in seen_classes:
-                continue
-            seen_classes.add(class_id)
+        for candidate in representatives:
             for item in candidate.get("evidenceScores") or []:
                 if not isinstance(item, dict) or item.get("role") != "calibration":
                     continue
@@ -732,11 +729,14 @@ class ChartRectificationService:
                     scores_by_event.setdefault(event_id, []).append(float(selection_score))
         result = []
         for event_id, scores in sorted(scores_by_event.items()):
-            if len(scores) < 2:
+            if expected_classes < 2 or len(scores) != expected_classes:
                 continue
             result.append(
                 {
                     "eventId": event_id,
+                    "candidateClassCount": expected_classes,
+                    "scoredCandidateClasses": len(scores),
+                    "completeCoverage": True,
                     "minimumScore": round(min(scores), 3),
                     "maximumScore": round(max(scores), 3),
                     "margin": round(max(scores) - min(scores), 3),
@@ -1624,7 +1624,20 @@ class ChartRectificationService:
             action = "apply_candidate_recalculation"
             directive = "Selected bounded candidate must be recalculated before report synthesis."
         elif status == "underdetermined":
-            if event_collection_required:
+            invalidation = (
+                state.get("evidenceInvalidation")
+                if isinstance(state.get("evidenceInvalidation"), dict)
+                else {}
+            )
+            if invalidation.get("requiresReset") is True:
+                action = "reset_rectification_evidence"
+                event_collection_required = False
+                directive = (
+                    "A user-rejected event participated in the previous candidate comparison. "
+                    "Discard that comparison and rebuild the evidence ledger before asking another "
+                    "question or releasing a report."
+                )
+            elif event_collection_required:
                 action = "collect_dated_life_events"
                 directive = (
                     "The current evidence is insufficient to compare the bounded candidates. "
@@ -1882,7 +1895,9 @@ class ChartRectificationService:
                     fields.append(field)
         if fields:
             return fields
-        return ["lagnaSign", "moonNakshatra", "d9Lagna", "d10Lagna"]
+        # No recorded candidate difference means there is no defensible event
+        # discriminator. Fail closed instead of inventing generic chart fields.
+        return []
 
     @staticmethod
     def _rectification_axes(_state: dict[str, Any]) -> list[str]:

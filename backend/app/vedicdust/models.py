@@ -1094,7 +1094,9 @@ class RectificationRoundAnsweredEvent(ContractModel):
 class RectificationRoundEvidenceImpact(ContractModel):
     event_id: str | None = None
     role: Literal["calibration", "holdout"] | None = None
+    candidate_class_count: int = Field(ge=0)
     scored_candidate_classes: int = Field(ge=0)
+    complete_coverage: bool
     minimum_score: float | None = Field(default=None, ge=-1, le=1)
     maximum_score: float | None = Field(default=None, ge=-1, le=1)
     score_spread: float | None = Field(default=None, ge=0, le=2)

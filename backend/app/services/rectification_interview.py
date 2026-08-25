@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, datetime, timezone
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -16,7 +18,7 @@ from app.vedicdust.rectification_policy import (
 )
 
 
-INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/1.8.0"
+INTERVIEW_SCHEMA_VERSION = "vedicdust-rectification-interview/2.0.0"
 _CLARIFICATION_REASON_CODES = frozenset(
     {
         "event_not_confirmed",
@@ -254,44 +256,49 @@ def build_rectification_interview(
     categories = [category for category in categories if category not in skipped]
     if available_categories is not None:
         categories = [category for category in categories if category in available_categories]
-    if not categories and len(existing) == 2 and len(existing_categories) >= 2:
-        categories = _rank_categories(
-            plan.get("discriminatingFields"),
-            set(),
-            life_stage=life_stage,
-            candidate_summaries=(
-                plan.get("candidateSummaries")
-                if isinstance(plan.get("candidateSummaries"), list)
-                else []
-            ),
-            question_discrimination=(
-                plan.get("questionDiscrimination")
-                if isinstance(plan.get("questionDiscrimination"), dict)
-                else {}
-            ),
-        )
-        categories = [category for category in categories if category not in skipped]
-        if available_categories is not None:
-            categories = [category for category in categories if category in available_categories]
+    # Domain breadth is preferred, but it must not replace actual information
+    # gain. If every new domain is non-discriminating, permit a genuinely new
+    # dated episode in a previously used domain after the new domains have been
+    # considered.
+    repeat_categories = _rank_categories(
+        plan.get("discriminatingFields"),
+        set(),
+        life_stage=life_stage,
+        candidate_summaries=(
+            plan.get("candidateSummaries")
+            if isinstance(plan.get("candidateSummaries"), list)
+            else []
+        ),
+        question_discrimination=(
+            plan.get("questionDiscrimination")
+            if isinstance(plan.get("questionDiscrimination"), dict)
+            else {}
+        ),
+    )
+    repeat_categories = [category for category in repeat_categories if category not in skipped]
+    if available_categories is not None:
+        repeat_categories = [
+            category for category in repeat_categories if category in available_categories
+        ]
+    categories.extend(category for category in repeat_categories if category not in categories)
     # One question is a complete interaction round. The answer is recalculated
     # before the next question is selected from the updated candidate state. The
     # backend owns the bounded pool; the Agent may choose one item from that pool
     # after the answer state has been recalculated, but it cannot invent a new
     # category or question identity.
-    pool_categories = categories[: min(3, remaining)]
     copy = _COPY.get(locale, _COPY["en"])
     target = min(MAX_RECTIFICATION_EVENTS, max(MIN_RECTIFICATION_EVENTS, len(existing) + 1))
-    discriminating_fields = [str(value) for value in plan.get("discriminatingFields") or []]
+    candidate_set_fingerprint = _candidate_set_fingerprint(plan)
+    candidate_count = len(_target_candidate_ids(plan))
     question_pool = []
-    for index, category in enumerate(pool_categories, start=1):
+    for category in categories:
+        if len(question_pool) >= min(3, remaining):
+            break
         title, prompt = copy["category"][category]
-        matched_fields = _category_discriminating_fields(category, discriminating_fields)
-        partition_summary = _category_partition_summary(
-            category,
-            plan.get("questionDiscrimination")
-            if isinstance(plan.get("questionDiscrimination"), dict)
-            else {},
-        )
+        selection_contract = _selection_contract_for_category(plan, category)
+        if selection_contract is None:
+            continue
+        index = len(question_pool) + 1
         question_pool.append(
             {
                 "questionId": f"rectify.r{interaction_round}.q{index}.{category}",
@@ -305,12 +312,7 @@ def build_rectification_interview(
                 "answerType": "dated_event",
                 "allowedSubtypes": list(RECTIFICATION_EVENT_SUBTYPES.get(category, ())),
                 "allowSkip": True,
-                "questionValue": {
-                    "tier": "discriminating" if matched_fields else "coverage",
-                    "matchedFieldCount": len(matched_fields),
-                    "matchedFields": matched_fields,
-                    **partition_summary,
-                },
+                "selectionContract": selection_contract,
             }
         )
     questions = question_pool[:1]
@@ -324,8 +326,9 @@ def build_rectification_interview(
         )
     else:
         stop_reason = (
-            "No usable event category remains after the user's availability and skip choices. "
-            "Continue with the bounded candidates or revise event availability."
+            "No remaining event domain has backend-proven information gain for the current "
+            "candidate set. Preserve an underdetermined result or request a narrower reported "
+            "time window; do not ask a generic coverage question."
         )
     return {
         "schemaVersion": INTERVIEW_SCHEMA_VERSION,
@@ -334,6 +337,17 @@ def build_rectification_interview(
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
         "round": interaction_round,
+        "stateRevision": int(state.get("revision") or 0),
+        "chartRevision": int(
+            (
+                state.get("activeChartRevision")
+                if isinstance(state.get("activeChartRevision"), dict)
+                else {}
+            ).get("revision")
+            or 0
+        ),
+        "candidateSetFingerprint": candidate_set_fingerprint,
+        "candidateCount": candidate_count,
         "status": status,
         "title": copy["title"],
         "intro": copy["intro"],
@@ -394,6 +408,12 @@ def validate_agent_question_wording(
         if question_id not in expected:
             raise ValueError("rectification interview selected an unapproved question pool item")
         original = expected[question_id]
+        if not _valid_selection_contract(
+            original.get("selectionContract"),
+            candidate_set_fingerprint=str(brief.get("candidateSetFingerprint") or ""),
+            expected_candidate_count=int(brief.get("candidateCount") or 0),
+        ):
+            raise ValueError("rectification interview selected a non-discriminating question")
         if item.get("category") != original["category"]:
             raise ValueError("rectification interview changed a question category")
         merged = dict(original)
@@ -404,7 +424,6 @@ def validate_agent_question_wording(
             if any(token in value.casefold() for token in forbidden):
                 raise ValueError("rectification wording leaks candidate or chart-leading language")
             merged[field] = value
-        merged.pop("questionValue", None)
         questions.append(merged)
     result["questions"] = questions
     return result
@@ -511,10 +530,24 @@ def validate_rectification_event_bindings(
 ) -> list[dict[str, Any]]:
     """Return newly answered events after enforcing backend-issued question identity."""
 
+    expected_fingerprint = _candidate_set_fingerprint(
+        state.get("rectificationPlan") if isinstance(state.get("rectificationPlan"), dict) else {}
+    )
+    interview_fingerprint = str(interview.get("candidateSetFingerprint") or "")
+    if not expected_fingerprint or interview_fingerprint != expected_fingerprint:
+        raise ValueError("the verification question belongs to an outdated candidate set")
+    if int(interview.get("stateRevision") or 0) != int(state.get("revision") or 0):
+        raise ValueError("the verification question belongs to an outdated rectification state")
+    active_revision = state.get("activeChartRevision")
+    active_revision = active_revision if isinstance(active_revision, dict) else {}
+    if int(interview.get("chartRevision") or 0) != int(active_revision.get("revision") or 0):
+        raise ValueError("the verification question belongs to an outdated chart revision")
+
     questions = {
         str(item.get("questionId")): {
             "category": str(item.get("category")),
             "allowedSubtypes": {str(value) for value in item.get("allowedSubtypes") or [] if value},
+            "selectionContract": item.get("selectionContract"),
         }
         for item in interview.get("questions", [])
         if isinstance(item, dict) and item.get("questionId") and item.get("category")
@@ -536,6 +569,12 @@ def validate_rectification_event_bindings(
     allowed_subtypes = expected_question["allowedSubtypes"]
     if not event_subtype or event_subtype not in allowed_subtypes:
         raise ValueError("life event subtype does not match its verification question")
+    plan = (
+        state.get("rectificationPlan") if isinstance(state.get("rectificationPlan"), dict) else {}
+    )
+    current_contract = _selection_contract_for_category(plan, expected_category)
+    if current_contract is None or expected_question.get("selectionContract") != current_contract:
+        raise ValueError("life event does not answer a discriminating verification question")
     return [event]
 
 
@@ -721,25 +760,135 @@ def _category_information_score(
     return score
 
 
-def _category_partition_summary(
+def _question_selection_contract(
     category: str,
     question_discrimination: dict[str, Any],
-) -> dict[str, int]:
+    *,
+    matched_fields: list[str],
+    candidate_set_fingerprint: str,
+    expected_candidate_count: int,
+) -> dict[str, Any] | None:
     rules = RECTIFICATION_EVENT_RULES.get(category, RECTIFICATION_EVENT_RULES["unknown"])
     normalized_discrimination = {
         str(field).casefold(): value for field, value in question_discrimination.items()
     }
-    summaries = [
-        normalized_discrimination.get(str(field).casefold())
-        for field in rules.get("fields") or []
-        if isinstance(normalized_discrimination.get(str(field).casefold()), dict)
-    ]
-    if not summaries:
-        return {"partitionCount": 1, "candidateCount": 0}
+    preferred = {str(field).casefold() for field in rules.get("fields") or []}
+    eligible: list[tuple[str, dict[str, Any]]] = []
+    for field in matched_fields:
+        if field.casefold() not in preferred:
+            continue
+        summary = normalized_discrimination.get(field.casefold())
+        if not isinstance(summary, dict):
+            continue
+        candidate_count = int(summary.get("candidateCount") or 0)
+        partition_count = int(summary.get("partitionCount") or 0)
+        largest_partition = int(summary.get("largestPartitionSize") or candidate_count)
+        if (
+            candidate_count >= 2
+            and candidate_count == expected_candidate_count
+            and partition_count >= 2
+            and 0 < largest_partition < candidate_count
+        ):
+            eligible.append((field, summary))
+    if not eligible or not candidate_set_fingerprint:
+        return None
+    eligible.sort(
+        key=lambda item: (
+            int(item[1].get("candidateCount") or 0) - int(item[1].get("largestPartitionSize") or 0),
+            int(item[1].get("partitionCount") or 0),
+        ),
+        reverse=True,
+    )
+    best_field, best = eligible[0]
+    candidate_count = int(best.get("candidateCount") or 0)
+    largest_partition = int(best.get("largestPartitionSize") or 0)
     return {
-        "partitionCount": max(int(item.get("partitionCount") or 1) for item in summaries),
-        "candidateCount": max(int(item.get("candidateCount") or 0) for item in summaries),
+        "tier": "discriminating",
+        "eligible": True,
+        "matchedFieldCount": len(eligible),
+        "matchedFields": [field for field, _summary in eligible],
+        "primaryField": best_field,
+        "partitionCount": int(best.get("partitionCount") or 0),
+        "candidateCount": candidate_count,
+        "largestPartitionSize": largest_partition,
+        "maximumElimination": candidate_count - largest_partition,
+        "candidateSetFingerprint": candidate_set_fingerprint,
     }
+
+
+def _selection_contract_for_category(
+    plan: dict[str, Any],
+    category: str,
+) -> dict[str, Any] | None:
+    discriminating_fields = [str(value) for value in plan.get("discriminatingFields") or []]
+    return _question_selection_contract(
+        category,
+        plan.get("questionDiscrimination")
+        if isinstance(plan.get("questionDiscrimination"), dict)
+        else {},
+        matched_fields=_category_discriminating_fields(category, discriminating_fields),
+        candidate_set_fingerprint=_candidate_set_fingerprint(plan),
+        expected_candidate_count=len(_target_candidate_ids(plan)),
+    )
+
+
+def _target_candidate_ids(plan: dict[str, Any]) -> list[str]:
+    return sorted({str(value) for value in plan.get("targetCandidateIds") or [] if value})
+
+
+def _candidate_set_fingerprint(plan: dict[str, Any]) -> str:
+    target_ids = _target_candidate_ids(plan)
+    discrimination = (
+        plan.get("questionDiscrimination")
+        if isinstance(plan.get("questionDiscrimination"), dict)
+        else {}
+    )
+    if len(target_ids) < 2 or not discrimination:
+        return ""
+    payload = {
+        "schemaVersion": plan.get("schemaVersion"),
+        "selectionPolicyId": plan.get("selectionPolicyId"),
+        "eventMappingId": plan.get("eventMappingId"),
+        "holdoutPolicyId": plan.get("holdoutPolicyId"),
+        "status": plan.get("status"),
+        "action": plan.get("action"),
+        "targetCandidateIds": target_ids,
+        "questionDiscrimination": discrimination,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _valid_selection_contract(
+    value: Any,
+    *,
+    candidate_set_fingerprint: str,
+    expected_candidate_count: int,
+) -> bool:
+    if not isinstance(value, dict):
+        return False
+    candidate_count = int(value.get("candidateCount") or 0)
+    partition_count = int(value.get("partitionCount") or 0)
+    largest_partition = int(value.get("largestPartitionSize") or candidate_count)
+    matched_fields = [str(field) for field in value.get("matchedFields") or [] if field]
+    primary_field = str(value.get("primaryField") or "")
+    return (
+        bool(candidate_set_fingerprint)
+        and value.get("tier") == "discriminating"
+        and value.get("eligible") is True
+        and int(value.get("matchedFieldCount") or 0) == len(matched_fields)
+        and len(matched_fields) > 0
+        and primary_field in matched_fields
+        and candidate_count >= 2
+        and candidate_count == expected_candidate_count
+        and 2 <= partition_count <= candidate_count
+        and 0 < largest_partition < candidate_count
+        and int(value.get("maximumElimination") or 0) == candidate_count - largest_partition
+        and str(value.get("candidateSetFingerprint") or "") == candidate_set_fingerprint
+    )
 
 
 def _category_discriminating_fields(

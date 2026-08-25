@@ -128,6 +128,12 @@ type RectificationState = {
   equivalentCandidateCount?: number;
   availableRectificationCategories?: RectificationLifeEventCategory[];
   selectionConfidence?: string;
+  evidenceInvalidation?: {
+    status?: "reset_required" | string;
+    reason?: string;
+    eventIds?: string[];
+    requiresReset?: boolean;
+  };
   selectionEvidence?: {
     calibrationEventCount?: number;
     calibrationEpisodeCount?: number;
@@ -205,6 +211,7 @@ type RectificationState = {
       method?: string;
     };
     evidenceHighlights?: Array<{
+      eventId?: string;
       date?: string;
       datePrecision?: "day" | "month" | "year" | "range";
       category?: RectificationLifeEventCategory | string;
@@ -216,12 +223,13 @@ type RectificationState = {
     }>;
     examples?: Array<{
       exampleId?: string;
+      eventId?: string;
       startDate?: string;
       endDate?: string;
       category?: RectificationLifeEventCategory | string;
       prompt?: string;
       description?: string;
-      source?: "post_selection_agent" | "submitted_evidence" | string;
+      source?: "deterministic_input_review" | "submitted_evidence" | string;
       usedForSelection?: boolean;
     }>;
     generation?: {
@@ -1185,6 +1193,7 @@ export function Session() {
           else if (nextStep === "reader") void startReaderValidation({ force: true });
           else if (nextStep === "collect_events") setSelectedStageId("reader");
           else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
+          else if (nextStep === "reset_events") setSelectedStageId("reader");
           else setSelectedStageId("chart");
         } else if (hasReader) {
           setSelectedStageId("reader");
@@ -1193,6 +1202,7 @@ export function Session() {
           if (nextStep === "reader") void startReaderValidation();
           else if (nextStep === "collect_events") setSelectedStageId("reader");
           else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
+          else if (nextStep === "reset_events") setSelectedStageId("reader");
           else setSelectedStageId("chart");
         }
       } catch (caught) {
@@ -1294,6 +1304,7 @@ export function Session() {
       else if (nextStep === "reader") await startReaderValidation({ force: true });
       else if (nextStep === "collect_events") setSelectedStageId("reader");
       else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
+      else if (nextStep === "reset_events") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
       setError(userFacingError(caught, "Could not save your replies. Please try again."));
@@ -1317,10 +1328,15 @@ export function Session() {
     try {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
       const expectedChartRevision = numberLike(chartRecord?.revision);
+      if (expectedChartRevision == null) {
+        throw new Error(
+          "The active chart revision is missing. Refresh the session before continuing."
+        );
+      }
       const updated = await api.recordRectificationLifeEvents({
         sessionId: id,
         events,
-        ...(expectedChartRevision != null ? { expectedChartRevision } : {})
+        expectedChartRevision
       });
       setSession(updated);
       readerStartedRef.current = false;
@@ -1329,6 +1345,7 @@ export function Session() {
       else if (nextStep === "reader") await startReaderValidation({ force: true });
       else if (nextStep === "collect_events") setSelectedStageId("reader");
       else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
+      else if (nextStep === "reset_events") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
       const clarification = rectificationClarificationFromError(caught);
@@ -1358,9 +1375,14 @@ export function Session() {
     try {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
       const expectedChartRevision = numberLike(chartRecord?.revision);
+      if (expectedChartRevision == null) {
+        throw new Error(
+          "The active chart revision is missing. Refresh the session before restarting."
+        );
+      }
       const updated = await api.resetRectificationLifeEvents({
         sessionId: id,
-        ...(expectedChartRevision != null ? { expectedChartRevision } : {})
+        expectedChartRevision
       });
       setSession(updated);
       readerStartedRef.current = false;
@@ -1389,10 +1411,15 @@ export function Session() {
     try {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
       const expectedChartRevision = numberLike(chartRecord?.revision);
+      if (expectedChartRevision == null) {
+        throw new Error(
+          "The active chart revision is missing. Refresh the session before confirming."
+        );
+      }
       const updated = await api.confirmRectification({
         sessionId: id,
         responses,
-        ...(expectedChartRevision != null ? { expectedChartRevision } : {})
+        expectedChartRevision
       });
       setSession(updated);
       readerStartedRef.current = false;
@@ -1400,6 +1427,7 @@ export function Session() {
       if (nextStep === "full_report") await startCoreReport({ sessionOverride: updated });
       else if (nextStep === "collect_events") setSelectedStageId("reader");
       else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
+      else if (nextStep === "reset_events") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
       setError(
@@ -3006,6 +3034,9 @@ function rectificationNextStepLabel(state: RectificationState | null, t: Transla
     return t("session.rectification.continueCheck");
   }
   if (state.status === "underdetermined") {
+    if (state.rectificationPlan?.action === "reset_rectification_evidence") {
+      return t("session.rectification.evidenceReset.title");
+    }
     return state.rectificationPlan?.eventCollectionRequired === true
       ? t("session.rectification.continueCheck")
       : t("session.rectification.reviewBirthWindow");
@@ -4588,6 +4619,9 @@ function ReaderDetail({
   const rectificationConfirmationRequired =
     rectificationState?.status === "rectification_confirmation_required" &&
     rectificationState.rectificationConclusion?.confirmation?.status === "pending";
+  const evidenceResetRequired =
+    rectificationState?.status === "underdetermined" &&
+    rectificationState.evidenceInvalidation?.requiresReset === true;
   const interviewArtifact = findArtifact(session, "rectification_interview.json");
   const collectedLifeEventCount =
     rectificationState?.lifeEventLedger?.independentEpisodeCount ??
@@ -4669,6 +4703,38 @@ function ReaderDetail({
 
   function movePrev() {
     setActiveAnchorIndex((current) => Math.max(0, current - 1));
+  }
+
+  if (evidenceResetRequired) {
+    return (
+      <section className="mt-5 grid gap-4 rounded-2xl border border-danger/25 bg-danger/5 p-5">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-danger" aria-hidden="true" />
+          <div>
+            <h3 className="m-0 text-lg font-semibold text-ink">
+              {t("session.rectification.evidenceReset.title")}
+            </h3>
+            <p className="m-0 mt-2 text-[13px] leading-6 text-body">
+              {t("session.rectification.evidenceReset.body")}
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={submittingLifeEvents || !authLoaded || !isSignedIn}
+          onClick={() => void onResetLifeEvents()}
+        >
+          {submittingLifeEvents ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="size-4" />
+          )}
+          {t("session.rectification.evidenceReset.action")}
+        </Button>
+        {authLoaded && !isSignedIn && <AnonymousCheckpointGate />}
+      </section>
+    );
   }
 
   if (rectificationConfirmationRequired && rectificationState) {
@@ -5930,7 +5996,7 @@ function canStartFullReading(session: SkillSessionResponse | null): boolean {
 }
 
 type ReadingContinuationAction =
-  "full_report" | "reader" | "collect_events" | "confirm_rectification" | "stop";
+  "full_report" | "reader" | "collect_events" | "confirm_rectification" | "reset_events" | "stop";
 
 const READER_CONTINUATION_STATUSES = new Set(["not_required"]);
 
@@ -5959,6 +6025,7 @@ function readingContinuationAction(
   const plan = objectValue(state, "rectificationPlan");
   const action = String(plan?.action ?? "").trim();
   const gate = objectValue(state, "reportGate");
+  if (action === "reset_rectification_evidence") return "reset_events";
   if (status === "corrected_chart_ready" && gate?.fullReportAllowed === true) {
     return "full_report";
   }

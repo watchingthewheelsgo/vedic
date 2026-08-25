@@ -1316,6 +1316,7 @@ def test_structured_life_event_category_wins_over_description_keywords() -> None
     input_data = RectificationLifeEventsInput.model_validate(
         {
             "sessionId": "session",
+            "expectedChartRevision": 1,
             "events": [
                 {
                     "date": "2018-10",
@@ -1516,6 +1517,7 @@ def test_structured_life_event_input_rejects_duplicate_evidence() -> None:
         RectificationLifeEventsInput.model_validate(
             {
                 "sessionId": "session",
+                "expectedChartRevision": 1,
                 "events": [duplicate, duplicate, duplicate],
             }
         )
@@ -2526,7 +2528,11 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(
             question = interview["questions"][0]
             assert "questionPool" not in interview
             assert "lifeEventFocus" not in interview
-            assert all("questionValue" not in item for item in interview["questions"])
+            assert question["selectionContract"]["tier"] == "discriminating"
+            assert (
+                question["selectionContract"]["candidateSetFingerprint"]
+                == interview["candidateSetFingerprint"]
+            )
             if index == 1:
                 mismatched_category = next(
                     category
@@ -2545,6 +2551,7 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(
                     )
             submission = RectificationLifeEventsInput(
                 sessionId=created.session_id,
+                expectedChartRevision=interview["chartRevision"],
                 events=[
                     {
                         "questionId": question["questionId"],
@@ -2650,6 +2657,11 @@ def test_runtime_recalculates_chart_after_collecting_dated_events(
         assert reset.stage == "reader_ready"
         assert reset_context["lifeEvents"]["events"] == []
         assert reset_context["lifeEventSemantics"] == []
+        assert reset_context["time"]["reported"] == "08:30"
+        assert reset_context["time"]["precision"] == "part_of_day"
+        assert reset_context["time"]["source"] == "family memory"
+        assert "activeCanonicalInput" not in reset_context
+        assert reset_record["birthAssertion"]["reportedLocalTime"] == "08:30"
         assert reset_record["revision"] == record["revision"] + 1
         assert reset_state["status"] == "collecting_evidence"
 
@@ -3051,10 +3063,18 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
     assert score["hitRate"] == 1.0
     assert result["chartRecordId"] == "chart-prevalidation"
     assert result["chartRevision"] == 3
+    assert result["assessmentPurpose"] == "reading_consistency_gate"
+    assert cast(dict[str, Any], result["authority"]) == {
+        "canSelectBirthTimeCandidate": False,
+        "canRecalculateChart": False,
+        "canGateReportPublication": True,
+    }
     assert (
         result["chartRecordSha256"] == hashlib.sha256(chart_record_json.encode("utf-8")).hexdigest()
     )
     assert decision["reportAllowed"] is False
+    assert decision["birthTimeSelectionAuthority"] is False
+    assert decision["candidateSelectionEffect"] == "none"
     assert decision["inputRiskLevel"] == "high"
     assert llm_contract["mustNotUseAsPrimaryEvidence"] == [
         "d9Lagna",
@@ -3715,6 +3735,21 @@ def test_initial_rectification_state_includes_backend_next_round_plan() -> None:
     assert plan["focusAxes"] == ["time"]
     assert plan["timeWindow"]["start"] == "1990-01-01 08:25"
     assert plan["timeWindow"]["end"] == "1990-01-01 08:45"
+
+
+def test_rectification_plan_does_not_invent_discriminators_without_candidate_differences() -> None:
+    service = ChartRectificationService()
+
+    assert (
+        service._discriminating_fields(
+            [
+                {"candidateId": "A", "changedFromBase": []},
+                {"candidateId": "B", "changedFromBase": []},
+            ],
+            {},
+        )
+        == []
+    )
 
 
 def test_rectification_plan_targets_distinct_equivalence_classes() -> None:

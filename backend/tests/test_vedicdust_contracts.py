@@ -189,6 +189,7 @@ def test_timing_input_stability_tracks_moon_and_dasha_boundaries() -> None:
 def test_rectification_life_event_submission_builds_a_parseable_ledger() -> None:
     submission = RectificationLifeEventsInput(
         sessionId="session-1",
+        expectedChartRevision=1,
         events=[
             {
                 "date": "2012-06",

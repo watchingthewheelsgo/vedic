@@ -1156,16 +1156,21 @@ class SkillRuntime:
             examples = conclusion.get("examples")
             if not isinstance(examples, list) or not examples:
                 raise ValueError("rectification conclusion has no confirmation examples")
-            expected_ids = {
-                str(example.get("exampleId") or "")
+            examples_by_id = {
+                str(example.get("exampleId") or ""): example
                 for example in examples
                 if isinstance(example, dict) and example.get("exampleId")
             }
+            expected_ids = set(examples_by_id)
+            if len(expected_ids) != len(examples) or "corrected-time-review" not in expected_ids:
+                raise ValueError("rectification confirmation examples are malformed or expired")
             responses = [
                 {
                     "exampleId": response.example_id,
                     "answer": response.answer,
                     "note": response.note.strip(),
+                    "source": str(examples_by_id.get(response.example_id, {}).get("source") or ""),
+                    "eventId": examples_by_id.get(response.example_id, {}).get("eventId"),
                 }
                 for response in input_data.responses
             ]
@@ -1177,22 +1182,77 @@ class SkillRuntime:
 
             next_state = copy.deepcopy(state)
             next_conclusion = copy.deepcopy(conclusion)
-            has_inaccurate = any(item["answer"] == "inaccurate" for item in responses)
-            has_partly = any(item["answer"] == "partly" for item in responses)
+            time_response = next(
+                (item for item in responses if item["exampleId"] == "corrected-time-review"),
+                None,
+            )
+            if time_response is None:
+                raise ValueError("rectification confirmation is missing the corrected-time review")
+            invalid_evidence_responses = [
+                item
+                for item in responses
+                if item["source"] == "submitted_evidence" and item["answer"] != "accurate"
+            ]
+            has_invalid_evidence = bool(invalid_evidence_responses)
+            time_inaccurate = time_response["answer"] == "inaccurate"
+            time_partly = time_response["answer"] == "partly"
+            rejected = has_invalid_evidence or time_inaccurate
             next_conclusion["confirmation"] = {
                 "status": "rejected"
-                if has_inaccurate
+                if rejected
                 else "confirmed_with_caveat"
-                if has_partly
+                if time_partly
                 else "confirmed",
                 "responses": responses,
             }
-            next_conclusion["status"] = "rejected" if has_inaccurate else "confirmed"
+            next_conclusion["status"] = "rejected" if rejected else "confirmed"
             next_state["rectificationConclusion"] = next_conclusion
-            generation = conclusion.get("generation")
-            generation = generation if isinstance(generation, dict) else {}
-            input_review_only = generation.get("source") == "deterministic_input_review"
-            if has_inaccurate:
+            next_state.pop("evidenceInvalidation", None)
+            if has_invalid_evidence:
+                invalidated_event_ids = sorted(
+                    {
+                        str(item.get("eventId") or "")
+                        for item in invalid_evidence_responses
+                        if str(item.get("eventId") or "")
+                    }
+                )
+                ledger = next_state.get("lifeEventLedger")
+                ledger = copy.deepcopy(ledger) if isinstance(ledger, dict) else {}
+                ledger["eventCollectionRequired"] = False
+                ledger["collectionStopReason"] = "invalidated_evidence_requires_reset"
+                next_state["lifeEventLedger"] = ledger
+                next_state["evidenceInvalidation"] = {
+                    "status": "reset_required",
+                    "reason": "submitted_evidence_not_reconfirmed",
+                    "eventIds": invalidated_event_ids,
+                    "responses": invalid_evidence_responses,
+                    "requiresReset": True,
+                }
+                next_state.update(
+                    {
+                        "revision": int(next_state.get("revision") or 0) + 1,
+                        "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "status": "underdetermined",
+                        "provisionalCandidateId": next_state.get("selectedCandidateId"),
+                        "selectedCandidateId": None,
+                        "selectionConfidence": "none",
+                        "reportGate": {
+                            "fullReportAllowed": False,
+                            "reason": (
+                                "A dated event used by the rectification decision was not "
+                                "reconfirmed. The prior candidate comparison is invalid and must "
+                                "be rebuilt from a clean evidence ledger."
+                            ),
+                            "nextStep": "reset_rectification_evidence",
+                        },
+                    }
+                )
+                message = (
+                    "One of the dated events used by the birth-time check is not reliable enough. "
+                    "The previous comparison has been invalidated. Restart the evidence check "
+                    "before generating a report."
+                )
+            elif time_inaccurate:
                 ledger = next_state.get("lifeEventLedger")
                 ledger = ledger if isinstance(ledger, dict) else {}
                 next_state["lifeEventLedger"] = ledger
@@ -1240,14 +1300,10 @@ class SkillRuntime:
                     "and was recalculated. The user retained the bounded interval with an "
                     "explicit uncertainty caveat; the report must use only interval-stable facts "
                     "and must not present the representative minute as exact."
-                    if has_partly
-                    else (
-                        "The bounded candidate passed the dated-event and reserved-holdout "
-                        "checks and was recalculated. The user acknowledged the bounded result; "
-                        "this acknowledgement did not increase selection confidence."
-                        if input_review_only
-                        else "The bounded candidate passed and the corrected interval was acknowledged."
-                    )
+                    if time_partly
+                    else "The bounded candidate passed the dated-event and reserved-holdout "
+                    "checks and was recalculated. The user acknowledged the bounded result; "
+                    "this acknowledgement did not increase selection confidence."
                 )
                 next_state.update(
                     {
@@ -1264,7 +1320,7 @@ class SkillRuntime:
                 message = (
                     "The bounded birth-time range is retained with your uncertainty note. "
                     "The report will use only conclusions stable across that range."
-                    if has_partly
+                    if time_partly
                     else "The corrected birth-time checkpoint is confirmed. The full Vedic report can now begin."
                 )
             next_state["rectificationPlan"] = self.rectification._build_rectification_plan(
@@ -1451,12 +1507,14 @@ class SkillRuntime:
                 current_artifacts,
             )
             self.workspace.mark_rectification_transaction_archive_ready(session_id)
-        if (
+        state_changed = (
             input_data.reset_skipped
             or input_data.skipped_category
             or input_data.available_categories is not None
-        ):
+        )
+        if state_changed:
             state["skippedRectificationCategories"] = sorted(skipped_categories)
+            state["revision"] = int(state.get("revision") or 0) + 1
             state["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             self.workspace.write_artifact(
                 session_id,
@@ -1504,13 +1562,11 @@ class SkillRuntime:
                 # in server logs/metrics rather than in a user-facing contract.
                 _ = exc
 
-        # The candidate-ranking pool is backend-private. The client receives only
-        # the single question selected for this round.
+        # The ranking pool stays private. Keep the selected question's aggregate
+        # selection contract so answer submission can prove that it still
+        # discriminates the current candidate set.
         interview.pop("questionPool", None)
         interview.pop("lifeEventFocus", None)
-        for question in interview.get("questions", []):
-            if isinstance(question, dict):
-                question.pop("questionValue", None)
 
         self.workspace.write_artifact(
             session_id,
@@ -2822,7 +2878,7 @@ class SkillRuntime:
                 )
                 if key in item
             }
-            private_value = item.get("questionValue")
+            private_value = item.get("selectionContract")
             if isinstance(private_value, dict):
                 # Expose only bounded comparison signals. Raw chart fields and
                 # candidate values stay in the backend.
@@ -3165,6 +3221,18 @@ Return JSON only:
             self._json_dict(birth_input_context_json),
             self._json_dict(sensitivity_scan_json),
         )
+        chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if not chart_record_text:
+            raise ValueError(
+                "chart_record.json must exist before rectification state is initialized"
+            )
+        chart_record = ChartRecord.model_validate_json(chart_record_text)
+        active_revision = state.get("activeChartRevision")
+        active_revision = active_revision if isinstance(active_revision, dict) else {}
+        state["activeChartRevision"] = {
+            **active_revision,
+            "revision": chart_record.revision,
+        }
         self.workspace.write_artifact(
             session_id,
             "chart_rectification_state.json",
@@ -4049,8 +4117,20 @@ Return JSON only:
                 else {}
             ),
         )
+        decision = {
+            **decision,
+            "birthTimeSelectionAuthority": False,
+            "candidateSelectionEffect": "none",
+            "assessmentPurpose": "reading_consistency_gate",
+        }
         return {
             "schemaVersion": "vedic-prevalidation-result/2.0.0",
+            "assessmentPurpose": "reading_consistency_gate",
+            "authority": {
+                "canSelectBirthTimeCandidate": False,
+                "canRecalculateChart": False,
+                "canGateReportPublication": True,
+            },
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             "chartRecordId": (
                 chart_payload.get("chartRecordId") if isinstance(chart_payload, dict) else None
@@ -4378,16 +4458,16 @@ Return JSON only:
 
     def _reader_default_user_message(self, locale: str) -> str:
         if locale == "zh":
-            return "开始读盘验前事"
+            return "开始读盘一致性检查"
         if locale == "ja":
-            return "事前リーディング確認を開始"
-        return "Begin pre-reading validation"
+            return "リーディング整合性チェックを開始"
+        return "Begin the reading consistency check"
 
     def _reader_prevalidation_format_instruction(self, locale: str) -> str:
         if locale == "zh":
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 准 / 不准 / 部分准.
 - reader_prevalidation.md must follow the original Step 5 output template:
-  - Start with: 在进入完整分析之前，我先验证几个时间锚点来确认出生数据的精度——
+  - Start with: 在进入完整分析之前，我先用几个已发生的事实检查当前解读是否贴合——
 - Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question in Chinese, e.g. **1.** 2018年前后，您是否经历过一次工作方向的明显变化？
   - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Prefer a dated major event when evidence supports one.
@@ -4402,7 +4482,7 @@ Return JSON only:
         if locale == "ja":
             return """- Chat response should be only the original short progress / next-step message and ask the user to reply 正確 / 不正確 / 一部正確.
 - reader_prevalidation.md must follow the original Step 5 output template:
-  - Start with: 完全な分析に入る前に、出生データの精度を確認するため、いくつかの時間アンカーを検証します——
+  - Start with: 完全な分析に入る前に、いくつかの既知の事実で現在の読みの整合性を確認します——
 - Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one short, direct lived-experience question in Japanese, ending with ？.
   - The visible question must cover exactly one concrete or dated fact and must not expose planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning.
@@ -4413,7 +4493,7 @@ Return JSON only:
   - End with: 各項目に返信してください：**正確 / 不正確 / 一部正確**"""
         return """- Chat response should be only the original short progress / next-step message and ask the user to reply Accurate / Not accurate / Partly accurate.
 - reader_prevalidation.md must follow the original Step 5 output template:
-  - Start with: Before entering the full analysis, I will first validate several timing anchors to check the precision of the birth data—
+  - Start with: Before entering the full analysis, I will check the current reading against several known past facts—
 - Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question, e.g. **1.** Around 2018, did you make one major change in your work direction?
   - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Keep it to one short sentence, ideally no more than 35 words.
@@ -4557,10 +4637,8 @@ Return JSON only:
                 chart
                 for chart in charts
                 if isinstance(chart, dict)
-                and (
-                    chart.get("eligibleAsPrimaryEvidence") is True
-                    or chart.get("inputStability") in {"verified", "corroborated"}
-                )
+                and chart.get("eligibleAsPrimaryEvidence") is True
+                and chart.get("inputStability") in {"verified", "corroborated"}
             ]
             if isinstance(charts, list)
             else []
@@ -4597,6 +4675,8 @@ Return JSON only:
                     "mahadasha",
                     "antardasha",
                 }:
+                    continue
+                if period.get("inputStability") not in {"verified", "corroborated"}:
                     continue
                 interval = period.get("interval")
                 if not isinstance(interval, dict):
@@ -4924,10 +5004,28 @@ User request:
     def _judgement_sensitivity(self, session_id: str) -> dict[str, object]:
         active = self.workspace.read_artifact_text(session_id, ACTIVE_CHART_SENSITIVITY_JSON)
         original = self.workspace.read_artifact_text(session_id, "sensitivity_scan.json")
-        sensitivity = self._json_dict(active or original or "")
         state = self._json_dict(
             self.workspace.read_artifact_text(session_id, "chart_rectification_state.json") or ""
         )
+        if active:
+            if not self.workspace.artifact_checkpoint_valid(
+                session_id,
+                ACTIVE_CHART_SENSITIVITY_JSON,
+                producer="calculator:rectification-active-sensitivity",
+                dependency_paths=[CHART_RECORD_JSON],
+            ):
+                raise ValueError(
+                    "active_chart_sensitivity.json is stale or was modified; "
+                    "recalculate the selected birth-time interval before generating a report"
+                )
+            sensitivity = self._json_dict(active)
+        else:
+            if state.get("status") == "corrected_chart_ready":
+                raise ValueError(
+                    "the corrected chart is missing its bounded sensitivity scan; "
+                    "recalculate the selected birth-time interval before generating a report"
+                )
+            sensitivity = self._json_dict(original or "")
         intersection = state.get("equivalentCandidateIntersection")
         if state.get("status") != "multiple_equivalent" or not isinstance(intersection, dict):
             return sensitivity

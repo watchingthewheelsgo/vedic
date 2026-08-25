@@ -52,10 +52,22 @@ def _state(
         }
         for index, category in enumerate(categories or [])
     ]
+    discriminating_fields = fields or []
     return {
+        "revision": 0,
         "status": status,
+        "activeChartRevision": {"revision": 1},
         "rectificationPlan": {
-            "discriminatingFields": fields or [],
+            "targetCandidateIds": ["candidate-a", "candidate-b", "candidate-c"],
+            "discriminatingFields": discriminating_fields,
+            "questionDiscrimination": {
+                field: {
+                    "candidateCount": 3,
+                    "partitionCount": 2,
+                    "largestPartitionSize": 2,
+                }
+                for field in discriminating_fields
+            },
             "eventCollectionRequired": status == "collecting_evidence",
         },
         "lifeEventLedger": {"events": events},
@@ -73,8 +85,8 @@ def test_question_categories_follow_candidate_discriminators() -> None:
     assert len(interview["questions"]) == 1
     assert interview["progress"]["target"] == 4
     assert interview["source"] == "deterministic_brief"
-    assert interview["questions"][0]["questionValue"]["tier"] == "discriminating"
-    assert interview["questions"][0]["questionValue"]["matchedFields"] == ["d10Lagna"]
+    assert interview["questions"][0]["selectionContract"]["tier"] == "discriminating"
+    assert interview["questions"][0]["selectionContract"]["matchedFields"] == ["d10Lagna"]
     assert len(interview["questionPool"]) >= 2
     assert interview["questions"][0]["questionId"] == interview["questionPool"][0]["questionId"]
     assert "候选" not in " ".join(question["prompt"] for question in interview["questions"])
@@ -103,6 +115,50 @@ def test_context_only_events_do_not_consume_interview_progress_or_limit() -> Non
     assert interview["progress"]["answered"] == 2
     assert interview["progress"]["target"] == 4
     assert interview["round"] == 3
+
+
+def test_incomplete_candidate_score_coverage_is_not_discriminating() -> None:
+    candidates = [
+        {
+            "candidateId": "candidate-a",
+            "equivalenceClassId": "class-a",
+            "deterministicScore": 0.9,
+            "evidenceScores": [
+                {
+                    "eventId": "event-1",
+                    "role": "calibration",
+                    "selectionScore": 0.9,
+                }
+            ],
+        },
+        {
+            "candidateId": "candidate-b",
+            "equivalenceClassId": "class-b",
+            "deterministicScore": 0.6,
+            "evidenceScores": [
+                {
+                    "eventId": "event-1",
+                    "role": "calibration",
+                    "selectionScore": 0.5,
+                }
+            ],
+        },
+        {
+            "candidateId": "candidate-c",
+            "equivalenceClassId": "class-c",
+            "deterministicScore": 0.3,
+            "evidenceScores": [],
+        },
+    ]
+
+    impact = ChartRectificationService._event_score_impact(candidates, "event-1")
+    discrimination = ChartRectificationService._calibration_event_discrimination(candidates)
+
+    assert impact["candidateClassCount"] == 3
+    assert impact["scoredCandidateClasses"] == 2
+    assert impact["completeCoverage"] is False
+    assert impact["discriminating"] is False
+    assert discrimination == []
 
 
 def test_correlated_event_advances_interaction_round_without_advancing_evidence_progress() -> None:
@@ -151,7 +207,54 @@ def test_question_ranking_prefers_the_field_with_better_candidate_partition() ->
     )
 
     assert interview["questions"][0]["category"] == "relocation"
-    assert interview["questions"][0]["questionValue"]["partitionCount"] == 3
+    assert interview["questions"][0]["selectionContract"]["partitionCount"] == 3
+
+
+def test_interview_fails_closed_without_a_proven_candidate_partition() -> None:
+    state = _state(fields=["d10Lagna"])
+    state["rectificationPlan"]["questionDiscrimination"] = {}
+
+    interview = build_rectification_interview(
+        state,
+        session_id="session-no-information-gain",
+        locale="en",
+    )
+
+    assert interview["status"] == "exhausted"
+    assert interview["questions"] == []
+    assert interview["questionPool"] == []
+    assert "backend-proven information gain" in interview["stopReason"]
+
+
+def test_agent_cannot_select_a_question_without_backend_information_gain() -> None:
+    brief = build_rectification_interview(
+        _state(fields=["d10Lagna"]),
+        session_id="session-invalid-contract",
+        locale="en",
+    )
+    question = brief["questions"][0]
+    question["selectionContract"] = {
+        **question["selectionContract"],
+        "partitionCount": 1,
+        "largestPartitionSize": question["selectionContract"]["candidateCount"],
+    }
+
+    with pytest.raises(ValueError, match="non-discriminating question"):
+        validate_agent_question_wording(
+            brief,
+            {
+                "questions": [
+                    {
+                        "questionId": question["questionId"],
+                        "category": question["category"],
+                        "title": question["title"],
+                        "prompt": question["prompt"],
+                        "whyWeAsk": question["whyWeAsk"],
+                        "detailsPlaceholder": question["detailsPlaceholder"],
+                    }
+                ]
+            },
+        )
 
 
 def test_question_discrimination_resolves_nested_signature_fields() -> None:
@@ -542,7 +645,7 @@ def test_agent_wording_prompt_excludes_private_candidate_discrimination(tmp_path
     assert "d10Lagna" not in prompt
     assert "matchedFields" not in prompt
     assert "partitionCount" not in prompt
-    assert "questionValue" not in prompt
+    assert "selectionContract" not in prompt
     assert interview["questions"][0]["questionId"] in prompt
 
 
@@ -658,7 +761,12 @@ def test_rejected_confirmation_discards_stale_interview_before_next_round(tmp_pa
                 "chartRevision": 1,
                 "generation": {"source": "deterministic_input_review"},
                 "confirmation": {"status": "pending"},
-                "examples": [{"exampleId": "example-1"}],
+                "examples": [
+                    {
+                        "exampleId": "corrected-time-review",
+                        "source": "deterministic_input_review",
+                    }
+                ],
             },
         }
         workspace.write_artifact(
@@ -685,7 +793,7 @@ def test_rejected_confirmation_discards_stale_interview_before_next_round(tmp_pa
             RectificationConfirmationInput(
                 sessionId=session_id,
                 expectedChartRevision=1,
-                responses=[{"exampleId": "example-1", "answer": "inaccurate"}],
+                responses=[{"exampleId": "corrected-time-review", "answer": "inaccurate"}],
             )
         )
         updated = json.loads(
@@ -744,7 +852,12 @@ def test_rejected_confirmation_respects_maximum_independent_event_limit(tmp_path
                 "chartRevision": 1,
                 "generation": {"source": "deterministic_input_review"},
                 "confirmation": {"status": "pending"},
-                "examples": [{"exampleId": "example-1"}],
+                "examples": [
+                    {
+                        "exampleId": "corrected-time-review",
+                        "source": "deterministic_input_review",
+                    }
+                ],
             },
         }
         workspace.write_artifact(
@@ -766,7 +879,7 @@ def test_rejected_confirmation_respects_maximum_independent_event_limit(tmp_path
             RectificationConfirmationInput(
                 sessionId=session_id,
                 expectedChartRevision=1,
-                responses=[{"exampleId": "example-1", "answer": "inaccurate"}],
+                responses=[{"exampleId": "corrected-time-review", "answer": "inaccurate"}],
             )
         )
         updated = json.loads(
@@ -776,6 +889,128 @@ def test_rejected_confirmation_respects_maximum_independent_event_limit(tmp_path
         assert updated["lifeEventLedger"]["eventCollectionRequired"] is False
         assert updated["rectificationPlan"]["action"] == "rectification_inconclusive"
         assert "maximum independent evidence set" in response.chat_message
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("time_answer", "evidence_answer", "expected_status", "expected_action"),
+    [
+        ("partly", "accurate", "corrected_chart_ready", "full_report"),
+        ("accurate", "partly", "underdetermined", "reset_rectification_evidence"),
+        ("accurate", "inaccurate", "underdetermined", "reset_rectification_evidence"),
+    ],
+)
+def test_confirmation_distinguishes_time_uncertainty_from_invalid_evidence(
+    tmp_path,
+    time_answer: str,
+    evidence_answer: str,
+    expected_status: str,
+    expected_action: str,
+) -> None:
+    async def run() -> None:
+        workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+        session_id = workspace.create_session(f"confirmation-{time_answer}-{evidence_answer}")
+        record = ChartRecord(
+            chartRecordId="chart-confirmation-evidence",
+            readingSessionId=session_id,
+            revision=1,
+            createdAt="2026-08-09T00:00:00Z",
+            subject=SubjectContext(subjectId="subject-confirmation-evidence"),
+            birthAssertion=BirthAssertion(
+                localDate="1990-01-01",
+                reportedLocalTime="08:00",
+                reportedPlace="Test City",
+                timeCertainty="approximate",
+                evidence=[
+                    {
+                        "evidenceId": "birth-source",
+                        "evidenceClass": "user_testimony",
+                        "sourceLabel": "user",
+                        "observedValue": "1990-01-01 08:00",
+                        "confidence": "provisional",
+                    }
+                ],
+            ),
+            calculationProfile=parashari_lahiri_profile(),
+            status="intake",
+        )
+        state = {
+            "status": "rectification_confirmation_required",
+            "revision": 1,
+            "selectedCandidateId": "candidate-a",
+            "activeChartRevision": {"revision": 1},
+            "lifeEventLedger": {
+                "independentEpisodeCount": 4,
+                "eligibleEventCount": 4,
+                "eventCollectionRequired": False,
+                "events": [
+                    {
+                        "eventId": "event-career",
+                        "date": "2018-06",
+                        "category": "career",
+                        "eventSubtype": "job_change",
+                        "description": "Changed employer",
+                        "role": "calibration",
+                    }
+                ],
+            },
+            "rectificationConclusion": {
+                "status": "pending",
+                "chartRevision": 1,
+                "confirmation": {"status": "pending"},
+                "examples": [
+                    {
+                        "exampleId": "corrected-time-review",
+                        "source": "deterministic_input_review",
+                    },
+                    {
+                        "exampleId": "submitted-evidence-1",
+                        "eventId": "event-career",
+                        "source": "submitted_evidence",
+                    },
+                ],
+            },
+        }
+        workspace.write_artifact(
+            session_id, "chart_record.json", record.model_dump_json(by_alias=True)
+        )
+        workspace.write_artifact(session_id, "chart_rectification_state.json", json.dumps(state))
+        runtime = SkillRuntime(
+            calculator=object(),  # type: ignore[arg-type]
+            workspace=workspace,
+            agent_runtime=None,  # type: ignore[arg-type]
+        )
+        runtime._sync_chart_record_rectification = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+        async def no_sync(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        runtime._sync_metadata = no_sync  # type: ignore[method-assign]
+        await runtime.confirm_rectification_result(
+            RectificationConfirmationInput(
+                sessionId=session_id,
+                expectedChartRevision=1,
+                responses=[
+                    {"exampleId": "corrected-time-review", "answer": time_answer},
+                    {"exampleId": "submitted-evidence-1", "answer": evidence_answer},
+                ],
+            )
+        )
+        updated = json.loads(
+            workspace.read_artifact_text(session_id, "chart_rectification_state.json") or "{}"
+        )
+
+        assert updated["status"] == expected_status
+        assert updated["rectificationPlan"]["action"] == expected_action
+        if expected_action == "reset_rectification_evidence":
+            assert updated["reportGate"]["fullReportAllowed"] is False
+            assert updated["lifeEventLedger"]["eventCollectionRequired"] is False
+            assert updated["evidenceInvalidation"]["eventIds"] == ["event-career"]
+            assert updated["selectedCandidateId"] is None
+        else:
+            assert updated["reportGate"]["fullReportAllowed"] is True
+            assert "evidenceInvalidation" not in updated
 
     asyncio.run(run())
 
@@ -845,7 +1080,7 @@ def test_agent_may_rephrase_but_not_change_question_identity() -> None:
     accepted = validate_agent_question_wording(brief, proposed)
     assert accepted["source"] == "agent_wording"
     assert "questionPool" not in accepted
-    assert "questionValue" not in accepted["questions"][0]
+    assert accepted["questions"][0]["selectionContract"]["tier"] == "discriminating"
 
     proposed["questions"][0]["category"] = "health"
     with pytest.raises(ValueError, match="changed a question category"):
@@ -1069,6 +1304,15 @@ def test_rectification_event_must_match_backend_question_category() -> None:
             interview=interview,
         )
 
+    tampered_interview = json.loads(json.dumps(interview))
+    tampered_interview["questions"][0]["selectionContract"]["maximumElimination"] = 99
+    with pytest.raises(ValueError, match="discriminating verification question"):
+        validate_rectification_event_bindings(
+            [event],
+            state=state,
+            interview=tampered_interview,
+        )
+
     with pytest.raises(ValueError, match="exactly one"):
         validate_rectification_event_bindings(
             [event, event],
@@ -1082,6 +1326,70 @@ def test_rectification_event_must_match_backend_question_category() -> None:
             state=state,
             interview=interview,
         )
+
+
+def test_rectification_event_rejects_question_from_previous_candidate_set() -> None:
+    state = _state(fields=["d10Lagna"])
+    interview = build_rectification_interview(
+        state,
+        session_id="session-stale-candidates",
+        locale="en",
+    )
+    question = interview["questions"][0]
+    event = {
+        "questionId": question["questionId"],
+        "date": "2018",
+        "category": question["category"],
+        "eventSubtype": question["allowedSubtypes"][0],
+        "description": "Changed employer",
+    }
+    state["rectificationPlan"]["targetCandidateIds"] = ["candidate-a", "candidate-b"]
+
+    with pytest.raises(ValueError, match="outdated candidate set"):
+        validate_rectification_event_bindings([event], state=state, interview=interview)
+
+
+def test_rectification_event_rejects_question_from_previous_state_revision() -> None:
+    state = _state(fields=["d10Lagna"])
+    interview = build_rectification_interview(
+        state,
+        session_id="session-stale-state",
+        locale="en",
+    )
+    question = interview["questions"][0]
+    event = {
+        "questionId": question["questionId"],
+        "date": "2018",
+        "category": question["category"],
+        "eventSubtype": question["allowedSubtypes"][0],
+        "description": "Changed employer",
+    }
+    state["revision"] = int(state["revision"]) + 1
+
+    with pytest.raises(ValueError, match="outdated rectification state"):
+        validate_rectification_event_bindings([event], state=state, interview=interview)
+
+
+def test_rectification_event_rejects_question_after_policy_change() -> None:
+    state = _state(fields=["d10Lagna"])
+    state["rectificationPlan"]["selectionPolicyId"] = "policy-a"
+    interview = build_rectification_interview(
+        state,
+        session_id="session-stale-policy",
+        locale="en",
+    )
+    question = interview["questions"][0]
+    event = {
+        "questionId": question["questionId"],
+        "date": "2018",
+        "category": question["category"],
+        "eventSubtype": question["allowedSubtypes"][0],
+        "description": "Changed employer",
+    }
+    state["rectificationPlan"]["selectionPolicyId"] = "policy-b"
+
+    with pytest.raises(ValueError, match="outdated candidate set"):
+        validate_rectification_event_bindings([event], state=state, interview=interview)
 
 
 def test_rectification_event_schema_rejects_cross_category_subtype() -> None:
