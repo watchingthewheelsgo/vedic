@@ -93,8 +93,10 @@ export function BirthInputAstroVisual({
     if (!context) return;
     const canvasElement = canvas;
     const ctx = context;
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     let animation = 0;
+    let reducedMotion = motionQuery.matches;
     let width = 0;
     let height = 0;
     let dpr = 1;
@@ -186,6 +188,17 @@ export function BirthInputAstroVisual({
         }
         if (best >= 0 && bestDistance < (240 * dpr) ** 2) edges.push([bright[index], bright[best]]);
       }
+      if (reducedMotion) scheduleDraw();
+    }
+
+    function scheduleDraw() {
+      if (animation) cancelAnimationFrame(animation);
+      animation = requestAnimationFrame(draw);
+    }
+
+    function onMotionPreferenceChange(event: MediaQueryListEvent) {
+      reducedMotion = event.matches;
+      scheduleDraw();
     }
 
     function onCity(event: Event) {
@@ -213,11 +226,13 @@ export function BirthInputAstroVisual({
           maxLife: 1
         });
       }
+      if (reducedMotion) scheduleDraw();
     }
 
     function draw(now: number) {
-      animation = requestAnimationFrame(draw);
-      const dt = Math.min((now - last) / 1000, 0.05);
+      animation = 0;
+      if (!reducedMotion) animation = requestAnimationFrame(draw);
+      const dt = reducedMotion ? 1 : Math.min((now - last) / 1000, 0.05);
       last = now;
       time += dt;
 
@@ -258,9 +273,14 @@ export function BirthInputAstroVisual({
         if (!timeMotion.hasTarget) timeMotion.hasTarget = true;
         let difference = targetAngle - timeMotion.angle;
         difference = ((((difference + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
-        timeMotion.velocity += difference * 38 * dt;
-        timeMotion.velocity *= Math.pow(0.05, dt);
-        timeMotion.angle += timeMotion.velocity * dt;
+        if (reducedMotion) {
+          timeMotion.angle = targetAngle;
+          timeMotion.velocity = 0;
+        } else {
+          timeMotion.velocity += difference * 38 * dt;
+          timeMotion.velocity *= Math.pow(0.05, dt);
+          timeMotion.angle += timeMotion.velocity * dt;
+        }
         timeSeeking = Math.abs(timeMotion.velocity) > 0.04 || Math.abs(difference) > 0.01;
 
         const palette = timeOfDayPalette(minutes / 60);
@@ -640,14 +660,16 @@ export function BirthInputAstroVisual({
     observer.observe(canvasElement);
     window.addEventListener("resize", rebuild);
     window.addEventListener("birth-place-coordinates", onCity);
+    motionQuery.addEventListener("change", onMotionPreferenceChange);
     rebuild();
-    animation = requestAnimationFrame(draw);
+    scheduleDraw();
 
     return () => {
       cancelAnimationFrame(animation);
       observer.disconnect();
       window.removeEventListener("resize", rebuild);
       window.removeEventListener("birth-place-coordinates", onCity);
+      motionQuery.removeEventListener("change", onMotionPreferenceChange);
     };
   }, [embedded, location, placement, theme]);
 

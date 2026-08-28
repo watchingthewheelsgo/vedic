@@ -148,7 +148,7 @@ class ChartRectificationService:
                 if status == "calculation_failed"
                 else "collect_dated_life_events"
                 if status == "collecting_evidence"
-                else "standard_prevalidation",
+                else "full_report",
             },
             "searchBounds": {
                 "time": (birth_input_context.get("time") or {}).get("window"),
@@ -1630,7 +1630,10 @@ class ChartRectificationService:
 
         if status == "not_required":
             action = "full_report"
-            directive = "Rectification is not required; run standard prevalidation only."
+            directive = (
+                "Rectification is not required; continue directly to the full report. "
+                "Any later reading-consistency feedback is optional consultation context."
+            )
         elif status == "rectification_confirmation_required":
             action = "confirm_rectification_result"
             directive = (

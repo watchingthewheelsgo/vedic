@@ -84,6 +84,10 @@ class FakeSkillRuntime:
         self.workspace = workspace
         self.batches = batches
         self.calls: list[tuple[str, bool]] = []
+        self.readiness_calls: list[tuple[str, bool]] = []
+
+    def assert_core_readiness(self, session_id: str, *, prepare_judgement: bool = True) -> None:
+        self.readiness_calls.append((session_id, prepare_judgement))
 
     def core_batches(self, user_message: str, locale: str = "en") -> list[dict[str, Any]]:
         return self.batches
@@ -240,6 +244,7 @@ def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path
         finished = await wait_for_job(runtime, started.job_id)
 
         assert finished.status == "completed"
+        assert skill_runtime.readiness_calls == [(session_id, False)]
         assert skill_runtime.calls == [("vedicdust_consultation", True)]
         nodes = {node.id: node for node in finished.nodes}
         assert nodes["completed_step"].status == "skipped"

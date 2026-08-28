@@ -2761,6 +2761,22 @@ def test_core_readiness_requires_prevalidation_result(tmp_path) -> None:
         runtime.assert_core_readiness("session")
 
 
+def test_core_readiness_allows_stable_chart_without_reader_prevalidation(tmp_path) -> None:
+    runtime = runtime_with_workspace(tmp_path)
+    session_dir = runtime.workspace.require_session_dir("session")
+    (session_dir / "chart_rectification_state.json").write_text(
+        json.dumps(
+            {
+                "status": "not_required",
+                "reportGate": {"fullReportAllowed": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime.assert_core_readiness("session")
+
+
 def test_core_readiness_accepts_backend_rectification_gate_without_reader_prevalidation(
     tmp_path,
 ) -> None:
@@ -2833,7 +2849,7 @@ def test_core_readiness_allows_valid_report_gate(tmp_path) -> None:
     runtime.assert_core_readiness("session")
 
 
-def test_core_readiness_rejects_prevalidation_from_prior_chart_revision(
+def test_stable_chart_readiness_ignores_optional_reader_feedback_freshness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class FixedPlaceService:
@@ -2901,8 +2917,7 @@ def test_core_readiness_rejects_prevalidation_from_prior_chart_revision(
             "reader_prevalidation.md",
             prevalidation_markdown + "\nChanged after the quality decision.\n",
         )
-        with pytest.raises(ValueError, match="prevalidation_result.json 已过期"):
-            runtime.assert_core_readiness(created.session_id)
+        runtime.assert_core_readiness(created.session_id)
 
         workspace.write_artifact(
             created.session_id,
@@ -2925,8 +2940,7 @@ def test_core_readiness_rejects_prevalidation_from_prior_chart_revision(
             json.dumps(record, ensure_ascii=False, indent=2) + "\n",
         )
 
-        with pytest.raises(ValueError, match="prevalidation_result.json 已过期"):
-            runtime.assert_core_readiness(created.session_id)
+        runtime.assert_core_readiness(created.session_id)
 
     asyncio.run(run())
 

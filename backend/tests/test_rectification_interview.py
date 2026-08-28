@@ -1588,6 +1588,39 @@ def test_consultation_answer_rejects_unsupported_certainty_language() -> None:
         )
 
 
+def test_bounded_audit_prefers_direct_transport_with_primary_model() -> None:
+    class FakeAgentRuntime:
+        settings = SimpleNamespace(anthropic_model="primary-model")
+
+        def __init__(self) -> None:
+            self.direct_kwargs: dict[str, object] | None = None
+
+        async def run_direct_prompt_task(
+            self, _task: str, _prompt: str, **kwargs: object
+        ) -> SimpleNamespace:
+            self.direct_kwargs = kwargs
+            return SimpleNamespace(raw_text='{"supported":true}')
+
+        async def run_skill_prompt_task(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("bounded audit should not start an Agent SDK session")
+
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    fake = FakeAgentRuntime()
+    runtime.agent_runtime = fake  # type: ignore[assignment]
+
+    result = asyncio.run(
+        runtime._run_bounded_audit_prompt(
+            "audit",
+            "bounded prompt",
+            skills=["vedicdust-consultation"],
+            max_tokens=2600,
+        )
+    )
+
+    assert result.raw_text == '{"supported":true}'
+    assert fake.direct_kwargs == {"model_name": "primary-model", "max_tokens": 2600}
+
+
 def test_consultation_grounding_audit_rejects_content_beyond_cited_claims() -> None:
     class FakeAgentRuntime:
         async def run_skill_prompt_task(self, *_args: object, **_kwargs: object):

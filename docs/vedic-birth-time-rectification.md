@@ -140,9 +140,10 @@ silently assuming that the event happened in the birth-place timezone.
 - `input_resolution_required` / `calculation_failed`: civil-time/place or
   deterministic provider failure must be fixed before astrological questioning.
 
-`corrected_chart_ready` and terminal `multiple_equivalent` states with a passed
-holdout and an open scoped report gate may bypass Reader prevalidation. Stable
-`not_required` charts still use the ordinary pre-reading quality check.
+`corrected_chart_ready`, stable `not_required`, and terminal `multiple_equivalent`
+states with an open scoped report gate continue directly to report synthesis. An
+optional Reader pass on a stable chart records consultation context only and never
+controls publication.
 
 ## Evidence contracts
 

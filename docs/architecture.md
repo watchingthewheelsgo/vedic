@@ -31,7 +31,7 @@ Frontend:
 
 - collect birth date, time certainty, city, optional precise place, and consultation scope;
 - show resolved place, coordinates, timezone, chart status, structured dated-event intake,
-  optional scan-stable quality questions, and report;
+  optional scan-stable reading feedback, and report;
 - submit explicit quality feedback without turning it into calculated evidence.
 
 Backend:
@@ -72,10 +72,10 @@ POST /api/skill-sessions
   -> reading_session.json
 
 POST /api/skill-feedback
-  -> Reader quality feedback for a scan-stable chart
-  -> quality gate only; never candidate selection or chart revision
+  -> optional Reader consistency feedback for a scan-stable chart
+  -> consultation context only; never report gating, candidate selection, or chart revision
 
-POST /api/skill-runs (vedic-core)
+POST /api/core-jobs (vedic-core)
   -> judgement_context.json
   -> claim_graph.json
   -> consultation_dossier.json

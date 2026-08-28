@@ -18,7 +18,7 @@ try:
 except ImportError:  # pragma: no cover - Windows deployments use the in-process lock.
     fcntl = None  # type: ignore[assignment]
 
-from app.agents.claude_runtime import ClaudeRuntime
+from app.agents.claude_runtime import AgentRunResult, ClaudeRuntime
 from app.calculator.civil_time import resolve_civil_time
 from app.schemas import (
     BaziSessionInput,
@@ -613,10 +613,7 @@ class SkillRuntime:
             round((time.perf_counter() - flow_started_perf) * 1000),
         )
 
-        chat_message = (
-            "Your chart data is ready.\n\n"
-            "Next, the system will prepare a few pre-reading checkpoints for you to confirm."
-        )
+        chat_message = self._chart_ready_message(input_data.locale)
         return SkillSessionResponse(
             session_id=session_id,
             stage="reader_ready",
@@ -2179,6 +2176,11 @@ class SkillRuntime:
         state_status = str(state.get("status") or "")
         raw_state_gate = state.get("reportGate")
         state_gate: dict[str, object] = raw_state_gate if isinstance(raw_state_gate, dict) else {}
+        if state_status == "not_required" and state_gate.get("fullReportAllowed") is True:
+            if callable(read_artifact_text) and read_artifact_text(session_id, CHART_RECORD_JSON):
+                if prepare_judgement:
+                    self._prepare_judgement_context(session_id)
+            return
         if (
             state_status == "corrected_chart_ready"
             and state.get("holdoutResult") == "passed"
@@ -2603,6 +2605,33 @@ class SkillRuntime:
             int(getattr(settings, "agent_retry_base_delay_ms", 0)),
         )
 
+    async def _run_bounded_audit_prompt(
+        self,
+        task_name: str,
+        prompt: str,
+        *,
+        skills: list[str],
+        max_tokens: int,
+    ) -> AgentRunResult:
+        """Use the direct transport for self-contained JSON audits when available."""
+
+        direct_prompt_task = getattr(self.agent_runtime, "run_direct_prompt_task", None)
+        if callable(direct_prompt_task):
+            settings = getattr(self.agent_runtime, "settings", None)
+            return await direct_prompt_task(
+                task_name,
+                prompt,
+                model_name=getattr(settings, "anthropic_model", None),
+                max_tokens=max_tokens,
+            )
+        return await self.agent_runtime.run_skill_prompt_task(
+            task_name,
+            prompt,
+            skills=skills,
+            max_turns=3,
+            allow_file_tools=False,
+        )
+
     @staticmethod
     def _is_transient_agent_error(exc: Exception) -> bool:
         error_type = type(exc).__name__
@@ -2774,6 +2803,18 @@ class SkillRuntime:
             artifacts=self.workspace.read_artifacts(session_id),
             active_artifact="user_context.md",
         )
+
+    @staticmethod
+    def _chart_ready_message(locale: str) -> str:
+        messages = {
+            "zh": "你的盘面数据已准备好。系统将根据盘面稳定性直接生成报告，或进入必要的生时校准。",
+            "ja": "チャートデータの準備ができました。安定性に応じて、レポート生成または必要な出生時刻調整へ進みます。",
+            "en": (
+                "Your chart data is ready. The system will now continue to the report or, "
+                "when needed, birth-time calibration."
+            ),
+        }
+        return messages.get(locale, messages["en"])
 
     @staticmethod
     def _reader_quality_message(locale: str, report_allowed: bool) -> str:
@@ -5350,12 +5391,11 @@ Return JSON only:
         last_error: Exception | None = None
         for audit_attempts in range(1, 3):
             try:
-                result = await self.agent_runtime.run_skill_prompt_task(
+                result = await self._run_bounded_audit_prompt(
                     "vedicdust-consultation-grounding-audit",
                     prompt,
                     skills=["vedicdust-consultation"],
-                    max_turns=3,
-                    allow_file_tools=False,
+                    max_tokens=2600,
                 )
                 audit_model = getattr(result, "model", None)
                 payload = self._parse_json_object(result.raw_text)

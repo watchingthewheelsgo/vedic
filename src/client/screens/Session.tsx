@@ -1023,12 +1023,13 @@ export function Session() {
   const birthInfo = useMemo(() => resolveBirthInfo(navState, session), [navState, session]);
   const readerPrevalidation = findArtifact(session, "reader_prevalidation.md");
   const feedbackArtifact = findArtifact(session, "user_context.md");
+  const calibrationDone = baziMode || canStartFullReading(session);
   const awaitingValidationFeedback = Boolean(
     readerPrevalidation &&
     !hasCurrentValidationFeedback(readerPrevalidation, feedbackArtifact) &&
+    !calibrationDone &&
     !complete
   );
-  const calibrationDone = baziMode || canStartFullReading(session);
   const calibrationFocus = Boolean(session) && !baziMode && !calibrationDone && !complete;
   const productPhases = useMemo(
     () =>
@@ -1073,11 +1074,11 @@ export function Session() {
     async (options: { resume?: boolean; sessionOverride?: SkillSessionResponse } = {}) => {
       if (!id || (coreStartedRef.current && !options.resume)) return;
       if (!authLoaded) {
-        setError("Account status is still loading. Please try again in a moment.");
+        setError(t("session.error.accountLoading"));
         return;
       }
       if (!isSignedIn) {
-        setError("Sign in or create an account to start the full reading.");
+        setError(t("session.error.signInReading"));
         return;
       }
       if (
@@ -1186,37 +1187,30 @@ export function Session() {
         const loadedReader = findArtifact(loaded, "reader_prevalidation.md");
         const loadedFeedback = findArtifact(loaded, "user_context.md");
         const hasFeedback = hasCurrentValidationFeedback(loadedReader, loadedFeedback);
-        const hasReader = Boolean(loadedReader);
-        if (hasFeedback) {
-          const nextStep = readingContinuationAction(loaded);
-          if (nextStep === "full_report") void startCoreReport({ sessionOverride: loaded });
-          else if (nextStep === "reader") void startReaderValidation({ force: true });
-          else if (nextStep === "collect_events") setSelectedStageId("reader");
-          else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
-          else if (nextStep === "reset_events") setSelectedStageId("reader");
+        const nextStep = readingContinuationAction(loaded);
+        if (nextStep === "full_report") {
+          if (authLoaded && isSignedIn) void startCoreReport({ sessionOverride: loaded });
           else setSelectedStageId("chart");
-        } else if (hasReader) {
+        } else if (nextStep === "reader") {
+          if (loadedReader && !hasFeedback) setSelectedStageId("reader");
+          else void startReaderValidation({ force: hasFeedback });
+        } else if (
+          nextStep === "collect_events" ||
+          nextStep === "confirm_rectification" ||
+          nextStep === "reset_events"
+        ) {
           setSelectedStageId("reader");
         } else {
-          const nextStep = readingContinuationAction(loaded);
-          if (nextStep === "reader") void startReaderValidation();
-          else if (nextStep === "collect_events") setSelectedStageId("reader");
-          else if (nextStep === "confirm_rectification") setSelectedStageId("reader");
-          else if (nextStep === "reset_events") setSelectedStageId("reader");
-          else setSelectedStageId("chart");
+          setSelectedStageId("chart");
         }
       } catch (caught) {
-        if (!cancelled) setError(userFacingError(caught, "Could not load this reading."));
+        if (!cancelled) setError(userFacingError(caught, t("session.error.loadReading")));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [id, startCoreReport, startReaderValidation]);
-
-  useEffect(() => {
-    if (readerPrevalidation && !feedbackArtifact) setSelectedStageId("reader");
-  }, [readerPrevalidation, feedbackArtifact]);
+  }, [authLoaded, id, isSignedIn, startCoreReport, startReaderValidation, t]);
 
   useEffect(() => {
     if (!readerRunning && !jobActive) return;
@@ -1241,14 +1235,16 @@ export function Session() {
           }
         })
         .catch((caught) => {
-          if (!cancelled) setError(userFacingError(caught, "Could not refresh reading progress."));
+          if (!cancelled) {
+            setError(userFacingError(caught, t("session.error.refreshProgress")));
+          }
         });
     }, 2500);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [coreJob?.jobId, coreJob?.status]);
+  }, [coreJob?.jobId, coreJob?.status, t]);
 
   function scrollToSection(index: number) {
     setActiveSection(index);
@@ -1264,7 +1260,7 @@ export function Session() {
     try {
       await api.downloadReportPdf(id);
     } catch (caught) {
-      setError(userFacingError(caught, "Could not prepare the PDF. Please try again."));
+      setError(userFacingError(caught, t("session.error.exportPdf")));
     } finally {
       setExportingPdf(false);
     }
@@ -1273,16 +1269,16 @@ export function Session() {
   async function onSubmitFeedback(event: FormEvent) {
     event.preventDefault();
     if (!authLoaded) {
-      setError("Account status is still loading. Please try again in a moment.");
+      setError(t("session.error.accountLoading"));
       return;
     }
     if (!isSignedIn) {
-      setError("Sign in or create an account to save your replies and continue.");
+      setError(t("session.error.signInFeedback"));
       return;
     }
     const feedback = validationFeedback.trim();
     if (!feedback) {
-      setError("Please answer the current check before starting the full reading.");
+      setError(t("session.error.answerCheck"));
       return;
     }
 
@@ -1307,7 +1303,7 @@ export function Session() {
       else if (nextStep === "reset_events") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
-      setError(userFacingError(caught, "Could not save your replies. Please try again."));
+      setError(userFacingError(caught, t("session.error.saveFeedback")));
     } finally {
       setSubmittingFeedback(false);
     }
@@ -1315,11 +1311,11 @@ export function Session() {
 
   async function onSubmitLifeEvents(events: RectificationLifeEventInput[]) {
     if (!authLoaded) {
-      setError("正在确认会话，请稍后再试。");
+      setError(t("session.error.accountLoading"));
       return;
     }
     if (!isSignedIn) {
-      setError("请先登录，再继续出生时间校准。");
+      setError(t("session.error.signInRectification"));
       return;
     }
     setError("");
@@ -1329,9 +1325,7 @@ export function Session() {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
       const expectedChartRevision = numberLike(chartRecord?.revision);
       if (expectedChartRevision == null) {
-        throw new Error(
-          "The active chart revision is missing. Refresh the session before continuing."
-        );
+        throw new Error(t("session.error.missingChartRevision"));
       }
       const updated = await api.recordRectificationLifeEvents({
         sessionId: id,
@@ -1353,7 +1347,7 @@ export function Session() {
         setRectificationClarification(clarification);
         setError("");
       } else {
-        setError(userFacingError(caught, "Could not save these life events. Please try again."));
+        setError(userFacingError(caught, t("session.error.saveLifeEvents")));
       }
     } finally {
       setSubmittingLifeEvents(false);
@@ -1362,11 +1356,11 @@ export function Session() {
 
   async function onResetLifeEvents() {
     if (!authLoaded) {
-      setError("正在确认会话，请稍后再试。");
+      setError(t("session.error.accountLoading"));
       return;
     }
     if (!isSignedIn) {
-      setError("请先登录，再重新开始出生时间校准。");
+      setError(t("session.error.signInRectification"));
       return;
     }
     setError("");
@@ -1376,9 +1370,7 @@ export function Session() {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
       const expectedChartRevision = numberLike(chartRecord?.revision);
       if (expectedChartRevision == null) {
-        throw new Error(
-          "The active chart revision is missing. Refresh the session before restarting."
-        );
+        throw new Error(t("session.error.missingChartRevision"));
       }
       const updated = await api.resetRectificationLifeEvents({
         sessionId: id,
@@ -1388,9 +1380,7 @@ export function Session() {
       readerStartedRef.current = false;
       setSelectedStageId("reader");
     } catch (caught) {
-      setError(
-        userFacingError(caught, "Could not restart the birth-time check. Please try again.")
-      );
+      setError(userFacingError(caught, t("session.error.restartRectification")));
     } finally {
       setSubmittingLifeEvents(false);
     }
@@ -1398,11 +1388,11 @@ export function Session() {
 
   async function onSubmitRectificationConfirmation(responses: RectificationConfirmationResponse[]) {
     if (!authLoaded) {
-      setError("正在确认会话，请稍后再试。");
+      setError(t("session.error.accountLoading"));
       return;
     }
     if (!isSignedIn) {
-      setError("请先登录，再确认生时校正结果。");
+      setError(t("session.error.signInRectification"));
       return;
     }
     setError("");
@@ -1412,9 +1402,7 @@ export function Session() {
       const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
       const expectedChartRevision = numberLike(chartRecord?.revision);
       if (expectedChartRevision == null) {
-        throw new Error(
-          "The active chart revision is missing. Refresh the session before confirming."
-        );
+        throw new Error(t("session.error.missingChartRevision"));
       }
       const updated = await api.confirmRectification({
         sessionId: id,
@@ -1430,9 +1418,7 @@ export function Session() {
       else if (nextStep === "reset_events") setSelectedStageId("reader");
       else setSelectedStageId("chart");
     } catch (caught) {
-      setError(
-        userFacingError(caught, "Could not save the rectification check. Please try again.")
-      );
+      setError(userFacingError(caught, t("session.error.saveRectification")));
     } finally {
       setSubmittingRectificationConfirmation(false);
     }
@@ -1442,7 +1428,7 @@ export function Session() {
     async (action: RectificationInterviewAction = {}) => {
       if (!authLoaded || preparingRectificationInterview) return;
       if (!isSignedIn) {
-        setError("请先登录，再继续出生时间校准。");
+        setError(t("session.error.signInRectification"));
         return;
       }
       setError("");
@@ -1455,12 +1441,12 @@ export function Session() {
         });
         setSession(updated);
       } catch (caught) {
-        setError(userFacingError(caught, "Could not prepare the next verification question."));
+        setError(userFacingError(caught, t("session.error.prepareQuestion")));
       } finally {
         setPreparingRectificationInterview(false);
       }
     },
-    [authLoaded, id, isSignedIn, locale, preparingRectificationInterview]
+    [authLoaded, id, isSignedIn, locale, preparingRectificationInterview, t]
   );
 
   return (
@@ -4165,7 +4151,7 @@ function ConsultationQuestionPanel({
   sessionId: string;
   isSignedIn: boolean;
 }) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const [question, setQuestion] = useState("");
   const [exchanges, setExchanges] = useState<ConsultationExchangeResponse[]>([]);
   const [loading, setLoading] = useState(false);
@@ -4224,13 +4210,13 @@ function ConsultationQuestionPanel({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(userFacingError(caught, "Could not load the consultation history."));
+          setError(userFacingError(caught, t("session.error.consultationHistory")));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, sessionId]);
+  }, [isSignedIn, sessionId, t]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -4249,7 +4235,7 @@ function ConsultationQuestionPanel({
       ]);
       setQuestion("");
     } catch (caught) {
-      setError(userFacingError(caught, "Could not answer this question. Please try again."));
+      setError(userFacingError(caught, t("session.error.consultationAnswer")));
     } finally {
       setLoading(false);
     }
@@ -6137,6 +6123,32 @@ function cleanStoredEventDescription(value: string) {
 }
 
 function canStartFullReading(session: SkillSessionResponse | null): boolean {
+  const state = parseJsonArtifact(session, "chart_rectification_state.json");
+  if (state) {
+    const status = String(state.status ?? "").trim();
+    const conclusion = objectValue(state, "rectificationConclusion");
+    const confirmation = objectValue(conclusion, "confirmation");
+    if (status === "rectification_confirmation_required" || confirmation?.status === "pending") {
+      return false;
+    }
+    const gate = objectValue(state, "reportGate");
+    if (status === "not_required" && gate?.fullReportAllowed === true) return true;
+    if (
+      status === "corrected_chart_ready" &&
+      state.holdoutResult === "passed" &&
+      gate?.fullReportAllowed === true
+    ) {
+      return true;
+    }
+    if (
+      status === "multiple_equivalent" &&
+      state.holdoutResult === "passed" &&
+      gate?.fullReportAllowed === true &&
+      gate.reportScope === "stable_intersection_only"
+    ) {
+      return true;
+    }
+  }
   const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
   const decision = objectValue(prevalidationResult, "decision");
   return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
@@ -6144,8 +6156,6 @@ function canStartFullReading(session: SkillSessionResponse | null): boolean {
 
 type ReadingContinuationAction =
   "full_report" | "reader" | "collect_events" | "confirm_rectification" | "reset_events" | "stop";
-
-const READER_CONTINUATION_STATUSES = new Set(["not_required"]);
 
 function readingContinuationAction(
   session: SkillSessionResponse | null
@@ -6171,18 +6181,7 @@ function readingContinuationAction(
   const status = String(state.status ?? "").trim();
   const plan = objectValue(state, "rectificationPlan");
   const action = String(plan?.action ?? "").trim();
-  const gate = objectValue(state, "reportGate");
   if (action === "reset_rectification_evidence") return "reset_events";
-  if (status === "corrected_chart_ready" && gate?.fullReportAllowed === true) {
-    return "full_report";
-  }
-  if (
-    status === "multiple_equivalent" &&
-    gate?.fullReportAllowed === true &&
-    gate.reportScope === "stable_intersection_only"
-  ) {
-    return "full_report";
-  }
   if (
     status === "collecting_evidence" ||
     action === "collect_dated_life_events" ||
@@ -6190,7 +6189,6 @@ function readingContinuationAction(
   ) {
     return "collect_events";
   }
-  if (READER_CONTINUATION_STATUSES.has(status)) return "reader";
   return "stop";
 }
 
