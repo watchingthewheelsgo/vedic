@@ -467,7 +467,7 @@ export function PlacePicker({
       <div className="grid gap-3">
         {mode === "city" ? (
           <div className="grid gap-4">
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.15fr)]">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 sm:items-end">
               <PlaceSearchBox
                 label={t("place.country.label")}
                 placeholder={t("place.country.placeholder")}
@@ -489,7 +489,7 @@ export function PlacePicker({
                 disabledText={t("place.region.requiresCountry")}
                 onSelect={selectRegion}
               />
-              <div className="sm:col-span-2 xl:col-span-1">
+              <div className="sm:col-span-2">
                 <PlaceSearchBox
                   label={t("place.city.label")}
                   placeholder={t("place.city.placeholder")}

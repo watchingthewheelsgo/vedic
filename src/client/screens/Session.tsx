@@ -2509,6 +2509,7 @@ function RectificationFocusHeader({
   readerRunning: boolean;
 }) {
   const { t } = useI18n();
+  const consistencyOnly = state?.status === "not_required";
   const conclusion =
     state?.status === "rectification_confirmation_required" &&
     state.rectificationConclusion?.confirmation?.status !== "rejected"
@@ -2560,6 +2561,26 @@ function RectificationFocusHeader({
         : "session.rectification.focus.actionCollecting"
     )
   };
+
+  if (consistencyOnly) {
+    return (
+      <header className="mb-4 text-center text-cream" aria-live="polite">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-normal text-gold-light/70">
+          {t("session.reader.focus.eyebrow")}
+        </div>
+        <h1 className="mx-auto max-w-[620px] text-[26px] font-light leading-tight tracking-normal text-cream sm:text-[32px]">
+          {t("session.reader.focus.title")}
+        </h1>
+        <p className="mx-auto mt-2 max-w-[600px] text-[12.5px] leading-5 text-cream/58">
+          {t("session.reader.focus.body")}
+        </p>
+        <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-full border border-gold-light/20 bg-white/[0.04] px-4 py-2 text-xs text-cream/58">
+          <span className="size-1.5 rounded-full bg-gold-light/75" aria-hidden />
+          <span>{t("session.reader.focus.chartTime", { time: displayTime })}</span>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="mb-4 text-center text-cream" aria-live="polite">
@@ -2843,6 +2864,10 @@ function ChartFactsDetail({
         rectificationState={rectificationState}
       />
 
+      {publicationMode === "representative" && chartRecord ? (
+        <VedicChartPanel record={chartRecord} />
+      ) : null}
+
       <details className="my-5 rounded-xl border border-gold/18 bg-cream-2 px-4 py-3">
         <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[1.4px] text-muted outline-none">
           {t("session.chart.sourceFiles")}
@@ -2912,6 +2937,128 @@ function ChartFactsDetail({
         <EmptyResultState status={status} copy={copy} progress="" />
       )}
     </>
+  );
+}
+
+const SOUTH_INDIAN_SIGN_CELLS = [
+  { signIndex: 11, row: 1, column: 1, short: "Pi", name: "Pisces" },
+  { signIndex: 0, row: 1, column: 2, short: "Ar", name: "Aries" },
+  { signIndex: 1, row: 1, column: 3, short: "Ta", name: "Taurus" },
+  { signIndex: 2, row: 1, column: 4, short: "Ge", name: "Gemini" },
+  { signIndex: 10, row: 2, column: 1, short: "Aq", name: "Aquarius" },
+  { signIndex: 3, row: 2, column: 4, short: "Cn", name: "Cancer" },
+  { signIndex: 9, row: 3, column: 1, short: "Cp", name: "Capricorn" },
+  { signIndex: 4, row: 3, column: 4, short: "Le", name: "Leo" },
+  { signIndex: 8, row: 4, column: 1, short: "Sg", name: "Sagittarius" },
+  { signIndex: 7, row: 4, column: 2, short: "Sc", name: "Scorpio" },
+  { signIndex: 6, row: 4, column: 3, short: "Li", name: "Libra" },
+  { signIndex: 5, row: 4, column: 4, short: "Vi", name: "Virgo" }
+] as const;
+
+const GRAHA_SHORT_NAMES: Record<string, string> = {
+  Sun: "Su",
+  Moon: "Mo",
+  Mars: "Ma",
+  Mercury: "Me",
+  Jupiter: "Ju",
+  Venus: "Ve",
+  Saturn: "Sa",
+  Rahu: "Ra",
+  Ketu: "Ke"
+};
+
+function VedicChartPanel({ record }: { record: Record<string, unknown> }) {
+  const { t } = useI18n();
+  const charts = arrayValue(record, "charts")
+    .map(objectFromUnknown)
+    .filter((chart): chart is Record<string, unknown> => Boolean(chart));
+  const available = ["D1", "D9", "D10"]
+    .map((vargaId) => charts.find((chart) => chart.vargaId === vargaId))
+    .filter((chart): chart is Record<string, unknown> => Boolean(chart));
+  const [selectedVarga, setSelectedVarga] = useState("D1");
+  const selected = available.find((chart) => chart.vargaId === selectedVarga) ?? available[0];
+  if (!selected) return null;
+
+  const lagnaPosition = objectValue(objectValue(selected, "lagna"), "position");
+  const lagnaSignIndex = Number(lagnaPosition?.signIndex);
+  const placements = arrayValue(selected, "placements")
+    .map(objectFromUnknown)
+    .filter((placement): placement is Record<string, unknown> => Boolean(placement));
+  const placementsBySign = new Map<number, string[]>();
+  for (const placement of placements) {
+    const position = objectValue(placement, "position");
+    const signIndex = Number(position?.signIndex);
+    if (!Number.isInteger(signIndex)) continue;
+    const objectId = String(placement.objectId ?? "");
+    const label = GRAHA_SHORT_NAMES[objectId] ?? objectId.slice(0, 2);
+    placementsBySign.set(signIndex, [...(placementsBySign.get(signIndex) ?? []), label]);
+  }
+
+  return (
+    <section className="my-5 border-y border-gold/20 py-5">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <DetailSubtitle>{t("session.chart.visual.title")}</DetailSubtitle>
+          <p className="m-0 max-w-[440px] text-[12px] leading-5 text-body">
+            {t("session.chart.visual.body")}
+          </p>
+        </div>
+        <div className="flex items-center border border-gold/25 bg-cream-2 p-0.5" role="tablist">
+          {available.map((chart) => {
+            const vargaId = String(chart.vargaId);
+            const active = vargaId === String(selected.vargaId);
+            return (
+              <button
+                key={vargaId}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={cn(
+                  "h-8 min-w-12 px-3 text-xs font-semibold transition-colors",
+                  active ? "bg-night text-gold-light" : "text-muted hover:text-ink"
+                )}
+                onClick={() => setSelectedVarga(vargaId)}
+              >
+                {vargaId}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mx-auto grid aspect-square w-full max-w-[430px] grid-cols-4 grid-rows-4 border border-gold/35 bg-[rgba(255,252,244,0.72)] shadow-[0_18px_45px_rgba(45,31,17,0.10)]">
+        {SOUTH_INDIAN_SIGN_CELLS.map((cell) => {
+          const grahas = placementsBySign.get(cell.signIndex) ?? [];
+          const hasLagna = lagnaSignIndex === cell.signIndex;
+          return (
+            <div
+              key={cell.signIndex}
+              title={cell.name}
+              className={cn("relative min-h-0 border border-gold/20 p-2", hasLagna && "bg-gold/10")}
+              style={{ gridColumnStart: cell.column, gridRowStart: cell.row }}
+            >
+              <span className="absolute right-1.5 top-1 text-[9px] font-semibold text-gold-dim/70">
+                {cell.short}
+              </span>
+              <div className="flex h-full flex-col justify-center gap-0.5 pt-2 text-center text-[10px] font-semibold leading-4 text-ink sm:text-[11px]">
+                {hasLagna ? <span className="text-gold-dim">As</span> : null}
+                {grahas.map((graha, index) => (
+                  <span key={`${graha}-${index}`}>{graha}</span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <div className="col-span-2 col-start-2 row-span-2 row-start-2 grid place-items-center border border-gold/25 bg-night/[0.035] p-4 text-center">
+          <div>
+            <div className="font-serif text-2xl text-gold-dim">{String(selected.vargaId)}</div>
+            <div className="mt-1 text-[10px] uppercase tracking-[1.2px] text-muted">
+              {String(lagnaPosition?.sign ?? "—")} {t("session.chart.visual.ascendant")}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

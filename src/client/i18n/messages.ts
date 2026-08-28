@@ -546,6 +546,10 @@ export const messages: Record<LocaleCode, Dict> = {
       "The system has calculated bounded chart candidates, but it has not yet accepted one as the reading basis.",
     "session.chart.details.reference":
       "These values use one calculation reference minute inside the accepted range. The interpretation uses only facts that stay stable across that range.",
+    "session.chart.visual.title": "Divisional charts",
+    "session.chart.visual.body":
+      "South Indian fixed-sign view generated directly from the released Chart Record.",
+    "session.chart.visual.ascendant": "Ascendant",
     "session.chart.details.stableTitle": "Shared chart details only",
     "session.chart.details.stableBody":
       "Several equivalent time ranges remain. A single representative chart is withheld here; the report is limited to conclusions shared by every remaining range.",
@@ -633,6 +637,11 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.focus.evidence": "Independent life events: {count}",
     "session.rectification.focus.actionReady": "Next: review the result",
     "session.rectification.focus.actionCollecting": "Now: answer this card",
+    "session.reader.focus.eyebrow": "Pre-reading quality check",
+    "session.reader.focus.title": "The chart is stable within your reported time window",
+    "session.reader.focus.body":
+      "These short checks help the reading reflect your experience. They do not change your birth time or block the report.",
+    "session.reader.focus.chartTime": "Chart reference: {time}",
     "session.rectification.conclusion.checkpointTitle": "Your birth-time checkpoint is ready",
     "session.rectification.conclusion.checkpointBody":
       "Review this time range and the past-event checks before the full report begins from the calibrated chart.",
@@ -1384,6 +1393,9 @@ const zhOverrides: Dict = {
     "系统已经计算出有限范围内的候选盘，但尚未确认其中任何一个作为正式解读基础。",
   "session.chart.details.reference":
     "以下数值以已接受时间范围内的一个参考分钟计算；正式解读只会使用该范围内保持稳定的事实。",
+  "session.chart.visual.title": "分盘视图",
+  "session.chart.visual.body": "直接根据已发布盘面数据绘制的南印度固定星座盘。",
+  "session.chart.visual.ascendant": "上升",
   "session.chart.details.stableTitle": "仅保留共享稳定盘面",
   "session.chart.details.stableBody":
     "目前仍有多个等价时间范围，因此这里不会展示某一张代表盘；后续报告只使用所有范围共同稳定的结论。",
@@ -1468,6 +1480,11 @@ const zhOverrides: Dict = {
   "session.rectification.focus.evidence": "独立人生节点：{count}",
   "session.rectification.focus.actionReady": "下一步：确认结论",
   "session.rectification.focus.actionCollecting": "当前任务：回答这一张卡片",
+  "session.reader.focus.eyebrow": "正式解读前的质量确认",
+  "session.reader.focus.title": "申报时间范围内的盘面结构保持稳定",
+  "session.reader.focus.body":
+    "这些简短问题只帮助后续解读贴近真实经历，不会修改出生时间，也不会阻断报告。",
+  "session.reader.focus.chartTime": "盘面参考时间：{time}",
   "session.rectification.conclusion.checkpointTitle": "生时校准阶段结论待确认",
   "session.rectification.conclusion.checkpointBody":
     "先确认这个时间范围和过去经历，再以校正后的盘面开始正式报告。",
@@ -2019,7 +2036,7 @@ const jaOverrides: Dict = {
   "place.lookup.progress.live": "処理中",
   "place.lookup.progress.scope": "都市範囲",
   "place.lookup.progress.local": "ローカル索引",
-  "place.lookup.progress.agent": "地址证据",
+  "place.lookup.progress.agent": "住所の根拠",
   "place.lookup.progress.verify": "座標確認",
   "place.lookup.progress.status.pending": "待機",
   "place.lookup.progress.status.active": "実行中",
@@ -2151,6 +2168,9 @@ const jaOverrides: Dict = {
     "限られた範囲の候補チャートは計算済みですが、解釈の基礎となる一つの候補はまだ確定していません。",
   "session.chart.details.reference":
     "以下の値は承認された範囲内の一つの参照時刻で計算されています。解釈には、その範囲全体で安定する事実だけを使用します。",
+  "session.chart.visual.title": "分割図",
+  "session.chart.visual.body": "公開済みチャートデータから描画した南インド式の固定星座図です。",
+  "session.chart.visual.ascendant": "ラグナ",
   "session.chart.details.stableTitle": "共通して安定するチャートのみ",
   "session.chart.details.stableBody":
     "同等の時刻範囲が複数残っているため、一つの代表チャートは表示しません。レポートはすべての範囲に共通する結論だけに限定されます。",
@@ -2236,6 +2256,11 @@ const jaOverrides: Dict = {
   "session.rectification.focus.evidence": "独立した出来事：{count}",
   "session.rectification.focus.actionReady": "次へ：結果を確認",
   "session.rectification.focus.actionCollecting": "現在：このカードに回答",
+  "session.reader.focus.eyebrow": "リーディング前の品質確認",
+  "session.reader.focus.title": "申告された時間幅ではチャート構造が安定しています",
+  "session.reader.focus.body":
+    "短い確認は解釈を実体験に合わせるためのものです。出生時刻を変更したり、レポートを止めたりしません。",
+  "session.reader.focus.chartTime": "チャート参照時刻：{time}",
   "session.rectification.conclusion.checkpointTitle": "出生時刻の補正結果を確認してください",
   "session.rectification.conclusion.checkpointBody":
     "この時刻範囲と過去の出来事を確認してから、補正後のチャートでレポートを開始します。",

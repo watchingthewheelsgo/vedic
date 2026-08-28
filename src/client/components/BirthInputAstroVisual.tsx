@@ -597,10 +597,12 @@ export function BirthInputAstroVisual({
       }
 
       if (motion.marker > 0.01) {
+        const markerProgress = Math.max(0, Math.min(1, motion.marker));
+        const markerRadius = Math.max(0, (1 - markerProgress) * ringRadius);
         ctx.strokeStyle = `rgba(237,217,163,${motion.marker * 0.5})`;
         ctx.lineWidth = dpr * 1.6;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, (1 - motion.marker) * ringRadius, 0, TAU);
+        ctx.arc(centerX, centerY, markerRadius, 0, TAU);
         ctx.stroke();
       }
 

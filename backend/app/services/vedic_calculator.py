@@ -496,6 +496,11 @@ class VedicCalculator:
         reference_moment: datetime | None = None,
     ) -> dict[str, Any]:
         base_signature = self._chart_signature(base_chart)
+        time_window = self._time_window(
+            payload,
+            intake.birth_time_precision,
+            intake.time_source,
+        )
         time_variants = self._time_scan_variants(
             calculate_full_chart,
             base_chart,
@@ -535,6 +540,7 @@ class VedicCalculator:
             place_variants,
             boundary_flags,
             joint_variants=joint_variants,
+            window_radius_minutes=float(time_window["radiusMinutes"]),
         )
         candidate_groups = self._candidate_groups(
             base_signature,
@@ -2762,6 +2768,7 @@ class VedicCalculator:
         boundary_flags: list[dict[str, Any]],
         *,
         joint_variants: list[dict[str, Any]] | None = None,
+        window_radius_minutes: float | None = None,
     ) -> dict[str, Any]:
         joint_variants = joint_variants or []
         scan_errors = [
@@ -2824,7 +2831,11 @@ class VedicCalculator:
         else:
             risk_level = "low"
 
-        divisional_confidence = self._divisional_confidence(precision, changed)
+        divisional_confidence = self._divisional_confidence(
+            precision,
+            changed,
+            radius_minutes=window_radius_minutes,
+        )
         return {
             "riskLevel": risk_level,
             "riskFactors": risk_factors,
@@ -2886,8 +2897,20 @@ class VedicCalculator:
         return tuple(sorted(profile))
 
     @staticmethod
-    def _divisional_confidence(precision: str, changed: set[str]) -> dict[str, dict[str, Any]]:
-        radius_minutes = VedicCalculator._precision_radius_minutes(precision)
+    def _divisional_confidence(
+        precision: str,
+        changed: set[str],
+        *,
+        radius_minutes: float | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        radius_minutes = (
+            VedicCalculator._precision_radius_minutes(precision)
+            if radius_minutes is None
+            else radius_minutes
+        )
+        radius_minutes = round(float(radius_minutes), 3)
+        if radius_minutes.is_integer():
+            radius_minutes = int(radius_minutes)
         result: dict[str, dict[str, Any]] = {}
         for factor in DIVISIONAL_FACTORS:
             key = VedicCalculator._divisional_key(factor)
@@ -2958,7 +2981,7 @@ class VedicCalculator:
     @staticmethod
     def _confidence_for_division(
         precision: str,
-        radius_minutes: int,
+        radius_minutes: float,
         factor: int,
         changed: bool,
     ) -> str:
@@ -3214,7 +3237,7 @@ class VedicCalculator:
             "time_precision": self._precision_label(intake.birth_time_precision),
             "time_source": intake.time_source,
             "reported_time_window": (
-                intake.reported_time_window.model_dump()
+                intake.reported_time_window.model_dump(by_alias=False)
                 if intake.reported_time_window is not None
                 else None
             ),

@@ -1,18 +1,47 @@
 import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
-import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode
+} from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { api, setAnonymousIdProvider, setAuthFailureHandler, setAuthTokenProvider } from "./api";
 import { CosmicBackdrop } from "./components/CosmicBackdrop";
 import { Button } from "./components/ui/button";
 import { useI18n } from "./i18n/provider";
-import { Landing } from "./screens/Landing";
-import { Intake } from "./screens/Intake";
-import { BaziWorkshop } from "./screens/BaziWorkshop";
-import { Account } from "./screens/Account";
-import { Session } from "./screens/Session";
-import { AdminSessions } from "./screens/AdminSessions";
-import { AdminSessionDetail } from "./screens/AdminSessionDetail";
-import { ChartRevealPreview } from "./screens/ChartRevealPreview";
+
+const Landing = lazy(() =>
+  import("./screens/Landing").then((module) => ({ default: module.Landing }))
+);
+const Intake = lazy(() =>
+  import("./screens/Intake").then((module) => ({ default: module.Intake }))
+);
+const BaziWorkshop = lazy(() =>
+  import("./screens/BaziWorkshop").then((module) => ({ default: module.BaziWorkshop }))
+);
+const Account = lazy(() =>
+  import("./screens/Account").then((module) => ({ default: module.Account }))
+);
+const Session = lazy(() =>
+  import("./screens/Session").then((module) => ({ default: module.Session }))
+);
+const AdminSessions = lazy(() =>
+  import("./screens/AdminSessions").then((module) => ({ default: module.AdminSessions }))
+);
+const AdminSessionDetail = lazy(() =>
+  import("./screens/AdminSessionDetail").then((module) => ({
+    default: module.AdminSessionDetail
+  }))
+);
+const ChartRevealPreview = lazy(() =>
+  import("./screens/ChartRevealPreview").then((module) => ({
+    default: module.ChartRevealPreview
+  }))
+);
 
 export function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -32,10 +61,7 @@ export function App() {
 
   useLayoutEffect(() => {
     setAuthFailureHandler(async () => {
-      // Temporary dev behavior: keep the Clerk client session alive even when
-      // the backend cannot verify the short-lived JWT. The backend has a local
-      // bypass switch for this while Clerk JWKS/network verification is fixed.
-      return;
+      setSessionExpired(true);
     });
     return () => setAuthFailureHandler(null);
   }, []);
@@ -71,40 +97,50 @@ export function App() {
         </div>
       )}
       <div className="relative z-10 min-h-screen">
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/new" element={<Intake />} />
-          <Route path="/bazi" element={<BaziWorkshop />} />
-          <Route path="/session/:id" element={<Session />} />
-          <Route path="/dev/chart-reveal" element={<ChartRevealPreview />} />
-          <Route
-            path="/account"
-            element={
-              <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-                <Account />
-              </RequireAuth>
-            }
-          />
-          <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
-          <Route
-            path="/admin/sessions"
-            element={
-              <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-                <AdminSessions />
-              </RequireAdmin>
-            }
-          />
-          <Route
-            path="/admin/sessions/:id"
-            element={
-              <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-                <AdminSessionDetail />
-              </RequireAdmin>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<RouteLoadingState />}>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/new" element={<Intake />} />
+            <Route path="/bazi" element={<BaziWorkshop />} />
+            <Route path="/session/:id" element={<Session />} />
+            <Route path="/dev/chart-reveal" element={<ChartRevealPreview />} />
+            <Route
+              path="/account"
+              element={
+                <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                  <Account />
+                </RequireAuth>
+              }
+            />
+            <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
+            <Route
+              path="/admin/sessions"
+              element={
+                <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                  <AdminSessions />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/sessions/:id"
+              element={
+                <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                  <AdminSessionDetail />
+                </RequireAdmin>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
+    </div>
+  );
+}
+
+function RouteLoadingState() {
+  return (
+    <div className="grid min-h-screen place-items-center" role="status" aria-live="polite">
+      <div className="size-7 animate-spin rounded-full border border-gold/25 border-t-gold-light" />
     </div>
   );
 }

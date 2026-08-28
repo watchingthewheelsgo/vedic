@@ -41,9 +41,12 @@ time/place, or recalculate the Chart Record.
 3. Prefer externally checkable events over personality language.
 4. Keep each question neutral and falsifiable. Include a concise derivation for
    audit, but never expose technical astrology in the visible question.
-5. Never turn a vague match into confirmation; preserve partly accurate,
+5. Do not invent calendar years, dates, ages, or date ranges. This skill is not
+   supplied with backend-authorized timing windows. Dated events are collected
+   from the user only by the rectification interview.
+6. Never turn a vague match into confirmation; preserve partly accurate,
    inaccurate, unknown, and contradictory answers.
-6. Do not emit Candidate, Contrast, Event, or Field machine mappings. Submitted
+7. Do not emit Candidate, Contrast, Event, or Field machine mappings. Submitted
    life events are not independent again merely because the Agent restates them.
 
 ## Release discipline
@@ -53,4 +56,6 @@ time/place, or recalculate the Chart Record.
 - Coarse time or city-level place expands the candidate window within user-provided bounds.
 - Precise verified POI coordinates lock the place axis; only time may be rectified.
 - No answer may move the time or place outside the reported window/radius.
+- Reader answers are consultation context only. They cannot block a report that
+  the deterministic stable-window gate already permits.
 - The result is a bounded interval or an explicit underdetermined state, never fabricated second-level certainty.

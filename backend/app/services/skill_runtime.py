@@ -4129,7 +4129,7 @@ Return JSON only:
             "authority": {
                 "canSelectBirthTimeCandidate": False,
                 "canRecalculateChart": False,
-                "canGateReportPublication": True,
+                "canGateReportPublication": False,
             },
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             "chartRecordId": (
@@ -4315,7 +4315,9 @@ Return JSON only:
         time_source = (
             str(first_evidence.get("sourceLabel") or "") if isinstance(first_evidence, dict) else ""
         )
-        time_reliability = "reported_exact" if time_precision == "exact" else "uncertain"
+        time_reliability = (
+            "reported_time_with_bounded_envelope" if time_precision == "exact" else "uncertain"
+        )
         return {
             "birthDate": birth_assertion.get("localDate"),
             "birthTime": birth_assertion.get("reportedLocalTime"),
@@ -4363,9 +4365,7 @@ Return JSON only:
             }
         hit_rate = total_score / max_score
         threshold_high = hit_rate >= 0.8
-        threshold_medium = hit_rate >= 0.6
         meets_readiness_threshold = hit_rate >= min_hit_rate
-        reliable_exact = time_reliability in {"reported_exact", "reliable_exact"}
         if mode == "rectification_required":
             return {
                 "nextStep": "complete_deterministic_rectification",
@@ -4379,77 +4379,40 @@ Return JSON only:
                     "Complete deterministic dated-event rectification before the full report."
                 ),
             }
-        if reliable_exact:
-            if not meets_readiness_threshold:
-                return {
-                    "nextStep": "regenerate_prevalidation_or_review_subject",
-                    "timeConfidence": "high",
-                    "reportAllowed": False,
-                    "reportScope": scope,
-                    "inputRiskLevel": input_risk_level,
-                    "llmContract": llm_contract,
-                    "reason": (
-                        "The recorded birth time remains the authoritative calculation input, "
-                        "but the Reader validation did not meet the publication threshold. "
-                        "Regenerate neutral validation questions or review subject identity; "
-                        "do not select a different chart from these answers."
-                    ),
-                }
+        if not core_allowed_without_rectification:
             return {
-                "nextStep": (
-                    "report_allowed_with_limits"
-                    if input_risk_level in {"medium", "high"}
-                    else "report_allowed"
-                ),
-                "timeConfidence": "high",
-                "reportAllowed": True,
-                "reportScope": "guarded_full_report" if input_risk_level == "high" else scope,
-                "inputRiskLevel": input_risk_level,
-                "llmContract": llm_contract,
-                "reason": (
-                    "The user reported an exact time, the sensitivity scan did not require "
-                    "rectification, and validation feedback passed the publication threshold. "
-                    "The source label itself did not change confidence."
-                ),
-            }
-        if core_allowed_without_rectification and meets_readiness_threshold:
-            return {
-                "nextStep": "report_allowed"
-                if input_risk_level == "low"
-                else "report_allowed_with_limits",
-                "timeConfidence": "high" if threshold_high else "medium",
-                "reportAllowed": True,
+                "nextStep": "review_birth_details_or_stop",
+                "timeConfidence": "low",
+                "reportAllowed": False,
                 "reportScope": scope,
                 "inputRiskLevel": input_risk_level,
                 "llmContract": llm_contract,
-                "reason": "Validation feedback satisfies the input-risk report readiness threshold.",
-            }
-        if threshold_medium:
-            return {
-                "nextStep": "report_allowed_with_limits"
-                if input_risk_level == "low"
-                else "review_birth_details_or_stop",
-                "timeConfidence": "medium",
-                "reportAllowed": input_risk_level == "low",
-                "reportScope": "guarded_full_report" if input_risk_level == "low" else scope,
-                "inputRiskLevel": input_risk_level,
-                "llmContract": llm_contract,
+                "readingConsistency": "low" if hit_rate < 0.6 else "mixed",
                 "reason": (
-                    "Medium validation score is enough only for low input-risk sessions; "
-                    "medium/high risk sessions should review the recorded birth details before "
-                    "continuing. Reader feedback cannot choose another chart."
+                    "The deterministic input-sensitivity policy does not permit a full report. "
+                    "Reader feedback cannot override that calculation gate."
                 ),
             }
+        reading_consistency = "strong" if threshold_high else "mixed" if hit_rate >= 0.4 else "low"
+        report_scope = "guarded_full_report" if input_risk_level == "high" else scope
         return {
-            "nextStep": "review_birth_details_or_stop",
-            "timeConfidence": "low",
-            "reportAllowed": False,
-            "reportScope": scope,
+            "nextStep": (
+                "report_allowed"
+                if meets_readiness_threshold and input_risk_level == "low"
+                else "report_allowed_with_limits"
+                if meets_readiness_threshold
+                else "report_allowed_with_consistency_notes"
+            ),
+            "timeConfidence": "low" if input_risk_level == "high" else "medium",
+            "reportAllowed": True,
+            "reportScope": report_scope,
             "inputRiskLevel": input_risk_level,
             "llmContract": llm_contract,
+            "readingConsistency": reading_consistency,
             "reason": (
-                "The scan-stable reading did not meet the quality threshold. Review the recorded "
-                "birth details or stop; Reader feedback cannot alter the calculated chart."
+                "The bounded chart is stable under the deterministic sensitivity policy. "
+                "Reader feedback is retained as consultation context and may limit wording, "
+                "but it cannot select a birth time or block publication."
             ),
         }
 
@@ -4469,8 +4432,9 @@ Return JSON only:
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: 在进入完整分析之前，我先用几个已发生的事实检查当前解读是否贴合——
 - Output 1 to 5 numbered items using only facts stable across the reported input window.
-  - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question in Chinese, e.g. **1.** 2018年前后，您是否经历过一次工作方向的明显变化？
-  - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Prefer a dated major event when evidence supports one.
+  - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question in Chinese, e.g. **1.** 您是否经历过一次工作方向的明显变化？
+  - The visible question must describe exactly one concrete family, education, relocation, career, or relationship fact.
+  - Do not invent or include a calendar year, date, age, or date range. This Reader receives no backend-authorized timing windows. Dated user events belong only to the rectification interview.
   - Keep the visible question to one short sentence, ideally no more than 45 Chinese characters, and end it with ？.
   - Never put planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning in the visible numbered question.
   - Do not ask flattering personality generalities, leading questions, or bundle multiple unrelated events in one item.
@@ -4485,7 +4449,8 @@ Return JSON only:
   - Start with: 完全な分析に入る前に、いくつかの既知の事実で現在の読みの整合性を確認します——
 - Output 1 to 5 numbered items using only facts stable across the reported input window.
   - Each item uses a bold markdown number followed by one short, direct lived-experience question in Japanese, ending with ？.
-  - The visible question must cover exactly one concrete or dated fact and must not expose planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning.
+  - The visible question must cover exactly one concrete fact and must not expose planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning.
+  - Do not invent or include a calendar year, date, age, or date range. Dated user events belong only to the rectification interview.
   - Do not ask flattering personality generalities or bundle unrelated events. For a minor, do not ask adult marriage, career, or childbirth questions.
   - Each item is followed by one blank line and a quoted derivation line: > 根拠：...
   - Do not add signal tables, Yoga tables, synthesis profile, advice, disclaimers, or app-specific explanation.
@@ -4495,8 +4460,9 @@ Return JSON only:
 - reader_prevalidation.md must follow the original Step 5 output template:
   - Start with: Before entering the full analysis, I will check the current reading against several known past facts—
 - Output 1 to 5 numbered items using only facts stable across the reported input window.
-  - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question, e.g. **1.** Around 2018, did you make one major change in your work direction?
-  - The visible question must describe exactly one concrete family, education, relocation, career, relationship, or dated life-event fact. Keep it to one short sentence, ideally no more than 35 words.
+  - Each item uses a bold markdown number followed by one direct, user-answerable lived-experience question, e.g. **1.** Did you make one major change in your work direction?
+  - The visible question must describe exactly one concrete family, education, relocation, career, or relationship fact. Keep it to one short sentence, ideally no more than 35 words.
+  - Do not invent or include a calendar year, date, age, or date range. This Reader receives no backend-authorized timing windows. Dated user events belong only to the rectification interview.
   - Never put planets, signs, houses, degrees, Yoga, Nakshatra, Dasha, Sanskrit terms, candidate IDs, field IDs, scores, or astrological reasoning in the visible question.
   - Do not ask flattering personality generalities, leading questions, or bundle unrelated events. For a minor, do not ask about adult marriage, career, or childbirth.
   - Each item is followed by one blank line and a quoted derivation line: > Derivation: ...

@@ -319,6 +319,92 @@ def test_calculator_payload_preserves_second_level_birth_time() -> None:
     assert payload["time"] == "08:30:45"
 
 
+def test_calculator_payload_preserves_api_reported_time_window() -> None:
+    calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
+    input_payload = _birth_input().model_dump()
+    input_payload["reportedTimeWindow"] = {
+        "minutesBefore": 10,
+        "minutesAfter": 10,
+        "basis": "user_certainty_choice",
+    }
+    intake = BirthInput.model_validate(input_payload)
+    place = ResolvedPlace(
+        label="Shanghai, Shanghai, China",
+        lat=31.2304,
+        lon=121.4737,
+        timezone="Asia/Shanghai",
+        source="geonames-local",
+        accuracy="city",
+        radius_km=25.0,
+        confidence="medium",
+    )
+
+    payload = calculator._calculator_payload(
+        intake,
+        calculator._parse_birth_date(intake.birth_date),
+        calculator._parse_birth_time(intake.birth_time, intake.birth_time_precision),
+        place,
+    )
+    window = calculator._time_window(
+        payload,
+        intake.birth_time_precision,
+        intake.time_source,
+    )
+
+    assert payload["reported_time_window"] == {
+        "minutes_before": 10,
+        "minutes_after": 10,
+        "basis": "user_certainty_choice",
+    }
+    assert window["minutesBefore"] == 10
+    assert window["minutesAfter"] == 10
+    assert window["radiusMinutes"] == 10
+
+
+def test_exact_minute_api_input_still_builds_rectification_candidates() -> None:
+    class FixedPrecisePlaceService:
+        @staticmethod
+        def resolve(_: str) -> ResolvedPlace:
+            return ResolvedPlace(
+                label="Pudong, Shanghai, China",
+                lat=31.221461,
+                lon=121.544346,
+                timezone="Asia/Shanghai",
+                source="test-fixture",
+                accuracy="poi",
+                radius_km=0.3,
+                confidence="high",
+            )
+
+    intake = BirthInput(
+        birthDate="1990-01-15",
+        birthTime="08:30",
+        birthPlace="CN-310115",
+        birthTimePrecision="exact",
+        reportedTimeWindow={
+            "minutesBefore": 10,
+            "minutesAfter": 10,
+            "basis": "user_certainty_choice",
+        },
+        gender="女",
+        relationship="单身",
+        locale="zh",
+    )
+    snapshot = VedicCalculator(
+        SimpleNamespace(),
+        FixedPrecisePlaceService(),  # type: ignore[arg-type]
+    ).calculate(intake)
+    context = json.loads(snapshot.birth_input_context_json)
+    scan = json.loads(snapshot.sensitivity_scan_json)
+    state = ChartRectificationService().initial_state(context, scan)
+
+    assert context["time"]["window"]["minutesBefore"] == 10
+    assert context["time"]["window"]["minutesAfter"] == 10
+    assert len(scan["candidateGroups"]) > 1
+    assert state["status"] == "collecting_evidence"
+    assert state["rectificationPlan"]["action"] == "collect_dated_life_events"
+
+
 def test_scan_summary_marks_changed_divisional_chart_as_high_risk() -> None:
     calculator = VedicCalculator(SimpleNamespace(), SimpleNamespace())
     place = ResolvedPlace(
@@ -2868,7 +2954,7 @@ def test_prevalidation_decision_blocks_high_risk_without_rectification() -> None
     assert decision["reportScope"] == "prevalidation_or_d1_only"
 
 
-def test_prevalidation_decision_requires_medium_risk_threshold() -> None:
+def test_prevalidation_decision_records_low_consistency_without_blocking_stable_chart() -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
 
     below_threshold = runtime._prevalidation_decision(
@@ -2898,13 +2984,15 @@ def test_prevalidation_decision_requires_medium_risk_threshold() -> None:
         },
     )
 
-    assert below_threshold["reportAllowed"] is False
-    assert below_threshold["nextStep"] == "review_birth_details_or_stop"
+    assert below_threshold["reportAllowed"] is True
+    assert below_threshold["nextStep"] == "report_allowed_with_consistency_notes"
+    assert below_threshold["readingConsistency"] == "mixed"
     assert at_threshold["reportAllowed"] is True
     assert at_threshold["nextStep"] == "report_allowed_with_limits"
+    assert at_threshold["readingConsistency"] == "strong"
 
 
-def test_reliable_exact_time_does_not_bypass_failed_reader_quality_gate() -> None:
+def test_reader_quality_feedback_never_overrules_a_stable_bounded_chart() -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
 
     decision = runtime._prevalidation_decision(
@@ -2921,9 +3009,10 @@ def test_reliable_exact_time_does_not_bypass_failed_reader_quality_gate() -> Non
         },
     )
 
-    assert decision["reportAllowed"] is False
-    assert decision["timeConfidence"] == "high"
-    assert decision["nextStep"] == "regenerate_prevalidation_or_review_subject"
+    assert decision["reportAllowed"] is True
+    assert decision["timeConfidence"] == "medium"
+    assert decision["nextStep"] == "report_allowed_with_consistency_notes"
+    assert decision["readingConsistency"] == "low"
 
 
 def test_reliable_exact_time_does_not_bypass_required_place_rectification() -> None:
@@ -2947,7 +3036,7 @@ def test_reliable_exact_time_does_not_bypass_required_place_rectification() -> N
     assert decision["nextStep"] == "complete_deterministic_rectification"
 
 
-def test_reader_quality_attempt_stops_after_two_failed_rounds(tmp_path) -> None:
+def test_reader_consistency_attempts_do_not_become_a_publication_gate(tmp_path) -> None:
     runtime = SkillRuntime.__new__(SkillRuntime)
     runtime.workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
     session_id = "session-quality-attempts"
@@ -2995,14 +3084,16 @@ def test_reader_quality_attempt_stops_after_two_failed_rounds(tmp_path) -> None:
     assert first is not None
     assert first["qualityAttempt"] == 1
     assert cast(dict[str, Any], first["decision"])["nextStep"] == (
-        "regenerate_prevalidation_or_review_subject"
+        "report_allowed_with_consistency_notes"
     )
 
     runtime._write_prevalidation_result(session_id, feedback_markdown="")
     second = runtime._write_prevalidation_result(session_id, feedback_markdown="1. 不准")
     assert second is not None
     assert second["qualityAttempt"] == 2
-    assert cast(dict[str, Any], second["decision"])["nextStep"] == ("review_birth_details_or_stop")
+    assert cast(dict[str, Any], second["decision"])["nextStep"] == (
+        "report_allowed_with_consistency_notes"
+    )
 
 
 def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
@@ -3067,7 +3158,7 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
     assert cast(dict[str, Any], result["authority"]) == {
         "canSelectBirthTimeCandidate": False,
         "canRecalculateChart": False,
-        "canGateReportPublication": True,
+        "canGateReportPublication": False,
     }
     assert (
         result["chartRecordSha256"] == hashlib.sha256(chart_record_json.encode("utf-8")).hexdigest()
@@ -3872,8 +3963,9 @@ def test_single_stable_candidate_does_not_start_fake_boundary_rectification() ->
         {"reportAllowed": False, "reportScope": "prevalidation_or_d1_only"},
         state,
     )
-    assert decision["reportAllowed"] is False
-    assert decision["reportScope"] == "prevalidation_or_d1_only"
+    assert decision["reportAllowed"] is True
+    assert decision["nextStep"] == "report_allowed_with_stable_interval"
+    assert decision["reportScope"] == "guarded_full_report"
 
 
 def test_stable_interval_preserves_successful_reader_quality_gate() -> None:
@@ -4690,7 +4782,7 @@ def test_reader_run_retries_once_after_output_contract_rejection() -> None:
         }
     )
     valid_content = """
-**1.** Did you move once between 2018 and 2020?
+**1.** Did you make one major move away from your usual home base?
 
 > Derivation: test
 
@@ -4698,7 +4790,7 @@ def test_reader_run_retries_once_after_output_contract_rejection() -> None:
 
 > Derivation: test
 
-**3.** Did your family make one major financial adjustment before 2015?
+**3.** Did your family make one major financial adjustment?
 
 > Derivation: test
 """
@@ -6030,6 +6122,17 @@ def test_explicit_reported_time_window_controls_candidate_coverage() -> None:
     assert window["sourcePolicy"]["windowSource"] == "explicit_reported_time_window"
 
 
+def test_divisional_confidence_uses_the_actual_reported_window_radius() -> None:
+    confidence = VedicCalculator._divisional_confidence(
+        "exact",
+        set(),
+        radius_minutes=12,
+    )
+
+    assert confidence["D9"]["timeWindowRadiusMinutes"] == 12
+    assert "reported time window radius is +/-12m" in confidence["D9"]["reasons"]
+
+
 def test_candidate_selection_requires_convergent_evidence_layers() -> None:
     service = ChartRectificationService()
     ledger = _rectification_ledger()
@@ -6413,6 +6516,22 @@ def test_prevalidation_contract_rejects_visible_astrology_and_non_questions() ->
 
     assert any("direct question" in error for error in errors)
     assert any("astrology or candidate terminology" in error for error in errors)
+
+
+def test_prevalidation_contract_rejects_unsourced_calendar_dates() -> None:
+    service = ChartRectificationService()
+
+    errors = service.validate_prevalidation_contract(
+        {},
+        """
+**1.** 2018年前后，您是否经历过一次工作方向变化？
+
+> 推导：2018年职业主题被激活。
+""",
+        enforce_user_facing_quality=True,
+    )
+
+    assert any("calendar date" in error for error in errors)
 
 
 def test_event_interval_survives_a_historical_midnight_dst_gap() -> None:

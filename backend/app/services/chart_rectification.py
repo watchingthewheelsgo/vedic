@@ -1333,11 +1333,19 @@ class ChartRectificationService:
             "plan": state.get("rectificationPlan"),
         }
         if status == "not_required":
-            if bool(next_decision.get("reportAllowed")):
+            if gate.get("fullReportAllowed") is True:
+                reader_scope = str(next_decision.get("reportScope") or "").strip()
+                stable_report_scope = (
+                    reader_scope
+                    if bool(next_decision.get("reportAllowed"))
+                    and reader_scope in {"full_report", "guarded_full_report"}
+                    else "guarded_full_report"
+                )
                 next_decision.update(
                     {
+                        "reportAllowed": True,
                         "nextStep": "report_allowed_with_stable_interval",
-                        "reportScope": next_decision.get("reportScope") or "guarded_full_report",
+                        "reportScope": stable_report_scope,
                         "reason": gate.get("reason")
                         or "No chart-changing candidate exists inside the bounded input window.",
                     }
@@ -1470,9 +1478,24 @@ class ChartRectificationService:
                     errors.append(
                         f"Anchor {index} exposes astrology or candidate terminology in the visible question."
                     )
+                if self._contains_calendar_date(block):
+                    errors.append(f"Anchor {index} contains an unsupported calendar date or age.")
                 if not re.search(r"(?im)^>\s*(?:推导|Derivation|根拠)\s*[：:]", block):
                     errors.append(f"Anchor {index} is missing a quoted derivation line.")
         return errors
+
+    @staticmethod
+    def _contains_calendar_date(value: str) -> bool:
+        return bool(
+            re.search(
+                r"(?:"
+                r"(?<!\d)(?:19|20)\d{2}(?!\d)|"
+                r"(?<!\d)\d{1,3}\s*(?:years?\s+old|歳|岁)(?![A-Za-z0-9])"
+                r")",
+                value,
+                re.IGNORECASE,
+            )
+        )
 
     @staticmethod
     def _contains_visible_astrology_terms(statement: str) -> bool:

@@ -11,6 +11,18 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: "dist/client"
+    outDir: "dist/client",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("@clerk")) return "clerk";
+          if (id.includes("react-day-picker") || id.includes("date-fns")) return "calendar";
+          if (id.includes("@radix-ui")) return "radix";
+          if (id.includes("lucide-react")) return "icons";
+          return undefined;
+        }
+      }
+    }
   }
 });
