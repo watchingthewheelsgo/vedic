@@ -2656,6 +2656,21 @@ def _reader_relationship_for_life_stage(
     return reader_relationship
 
 
+def consultation_reference_date(record: ChartRecord, reference_time: datetime) -> date:
+    """Resolve the consultation date in the chart's canonical civil timezone."""
+
+    if reference_time.tzinfo is None or reference_time.utcoffset() is None:
+        raise ValueError("consultation reference time must be timezone-aware")
+    if record.canonical_moment is None:
+        return reference_time.date()
+    timezone_id = record.canonical_moment.timezone_id
+    try:
+        civil_timezone = pytz.timezone(timezone_id)
+    except pytz.UnknownTimeZoneError as exc:
+        raise ValueError(f"unknown canonical timezone: {timezone_id}") from exc
+    return reference_time.astimezone(civil_timezone).date()
+
+
 def chart_record_for_consultation(
     record: ChartRecord,
     reference_time: datetime,
@@ -2667,7 +2682,7 @@ def chart_record_for_consultation(
     consultation_record = record.model_copy(deep=True)
     current_age = _age_on(
         date.fromisoformat(consultation_record.birth_assertion.local_date),
-        reference_time.date(),
+        consultation_reference_date(consultation_record, reference_time),
     )
     life_stage = _life_stage(current_age)
     preferred_reader = reader_relationship or consultation_record.subject.reader_relationship

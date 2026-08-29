@@ -65,7 +65,10 @@ from app.vedicdust.models import (
     RectificationRoundRecord,
     TimeRange,
 )
-from app.vedicdust.chart_record_builder import chart_record_for_consultation
+from app.vedicdust.chart_record_builder import (
+    chart_record_for_consultation,
+    consultation_reference_date,
+)
 from app.vedicdust.judgement import TOPICS, build_judgement_context
 from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.orchestrator import audit_chart_record
@@ -106,6 +109,7 @@ CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
 PREVALIDATION_DEPENDENCY_PATHS = [
     CHART_RECORD_JSON,
+    CONSULTATION_SUBJECT_CONTEXT_JSON,
     "sensitivity_scan.json",
     "reader_prevalidation.md",
     "user_context.md",
@@ -151,6 +155,7 @@ def _merge_rectification_semantics(
 READER_AGENT_INPUT_ARTIFACTS = frozenset(
     {
         CHART_RECORD_JSON,
+        CONSULTATION_SUBJECT_CONTEXT_JSON,
         "chart_audit.json",
         "birth_input_context.json",
         "sensitivity_scan.json",
@@ -1929,6 +1934,7 @@ class SkillRuntime:
             return await self._run_core(input_data, owner_user_id=owner_user_id)
         if input_data.skill == "vedic-reader":
             self._assert_reader_readiness(input_data.session_id)
+            self._prepare_consultation_subject_context(input_data.session_id)
 
         base_prompt = self._artifact_prompt_for(input_data)
         prompt = base_prompt
@@ -2077,6 +2083,11 @@ class SkillRuntime:
                 input_data.session_id,
                 artifact_path,
                 producer=input_data.skill,
+                dependency_paths=(
+                    [CONSULTATION_SUBJECT_CONTEXT_JSON]
+                    if input_data.skill == "vedic-reader"
+                    else None
+                ),
             )
         if input_data.skill == "vedic-reader":
             self._write_prevalidation_result(input_data.session_id, feedback_markdown="")
@@ -3299,6 +3310,7 @@ Return JSON only:
             "reader_prevalidation.md",
             "user_context.md",
             CHART_RECORD_JSON,
+            CONSULTATION_SUBJECT_CONTEXT_JSON,
             "sensitivity_scan.json",
             "prevalidation_result.json",
         )
@@ -3318,6 +3330,7 @@ Return JSON only:
             prevalidation,
             feedback,
             artifacts.get(CHART_RECORD_JSON, ""),
+            artifacts.get(CONSULTATION_SUBJECT_CONTEXT_JSON, ""),
             artifacts.get("sensitivity_scan.json", ""),
         )
         previous = self._json_dict(artifacts.get("prevalidation_result.json", ""))
@@ -4127,6 +4140,7 @@ Return JSON only:
         prevalidation_markdown: str,
         feedback_markdown: str,
         chart_record_json: str,
+        consultation_subject_context_json: str,
         sensitivity_scan_json: str,
     ) -> dict[str, object]:
         try:
@@ -4135,7 +4149,11 @@ Return JSON only:
             chart_payload = {}
         anchors = self._parse_prevalidation_anchors(prevalidation_markdown)
         answers = self._parse_prevalidation_feedback(feedback_markdown)
-        subject = self._prevalidation_subject_context(chart_record_json, sensitivity_scan_json)
+        subject = self._prevalidation_subject_context(
+            chart_record_json,
+            consultation_subject_context_json,
+            sensitivity_scan_json,
+        )
         scored_anchors: list[dict[str, object]] = []
         total_score = 0.0
         answered_count = 0
@@ -4328,6 +4346,7 @@ Return JSON only:
     def _prevalidation_subject_context(
         self,
         chart_record_json: str,
+        consultation_subject_context_json: str,
         sensitivity_scan_json: str,
     ) -> dict[str, object]:
         try:
@@ -4337,6 +4356,19 @@ Return JSON only:
         subject = payload.get("subject") if isinstance(payload, dict) else {}
         if not isinstance(subject, dict):
             subject = {}
+        try:
+            consultation_payload = (
+                json.loads(consultation_subject_context_json)
+                if consultation_subject_context_json.strip()
+                else {}
+            )
+        except json.JSONDecodeError:
+            consultation_payload = {}
+        consultation_subject = (
+            consultation_payload.get("subject") if isinstance(consultation_payload, dict) else {}
+        )
+        if not isinstance(consultation_subject, dict):
+            consultation_subject = {}
         birth_assertion = payload.get("birthAssertion") if isinstance(payload, dict) else {}
         if not isinstance(birth_assertion, dict):
             birth_assertion = {}
@@ -4371,6 +4403,17 @@ Return JSON only:
             "reported_time_with_bounded_envelope" if time_precision == "exact" else "uncertain"
         )
         return {
+            "displayName": consultation_subject.get("displayName") or subject.get("displayName"),
+            "currentAge": consultation_subject.get("currentAge", subject.get("currentAge")),
+            "lifeStage": consultation_subject.get("lifeStage") or subject.get("lifeStage"),
+            "readerRelationship": (
+                consultation_subject.get("readerRelationship") or subject.get("readerRelationship")
+            ),
+            "referenceDate": (
+                consultation_payload.get("referenceDate")
+                if isinstance(consultation_payload, dict)
+                else None
+            ),
             "birthDate": birth_assertion.get("localDate"),
             "birthTime": birth_assertion.get("reportedLocalTime"),
             "birthPlace": birth_assertion.get("reportedPlace"),
@@ -4681,6 +4724,10 @@ Return JSON only:
                 )
 
         birth_assertion = payload.get("birthAssertion")
+        subject = payload.get("subject")
+        subject_projection = dict(subject) if isinstance(subject, dict) else {}
+        for time_sensitive_field in ("currentAge", "lifeStage", "readerRelationship"):
+            subject_projection.pop(time_sensitive_field, None)
         birth_year = cls._iso_year(
             birth_assertion.get("localDate") if isinstance(birth_assertion, dict) else None
         )
@@ -4726,7 +4773,7 @@ Return JSON only:
             "readingSessionId": payload.get("readingSessionId"),
             "revision": payload.get("revision"),
             "createdAt": payload.get("createdAt"),
-            "subject": payload.get("subject"),
+            "subject": subject_projection,
             "birthAssertion": birth_assertion,
             "canonicalMoment": payload.get("canonicalMoment"),
             "calculationProfile": payload.get("calculationProfile"),
@@ -4992,6 +5039,48 @@ User request:
             ),
         )
 
+    def _prepare_consultation_subject_context(
+        self,
+        session_id: str,
+        reference_time: datetime | None = None,
+    ) -> ChartRecord:
+        chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+        if not chart_record_json:
+            raise ValueError("Session is missing chart_record.json")
+        effective_reference_time = reference_time or datetime.now(timezone.utc)
+        record = self._consultation_record(
+            session_id,
+            ChartRecord.model_validate_json(chart_record_json),
+            effective_reference_time,
+        )
+        canonical_moment = record.canonical_moment
+        timezone_id = canonical_moment.timezone_id if canonical_moment is not None else None
+        self.workspace.write_artifact(
+            session_id,
+            CONSULTATION_SUBJECT_CONTEXT_JSON,
+            json.dumps(
+                {
+                    "schemaVersion": "vedicdust-consultation-subject-context/1.0.0",
+                    "generatedAt": effective_reference_time.isoformat(),
+                    "referenceDate": consultation_reference_date(
+                        record, effective_reference_time
+                    ).isoformat(),
+                    "timezoneId": timezone_id,
+                    "subject": record.subject.model_dump(by_alias=True, mode="json"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CONSULTATION_SUBJECT_CONTEXT_JSON,
+            producer="vedicdust-consultation-subject-context",
+            dependency_paths=[CHART_RECORD_JSON, "birth_input_context.json"],
+        )
+        return record
+
     def _session_paths(self, session_dir: Path) -> set[str]:
         return {
             path.relative_to(session_dir).as_posix()
@@ -5003,15 +5092,9 @@ User request:
         chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         if not chart_record_json:
             raise ValueError("Session is missing chart_record.json")
-        reference_time = datetime.now(timezone.utc).replace(
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-        record = self._consultation_record(
+        reference_time = datetime.now(timezone.utc)
+        record = self._prepare_consultation_subject_context(
             session_id,
-            ChartRecord.model_validate_json(chart_record_json),
             reference_time,
         )
         sensitivity = self._judgement_sensitivity(session_id)
@@ -5042,26 +5125,6 @@ User request:
             session_id,
             JUDGEMENT_CONTEXT_JSON,
             producer="vedicdust-judgement-context",
-        )
-        self.workspace.write_artifact(
-            session_id,
-            CONSULTATION_SUBJECT_CONTEXT_JSON,
-            json.dumps(
-                {
-                    "schemaVersion": "vedicdust-consultation-subject-context/1.0.0",
-                    "generatedAt": reference_time.isoformat(),
-                    "subject": record.subject.model_dump(by_alias=True, mode="json"),
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-            + "\n",
-        )
-        self.workspace.mark_artifact_checkpoint(
-            session_id,
-            CONSULTATION_SUBJECT_CONTEXT_JSON,
-            producer="vedicdust-consultation-subject-context",
-            dependency_paths=[CHART_RECORD_JSON, "birth_input_context.json"],
         )
         self.workspace.write_artifact(
             session_id,
@@ -5554,6 +5617,9 @@ Return JSON only:
                 if path.startswith("bazi_"):
                     selected[path] = content
                 continue
+            if skill == "vedic-reader" and path == CONSULTATION_SUBJECT_CONTEXT_JSON:
+                selected[path] = content
+                continue
             if "/" not in path:
                 selected[path] = content
         return selected
@@ -5568,11 +5634,12 @@ Follow the active VedicDust reader contract, adapted for the web runtime:
 - Do not ask for setup or dependency installation.
 - Do not run shell commands.
 - Treat chart_record.json as the authoritative deterministic record.
-- Read birth_input_context.json, sensitivity_scan.json, and chart_rectification_state.json before writing anchors.
+- Read birth_input_context.json, sensitivity_scan.json, chart_rectification_state.json, and .runtime/consultation-subject-context.json before writing anchors.
+- Treat subject.currentAge, subject.lifeStage, and subject.readerRelationship in .runtime/consultation-subject-context.json as authoritative for this consultation. The same fields in chart_record.json are a historical calculation snapshot and must not override them.
 - Proceed only when chart_rectification_state.status is not_required. The bounded scan must be stable; do not use unstable fields as claims.
 - Birth-time candidate ranking, holdout evaluation, and chart recalculation are backend-owned. This skill cannot change them.
 - Use concrete, past, user-answerable facts as reading-quality checks. Generic personality, appearance, or preference questions remain weak testimony.
-- Every question must concern an event that could already have happened by today's date and the subject.currentAge in chart_record.json. Never ask about a future age or future year. If currentAge is 0, ask only already-observable pregnancy, birth, neonatal-care, or present family facts; do not ask about ages 1+ or school years.
+- Every question must concern an event that could already have happened by the context referenceDate and subject.currentAge. Never ask about a future age or future year. If currentAge is 0, ask only already-observable pregnancy, birth, neonatal-care, or present family facts; do not ask about ages 1+ or school years.
 - Do not use the submitted birth place, recorded clock time, time precision, or birth document as a validation question. Those are inputs to be tested, not independent lived-event evidence.
 - Never restate submitted life events as if the user's confirmation were new independent evidence.
 - Stop analysis as soon as you have the required number of concrete, non-duplicative questions that satisfy the format contract. Do not keep expanding the visible reading after sufficient evidence exists.

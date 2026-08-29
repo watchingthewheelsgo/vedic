@@ -3191,6 +3191,17 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
         """,
         "1. 准\n2. 准\n",
         chart_record_json,
+        json.dumps(
+            {
+                "referenceDate": "2026-08-30",
+                "subject": {
+                    "displayName": "Example subject",
+                    "currentAge": 36,
+                    "lifeStage": "adult",
+                    "readerRelationship": "self",
+                },
+            }
+        ),
         sensitivity_scan_json,
     )
 
@@ -3202,6 +3213,8 @@ def test_prevalidation_result_uses_sensitivity_scan_gate() -> None:
     assert result["chartRecordId"] == "chart-prevalidation"
     assert result["chartRevision"] == 3
     assert result["assessmentPurpose"] == "reading_consistency_gate"
+    assert cast(dict[str, Any], result["subject"])["currentAge"] == 36
+    assert cast(dict[str, Any], result["subject"])["referenceDate"] == "2026-08-30"
     assert cast(dict[str, Any], result["authority"]) == {
         "canSelectBirthTimeCandidate": False,
         "canRecalculateChart": False,
@@ -4770,6 +4783,46 @@ def test_reader_prompt_cannot_select_birth_time_candidates() -> None:
     assert "For a minor" in prompt
     assert "Never ask about a future age or future year" in prompt
     assert "Those are inputs to be tested" in prompt
+    assert ".runtime/consultation-subject-context.json" in prompt
+    assert "historical calculation snapshot" in prompt
+
+
+def test_reader_artifact_view_includes_current_consultation_subject_context() -> None:
+    runtime = SkillRuntime.__new__(SkillRuntime)
+    context = json.dumps(
+        {
+            "referenceDate": "2026-08-30",
+            "subject": {"currentAge": 36, "readerRelationship": "self"},
+        }
+    )
+    artifacts = [
+        SimpleNamespace(
+            path="chart_record.json",
+            content=json.dumps(
+                {
+                    "subject": {
+                        "subjectId": "subject-1",
+                        "currentAge": 35,
+                        "lifeStage": "adult",
+                        "readerRelationship": "parent",
+                    }
+                }
+            ),
+        ),
+        SimpleNamespace(
+            path=".runtime/consultation-subject-context.json",
+            content=context,
+        ),
+    ]
+
+    selected = runtime._artifacts_for_skill("vedic-reader", artifacts)
+    visible = runtime._reader_agent_artifacts(selected)
+
+    assert json.loads(visible[".runtime/consultation-subject-context.json"])["subject"] == {
+        "currentAge": 36,
+        "readerRelationship": "self",
+    }
+    assert json.loads(visible["chart_record.json"])["subject"] == {"subjectId": "subject-1"}
 
 
 def test_reader_readiness_rejects_rectification_candidate_state() -> None:
@@ -4940,6 +4993,7 @@ def test_reader_run_retries_once_after_output_contract_rejection() -> None:
     runtime.workspace = FakeWorkspace()
     runtime.rectification = ChartRectificationService()
     runtime._artifact_prompt_for = lambda _input: "base prompt"
+    runtime._prepare_consultation_subject_context = lambda *_args, **_kwargs: None
     runtime._write_prevalidation_result = lambda *_args, **_kwargs: None
 
     async def no_sync(*_args: object, **_kwargs: object) -> None:

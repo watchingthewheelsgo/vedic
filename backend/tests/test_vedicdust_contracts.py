@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,6 +17,7 @@ from app.vedicdust.models import (
     AstronomySnapshot,
     AuditFinding,
     BirthAssertion,
+    CanonicalBirthMoment,
     CandidateEvidenceScore,
     CandidateInterval,
     ChartAudit,
@@ -28,12 +29,14 @@ from app.vedicdust.models import (
     ConsultationScope,
     EvidenceClass,
     EvidenceItem,
+    GeoPoint,
     GrahaPosition,
     InputSensitivityAssessment,
     JyotishFact,
     JudgementContext,
     JudgementFinding,
     LifeEvent,
+    PlaceResolution,
     ReportSection,
     RectificationDecision,
     RectificationRecord,
@@ -147,6 +150,61 @@ def test_consultation_subject_uses_report_date_and_original_reader_choice() -> N
     assert record.subject.current_age == 15
     assert record.subject.life_stage == "teen"
     assert record.subject.reader_relationship == "parent"
+
+
+def test_consultation_subject_uses_canonical_civil_date_at_timezone_boundary() -> None:
+    evidence = EvidenceItem(
+        evidenceId="birth-source-timezone",
+        evidenceClass="user_testimony",
+        sourceLabel="user",
+        observedValue="2000-08-31 08:00",
+        confidence="provisional",
+    )
+    record = ChartRecord(
+        chartRecordId="chart-age-timezone-boundary",
+        readingSessionId="session-age-timezone-boundary",
+        revision=1,
+        createdAt=datetime(2026, 8, 1, tzinfo=UTC),
+        subject=SubjectContext(subjectId="subject-age-timezone-boundary"),
+        birthAssertion=BirthAssertion(
+            localDate="2000-08-31",
+            reportedLocalTime="08:00",
+            reportedPlace="Kiritimati",
+            timeCertainty="approximate",
+            evidence=[evidence],
+        ),
+        canonicalMoment=CanonicalBirthMoment(
+            localDatetime=datetime(
+                2000,
+                8,
+                31,
+                8,
+                tzinfo=timezone(timedelta(hours=14)),
+            ),
+            utcDatetime=datetime(2000, 8, 30, 18, tzinfo=UTC),
+            timezoneId="Pacific/Kiritimati",
+            utcOffsetSeconds=14 * 60 * 60,
+            historicalOffsetStatus="resolved",
+            place=PlaceResolution(
+                label="Kiritimati",
+                point=GeoPoint(latitudeDeg=1.8721, longitudeDeg=-157.4278),
+                precision="city",
+                timezoneId="Pacific/Kiritimati",
+                evidence=[evidence],
+            ),
+            resolutionConfidence="provisional",
+        ),
+        calculationProfile=parashari_lahiri_profile(),
+        status="intake",
+    )
+
+    consultation = chart_record_for_consultation(
+        record,
+        datetime(2026, 8, 30, 12, tzinfo=UTC),
+    )
+
+    assert consultation.subject.current_age == 26
+    assert consultation.subject.life_stage == "adult"
 
 
 from app.vedicdust.validation import (
