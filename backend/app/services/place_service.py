@@ -370,7 +370,8 @@ class PlaceService:
             raise LookupError(
                 "暂时没有识别这个出生城市。请换成“城市, 国家/省州”的格式；"
                 "例如 Shenzhen, China / Atlanta, GA / New York City, United States；"
-                "或输入坐标格式：lat=34.0522, lon=-118.2437, tz=America/Los_Angeles"
+                "或输入 WGS84 坐标格式：lat=34.0522, lon=-118.2437, "
+                "tz=America/Los_Angeles, coord=WGS84"
             )
 
         timezone = self._timezone_for(best.latitude, best.longitude, best.timezone_hours)

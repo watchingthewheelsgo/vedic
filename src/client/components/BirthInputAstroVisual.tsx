@@ -79,11 +79,13 @@ export function BirthInputAstroVisual({
   const birthDateRef = useRef(birthDate);
   const birthTimeRef = useRef(birthTime);
   const timePrecisionRef = useRef(timePrecision);
+  const redrawRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     birthDateRef.current = birthDate;
     birthTimeRef.current = birthTime;
     timePrecisionRef.current = timePrecision;
+    redrawRef.current();
   }, [birthDate, birthTime, timePrecision]);
 
   useEffect(() => {
@@ -195,6 +197,8 @@ export function BirthInputAstroVisual({
       if (animation) cancelAnimationFrame(animation);
       animation = requestAnimationFrame(draw);
     }
+
+    redrawRef.current = scheduleDraw;
 
     function onMotionPreferenceChange(event: MediaQueryListEvent) {
       reducedMotion = event.matches;
@@ -666,6 +670,7 @@ export function BirthInputAstroVisual({
 
     return () => {
       cancelAnimationFrame(animation);
+      if (redrawRef.current === scheduleDraw) redrawRef.current = () => undefined;
       observer.disconnect();
       window.removeEventListener("resize", rebuild);
       window.removeEventListener("birth-place-coordinates", onCity);

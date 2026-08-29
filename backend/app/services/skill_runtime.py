@@ -65,6 +65,7 @@ from app.vedicdust.models import (
     RectificationRoundRecord,
     TimeRange,
 )
+from app.vedicdust.chart_record_builder import chart_record_for_consultation
 from app.vedicdust.judgement import TOPICS, build_judgement_context
 from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.orchestrator import audit_chart_record
@@ -100,6 +101,7 @@ RECTIFICATION_INTERVIEW_JSON = "rectification_interview.json"
 LIFE_EVENT_EVIDENCE_VALIDATION_JSON = "life_event_evidence_validation.json"
 CONSULTATION_GROUNDING_AUDIT_JSON = "consultation_grounding_audit.json"
 CONSULTATION_TOPIC_SELECTION_JSON = ".runtime/consultation-topic-selection.json"
+CONSULTATION_SUBJECT_CONTEXT_JSON = ".runtime/consultation-subject-context.json"
 CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
 PREVALIDATION_DEPENDENCY_PATHS = [
@@ -1526,7 +1528,12 @@ class SkillRuntime:
 
         life_stage = None
         if chart_record_text:
-            life_stage = ChartRecord.model_validate_json(chart_record_text).subject.life_stage
+            interview_record = self._consultation_record(
+                session_id,
+                ChartRecord.model_validate_json(chart_record_text),
+                datetime.now(timezone.utc),
+            )
+            life_stage = interview_record.subject.life_stage
         interview = build_rectification_interview(
             state,
             session_id=session_id,
@@ -4887,6 +4894,8 @@ Rules:
 
 Read:
 - chart_record.json and chart_audit.json;
+- .runtime/consultation-subject-context.json for the authoritative current age,
+  life stage, and reader relationship for this consultation;
 - judgement_context.json;
 - claim_graph.json;
 - prevalidation_result.json and chart_rectification_state.json.
@@ -4956,8 +4965,32 @@ User request:
     @staticmethod
     def _core_batch_dependency_paths(batch_id: str) -> list[str]:
         if batch_id == "vedicdust_consultation":
-            return [JUDGEMENT_CONTEXT_JSON, CLAIM_GRAPH_JSON]
+            return [
+                JUDGEMENT_CONTEXT_JSON,
+                CLAIM_GRAPH_JSON,
+                CONSULTATION_SUBJECT_CONTEXT_JSON,
+            ]
         return []
+
+    def _consultation_record(
+        self,
+        session_id: str,
+        record: ChartRecord,
+        reference_time: datetime,
+    ) -> ChartRecord:
+        birth_context = self._json_dict(
+            self.workspace.read_artifact_text(session_id, "birth_input_context.json") or ""
+        )
+        subject_context = birth_context.get("subject")
+        subject_context = subject_context if isinstance(subject_context, dict) else {}
+        reader_relationship = subject_context.get("readerRelationship")
+        return chart_record_for_consultation(
+            record,
+            reference_time,
+            reader_relationship=(
+                str(reader_relationship).strip() if reader_relationship is not None else None
+            ),
+        )
 
     def _session_paths(self, session_dir: Path) -> set[str]:
         return {
@@ -4970,7 +5003,17 @@ User request:
         chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         if not chart_record_json:
             raise ValueError("Session is missing chart_record.json")
-        record = ChartRecord.model_validate_json(chart_record_json)
+        reference_time = datetime.now(timezone.utc).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        record = self._consultation_record(
+            session_id,
+            ChartRecord.model_validate_json(chart_record_json),
+            reference_time,
+        )
         sensitivity = self._judgement_sensitivity(session_id)
         restricted_fact_ids, restrict_timing = self._restricted_judgement_evidence(
             record, sensitivity
@@ -4985,7 +5028,7 @@ User request:
             restricted_fact_ids=restricted_fact_ids,
             restrict_timing=restrict_timing,
             requested_topics=self._canonical_topic_ids(topic_selection.get("selectedTopicIds")),
-            now=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
+            now=reference_time,
         )
         validate_judgement_context(record, context, catalog)
         graph = build_claim_graph(record, context)
@@ -4999,6 +5042,26 @@ User request:
             session_id,
             JUDGEMENT_CONTEXT_JSON,
             producer="vedicdust-judgement-context",
+        )
+        self.workspace.write_artifact(
+            session_id,
+            CONSULTATION_SUBJECT_CONTEXT_JSON,
+            json.dumps(
+                {
+                    "schemaVersion": "vedicdust-consultation-subject-context/1.0.0",
+                    "generatedAt": reference_time.isoformat(),
+                    "subject": record.subject.model_dump(by_alias=True, mode="json"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
+        self.workspace.mark_artifact_checkpoint(
+            session_id,
+            CONSULTATION_SUBJECT_CONTEXT_JSON,
+            producer="vedicdust-consultation-subject-context",
+            dependency_paths=[CHART_RECORD_JSON, "birth_input_context.json"],
         )
         self.workspace.write_artifact(
             session_id,
@@ -5268,8 +5331,12 @@ User request:
 
         self.assert_core_readiness(session_id)
 
-        record = ChartRecord.model_validate_json(chart_record_json)
         context = JudgementContext.model_validate_json(judgement_context_json)
+        record = self._consultation_record(
+            session_id,
+            ChartRecord.model_validate_json(chart_record_json),
+            context.generated_at,
+        )
         graph = ClaimGraph.model_validate_json(claim_graph_json)
         dossier = ConsultationDossier.model_validate_json(dossier_json)
         catalog = load_rule_catalog()

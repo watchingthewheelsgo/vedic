@@ -3753,7 +3753,12 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
         },
         "place": {
             "reported": "Shanghai, Shanghai, China",
+            "resolvedLabel": "Shanghai, Shanghai, China",
+            "coordinates": {"lat": 31.2304, "lon": 121.4737},
+            "timezone": "Asia/Shanghai",
+            "source": "geonames-local",
             "accuracy": "city",
+            "coordinateSystem": "WGS84",
             "radiusKm": 25,
         },
         "constraints": {
@@ -3815,7 +3820,10 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
     assert rectified is not None
     assert rectified.birth_time == "08:45"
     assert rectified.birth_time_precision == "exact"
-    assert rectified.birth_place == "Shanghai, Shanghai, China"
+    assert rectified.birth_place == (
+        "Shanghai, Shanghai, China | lat=31.230400, lon=121.473700, coord=WGS84, "
+        "tz=Asia/Shanghai, source=geonames-local, accuracy=city"
+    )
     assert rectified.locale == "ja"
     assert rectified.life_events == "2018-06 career\n2020-09 marriage\n2023-05 relocation"
     assert rectified.gender == "女"
@@ -3831,6 +3839,43 @@ def test_rectification_selects_candidate_and_builds_rectified_birth_input() -> N
     assert ready["rectificationConclusion"]["examples"]
     assert decision["reportAllowed"] is False
     assert decision["nextStep"] == "confirm_rectification_result"
+
+
+def test_life_event_recalculation_migrates_legacy_manual_coordinate_input() -> None:
+    service = ChartRectificationService()
+    birth_input = service.birth_input_with_life_events(
+        {
+            "time": {
+                "date": "1990-01-01",
+                "reported": "08:30",
+                "precision": "approximate",
+                "window": {"start": "1990-01-01 08:15", "end": "1990-01-01 08:45"},
+            },
+            "place": {
+                "reported": "lat=31.2304, lon=121.4737",
+                "resolvedLabel": "Shanghai, Shanghai, China",
+                "coordinates": {"lat": 31.2304, "lon": 121.4737},
+                "timezone": "Asia/Shanghai",
+                "source": "inline-coordinates",
+                "accuracy": "coordinate",
+                "coordinateSystem": "WGS84",
+            },
+        },
+        {
+            "subject": {"locale": "en"},
+            "birthAssertion": {
+                "localDate": "1990-01-01",
+                "reportedLocalTime": "08:30",
+                "reportedPlace": "lat=31.2304, lon=121.4737",
+            },
+        },
+        "2018-06 career",
+    )
+
+    assert birth_input.birth_place == (
+        "Shanghai, Shanghai, China | lat=31.230400, lon=121.473700, coord=WGS84, "
+        "tz=Asia/Shanghai, source=inline-coordinates, accuracy=coordinate"
+    )
 
 
 def test_initial_rectification_state_includes_backend_next_round_plan() -> None:

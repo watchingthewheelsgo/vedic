@@ -54,6 +54,7 @@ from app.vedicdust.chart_record_builder import (
     _candidate_evidence_score,
     _reader_relationship_for_life_stage,
     _rectification,
+    chart_record_for_consultation,
 )
 from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.judgement import TOPICS, _validate_requested_topic_ids, build_judgement_context
@@ -94,6 +95,58 @@ def test_minor_self_readings_are_normalized_to_parent_facing_reports() -> None:
     assert _reader_relationship_for_life_stage("self", "teen") == "parent"
     assert _reader_relationship_for_life_stage("professional", "child") == "professional"
     assert _reader_relationship_for_life_stage("self", "adult") == "self"
+
+
+def test_consultation_subject_uses_report_date_and_original_reader_choice() -> None:
+    evidence = EvidenceItem(
+        evidenceId="birth-source",
+        evidenceClass="user_testimony",
+        sourceLabel="user",
+        observedValue="2010-09-01 08:00",
+        confidence="provisional",
+    )
+    record = ChartRecord(
+        chartRecordId="chart-age-boundary",
+        readingSessionId="session-age-boundary",
+        revision=1,
+        createdAt=datetime(2026, 8, 1, tzinfo=UTC),
+        subject=SubjectContext(
+            subjectId="subject-age-boundary",
+            currentAge=15,
+            lifeStage="teen",
+            readerRelationship="parent",
+        ),
+        birthAssertion=BirthAssertion(
+            localDate="2010-09-01",
+            reportedLocalTime="08:00",
+            reportedPlace="Test City",
+            timeCertainty="approximate",
+            evidence=[evidence],
+        ),
+        calculationProfile=parashari_lahiri_profile(),
+        status="intake",
+    )
+
+    teen_consultation = chart_record_for_consultation(
+        record,
+        datetime(2026, 8, 30, tzinfo=UTC),
+        reader_relationship="self",
+    )
+    adult_consultation = chart_record_for_consultation(
+        record,
+        datetime(2028, 9, 1, tzinfo=UTC),
+        reader_relationship="self",
+    )
+
+    assert teen_consultation.subject.current_age == 15
+    assert teen_consultation.subject.life_stage == "teen"
+    assert teen_consultation.subject.reader_relationship == "parent"
+    assert adult_consultation.subject.current_age == 18
+    assert adult_consultation.subject.life_stage == "young_adult"
+    assert adult_consultation.subject.reader_relationship == "self"
+    assert record.subject.current_age == 15
+    assert record.subject.life_stage == "teen"
+    assert record.subject.reader_relationship == "parent"
 
 
 from app.vedicdust.validation import (

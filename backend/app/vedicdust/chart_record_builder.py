@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import lru_cache
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, cast
 
 import pytz
 
@@ -2635,7 +2635,7 @@ def _age_on(birth_date: date, current_date: date) -> int:
     )
 
 
-def _life_stage(age: int) -> str:
+def _life_stage(age: int) -> Literal["child", "teen", "young_adult", "adult", "elder"]:
     if age < 13:
         return "child"
     if age < 18:
@@ -2647,7 +2647,40 @@ def _life_stage(age: int) -> str:
     return "elder"
 
 
-def _reader_relationship_for_life_stage(reader_relationship: str, life_stage: str) -> str:
+def _reader_relationship_for_life_stage(
+    reader_relationship: Literal["self", "parent", "partner", "family", "professional"],
+    life_stage: str,
+) -> Literal["self", "parent", "partner", "family", "professional"]:
     if life_stage in {"child", "teen"} and reader_relationship == "self":
         return "parent"
     return reader_relationship
+
+
+def chart_record_for_consultation(
+    record: ChartRecord,
+    reference_time: datetime,
+    *,
+    reader_relationship: str | None = None,
+) -> ChartRecord:
+    """Derive time-sensitive report subject fields without rewriting chart facts."""
+
+    consultation_record = record.model_copy(deep=True)
+    current_age = _age_on(
+        date.fromisoformat(consultation_record.birth_assertion.local_date),
+        reference_time.date(),
+    )
+    life_stage = _life_stage(current_age)
+    preferred_reader = reader_relationship or consultation_record.subject.reader_relationship
+    if preferred_reader not in {"self", "parent", "partner", "family", "professional"}:
+        preferred_reader = consultation_record.subject.reader_relationship
+    preferred_reader = cast(
+        Literal["self", "parent", "partner", "family", "professional"],
+        preferred_reader,
+    )
+    consultation_record.subject.current_age = current_age
+    consultation_record.subject.life_stage = life_stage
+    consultation_record.subject.reader_relationship = _reader_relationship_for_life_stage(
+        preferred_reader,
+        life_stage,
+    )
+    return consultation_record

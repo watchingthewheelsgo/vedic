@@ -1085,12 +1085,7 @@ class ChartRectificationService:
         birth_time = str(
             birth_assertion.get("reportedLocalTime") or time_context.get("reported") or ""
         )
-        birth_place = str(
-            place_context.get("reported")
-            or birth_assertion.get("reportedPlace")
-            or place_context.get("resolvedLabel")
-            or ""
-        )
+        birth_place = self._canonical_birth_place(place_context, birth_assertion)
         axis_changes = []
         representative = candidate.get("representativeDatetime")
         if representative:
@@ -1165,12 +1160,7 @@ class ChartRectificationService:
             "未提供" if locale == "zh" else "未記入" if locale == "ja" else "[not provided]"
         )
         birth_date = str(assertion.get("localDate") or time_context.get("date") or "")
-        birth_place = str(
-            place_context.get("reported")
-            or assertion.get("reportedPlace")
-            or place_context.get("resolvedLabel")
-            or ""
-        )
+        birth_place = self._canonical_birth_place(place_context, assertion)
         if not birth_date or not birth_place:
             raise ValueError("session is missing the reported birth date or place")
         utc_offset = time_context.get("utcOffsetSeconds")
@@ -1193,6 +1183,51 @@ class ChartRectificationService:
             utcOffsetSeconds=int(utc_offset) if utc_offset is not None else None,
             locale=locale,
         )
+
+    @staticmethod
+    def _canonical_birth_place(
+        place_context: dict[str, Any],
+        birth_assertion: dict[str, Any],
+    ) -> str:
+        """Serialize the already-resolved place for deterministic recalculation."""
+
+        reported = str(
+            place_context.get("reported")
+            or birth_assertion.get("reportedPlace")
+            or place_context.get("resolvedLabel")
+            or ""
+        )
+        coordinates = place_context.get("coordinates")
+        if not isinstance(coordinates, dict):
+            return reported
+        latitude = coordinates.get("lat")
+        longitude = coordinates.get("lon")
+        coordinate_system = str(place_context.get("coordinateSystem") or "").upper()
+        if (
+            not isinstance(latitude, (int, float))
+            or isinstance(latitude, bool)
+            or not isinstance(longitude, (int, float))
+            or isinstance(longitude, bool)
+            or coordinate_system not in {"WGS84", "EPSG:4326"}
+        ):
+            return reported
+
+        label = str(place_context.get("resolvedLabel") or reported).split("|", 1)[0].strip()
+        parts = [
+            f"lat={float(latitude):.6f}",
+            f"lon={float(longitude):.6f}",
+            "coord=WGS84",
+        ]
+        timezone_id = str(place_context.get("timezone") or "").strip()
+        source = str(place_context.get("source") or "").strip()
+        accuracy = str(place_context.get("accuracy") or "").strip()
+        if timezone_id:
+            parts.append(f"tz={timezone_id}")
+        if source:
+            parts.append(f"source={source}")
+        if accuracy:
+            parts.append(f"accuracy={accuracy}")
+        return f"{label} | {', '.join(parts)}"
 
     @staticmethod
     def _reported_time_window_input(time_context: dict[str, Any]) -> dict[str, Any] | None:
