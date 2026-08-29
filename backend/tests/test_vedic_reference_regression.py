@@ -1661,14 +1661,14 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
         requested_topics=["career"],
         now=reference_time,
     )
-    localized_career = next(
-        unit for unit in localized_context.units if unit.topic_id == "career"
-    ).conclusions[0]
-    assert localized_career.title == "事业与社会贡献"
-    assert localized_career.user_relevance == "你在本次咨询中明确关注了事业与社会贡献。"
-    assert "第10宫" in localized_career.plain_statement
-    assert "盘面条件" in localized_career.plain_statement
-    assert "Integrated direction=" in localized_career.technical_statement
+    localized_topic_ids = {unit.topic_id for unit in localized_context.units}
+    assert "career" not in localized_topic_ids
+    assert "finance" not in localized_topic_ids
+    assert "relationship" not in localized_topic_ids
+    assert "children" not in localized_topic_ids
+    assert {"foundation", "identity", "home", "learning", "health", "dharma", "family"} <= (
+        localized_topic_ids
+    )
     localized_foundation = next(
         unit for unit in localized_context.units if unit.topic_id == "foundation"
     ).conclusions[0]
@@ -1679,7 +1679,8 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     graph = build_claim_graph(localized, localized_context)
     validate_claim_graph(localized, graph, load_rule_catalog(), localized_context)
     assert 5 <= len(graph.claims) <= 10
-    assert {"foundation", "career"} <= {claim.topic for claim in graph.claims}
+    assert "career" not in {claim.topic for claim in graph.claims}
+    assert "当前人生阶段" in graph.omitted_topics["career"]
     conclusions = {
         conclusion.conclusion_id: conclusion
         for unit in localized_context.units
@@ -1844,7 +1845,7 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     assert "用户报告的出生信息" in report
     assert "本次盘面采用的计算依据" in report
     assert "12岁 · 儿童 · 由父母阅读" in report
-    assert "这对当事人可能意味着什么" in report
+    assert "事业与社会贡献" not in report
     assert foundation_claim.plain_statement in report
     assert "most useful when read together" in report
     assert localized.calculation_profile.profile_id not in report.split("##", 1)[0]

@@ -308,7 +308,8 @@ export const messages: Record<LocaleCode, Dict> = {
     "time.minute": "Minute",
     "place.label": "Birth place",
     "place.city.hint": "Search by city name first, then pick the matching result.",
-    "place.coordinates.hint": "Coordinates are accepted when latitude and longitude are in range.",
+    "place.coordinates.hint":
+      "Enter WGS84 coordinates only. Coordinates copied from another map datum must be converted first.",
     "place.coordinates.manualLink": "Enter coordinates manually",
     "place.mode.city": "City",
     "place.mode.coordinates": "Coordinates",
@@ -1185,7 +1186,7 @@ const zhOverrides: Dict = {
   "time.minute": "分钟",
   "place.label": "出生地点",
   "place.city.hint": "优先搜索城市名，并从结果中选择匹配地点。",
-  "place.coordinates.hint": "经纬度会自动解析时区；请确认经度和纬度没有填反。",
+  "place.coordinates.hint": "仅接受 WGS84 坐标，并会自动解析时区；其他地图坐标系请先转换后再填写。",
   "place.coordinates.manualLink": "手动输入经纬度",
   "place.mode.city": "城市",
   "place.mode.coordinates": "经纬度",
@@ -1968,7 +1969,8 @@ const jaOverrides: Dict = {
   "time.minute": "分",
   "place.label": "出生地",
   "place.city.hint": "まず都市名で検索し、該当する結果を選びます。",
-  "place.coordinates.hint": "緯度と経度が有効範囲内であれば座標を使えます。",
+  "place.coordinates.hint":
+    "WGS84 座標のみ入力できます。別の測地系から取得した座標は先に変換してください。",
   "place.coordinates.manualLink": "座標を手入力",
   "place.mode.city": "都市",
   "place.mode.coordinates": "座標",

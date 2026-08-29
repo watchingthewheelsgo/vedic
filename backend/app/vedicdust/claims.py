@@ -70,8 +70,9 @@ def build_claim_graph(
             claims.append(_claim(record, unit, timing))
 
     selected_topics = {claim.topic for claim in claims}
+    available_topic_ids = {topic.topic_id for topic in context.topics}
     omitted_topics = {
-        topic_id: "No eligible backend judgement conclusion passed the current evidence gate."
+        topic_id: _omitted_topic_reason(record, topic_id, available_topic_ids)
         for topic_id in context.requested_topics
         if topic_id not in selected_topics
     }
@@ -111,6 +112,23 @@ def build_claim_graph(
             ),
         ],
     )
+
+
+def _omitted_topic_reason(
+    record: ChartRecord,
+    topic_id: str,
+    available_topic_ids: set[str],
+) -> str:
+    if record.subject.life_stage in {"child", "teen"} and topic_id not in available_topic_ids:
+        if record.subject.locale == "zh":
+            return "该主题不适合当前人生阶段；报告改用成长、学习、家庭与健康视角。"
+        if record.subject.locale == "ja":
+            return "現在のライフステージには適さないため、成長・学習・家族・健康の観点に置き換えました。"
+        return (
+            "This topic is not appropriate for the subject's current life stage; the report uses "
+            "growth, learning, family, and health framing instead."
+        )
+    return "No eligible backend judgement conclusion passed the current evidence gate."
 
 
 def _claim(

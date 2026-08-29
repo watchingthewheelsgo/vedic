@@ -2200,6 +2200,10 @@ class SkillRuntime:
                 if prepare_judgement:
                     self._prepare_judgement_context(session_id)
             return
+        if state_status:
+            reason = state_gate.get("reason") or "生时校正状态尚未达到完整报告门槛。"
+            next_step = state_gate.get("nextStep") or "continue_rectification"
+            raise ValueError(f"完整报告暂不允许生成：{reason} 下一步：{next_step}")
         result_path = session_dir / "prevalidation_result.json"
         if not result_path.exists():
             raise ValueError(

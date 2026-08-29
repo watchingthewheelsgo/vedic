@@ -1,0 +1,12 @@
+{
+  "displayName": "Workflow Test",
+  "birthDate": "2002-12-11",
+  "birthTime": "20:47",
+  "birthPlace": "lat=25.4333, lon=119.0, tz=Asia/Shanghai, source=manual, accuracy=coordinate, coord=WGS84",
+  "birthTimePrecision": "exact",
+  "gender": "not_specified",
+  "relationship": "not_specified",
+  "timeSource": "user_reported_time",
+  "readerRelationship": "self",
+  "locale": "en"
+}

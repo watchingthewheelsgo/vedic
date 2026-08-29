@@ -50,7 +50,11 @@ from app.vedicdust.professional_review import (
     ProfessionalReviewArtifact,
     validate_professional_review_fixture,
 )
-from app.vedicdust.chart_record_builder import _candidate_evidence_score, _rectification
+from app.vedicdust.chart_record_builder import (
+    _candidate_evidence_score,
+    _reader_relationship_for_life_stage,
+    _rectification,
+)
 from app.vedicdust.claims import build_claim_graph
 from app.vedicdust.judgement import TOPICS, _validate_requested_topic_ids, build_judgement_context
 from app.vedicdust.orchestrator import audit_chart_record
@@ -83,6 +87,13 @@ def test_requested_topics_accept_only_agent_selected_ontology_ids() -> None:
         "home",
     }
     assert _validate_requested_topic_ids(["原生家庭", "career and finance", "homework"]) == set()
+
+
+def test_minor_self_readings_are_normalized_to_parent_facing_reports() -> None:
+    assert _reader_relationship_for_life_stage("self", "child") == "parent"
+    assert _reader_relationship_for_life_stage("self", "teen") == "parent"
+    assert _reader_relationship_for_life_stage("professional", "child") == "professional"
+    assert _reader_relationship_for_life_stage("self", "adult") == "self"
 
 
 from app.vedicdust.validation import (

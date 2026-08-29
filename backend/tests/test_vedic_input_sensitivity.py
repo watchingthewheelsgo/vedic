@@ -2809,6 +2809,39 @@ def test_core_readiness_accepts_backend_rectification_gate_without_reader_preval
     runtime.assert_core_readiness("session")
 
 
+def test_core_readiness_does_not_allow_prevalidation_to_bypass_failed_holdout(tmp_path) -> None:
+    runtime = runtime_with_workspace(tmp_path)
+    session_dir = runtime.workspace.require_session_dir("session")
+    (session_dir / "chart_rectification_state.json").write_text(
+        json.dumps(
+            {
+                "status": "corrected_chart_ready",
+                "holdoutResult": "failed",
+                "reportGate": {
+                    "fullReportAllowed": True,
+                    "reason": "Independent holdout did not pass.",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_dir / "prevalidation_result.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "vedic-prevalidation-result/2.0.0",
+                "decision": {
+                    "reportAllowed": True,
+                    "reportScope": "guarded_full_report",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Independent holdout did not pass"):
+        runtime.assert_core_readiness("session")
+
+
 def test_core_readiness_blocks_disallowed_report(tmp_path) -> None:
     runtime = runtime_with_workspace(tmp_path)
     session_dir = runtime.workspace.require_session_dir("session")

@@ -674,10 +674,20 @@ function buildBirthInput({
     relationship,
     readingFocus: readingFocus.trim(),
     lifeEvents: "",
-    readerRelationship: "self",
+    readerRelationship: readerRelationshipForBirthDate(birthDate),
     ...(utcOffsetSeconds !== null ? { utcOffsetSeconds } : {}),
     locale
   };
+}
+
+function readerRelationshipForBirthDate(birthDate: Date): "self" | "parent" {
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const birthdayHasPassed =
+    today.getMonth() > birthDate.getMonth() ||
+    (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
+  if (!birthdayHasPassed) age -= 1;
+  return age < 18 ? "parent" : "self";
 }
 
 function reportedTimeWindowFor(precision: BirthTimePrecision) {

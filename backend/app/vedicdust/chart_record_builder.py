@@ -230,6 +230,8 @@ def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
         else "ready_for_judgement"
     )
 
+    current_age = _age_on(date.fromisoformat(source.birth_date), source.created_at.date())
+    life_stage = _life_stage(current_age)
     result = ChartRecord(
         chart_record_id=source.chart_record_id,
         reading_session_id=source.reading_session_id,
@@ -239,11 +241,12 @@ def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
             subject_id=source.subject_id,
             display_name=source.display_name,
             locale=source.locale if source.locale in {"zh", "en", "ja"} else "en",
-            current_age=_age_on(date.fromisoformat(source.birth_date), source.created_at.date()),
-            life_stage=_life_stage(
-                _age_on(date.fromisoformat(source.birth_date), source.created_at.date())
+            current_age=current_age,
+            life_stage=life_stage,
+            reader_relationship=_reader_relationship_for_life_stage(
+                source.reader_relationship,
+                life_stage,
             ),
-            reader_relationship=source.reader_relationship,
             gender_context=source.gender_context,
             relationship_status=source.relationship_status,
             consultation_topics=list(source.consultation_topics),
@@ -2642,3 +2645,9 @@ def _life_stage(age: int) -> str:
     if age < 65:
         return "adult"
     return "elder"
+
+
+def _reader_relationship_for_life_stage(reader_relationship: str, life_stage: str) -> str:
+    if life_stage in {"child", "teen"} and reader_relationship == "self":
+        return "parent"
+    return reader_relationship

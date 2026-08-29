@@ -149,6 +149,28 @@ TOPICS = (
     ),
 )
 
+
+_YOUNG_PERSON_TOPIC_IDS = frozenset(
+    {
+        "foundation",
+        "identity",
+        "home",
+        "learning",
+        "health",
+        "dharma",
+        "family",
+    }
+)
+
+
+def eligible_topic_ids_for_life_stage(life_stage: str | None) -> frozenset[str]:
+    """Return report domains that are meaningful at the subject's current life stage."""
+
+    if life_stage in {"child", "teen"}:
+        return _YOUNG_PERSON_TOPIC_IDS
+    return frozenset(definition.topic_id for definition in TOPICS)
+
+
 GLOBAL_GATE_RULE_IDS = (
     "sop.promise-before-varga",
     "sop.promise-capacity-before-timing",
@@ -174,6 +196,7 @@ def build_judgement_context(
         chart.varga_id for chart in record.charts if chart.eligible_as_primary_evidence
     }
     requested = _validate_requested_topic_ids(requested_topics or [])
+    eligible_topic_ids = eligible_topic_ids_for_life_stage(record.subject.life_stage)
     reference_time = now or datetime.now(timezone.utc)
     relevant_period_ids = _relevant_period_ids(record, reference_time)
     periods_by_id = {period.period_id: period for period in record.timing_periods}
@@ -224,7 +247,8 @@ def build_judgement_context(
             restricted,
         )
         for definition in TOPICS
-        if definition.rule_id in active_rules
+        if definition.topic_id in eligible_topic_ids
+        and definition.rule_id in active_rules
         and rule_evaluations[definition.rule_id]["evaluationStatus"] == "eligible"
     ]
     eligible_interpretation_rule_ids = [

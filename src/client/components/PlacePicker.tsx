@@ -641,6 +641,10 @@ export function PlacePicker({
           </div>
         )}
 
+        {mode === "coordinates" ? (
+          <p className="text-xs leading-relaxed text-cream/45">{t("place.coordinates.hint")}</p>
+        ) : null}
+
         {mode === "coordinates" && readout ? (
           <PlaceCoordinateReadout readout={readout} t={t} />
         ) : null}

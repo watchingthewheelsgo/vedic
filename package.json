@@ -25,14 +25,15 @@
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
     "frontend:lint": "eslint src scripts vite.config.ts",
+    "frontend:test": "node --import tsx --test src/client/lib/*.test.ts",
     "report:export": "uv run --project backend python scripts/export-report.py",
     "report:pdf": "node scripts/render-report-pdf.mjs",
     "report:pdf:install": "playwright install chromium",
-    "workflow:test": "node scripts/run-full-workflow.mjs",
+    "workflow:test": "node --import tsx scripts/run-full-workflow.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "tsc --noEmit",
-    "ci": "npm run format:check && npm run frontend:lint && npm run backend:format:check && npm run backend:lint && npm run check && npm run backend:sync && npm run backend:ensure && npm run backend:check && npm run backend:typecheck && npm run backend:test && npm run build",
+    "ci": "npm run format:check && npm run frontend:lint && npm run frontend:test && npm run backend:format:check && npm run backend:lint && npm run check && npm run backend:sync && npm run backend:ensure && npm run backend:check && npm run backend:typecheck && npm run backend:test && npm run build",
     "ci:certified": "npm run ci && npm run backend:certify:references"
   },
   "dependencies": {

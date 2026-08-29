@@ -945,6 +945,7 @@ class PlaceService:
         parts = [
             f"lat={self._format_coordinate(lat)}",
             f"lon={self._format_coordinate(lon)}",
+            "coord=WGS84",
         ]
         if source:
             parts.append(f"source={source}")
@@ -1228,9 +1229,16 @@ class PlaceService:
         accuracy = self._parse_inline_token(value, ["accuracy", "acc"]) or "coordinate"
         if accuracy not in {"city", "poi", "address", "district", "coordinate"}:
             accuracy = "coordinate"
-        coordinate_system = (
-            self._parse_inline_token(value, ["coordinateSystem", "coord", "cs"]) or "WGS84"
-        )
+        coordinate_system = self._parse_inline_token(value, ["coordinateSystem", "coord", "cs"])
+        if coordinate_system is None:
+            trusted_wgs84_sources = {"agent", "amap", "geonames-local"}
+            if source in trusted_wgs84_sources:
+                coordinate_system = "WGS84"
+            else:
+                raise ValueError("请明确标注坐标系；手工坐标目前只接受 coord=WGS84。")
+        if coordinate_system.upper() not in {"WGS84", "EPSG:4326"}:
+            raise ValueError("手工坐标目前只接受 WGS84 / EPSG:4326。")
+        coordinate_system = "WGS84"
 
         label = value.split("|", 1)[0].strip() or value
         return ResolvedPlace(
@@ -1250,7 +1258,7 @@ class PlaceService:
     @staticmethod
     def _parse_inline_token(value: str, keys: list[str]) -> str | None:
         key_pattern = "|".join(re.escape(key) for key in keys)
-        match = re.search(rf"(?:{key_pattern})\s*[:=]\s*([A-Za-z0-9_.-]+)", value, re.I)
+        match = re.search(rf"(?:{key_pattern})\s*[:=]\s*([A-Za-z0-9_.:-]+)", value, re.I)
         return match.group(1) if match else None
 
     @staticmethod

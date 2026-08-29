@@ -61,6 +61,11 @@ import {
 } from "../lib/chartRevealMapping";
 import { getReportSections, titleForArtifact } from "../lib/report";
 import { cn } from "../lib/cn";
+import {
+  canStartFullReadingFromArtifacts,
+  readingContinuationActionFromArtifacts,
+  type ReadingContinuationAction
+} from "../lib/reading-continuation";
 import { useI18n } from "../i18n/provider";
 import type {
   BirthInput,
@@ -6124,72 +6129,16 @@ function cleanStoredEventDescription(value: string) {
 
 function canStartFullReading(session: SkillSessionResponse | null): boolean {
   const state = parseJsonArtifact(session, "chart_rectification_state.json");
-  if (state) {
-    const status = String(state.status ?? "").trim();
-    const conclusion = objectValue(state, "rectificationConclusion");
-    const confirmation = objectValue(conclusion, "confirmation");
-    if (status === "rectification_confirmation_required" || confirmation?.status === "pending") {
-      return false;
-    }
-    const gate = objectValue(state, "reportGate");
-    if (status === "not_required" && gate?.fullReportAllowed === true) return true;
-    if (
-      status === "corrected_chart_ready" &&
-      state.holdoutResult === "passed" &&
-      gate?.fullReportAllowed === true
-    ) {
-      return true;
-    }
-    if (
-      status === "multiple_equivalent" &&
-      state.holdoutResult === "passed" &&
-      gate?.fullReportAllowed === true &&
-      gate.reportScope === "stable_intersection_only"
-    ) {
-      return true;
-    }
-  }
   const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
-  const decision = objectValue(prevalidationResult, "decision");
-  return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
+  return canStartFullReadingFromArtifacts(state, prevalidationResult);
 }
-
-type ReadingContinuationAction =
-  "full_report" | "reader" | "collect_events" | "confirm_rectification" | "reset_events" | "stop";
 
 function readingContinuationAction(
   session: SkillSessionResponse | null
 ): ReadingContinuationAction {
   const state = parseJsonArtifact(session, "chart_rectification_state.json");
-  if (state) {
-    const status = String(state.status ?? "").trim();
-    const conclusion = objectValue(state, "rectificationConclusion");
-    const confirmation = objectValue(conclusion, "confirmation");
-    if (status === "rectification_confirmation_required" || confirmation?.status === "pending") {
-      return "confirm_rectification";
-    }
-  }
-
-  if (canStartFullReading(session)) return "full_report";
-
   const prevalidationResult = parseJsonArtifact(session, "prevalidation_result.json");
-  const prevalidationDecision = objectValue(prevalidationResult, "decision");
-  if (prevalidationDecision?.nextStep === "review_birth_details_or_stop") return "stop";
-
-  if (!state) return "reader";
-
-  const status = String(state.status ?? "").trim();
-  const plan = objectValue(state, "rectificationPlan");
-  const action = String(plan?.action ?? "").trim();
-  if (action === "reset_rectification_evidence") return "reset_events";
-  if (
-    status === "collecting_evidence" ||
-    action === "collect_dated_life_events" ||
-    (status === "underdetermined" && plan?.eventCollectionRequired === true)
-  ) {
-    return "collect_events";
-  }
-  return "stop";
+  return readingContinuationActionFromArtifacts(state, prevalidationResult);
 }
 
 function parseRectificationState(content: string): RectificationState | null {

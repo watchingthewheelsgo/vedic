@@ -74,7 +74,7 @@ export function parseCoordinateInput(value: string): CoordinateValidation {
 }
 
 export function formatCoordinateValue(latitude: number, longitude: number): string {
-  return `lat=${formatCoordinateNumber(latitude)}, lon=${formatCoordinateNumber(longitude)}`;
+  return `lat=${formatCoordinateNumber(latitude)}, lon=${formatCoordinateNumber(longitude)}, source=manual, accuracy=coordinate, coord=WGS84`;
 }
 
 export function formatCoordinateNumber(value: number): string {

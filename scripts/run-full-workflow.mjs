@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { canStartFullReadingFromArtifacts } from "../src/client/lib/reading-continuation.ts";
+
 const apiBase = process.env.VEDIC_API_BASE ?? "http://127.0.0.1:8787";
 const pollIntervalMs = Number(process.env.VEDIC_WORKFLOW_POLL_MS ?? 5000);
 const timeoutMs = Number(process.env.VEDIC_WORKFLOW_TIMEOUT_MS ?? 7_200_000);
@@ -15,14 +18,20 @@ const requiredPublicArtifacts = [
   "consultation_report.md"
 ];
 
+const defaultBirthInput = JSON.parse(
+  readFileSync(new URL("./fixtures/workflow-birth-input.json", import.meta.url), "utf8")
+);
 const birthInput = {
-  birthDate: process.env.VEDIC_TEST_BIRTH_DATE ?? "2002-12-11",
-  birthTime: process.env.VEDIC_TEST_BIRTH_TIME ?? "20:47",
-  birthPlace: process.env.VEDIC_TEST_BIRTH_PLACE ?? "lat=25.4333, lon=119.0, tz=Asia/Shanghai",
-  birthTimePrecision: process.env.VEDIC_TEST_BIRTH_PRECISION ?? "exact",
-  gender: process.env.VEDIC_TEST_GENDER ?? "[not-collected]",
-  relationship: process.env.VEDIC_TEST_RELATIONSHIP ?? "[not-collected]",
-  timeSource: "workflow-smoke-test"
+  ...defaultBirthInput,
+  displayName: process.env.VEDIC_TEST_DISPLAY_NAME ?? defaultBirthInput.displayName,
+  birthDate: process.env.VEDIC_TEST_BIRTH_DATE ?? defaultBirthInput.birthDate,
+  birthTime: process.env.VEDIC_TEST_BIRTH_TIME ?? defaultBirthInput.birthTime,
+  birthPlace: process.env.VEDIC_TEST_BIRTH_PLACE ?? defaultBirthInput.birthPlace,
+  birthTimePrecision:
+    process.env.VEDIC_TEST_BIRTH_PRECISION ?? defaultBirthInput.birthTimePrecision,
+  gender: process.env.VEDIC_TEST_GENDER ?? defaultBirthInput.gender,
+  relationship: process.env.VEDIC_TEST_RELATIONSHIP ?? defaultBirthInput.relationship,
+  locale: process.env.VEDIC_TEST_LOCALE ?? defaultBirthInput.locale
 };
 
 async function main() {
@@ -225,14 +234,8 @@ function parseArtifact(session, path) {
 
 function canStartFullReading(session) {
   const state = rectificationState(session);
-  if (
-    state?.reportGate?.fullReportAllowed === true &&
-    String(state.status ?? "") === "corrected_chart_ready"
-  ) {
-    return true;
-  }
-  const decision = parseArtifact(session, "prevalidation_result.json")?.decision;
-  return decision?.reportAllowed === true && decision.reportScope !== "prevalidation_or_d1_only";
+  const prevalidationResult = parseArtifact(session, "prevalidation_result.json");
+  return canStartFullReadingFromArtifacts(state, prevalidationResult);
 }
 
 function rectificationState(session) {

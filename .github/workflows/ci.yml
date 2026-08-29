@@ -45,6 +45,9 @@ jobs:
       - name: Frontend lint
         run: npm run frontend:lint
 
+      - name: Frontend state tests
+        run: npm run frontend:test
+
       - name: Python format check
         run: npm run backend:format:check
 
