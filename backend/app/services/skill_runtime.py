@@ -3394,6 +3394,7 @@ Return JSON only:
                     session_id,
                     "prevalidation_result.json",
                     producer="vedic-reader:prevalidation-result",
+                    dependency_paths=PREVALIDATION_DEPENDENCY_PATHS,
                 )
             return
         raise ValueError(
@@ -5055,18 +5056,32 @@ User request:
         )
         canonical_moment = record.canonical_moment
         timezone_id = canonical_moment.timezone_id if canonical_moment is not None else None
+        semantic_payload = {
+            "referenceDate": consultation_reference_date(
+                record, effective_reference_time
+            ).isoformat(),
+            "timezoneId": timezone_id,
+            "subject": record.subject.model_dump(by_alias=True, mode="json"),
+        }
+        previous_payload = self._json_dict(
+            self.workspace.read_artifact_text(session_id, CONSULTATION_SUBJECT_CONTEXT_JSON) or ""
+        )
+        previous_semantics = {
+            key: previous_payload.get(key) for key in ("referenceDate", "timezoneId", "subject")
+        }
+        generated_at = (
+            previous_payload.get("generatedAt")
+            if previous_semantics == semantic_payload and previous_payload.get("generatedAt")
+            else effective_reference_time.isoformat()
+        )
         self.workspace.write_artifact(
             session_id,
             CONSULTATION_SUBJECT_CONTEXT_JSON,
             json.dumps(
                 {
                     "schemaVersion": "vedicdust-consultation-subject-context/1.0.0",
-                    "generatedAt": effective_reference_time.isoformat(),
-                    "referenceDate": consultation_reference_date(
-                        record, effective_reference_time
-                    ).isoformat(),
-                    "timezoneId": timezone_id,
-                    "subject": record.subject.model_dump(by_alias=True, mode="json"),
+                    "generatedAt": generated_at,
+                    **semantic_payload,
                 },
                 ensure_ascii=False,
                 indent=2,

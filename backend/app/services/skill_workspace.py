@@ -93,6 +93,10 @@ class SkillWorkspace:
         "life_event_evidence_validation.json",
     }
 
+    AGENT_INTERNAL_ARTIFACTS = {
+        ".runtime/consultation-subject-context.json",
+    }
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._active_transaction_tokens: set[str] = set()
@@ -193,14 +197,16 @@ class SkillWorkspace:
     ) -> list[SkillArtifact]:
         session_dir = self.require_session_dir(session_id)
         self._recover_pending_rectification_transaction(session_dir)
-        files = [
-            path
-            for path in session_dir.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() in [".md", ".txt", ".json"]
-            and not any(part.startswith(".") for part in path.relative_to(session_dir).parts)
-            and self.is_current_runtime_file(path.relative_to(session_dir).as_posix())
-        ]
+        files = []
+        for path in session_dir.rglob("*"):
+            relative = path.relative_to(session_dir).as_posix()
+            hidden = any(part.startswith(".") for part in path.relative_to(session_dir).parts)
+            if not path.is_file() or path.suffix.lower() not in [".md", ".txt", ".json"]:
+                continue
+            if hidden and not (include_internal and relative in self.AGENT_INTERNAL_ARTIFACTS):
+                continue
+            if self.is_current_runtime_file(relative):
+                files.append(path)
         files.sort(key=lambda path: (self._artifact_rank(path.name), path.name))
         artifacts: list[SkillArtifact] = []
         for path in files:
@@ -219,6 +225,8 @@ class SkillWorkspace:
 
     @staticmethod
     def is_current_runtime_file(relative_path: str) -> bool:
+        if relative_path in SkillWorkspace.AGENT_INTERNAL_ARTIFACTS:
+            return True
         if relative_path in SkillWorkspace.ROOT_ARTIFACTS:
             return True
         if relative_path in SkillWorkspace.BAZI_ARTIFACTS:

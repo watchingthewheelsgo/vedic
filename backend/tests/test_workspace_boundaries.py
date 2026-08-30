@@ -10,6 +10,7 @@ from typing import Any, cast
 import pytest
 
 from app.agents.claude_runtime import AgentRunResult
+from app.schemas import SkillRunInput
 from app.services.report_exporter import ReportExporter
 from app.services.skill_runtime import SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
@@ -102,6 +103,139 @@ def test_chart_record_is_the_public_calculation_contract(tmp_path: Path) -> None
     assert [artifact.path for artifact in public_artifacts] == ["chart_record.json"]
     assert runtime_artifacts[0].path == "chart_record.json"
     assert runtime_artifacts[0].kind == "json"
+
+
+def test_reader_prompt_receives_only_allowlisted_agent_internal_context(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    workspace.write_artifact(
+        session_id,
+        "chart_record.json",
+        json.dumps(
+            {
+                "subject": {
+                    "subjectId": "subject-reader-context",
+                    "currentAge": 35,
+                    "lifeStage": "adult",
+                    "readerRelationship": "parent",
+                }
+            }
+        ),
+    )
+    workspace.write_artifact(
+        session_id,
+        ".runtime/consultation-subject-context.json",
+        json.dumps(
+            {
+                "referenceDate": "2026-08-30",
+                "subject": {
+                    "currentAge": 36,
+                    "lifeStage": "adult",
+                    "readerRelationship": "self",
+                },
+            }
+        ),
+    )
+    workspace.write_artifact(
+        session_id,
+        ".runtime/agent-runs/private-trace.json",
+        '{"secret":"must-not-enter-reader-prompt"}',
+    )
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.workspace = workspace
+    runtime._prompt_for = lambda _input: "reader base prompt"
+
+    prompt = runtime._artifact_prompt_for(
+        SkillRunInput(
+            sessionId=session_id,
+            skill="vedic-reader",
+            userMessage="",
+            locale="en",
+        )
+    )
+
+    assert ".runtime/consultation-subject-context.json" in prompt
+    assert '"currentAge": 36' in prompt
+    assert '"currentAge": 35' not in prompt
+    assert "must-not-enter-reader-prompt" not in prompt
+    assert ".runtime/consultation-subject-context.json" not in {
+        artifact.path for artifact in workspace.read_artifacts(session_id)
+    }
+
+
+def test_consultation_subject_context_is_stable_within_one_civil_date(tmp_path: Path) -> None:
+    workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    session_id = workspace.create_session()
+    record = ChartRecord(
+        chartRecordId="chart-context-stability",
+        readingSessionId=session_id,
+        revision=1,
+        createdAt=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        subject=SubjectContext(subjectId="subject-context-stability"),
+        birthAssertion=BirthAssertion(
+            localDate="1990-01-01",
+            reportedLocalTime="08:00",
+            reportedPlace="Shanghai, China",
+            timeCertainty="reported_exact",
+            evidence=[
+                EvidenceItem(
+                    evidenceId="birth-input-context-stability",
+                    evidenceClass="user_testimony",
+                    sourceLabel="user",
+                    observedValue="1990-01-01 08:00",
+                    confidence="corroborated",
+                )
+            ],
+        ),
+        calculationProfile=parashari_lahiri_profile(),
+        status="intake",
+    )
+    workspace.write_artifact(
+        session_id,
+        "chart_record.json",
+        record.model_dump_json(by_alias=True, indent=2) + "\n",
+    )
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.workspace = workspace
+
+    runtime._prepare_consultation_subject_context(
+        session_id,
+        datetime(2026, 8, 30, 1, tzinfo=timezone.utc),
+    )
+    first = workspace.read_artifact_text(session_id, ".runtime/consultation-subject-context.json")
+    workspace.write_artifact(session_id, "reader_prevalidation.md", "reader result")
+    workspace.mark_artifact_checkpoint(
+        session_id,
+        "reader_prevalidation.md",
+        producer="vedic-reader",
+        dependency_paths=[".runtime/consultation-subject-context.json"],
+    )
+
+    runtime._prepare_consultation_subject_context(
+        session_id,
+        datetime(2026, 8, 30, 23, tzinfo=timezone.utc),
+    )
+    second = workspace.read_artifact_text(session_id, ".runtime/consultation-subject-context.json")
+
+    assert second == first
+    assert workspace.artifact_checkpoint_valid(
+        session_id,
+        "reader_prevalidation.md",
+        producer="vedic-reader",
+        dependency_paths=[".runtime/consultation-subject-context.json"],
+    )
+
+    runtime._prepare_consultation_subject_context(
+        session_id,
+        datetime(2026, 8, 31, 1, tzinfo=timezone.utc),
+    )
+
+    assert not workspace.artifact_checkpoint_valid(
+        session_id,
+        "reader_prevalidation.md",
+        producer="vedic-reader",
+        dependency_paths=[".runtime/consultation-subject-context.json"],
+    )
 
 
 def test_rectification_runtime_artifacts_have_strict_client_projections(tmp_path: Path) -> None:

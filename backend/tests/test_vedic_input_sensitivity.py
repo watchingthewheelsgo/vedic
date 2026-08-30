@@ -32,7 +32,7 @@ from app.services.life_event_rectification import (
 )
 from app.services.rectification_confirmation import build_rectification_conclusion
 from app.services.rectification_interview import RectificationEvidenceClarificationRequired
-from app.services.skill_runtime import SkillRuntime
+from app.services.skill_runtime import PREVALIDATION_DEPENDENCY_PATHS, SkillRuntime
 from app.services.skill_workspace import SkillWorkspace
 from app.services.vedic_calculator import VedicCalculator
 from app.vedicdust.chart_record_builder import _sensitivity_boundaries
@@ -3140,6 +3140,44 @@ def test_reader_consistency_attempts_do_not_become_a_publication_gate(tmp_path) 
     assert second["qualityAttempt"] == 2
     assert cast(dict[str, Any], second["decision"])["nextStep"] == (
         "report_allowed_with_consistency_notes"
+    )
+
+
+def test_applying_reader_decision_preserves_prevalidation_dependency_checkpoint(tmp_path) -> None:
+    runtime = cast(Any, SkillRuntime.__new__(SkillRuntime))
+    runtime.workspace = SkillWorkspace(SimpleNamespace(project_root=tmp_path))  # type: ignore[arg-type]
+    runtime.rectification = ChartRectificationService()
+    session_id = runtime.workspace.create_session("session-reader-decision-checkpoint")
+    artifacts = {
+        "chart_record.json": '{"chartRecordId":"chart-reader-decision"}\n',
+        ".runtime/consultation-subject-context.json": '{"referenceDate":"2026-08-30"}\n',
+        "sensitivity_scan.json": "{}\n",
+        "reader_prevalidation.md": "**1.** Did this happen?\n",
+        "user_context.md": "1. accurate\n",
+        "chart_rectification_state.json": json.dumps(
+            {
+                "status": "not_required",
+                "reportGate": {"fullReportAllowed": True},
+            }
+        ),
+    }
+    for path, content in artifacts.items():
+        runtime.workspace.write_artifact(session_id, path, content)
+    result: dict[str, object] = {
+        "schemaVersion": "vedic-prevalidation-result/2.0.0",
+        "decision": {
+            "reportAllowed": True,
+            "reportScope": "full_report",
+        },
+    }
+
+    runtime._apply_reader_quality_decision(session_id, result)
+
+    assert runtime.workspace.artifact_checkpoint_valid(
+        session_id,
+        "prevalidation_result.json",
+        producer="vedic-reader:prevalidation-result",
+        dependency_paths=PREVALIDATION_DEPENDENCY_PATHS,
     )
 
 
