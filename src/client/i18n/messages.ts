@@ -140,7 +140,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.hero.title": "Traditional perspectives. ",
     "landing.hero.strong": "Everyday reflection.",
     "landing.hero.body":
-      "Sign Atlas combines traditional cultural sources, calendar and Vedic chart calculations, and AI-assisted interpretation. Explore Indian Vedic astrology, Chinese BaZi and Tarot alongside your journal, moods and everyday questions.",
+      "A personal space for everyday stories, mood tracking and thoughtful AI conversation. Revisit your experiences, put feelings into words, and explore small next steps through Indian Vedic astrology, Chinese BaZi and Tarot, informed by traditional sources and calendar calculations.",
     "landing.meta.pages": "Calculated Chart Layers",
     "landing.meta.planets": "Planetary Signals",
     "landing.meta.lifeAreas": "Life Areas",
@@ -1052,7 +1052,7 @@ const zhOverrides: Dict = {
   "landing.hero.title": "从传统文化，",
   "landing.hero.strong": "回到自己的生活。",
   "landing.hero.body":
-    "Sign Atlas 将传统文化文献、历法与星盘计算，以及 AI 辅助解释结合起来。通过印度占星 Vedic、东方八字和塔罗的不同视角，把日记、心情与日常疑问连接成持续的自我探索。",
+    "一个记录生活、安放心情、和 AI 一起想一想的个人空间。记下日常与感受，回看自己的经历，再借助印度占星 Vedic、东方八字和塔罗的文化视角，探索可以尝试的小行动。",
   "landing.meta.pages": "计算盘层",
   "landing.meta.planets": "行星信号",
   "landing.meta.lifeAreas": "人生领域",
@@ -1858,7 +1858,7 @@ const jaOverrides: Dict = {
   "landing.hero.title": "伝統の視点から、",
   "landing.hero.strong": "日々の自分を見つめる。",
   "landing.hero.body":
-    "Sign Atlas は伝統文化の文献、暦とチャートの計算、AI による解釈を組み合わせます。ヴェーダ占星術、四柱推命、タロットの視点を、日記や気分、日々の問いにつなげて自分を見つめます。",
+    "日々の出来事や気分を記録し、AI と一緒に考える、自分のための空間。経験を振り返り、気持ちを言葉にし、ヴェーダ占星術・四柱推命・タロットの文化的な視点から、小さな次の一歩を探します。",
   "landing.meta.pages": "計算チャート層",
   "landing.meta.planets": "惑星シグナル",
   "landing.meta.lifeAreas": "人生領域",

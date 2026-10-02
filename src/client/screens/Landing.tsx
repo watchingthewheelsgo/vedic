@@ -141,6 +141,13 @@ export function Landing() {
           <Button className="mt-8" onClick={() => navigate("/app")}>
             {workspaceCopy[locale].homeAction} →
           </Button>
+          <p className="mt-6 max-w-3xl text-sm leading-7 text-cream/65">
+            {locale === "zh"
+              ? "这里的 AI 对话帮助你表达和整理感受，不是心理咨询或治疗。轻量文化小游戏与更多娱乐互动正在规划中，尚未开放。"
+              : locale === "ja"
+                ? "AI との対話は気持ちを言葉にして整理するためのもので、心理相談や治療ではありません。文化を楽しむミニゲームなどの機能は計画中で、まだ利用できません。"
+                : "AI conversation helps you express and organize feelings; it is not counseling or therapy. Light cultural mini-games and more playful interactions are planned and not yet available."}
+          </p>
         </div>
       </section>
       <section id="traditions" className="bg-cream-2 px-6 py-16 sm:px-10">
