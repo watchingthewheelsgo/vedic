@@ -9,9 +9,14 @@ exec 9>.deploy/vps.lock
 flock -n 9 || { echo 'Another deployment is running' >&2; exit 1; }
 mode="${1:-update}"
 [[ "$mode" == update || "$mode" == --no-pull || "$mode" == --rollback ]] || exit 64
-docker_cmd=(docker)
-docker info >/dev/null 2>&1 || docker_cmd=(sudo -n docker)
-compose() { "${docker_cmd[@]}" compose --env-file .env.production -f compose.vps.yml "$@"; }
+docker_cmd=(env)
+docker info >/dev/null 2>&1 || docker_cmd=(sudo -n env)
+# sudo drops caller environment; pass only these non-secret release controls explicitly.
+compose() {
+  "${docker_cmd[@]}" "VEDICSIGN_IMAGE_TAG=${VEDICSIGN_IMAGE_TAG:?required}" \
+    "COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}" \
+    docker compose --env-file .env.production -f compose.vps.yml "$@"
+}
 old_tag="$(cat .deploy/vps-current 2>/dev/null || true)"
 if [[ "$mode" == --rollback ]]; then
   export VEDICSIGN_IMAGE_TAG="$(cat .deploy/vps-previous)"
