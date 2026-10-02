@@ -26,3 +26,6 @@ tmp
 **/*.log
 
 **/._*
+
+# Developer-only guidance; keep out of the runtime agent cwd
+CLAUDE.md
