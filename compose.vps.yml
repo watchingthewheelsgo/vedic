@@ -32,10 +32,15 @@ services:
         VEDICSIGN_UID: ${VEDICSIGN_UID:-1000}
         VEDICSIGN_GID: ${VEDICSIGN_GID:-1000}
     env_file: [.env.production]
+    environment:
+      AWS_PROFILE: tapvox-prod
+      AWS_SHARED_CREDENTIALS_FILE: /run/signatlas-aws/aws-credentials
+      AWS_DEFAULT_REGION: us-west-2
     ports: ["127.0.0.1:18787:8787"]
     volumes:
       - ./.env.production:/app/.env:ro
       - ${SESSION_DATA_DIR:?required}:/app/backend/data/sessions
+      - ${SIGNATLAS_AWS_CREDENTIALS_DIR:-/home/ubuntu/signatlas-secrets}:/run/signatlas-aws:ro
     depends_on:
       db:
         condition: service_healthy

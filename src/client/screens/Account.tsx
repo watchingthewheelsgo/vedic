@@ -1,10 +1,8 @@
+import { AiAllowanceCard } from "../components/AiAllowance";
 import { useClerk, useUser } from "@clerk/clerk-react";
 import {
-  CreditCard,
-  Crown,
   Download,
   Eye,
-  ExternalLink,
   FileText,
   LoaderCircle,
   LockKeyhole,
@@ -26,9 +24,7 @@ import { formatDuration } from "../lib/pipeline";
 import type {
   AccountProfileResponse,
   AdminSessionListResponse,
-  AdminSessionSummary,
-  BillingAccountResponse,
-  BillingPlanResponse
+  AdminSessionSummary
 } from "../../shared/domain";
 import { StatusBadge, formatDateTime } from "./AdminSessions";
 
@@ -40,12 +36,10 @@ export function Account({ view }: { view: "charts" | "settings" }) {
   const w = workspaceCopy[locale];
   const [profile, setProfile] = useState<AccountProfileResponse | null>(null);
   const [sessions, setSessions] = useState<AdminSessionListResponse | null>(null);
-  const [billing, setBilling] = useState<BillingAccountResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [downloadingId, setDownloadingId] = useState("");
-  const [billingAction, setBillingAction] = useState<"checkout" | "portal" | "">("");
 
   const displayName =
     user?.fullName ||
@@ -61,19 +55,13 @@ export function Account({ view }: { view: "charts" | "settings" }) {
       if (options.quiet) setRefreshing(true);
       else setLoading(true);
       try {
-        const [profileResult, sessionResult, billingResult] = await Promise.allSettled([
+        const [profileResult, sessionResult] = await Promise.allSettled([
           api.getMe(),
-          api.listMySessions(),
-          api.getBillingAccount()
+          api.listMySessions()
         ]);
         if (profileResult.status === "fulfilled") setProfile(profileResult.value);
         if (sessionResult.status === "fulfilled") setSessions(sessionResult.value);
-        if (billingResult.status === "fulfilled") setBilling(billingResult.value);
-        if (
-          [profileResult, sessionResult, billingResult].some(
-            (result) => result.status === "rejected"
-          )
-        ) {
+        if ([profileResult, sessionResult].some((result) => result.status === "rejected")) {
           setError(t("account.page.error"));
         }
       } catch (caught) {
@@ -100,30 +88,6 @@ export function Account({ view }: { view: "charts" | "settings" }) {
       setError(caught instanceof Error ? caught.message : t("account.page.downloadError"));
     } finally {
       setDownloadingId("");
-    }
-  }
-
-  async function startCheckout(plan: BillingPlanResponse) {
-    setError("");
-    setBillingAction("checkout");
-    try {
-      const checkout = await api.createBillingCheckout({ planKey: plan.key });
-      window.location.assign(checkout.checkoutUrl);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("account.billing.checkoutError"));
-      setBillingAction("");
-    }
-  }
-
-  async function openBillingPortal() {
-    setError("");
-    setBillingAction("portal");
-    try {
-      const portal = await api.createBillingPortal();
-      window.location.assign(portal.portalUrl);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("account.billing.portalError"));
-      setBillingAction("");
     }
   }
 
@@ -227,13 +191,16 @@ export function Account({ view }: { view: "charts" | "settings" }) {
             </section>
 
             <div id="billing">
-              <BillingCard
-                billing={billing}
-                loading={loading || refreshing}
-                busy={billingAction}
-                onCheckout={(plan) => void startCheckout(plan)}
-                onPortal={() => void openBillingPortal()}
-              />
+              <AiAllowanceCard />
+              {profile?.isAdmin && (
+                <Button
+                  variant="outline"
+                  className="mt-4 w-full"
+                  onClick={() => navigate("/admin/feedback")}
+                >
+                  反馈与升级申请
+                </Button>
+              )}
             </div>
           </aside>
         )}
@@ -381,141 +348,6 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function BillingCard({
-  billing,
-  loading,
-  busy,
-  onCheckout,
-  onPortal
-}: {
-  billing: BillingAccountResponse | null;
-  loading: boolean;
-  busy: "checkout" | "portal" | "";
-  onCheckout: (plan: BillingPlanResponse) => void;
-  onPortal: () => void;
-}) {
-  const { t } = useI18n();
-  if (!billing) {
-    return (
-      <section className="rounded-lg border border-gold/25 bg-night px-5 py-5 text-cream shadow-[0_18px_48px_rgba(44,31,15,0.09)]">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-[10px] uppercase tracking-[2.2px] text-gold">
-              {t("account.billing.eyebrow")}
-            </div>
-            <h2 className="mt-1 text-lg font-semibold tracking-normal">
-              {t("account.billing.title")}
-            </h2>
-          </div>
-          <span className="grid size-9 place-items-center rounded-full border border-gold/25 bg-gold/10 text-gold">
-            {loading ? <LoaderCircle className="size-4 animate-spin" /> : <CreditCard size={16} />}
-          </span>
-        </div>
-        <p className="mt-4 text-sm text-cream/65">
-          {t(loading ? "common.loading" : "account.page.error")}
-        </p>
-      </section>
-    );
-  }
-
-  const preferredPlan =
-    billing.plans.find((plan) => plan.key === "pro_monthly" && plan.productIdConfigured) ??
-    billing.plans.find((plan) => plan.productIdConfigured) ??
-    null;
-  const subscription = billing.subscription ?? null;
-  const isActive = billing.hasActiveEntitlement;
-  const isAdmin = billing.entitlement === "admin";
-  const canCheckout = Boolean(billing.configured && preferredPlan && !isActive);
-  const planName = subscription?.planKey
-    ? planLabel(subscription.planKey, t)
-    : preferredPlan
-      ? planLabel(preferredPlan.key, t)
-      : t("account.billing.plan.free");
-
-  return (
-    <section className="rounded-lg border border-gold/25 bg-night px-5 py-5 text-cream shadow-[0_18px_48px_rgba(44,31,15,0.09)]">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-[10px] uppercase tracking-[2.2px] text-gold">
-            {t("account.billing.eyebrow")}
-          </div>
-          <h2 className="mt-1 text-lg font-semibold tracking-normal">
-            {t("account.billing.title")}
-          </h2>
-        </div>
-        <span className="grid size-9 place-items-center rounded-full border border-gold/25 bg-gold/10 text-gold">
-          {isAdmin ? (
-            <ShieldCheck size={17} />
-          ) : isActive ? (
-            <Crown size={17} />
-          ) : (
-            <CreditCard size={17} />
-          )}
-        </span>
-      </div>
-
-      <div className="mt-4 rounded-md border border-gold/20 bg-cream/5 px-4 py-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={isActive ? "gold" : "neutral"}>
-            {isAdmin
-              ? t("account.billing.status.admin")
-              : isActive
-                ? t("account.billing.status.active")
-                : t("account.billing.status.free")}
-          </Badge>
-          {billing.testMode && <Badge variant="done">{t("account.billing.testMode")}</Badge>}
-        </div>
-        <div className="mt-3 text-xl font-semibold tracking-normal">{planName}</div>
-        <p className="mt-2 text-sm leading-[1.65] text-cream/70">
-          {isAdmin
-            ? t("account.billing.adminBody")
-            : isActive
-              ? t("account.billing.activeBody")
-              : t("account.billing.freeBody")}
-        </p>
-        {subscription?.currentPeriodEnd && (
-          <div className="mt-3 text-xs text-cream/55">
-            {t("account.billing.renews")} {formatDateTime(subscription.currentPeriodEnd)}
-          </div>
-        )}
-      </div>
-
-      <div className="mt-4 grid gap-2">
-        {isActive && billing.canManageBilling ? (
-          <Button
-            variant="outline"
-            className="border-gold/60 text-gold hover:bg-gold/10"
-            onClick={onPortal}
-            disabled={busy === "portal"}
-          >
-            {busy === "portal" ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : (
-              <ExternalLink size={14} />
-            )}
-            {t("account.billing.manage")}
-          </Button>
-        ) : (
-          <Button
-            onClick={() => preferredPlan && onCheckout(preferredPlan)}
-            disabled={!canCheckout || busy === "checkout"}
-          >
-            {busy === "checkout" ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : (
-              <CreditCard size={14} />
-            )}
-            {t("account.billing.upgrade")}
-          </Button>
-        )}
-        {!billing.configured && (
-          <p className="text-xs leading-[1.55] text-cream/55">{t("account.billing.notReady")}</p>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function ReportRow({
   session,
   downloading,
@@ -619,11 +451,4 @@ function initialsFor(name: string) {
 
 function compact(values: Array<string | null | undefined>) {
   return values.filter(Boolean).join(" · ") || "-";
-}
-
-function planLabel(planKey: string, t: (key: string) => string) {
-  if (planKey === "pro_monthly") return t("account.billing.plan.proMonthly");
-  if (planKey === "pro_yearly") return t("account.billing.plan.proYearly");
-  if (planKey === "single_report") return t("account.billing.plan.singleReport");
-  return planKey;
 }

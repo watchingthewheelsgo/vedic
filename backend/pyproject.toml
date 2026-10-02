@@ -7,6 +7,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "alembic>=1.16.0,<2.0.0",
     "asyncpg>=0.31.0",
+    "boto3>=1.43.107",
     "claude-agent-sdk>=0.2.87",
     "clerk-backend-api>=6.0.1",
     "fastapi>=0.122.0",

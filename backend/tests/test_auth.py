@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -175,6 +176,7 @@ def test_skill_run_value_error_records_failed_session(monkeypatch: pytest.Monkey
         user_store=UserStore(),
         metadata_store=metadata_store,
         skill_runtime=SkillRuntime(),
+        ai_allowance=SimpleNamespace(charge=lambda *args, **kwargs: nullcontext()),
     )
     monkeypatch.setattr(main_module, "get_container", lambda: container)
 
@@ -240,8 +242,8 @@ def test_clerk_verifier_uses_backend_email_when_token_has_no_email(
 
     assert user.user_id == "user_123"
     assert user.email == "admin@example.com"
-    assert user.is_admin is True
-    assert user.role == "admin"
+    assert user.is_admin is False
+    assert user.role == "user"
 
 
 def test_clerk_verifier_rejects_expired_tokens() -> None:
@@ -367,14 +369,25 @@ def test_user_store_keeps_database_role_as_authority(tmp_path: Path) -> None:
             )
 
             created = await store.upsert_from_auth_user(token_admin)
-            assert created.role == "admin"
-            assert created.is_admin is True
+            assert created.role == "user"
+            assert created.is_admin is False
 
             async with get_session_factory()() as db:
                 result = await db.execute(
                     select(AppUserRecord).where(AppUserRecord.clerk_user_id == "user_admin123")
                 )
                 record = result.scalar_one()
+                record.role = "admin"
+                await db.commit()
+
+            promoted = await store.upsert_from_auth_user(token_admin)
+            assert promoted.is_admin is True
+            async with get_session_factory()() as db:
+                record = (
+                    await db.execute(
+                        select(AppUserRecord).where(AppUserRecord.clerk_user_id == "user_admin123")
+                    )
+                ).scalar_one()
                 record.role = "user"
                 await db.commit()
 
@@ -464,5 +477,60 @@ def test_product_http_endpoints_reject_anonymous_headers(monkeypatch, method, pa
             ):
                 response = await client.request(method, path, headers=headers)
                 assert response.status_code == 401, response.text
+
+    asyncio.run(run())
+
+
+def test_feedback_permissions_follow_database_role_each_request(monkeypatch, tmp_path):
+    import httpx
+    from fastapi import FastAPI
+    from app.services.feedback import router
+
+    monkeypatch.setattr(auth_module, "get_settings", lambda: AuthEnabledSettings())
+    monkeypatch.setattr(
+        auth_module,
+        "_verifier",
+        lambda: SimpleNamespace(
+            verify=lambda token: auth_module.AuthenticatedUser(
+                user_id="role_test", auth_mode="clerk", role="admin", is_admin=True
+            )
+        ),
+    )
+    api = FastAPI()
+    api.include_router(router)
+
+    async def run():
+        await init_db(
+            SimpleNamespace(
+                database_url=f"sqlite+aiosqlite:///{tmp_path / 'roles.db'}", database_echo=False
+            )
+        )
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=api),
+                base_url="http://test",
+                headers={"Authorization": "Bearer same-token"},
+            ) as client:
+                # Even a forged upstream admin flag cannot provision an administrator.
+                assert (await client.get("/api/admin/feedback")).status_code == 403
+                for role, expected in [("admin", 200), ("user", 403), ("owner", 403)]:
+                    async with get_session_factory()() as db:
+                        record = (
+                            await db.execute(
+                                select(AppUserRecord).where(
+                                    AppUserRecord.clerk_user_id == "role_test"
+                                )
+                            )
+                        ).scalar_one()
+                        record.role = role
+                        await db.commit()
+                    assert (await client.get("/api/admin/feedback")).status_code == expected
+                    response = await client.patch(
+                        "/api/admin/feedback/00000000-0000-0000-0000-000000000001",
+                        json={"status": "resolved"},
+                    )
+                    assert response.status_code == (404 if role == "admin" else 403)
+        finally:
+            await close_db()
 
     asyncio.run(run())

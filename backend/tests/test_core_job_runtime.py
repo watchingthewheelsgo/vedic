@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.schemas import SkillRunInput, SkillSessionResponse
 from app.services.core_job_runtime import CoreJobRuntime
 from app.services.skill_runtime import SkillRuntime
@@ -193,6 +195,48 @@ def test_production_core_graph_has_stable_topology_and_output_contract(tmp_path:
     assert [(node.id, node.wave, node.dependencies) for node in job.nodes] == [
         ("vedicdust_consultation", 1, [])
     ]
+
+
+@pytest.mark.parametrize("finalization_fails", [False, True])
+def test_consultation_resume_reenters_runtime_before_reporting_complete(
+    tmp_path: Path, finalization_fails: bool
+) -> None:
+    class ResumingRuntime(FakeSkillRuntime):
+        async def run_core_batch(self, input_data, batch, **kwargs):
+            self.calls.append((str(batch["id"]), kwargs["force"]))
+            if finalization_fails:
+                raise ValueError("Current report has not passed finalization")
+            self.workspace.write_artifact(
+                input_data.session_id, "consultation_report.md", "Finalized report"
+            )
+            return self.core_progress_response(input_data.session_id, "ready")
+
+    async def run() -> None:
+        workspace = FakeWorkspace(tmp_path)
+        session_id = "consultation-resume"
+        workspace.require_session_dir(session_id)
+        workspace.write_artifact(session_id, "consultation_dossier.json", "{}")
+        workspace.mark_artifact_checkpoint(
+            session_id,
+            "consultation_dossier.json",
+            producer="vedic-core:vedicdust_consultation",
+        )
+        skill_runtime = ResumingRuntime(
+            workspace, [batch("vedicdust_consultation", "consultation_dossier.json")]
+        )
+        runtime = CoreJobRuntime(skill_runtime)  # type: ignore[arg-type]
+        started = await runtime.start(
+            SkillRunInput(sessionId=session_id, skill="vedic-core", userMessage="career")
+        )
+        finished = await wait_for_job(runtime, started.job_id)
+
+        assert skill_runtime.calls == [("vedicdust_consultation", False)]
+        assert finished.status == ("failed" if finalization_fails else "completed")
+        assert (workspace.session_dir(session_id) / "consultation_report.md").exists() is (
+            not finalization_fails
+        )
+
+    asyncio.run(run())
 
 
 def test_resume_skips_completed_nodes_and_reruns_failed_artifacts(tmp_path: Path) -> None:

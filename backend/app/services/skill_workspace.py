@@ -12,6 +12,7 @@ from app.services.public_artifact_projection import (
     PUBLIC_PROJECTED_ARTIFACTS,
     project_public_artifact,
 )
+from app.services.session_storage import create_session_storage
 from app.settings import Settings
 from app.utils.ids import make_id
 
@@ -99,6 +100,7 @@ class SkillWorkspace:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.storage = create_session_storage(settings)
         self._active_transaction_tokens: set[str] = set()
         self.assert_no_project_runtime_artifacts()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -119,9 +121,12 @@ class SkillWorkspace:
 
     def require_session_dir(self, session_id: str) -> Path:
         path = self.session_dir(session_id)
-        if not path.exists():
+        if not path.exists() and not self.storage.restore(path):
             raise LookupError("Skill session not found")
         return path
+
+    def persist_session(self, session_id: str) -> None:
+        self.storage.save(self.require_session_dir(session_id), self.is_current_runtime_file)
 
     def write_artifact(self, session_id: str, path: str, content: str) -> SkillArtifact:
         session_dir = self.require_session_dir(session_id)

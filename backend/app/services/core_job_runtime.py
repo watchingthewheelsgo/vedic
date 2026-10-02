@@ -47,6 +47,7 @@ class CoreJobState:
     locale: str | None
     nodes: list[CoreNodeState]
     batches: list[dict[str, object]]
+    quota_reservation: str | None = None
     status: CoreJobStatus = "queued"
     message: str = "vedic-core 完整报告任务已排队。"
     started_at: str | None = None
@@ -66,7 +67,8 @@ class CoreJobRuntime:
     )
     USER_INTERRUPTED_MESSAGE = "Generation was interrupted. Completed sections are saved; retry will resume from unfinished steps."
 
-    def __init__(self, skill_runtime: SkillRuntime) -> None:
+    def __init__(self, skill_runtime: SkillRuntime, ai_allowance=None) -> None:
+        self.ai_allowance = ai_allowance
         self.skill_runtime = skill_runtime
         self._jobs: dict[str, CoreJobState] = {}
         self._persisted_jobs: dict[str, CoreJobResponse] = {}
@@ -89,7 +91,7 @@ class CoreJobRuntime:
             }
 
     async def start(
-        self, input_data: SkillRunInput, *, owner_user_id: str | None = None
+        self, input_data: SkillRunInput, *, owner_user_id: str | None = None, user=None
     ) -> CoreJobResponse:
         if input_data.skill != "vedic-core":
             raise ValueError("Core jobs only support vedic-core")
@@ -106,11 +108,22 @@ class CoreJobRuntime:
                     return self._to_response(active_job)
 
             job = self._create_job(input_data, owner_user_id=owner_user_id)
+            if self.ai_allowance is not None and user is not None:
+                job.quota_reservation = await self.ai_allowance.reserve(
+                    user, 10, "full-report", job_id=job.job_id
+                )
             self._jobs[job.job_id] = job
             self._persisted_jobs.pop(job.job_id, None)
             self._persisted_owners.pop(job.job_id, None)
             self._active_by_session[job.session_id] = job.job_id
-            await self._persist_job_metadata(job)
+            try:
+                await self._persist_job_metadata(job)
+            except BaseException:
+                self._jobs.pop(job.job_id, None)
+                self._active_by_session.pop(job.session_id, None)
+                if self.ai_allowance is not None:
+                    await self.ai_allowance.settle(job.quota_reservation, success=False)
+                raise
             job.task = asyncio.create_task(self._run_job(job))
             return self._to_response(job)
 
@@ -258,6 +271,13 @@ class CoreJobRuntime:
                 job.message,
                 stage="core_complete",
             )
+        except asyncio.CancelledError:
+            job.status = "failed"
+            job.message = self.USER_INTERRUPTED_MESSAGE
+            job.finished_at = _now()
+            job.finished_perf = time.perf_counter()
+            await self._write_metrics(job)
+            raise
         except Exception as exc:
             job.status = "failed"
             job.message = self.USER_INTERRUPTED_MESSAGE
@@ -270,6 +290,10 @@ class CoreJobRuntime:
                 stage="error",
             )
         finally:
+            if self.ai_allowance is not None:
+                await self.ai_allowance.settle(
+                    job.quota_reservation, success=job.status == "completed"
+                )
             response = self._to_response(job)
             self._persisted_jobs[job.job_id] = response.model_copy(deep=True)
             self._persisted_owners[job.job_id] = job.owner_user_id
@@ -295,7 +319,10 @@ class CoreJobRuntime:
                 input_data,
                 node.batch,
                 batches=job.batches,
-                force=True,
+                force=not (
+                    node.id == "vedicdust_consultation"
+                    and self.skill_runtime.core_batch_resume_valid(job.session_id, node.batch)
+                ),
                 owner_user_id=job.owner_user_id,
             )
             job.session.chat_message = self.USER_RUNNING_MESSAGE
@@ -472,6 +499,10 @@ class CoreJobRuntime:
         has_node_metrics = bool(metric_nodes)
 
         for node in nodes:
+            # Consultation reuse must refresh the current question/date and
+            # finalize rendered outputs inside run_core_batch before completion.
+            if node.id == "vedicdust_consultation":
+                continue
             files_exist = set(node.files).issubset(existing)
             resume_valid = self.skill_runtime.core_batch_resume_valid(session_id, node.batch)
             metric = metric_nodes.get(node.id)

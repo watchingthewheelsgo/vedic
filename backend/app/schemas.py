@@ -357,7 +357,8 @@ class BillingSubscriptionResponse(ApiModel):
 
 
 class BillingAccountResponse(ApiModel):
-    provider: Literal["creem"] = "creem"
+    provider: Literal["creem", "manual"] = "creem"
+    ai_allowance: dict | None = Field(default=None, alias="aiAllowance")
     configured: bool
     test_mode: bool = Field(alias="testMode")
     entitlement: Literal["admin", "paid", "free"]

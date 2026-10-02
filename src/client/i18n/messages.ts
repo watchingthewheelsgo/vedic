@@ -124,7 +124,8 @@ export const messages: Record<LocaleCode, Dict> = {
     "account.billing.plan.singleReport": "Single report",
     "account.billing.adminBody": "This account can access paid features through its admin role.",
     "account.billing.activeBody": "Your paid access is active for full readings and exports.",
-    "account.billing.freeBody": "Upgrade when you are ready to unlock complete readings.",
+    "account.billing.freeBody":
+      "Daily records are free. Monthly AI credits are included; request more through the feedback window.",
     "account.billing.renews": "Current period ends",
     "account.billing.upgrade": "Upgrade",
     "account.billing.manage": "Manage billing",
@@ -1036,7 +1037,8 @@ const zhOverrides: Dict = {
   "account.billing.plan.singleReport": "单次报告",
   "account.billing.adminBody": "该账户通过管理员角色访问付费功能。",
   "account.billing.activeBody": "你的付费权限已生效，可使用完整读盘和导出功能。",
-  "account.billing.freeBody": "准备好后可以升级，解锁完整读盘。",
+  "account.billing.freeBody":
+    "记录和日常使用免费，每月附赠 AI 额度；需要更多时可在反馈窗口申请升级。",
   "account.billing.renews": "当前周期结束于",
   "account.billing.upgrade": "升级",
   "account.billing.manage": "管理订阅",

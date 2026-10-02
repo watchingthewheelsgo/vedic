@@ -107,7 +107,8 @@ export type BillingSubscriptionResponse = {
 };
 
 export type BillingAccountResponse = {
-  provider: "creem";
+  provider: "creem" | "manual";
+  aiAllowance?: AiAllowance | null;
   configured: boolean;
   testMode: boolean;
   entitlement: "admin" | "paid" | "free";
@@ -115,6 +116,19 @@ export type BillingAccountResponse = {
   canManageBilling: boolean;
   subscription?: BillingSubscriptionResponse | null;
   plans: BillingPlanResponse[];
+};
+
+export type AiAllowance = {
+  plan: "free" | "member" | "admin";
+  limit: number;
+  used: number;
+  remaining: number;
+  unlimited: boolean;
+  resetsAt: string;
+  expiresAt: string | null;
+  supportEmail: string;
+  standardCost: number;
+  reportCost: number;
 };
 
 export type BillingCheckoutInput = {

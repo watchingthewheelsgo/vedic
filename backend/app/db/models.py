@@ -20,6 +20,66 @@ class Base(DeclarativeBase):
     pass
 
 
+class AiAllowanceRecord(Base):
+    __tablename__ = "ai_allowances"
+    owner_user_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    period: Mapped[str] = mapped_column(String(7), primary_key=True)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AiUsageRecord(Base):
+    __tablename__ = "ai_usage"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    period: Mapped[str] = mapped_column(String(7))
+    operation: Mapped[str] = mapped_column(String(80))
+    units: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="reserved")
+    job_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+
+
+class ManualMembershipRecord(Base):
+    __tablename__ = "manual_memberships"
+    owner_user_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    monthly_limit: Mapped[int] = mapped_column(Integer, default=100)
+    note: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), onupdate=func.now()
+    )
+
+
+class MembershipAuditRecord(Base):
+    __tablename__ = "membership_audit"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    actor_user_id: Mapped[str] = mapped_column(String(160))
+    action: Mapped[str] = mapped_column(String(20))
+    request: Mapped[dict] = mapped_column(JSON)
+    before: Mapped[dict] = mapped_column(JSON)
+    after: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+
+
+class FeedbackRecord(Base):
+    __tablename__ = "feedback"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    sender_key: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(20))
+    contact: Mapped[str] = mapped_column(String(320))
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+
+
+class FeedbackRateRecord(Base):
+    __tablename__ = "feedback_rate_limits"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class AppUserRecord(Base):
     __tablename__ = "app_users"
 

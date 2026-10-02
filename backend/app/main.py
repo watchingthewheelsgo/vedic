@@ -73,10 +73,15 @@ async def lifespan(_: FastAPI):
 
 
 from app.services.daily_journal import router as journal_router
+from app.services.feedback import router as feedback_router
+from app.services.memberships import router as memberships_router
 
 app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0", lifespan=lifespan)
 
 app.include_router(journal_router)
+
+app.include_router(feedback_router)
+app.include_router(memberships_router)
 
 _settings = get_settings()
 
@@ -315,7 +320,21 @@ async def get_billing_account(
     try:
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
-        return await container.billing.account_for_user(account_user)
+        allowance = await container.ai_allowance.summary(account_user)
+        return BillingAccountResponse(
+            provider="manual",
+            configured=False,
+            testMode=False,
+            entitlement="admin"
+            if account_user.is_admin
+            else "paid"
+            if allowance["plan"] == "member"
+            else "free",
+            hasActiveEntitlement=allowance["plan"] != "free",
+            canManageBilling=False,
+            plans=[],
+            aiAllowance=allowance,
+        )
     except Exception as exc:
         raise _internal_server_error("billing account", exc) from exc
 
@@ -328,7 +347,12 @@ async def create_billing_checkout(
     try:
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
-        return await container.billing.create_checkout(account_user, input_data)
+        raise HTTPException(
+            409,
+            "Automatic payments are unavailable. Use the feedback form to request an upgrade.",
+        )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -504,11 +528,14 @@ async def prepare_rectification_interview(
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, input_data.session_id, account_user)
+        # Evidence collection stays free; deterministic wording needs no model call.
         return await container.skill_runtime.prepare_rectification_interview(
             input_data,
             owner_user_id=account_user.owner_user_id,
-            use_agent=current_user.is_clerk,
+            use_agent=False,
         )
+    except HTTPException:
+        raise
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -551,8 +578,10 @@ async def answer_consultation_question(
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, input_data.session_id, account_user)
-        await container.billing.assert_paid_access(account_user)
-        return await container.skill_runtime.answer_consultation_question(input_data)
+        async with container.ai_allowance.charge(account_user, 1, "answer_consultation_question"):
+            return await container.skill_runtime.answer_consultation_question(input_data)
+    except HTTPException:
+        raise
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -575,7 +604,6 @@ async def get_consultation_conversation(
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, session_id, account_user)
-        await container.billing.assert_paid_access(account_user)
         return container.skill_runtime.get_consultation_conversation(session_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -596,7 +624,6 @@ async def download_skill_session_report_pdf(
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, session_id, account_user)
-        await container.billing.assert_paid_access(account_user)
         result = container.report_exporter.export_session(session_id)
         await container.metadata_store.sync_session_from_files(
             session_id,
@@ -626,7 +653,6 @@ async def create_synastry_subject(
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, input_data.session_id, account_user)
-        await container.billing.assert_paid_access(account_user)
         return await container.skill_runtime.create_synastry_subject(
             input_data,
             owner_user_id=account_user.owner_user_id,
@@ -656,13 +682,14 @@ async def run_skill(
                 status_code=401,
                 detail=account_user.auth_error_detail or "Sign in to continue",
             )
-        if input_data.skill != "vedic-reader":
-            await container.billing.assert_paid_access(account_user)
         await _claim_or_assert_session_access(container, input_data.session_id, account_user)
-        return await container.skill_runtime.run_skill(
-            input_data,
-            owner_user_id=account_user.owner_user_id,
-        )
+        async with container.ai_allowance.charge(
+            account_user, 10 if input_data.skill == "vedic-core" else 1, "run_skill"
+        ):
+            return await container.skill_runtime.run_skill(
+                input_data,
+                owner_user_id=account_user.owner_user_id,
+            )
     except HTTPException:
         raise
     except LookupError as exc:
@@ -711,11 +738,13 @@ async def start_core_job(
         container = get_container()
         account_user = await _sync_account_user(container, current_user)
         await _claim_or_assert_session_access(container, input_data.session_id, account_user)
-        await container.billing.assert_paid_access(account_user)
         return await container.core_job_runtime.start(
             input_data,
             owner_user_id=account_user.owner_user_id,
+            user=account_user,
         )
+    except HTTPException:
+        raise
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

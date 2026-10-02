@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -123,6 +124,11 @@ class MetadataStore:
             if record.status != "failed" and progress.failed > 0:
                 record.status = "failed"
             await db.commit()
+        if (
+            getattr(self.workspace.settings, "session_storage_backend", "local") == "s3"
+            and derived_status != "running"
+        ):
+            await asyncio.to_thread(self.workspace.persist_session, session_id)
 
     async def upsert_core_job(
         self,

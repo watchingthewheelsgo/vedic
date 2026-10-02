@@ -1,3 +1,5 @@
+import { FeedbackWidget } from "./components/FeedbackWidget";
+import { AdminFeedback } from "./screens/AdminFeedback";
 import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useSearchParams, useParams } from "react-router-dom";
@@ -131,6 +133,14 @@ export function App() {
             {import.meta.env.DEV && (
               <Route path="/dev/chart-reveal" element={<ChartRevealPreview />} />
             )}
+            <Route
+              path="/admin/feedback"
+              element={
+                <RequireAdmin isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                  <AdminFeedback />
+                </RequireAdmin>
+              }
+            />
             <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
             <Route
               path="/admin/sessions"
@@ -151,6 +161,7 @@ export function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        <FeedbackWidget />
       </div>
     </div>
   );

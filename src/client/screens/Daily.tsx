@@ -1,3 +1,4 @@
+import { AiCostNotice } from "../components/AiAllowance";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { Check, LoaderCircle, Sparkles } from "lucide-react";
@@ -387,6 +388,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                     </div>
                   )}
                   <h2 className="mt-8 text-xl font-medium">{c.ask}</h2>
+                  <AiCostNotice />
                   <label
                     htmlFor="reflection-question"
                     className="mb-2 mt-5 block text-sm text-cream/75"

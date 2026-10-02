@@ -1,3 +1,4 @@
+import { AiAllowanceProvider, AiAllowanceSummary } from "./AiAllowance";
 import { useRef, useEffect, useCallback, type ReactNode } from "react";
 import { NavLink, Link, Outlet, useLocation } from "react-router-dom";
 import { Sun, NotebookPen, Sparkles, Orbit, ArrowUpRight } from "lucide-react";
@@ -51,77 +52,80 @@ export function WorkspaceLayout() {
       </NavLink>
     ));
   return (
-    <DraftContext.Provider
-      value={{ setDirty, confirmLeave: () => !dirty.current || window.confirm(w.discard) }}
-    >
-      <div
-        className="workspace-layout min-h-dvh bg-[#100d16] text-cream"
-        onClickCapture={(event) => {
-          const anchor = (event.target as HTMLElement).closest("a[href]");
-          if (
-            anchor &&
-            dirty.current &&
-            anchor.getAttribute("href") !== location.pathname + location.search &&
-            !window.confirm(w.discard)
-          ) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-        }}
+    <AiAllowanceProvider>
+      <DraftContext.Provider
+        value={{ setDirty, confirmLeave: () => !dirty.current || window.confirm(w.discard) }}
       >
-        <a
-          href="#workspace-content"
-          className="sr-only focus:not-sr-only focus:fixed focus:z-[100] focus:bg-night focus:p-4"
+        <div
+          className="workspace-layout min-h-dvh bg-[#100d16] text-cream"
+          onClickCapture={(event) => {
+            const anchor = (event.target as HTMLElement).closest("a[href]");
+            if (
+              anchor &&
+              dirty.current &&
+              anchor.getAttribute("href") !== location.pathname + location.search &&
+              !window.confirm(w.discard)
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
         >
-          {current}
-        </a>
-        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[224px] flex-col border-r border-white/8 bg-[#100c16] px-4 py-8 lg:flex">
-          <Link to="/app" className="brand-logo mb-12 px-4">
-            Sign <span>Atlas</span>
-          </Link>
-          <p className="mb-4 px-4 text-[10px] tracking-[.2em] text-cream/40">{w.personal}</p>
-          <nav aria-label={w.space} className="space-y-2">
-            {nav()}
-          </nav>
-          <div className="mt-auto space-y-4 px-4 pt-8">
-            <Link to="/app/settings" className="block text-sm text-cream/65 hover:text-gold">
-              {w.settings}
-            </Link>
-            <Link
-              to="/welcome"
-              className="flex items-center gap-2 text-xs text-cream/50 hover:text-gold"
-            >
-              {w.website}
-              <ArrowUpRight size={13} />
-            </Link>
-          </div>
-        </aside>
-        <div className="lg:pl-[224px]">
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/8 bg-[#100d16]/95 px-5 backdrop-blur-xl sm:px-8">
-            <Link to="/app" className="brand-logo lg:hidden">
+          <a
+            href="#workspace-content"
+            className="sr-only focus:not-sr-only focus:fixed focus:z-[100] focus:bg-night focus:p-4"
+          >
+            {current}
+          </a>
+          <aside className="fixed inset-y-0 left-0 z-40 hidden w-[224px] flex-col border-r border-white/8 bg-[#100c16] px-4 py-8 lg:flex">
+            <Link to="/app" className="brand-logo mb-12 px-4">
               Sign <span>Atlas</span>
             </Link>
-            <span className="hidden text-sm text-cream/60 lg:block">
-              {w.space}
-              <span className="mx-3 text-cream/25">/</span>
-              {current}
-            </span>
-            <div className="flex items-center gap-2">
-              <LanguageSwitcher />
-              <AccountCenter compact />
+            <p className="mb-4 px-4 text-[10px] tracking-[.2em] text-cream/40">{w.personal}</p>
+            <nav aria-label={w.space} className="space-y-2">
+              {nav()}
+            </nav>
+            <div className="mt-auto space-y-4 px-4 pt-8">
+              <Link to="/app/settings" className="block text-sm text-cream/65 hover:text-gold">
+                {w.settings}
+              </Link>
+              <Link
+                to="/welcome"
+                className="flex items-center gap-2 text-xs text-cream/50 hover:text-gold"
+              >
+                {w.website}
+                <ArrowUpRight size={13} />
+              </Link>
             </div>
-          </header>
-          <main id="workspace-content" className="min-w-0 pb-24 lg:pb-0">
-            <Outlet />
-          </main>
+          </aside>
+          <div className="lg:pl-[224px]">
+            <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/8 bg-[#100d16]/95 px-5 backdrop-blur-xl sm:px-8">
+              <Link to="/app" className="brand-logo lg:hidden">
+                Sign <span>Atlas</span>
+              </Link>
+              <span className="hidden text-sm text-cream/60 lg:block">
+                {w.space}
+                <span className="mx-3 text-cream/25">/</span>
+                {current}
+              </span>
+              <div className="flex items-center gap-2">
+                <LanguageSwitcher />
+                <AccountCenter compact />
+              </div>
+            </header>
+            <AiAllowanceSummary />
+            <main id="workspace-content" className="min-w-0 pb-24 lg:pb-0">
+              <Outlet />
+            </main>
+          </div>
+          <nav
+            aria-label={w.space}
+            className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/10 bg-[#100c16]/98 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
+          >
+            {nav(true)}
+          </nav>
         </div>
-        <nav
-          aria-label={w.space}
-          className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/10 bg-[#100c16]/98 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
-        >
-          {nav(true)}
-        </nav>
-      </div>
-    </DraftContext.Provider>
+      </DraftContext.Provider>
+    </AiAllowanceProvider>
   );
 }

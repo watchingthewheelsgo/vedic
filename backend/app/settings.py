@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     database_schema_mode: Literal["create_all", "migrations"] = Field(
         default="create_all", alias="DATABASE_SCHEMA_MODE"
     )
+    session_storage_backend: Literal["local", "s3"] = Field(
+        default="local", alias="SESSION_STORAGE_BACKEND"
+    )
+    session_s3_bucket: str = Field(default="", alias="SESSION_S3_BUCKET")
+    session_s3_region: str = Field(default="us-west-2", alias="SESSION_S3_REGION")
+    session_s3_prefix: str = Field(default="sessions", alias="SESSION_S3_PREFIX")
+    session_s3_expected_owner: str = Field(default="", alias="SESSION_S3_EXPECTED_OWNER")
+
     supabase_project_ref: str = Field(default="", alias="SUPABASE_PROJECT_REF")
     supabase_db_password: str = Field(default="", alias="SUPABASE_DB_PASSWORD")
     supabase_db_user: str = Field(default="postgres", alias="SUPABASE_DB_USER")
@@ -50,8 +58,6 @@ class Settings(BaseSettings):
         default="http://127.0.0.1:5173,http://localhost:5173",
         alias="ALLOWED_ORIGINS",
     )
-    vedic_admin_user_ids: str = Field(default="", alias="VEDIC_ADMIN_USER_IDS")
-    vedic_admin_emails: str = Field(default="", alias="VEDIC_ADMIN_EMAILS")
 
     creem_api_key: str = Field(default="", alias="CREEM_API_KEY")
     creem_webhook_secret: str = Field(default="", alias="CREEM_WEBHOOK_SECRET")
@@ -285,13 +291,6 @@ class Settings(BaseSettings):
 
     def allowed_origin_list(self) -> list[str]:
         return sorted(_csv_set(self.allowed_origins))
-
-    def is_admin_identity(self, user_id: str, email: str | None = None) -> bool:
-        user_ids = _csv_set(self.vedic_admin_user_ids)
-        emails = _csv_set(self.vedic_admin_emails)
-        if user_id and user_id.lower() in user_ids:
-            return True
-        return bool(email and email.lower() in emails)
 
 
 def _csv_set(value: str) -> set[str]:

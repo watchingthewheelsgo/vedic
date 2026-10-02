@@ -1613,10 +1613,15 @@ class SkillRuntime:
         session_id = input_data.session_id
         context_text = self.workspace.read_artifact_text(session_id, AGENT_CONTEXT_JSON)
         dossier_text = self.workspace.read_artifact_text(session_id, CONSULTATION_DOSSIER_JSON)
-        if not context_text or not dossier_text:
+        if (
+            not context_text
+            or not dossier_text
+            or not self._consultation_artifacts_complete(session_id)
+        ):
             raise ValueError(
                 "the approved consultation must be completed before follow-up questions"
             )
+        self.assert_core_readiness(session_id, prepare_judgement=False)
         dossier = ConsultationDossier.model_validate_json(dossier_text)
         if dossier.release_status != "approved":
             raise ValueError("follow-up questions require an approved consultation")
@@ -3212,22 +3217,45 @@ Return JSON only:
                     max_turns=2,
                     allow_file_tools=False,
                 )
-                payload = self._parse_json_object(result.raw_text)
+                candidate = self._parse_json_object(result.raw_text)
+                self._validate_grounding_verdict(candidate)
+                payload = candidate
                 break
             except (RuntimeError, ValueError) as exc:
                 last_error = exc
         if payload is None:
             raise ValueError(
-                "consultation grounding audit did not return valid JSON"
+                "consultation grounding audit did not return a valid verdict"
             ) from last_error
         unsupported = self._bounded_string_list(
             payload.get("unsupportedStatements"),
             limit=4,
             max_length=500,
         )
-        if payload.get("supported") is not True or payload.get("unsafeCertainty") is True:
+        if (
+            payload["supported"] is not True
+            or payload["unsafeCertainty"] is True
+            or payload["unsupportedStatements"]
+        ):
             detail = unsupported[0] if unsupported else "answer exceeded its cited evidence"
             raise ValueError(f"consultation answer failed grounding audit: {detail}")
+
+    @staticmethod
+    def _validate_grounding_verdict(payload: dict[str, Any]) -> None:
+        if (
+            type(payload.get("supported")) is not bool
+            or type(payload.get("unsafeCertainty")) is not bool
+        ):
+            raise ValueError(
+                "grounding audit verdict requires supported and unsafeCertainty booleans"
+            )
+        statements = payload.get("unsupportedStatements")
+        if not isinstance(statements, list) or any(
+            not isinstance(item, str) for item in statements
+        ):
+            raise ValueError(
+                "grounding audit verdict requires an unsupportedStatements string list"
+            )
 
     @staticmethod
     def _safe_agent_failure_reason(exc: Exception) -> str:
@@ -5017,6 +5045,7 @@ User request:
                 JUDGEMENT_CONTEXT_JSON,
                 CLAIM_GRAPH_JSON,
                 CONSULTATION_SUBJECT_CONTEXT_JSON,
+                CONSULTATION_TOPIC_SELECTION_JSON,
             ]
         return []
 
@@ -5112,6 +5141,12 @@ User request:
             session_id,
             reference_time,
         )
+        # Reuse the consultation day's reference instant so identical retries
+        # do not invalidate the dossier solely through generated timestamps.
+        subject_context = self._json_dict(
+            self.workspace.read_artifact_text(session_id, CONSULTATION_SUBJECT_CONTEXT_JSON) or ""
+        )
+        reference_time = datetime.fromisoformat(str(subject_context["generatedAt"]))
         sensitivity = self._judgement_sensitivity(session_id)
         restricted_fact_ids, restrict_timing = self._restricted_judgement_evidence(
             record, sensitivity
@@ -5407,7 +5442,7 @@ User request:
         ):
             return
 
-        self.assert_core_readiness(session_id)
+        self.assert_core_readiness(session_id, prepare_judgement=False)
 
         context = JudgementContext.model_validate_json(judgement_context_json)
         record = self._consultation_record(
@@ -5465,15 +5500,17 @@ User request:
         dossier: ConsultationDossier,
         graph: ClaimGraph,
     ) -> None:
-        if self.agent_runtime is None or not self.agent_runtime.is_configured():
-            return
         if self.workspace.artifact_checkpoint_valid(
             session_id,
             CONSULTATION_GROUNDING_AUDIT_JSON,
             producer="vedicdust-consultation-grounding-audit",
-            dependency_paths=[CONSULTATION_DOSSIER_JSON],
+            dependency_paths=[CONSULTATION_DOSSIER_JSON, CLAIM_GRAPH_JSON],
         ):
             return
+        if self.agent_runtime is None or not self.agent_runtime.is_configured():
+            raise ValueError(
+                "Consultation grounding audit is unavailable; cannot release unaudited prose"
+            )
         claims_by_id = {claim.claim_id: claim for claim in graph.claims}
         units: list[dict[str, Any]] = []
         for section in dossier.sections:
@@ -5558,6 +5595,7 @@ Return JSON only:
                     narrative_id = str(item.get("narrativeId") or "")
                     if narrative_id not in expected_ids or narrative_id in candidate_observed:
                         raise ValueError("consultation grounding audit changed the narrative set")
+                    self._validate_grounding_verdict(item)
                     candidate_observed[narrative_id] = item
                 if set(candidate_observed) != expected_ids:
                     raise ValueError("consultation grounding audit omitted a narrative")
@@ -5573,7 +5611,9 @@ Return JSON only:
         failed = [
             narrative_id
             for narrative_id, item in observed.items()
-            if item.get("supported") is not True or item.get("unsafeCertainty") is True
+            if item["supported"] is not True
+            or item["unsafeCertainty"] is True
+            or item["unsupportedStatements"]
         ]
         if failed:
             raise ValueError(
@@ -5595,7 +5635,7 @@ Return JSON only:
             session_id,
             CONSULTATION_GROUNDING_AUDIT_JSON,
             producer="vedicdust-consultation-grounding-audit",
-            dependency_paths=[CONSULTATION_DOSSIER_JSON],
+            dependency_paths=[CONSULTATION_DOSSIER_JSON, CLAIM_GRAPH_JSON],
         )
 
     def _active_artifact_for_batch(self, batch: dict[str, object], artifacts: list[object]) -> str:

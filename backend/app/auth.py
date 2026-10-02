@@ -95,13 +95,10 @@ class ClerkTokenVerifier:
         if not subject:
             raise HTTPException(status_code=401, detail="Clerk session token is missing a subject")
         email = _email_from_clerk_user(clerk_user)
-        claim_admin = self.settings.is_admin_identity(subject, email)
         return AuthenticatedUser(
             user_id=subject,
             auth_mode="clerk",
             email=email,
-            role="admin" if claim_admin else "user",
-            is_admin=claim_admin,
         )
 
 
@@ -161,7 +158,10 @@ async def require_user(
         if user.auth_error_detail:
             raise HTTPException(status_code=401, detail=user.auth_error_detail)
         raise HTTPException(status_code=401, detail="Sign in to continue")
-    return user
+    # Import locally to avoid the AuthenticatedUser / UserStore module cycle.
+    from app.services.user_store import UserStore
+
+    return await UserStore().upsert_from_auth_user(user)
 
 
 CurrentUser = Depends(require_user)

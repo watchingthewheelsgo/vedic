@@ -274,10 +274,10 @@ export function Landing() {
             <p className="my-4 text-sm leading-7 text-cream/75">{t("landing.paths.vedic.body")}</p>
             <p className="mb-6 text-sm text-cream/65">
               {locale === "zh"
-                ? "先确认出生信息。付费内容与实际价格以账户方案和结账页为准。"
+                ? "记录与日常使用免费，每月包含 10 个 AI 额度。需要更多额度时，可在反馈窗口申请升级。"
                 : locale === "ja"
-                  ? "出生情報を確認して開始。料金と利用権限はアカウントと決済画面をご確認ください。"
-                  : "Start with your birth details. See your account and checkout for current pricing and access."}
+                  ? "記録と日常利用は無料。毎月10 AIクレジット付き。追加はフィードバックからお問い合わせください。"
+                  : "Free daily records and 10 AI credits every month. Request more credits through the feedback window."}
             </p>
             <Button variant="outline" onClick={start}>
               {t("landing.nav.reportArrow")}

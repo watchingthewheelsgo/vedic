@@ -3,14 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.auth import AuthenticatedUser
 from app.db.engine import get_session_factory
 from app.db.models import AppUserRecord
 from app.schemas import AccountProfileResponse
-
-
-ADMIN_ROLES = {"admin", "owner", "super_admin", "super-admin"}
 
 
 class UserStore:
@@ -25,20 +24,17 @@ class UserStore:
 
         now = datetime.now(timezone.utc)
         async with self._session() as db:
+            insert = sqlite_insert if db.bind.dialect.name == "sqlite" else pg_insert
+            await db.execute(
+                insert(AppUserRecord)
+                .values(clerk_user_id=user.user_id, email=user.email, role="user", created_at=now)
+                .on_conflict_do_nothing(index_elements=["clerk_user_id"])
+            )
             result = await db.execute(
                 select(AppUserRecord).where(AppUserRecord.clerk_user_id == user.user_id)
             )
-            record = result.scalar_one_or_none()
-            if record is None:
-                record = AppUserRecord(
-                    clerk_user_id=user.user_id,
-                    email=user.email,
-                    role="admin" if user.is_admin else "user",
-                    created_at=now,
-                )
-                db.add(record)
-            else:
-                record.email = user.email or record.email
+            record = result.scalar_one()
+            record.email = user.email or record.email
             record.last_seen_at = now
             record.updated_at = now
             await db.commit()
@@ -72,4 +68,4 @@ def normalize_role(value: str | None) -> str:
 
 
 def is_admin_role(role: str | None) -> bool:
-    return normalize_role(role) in ADMIN_ROLES
+    return role == "admin"

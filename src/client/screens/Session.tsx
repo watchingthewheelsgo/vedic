@@ -1,3 +1,4 @@
+import { AiCostNotice } from "../components/AiAllowance";
 import { preferredScrollBehavior } from "../lib/motion";
 import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1454,7 +1455,10 @@ export function Session() {
   );
 
   return (
-    <div className="app-shell flex h-[calc(100dvh-136px)] lg:h-[calc(100dvh-64px)] flex-col overflow-hidden bg-cream-2">
+    <div className="app-shell flex h-[calc(100dvh-180px)] lg:h-[calc(100dvh-108px)] flex-col overflow-hidden bg-cream-2">
+      <div className="shrink-0 bg-night px-5">
+        <AiCostNotice report />
+      </div>
       <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-3 py-3 backdrop-blur-lg sm:px-8">
         <button
           className="brand-logo mr-1 border-0 bg-transparent sm:mr-3"

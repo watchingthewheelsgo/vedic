@@ -12,6 +12,7 @@ from app.runtime.preflight import (
 from app.services.core_job_runtime import CoreJobRuntime
 from app.services.admin_sessions import AdminSessionsService
 from app.services.creem_billing import CreemBillingService
+from app.services.ai_allowance import AiAllowanceService
 from app.services.metadata_store import MetadataStore
 from app.services.place_service import PlaceService
 from app.services.precise_place_lookup import PrecisePlaceLookupService
@@ -40,6 +41,7 @@ class AppContainer:
         self.metadata_store = MetadataStore(self.skill_workspace)
         self.user_store = UserStore()
         self.billing = CreemBillingService(settings)
+        self.ai_allowance = AiAllowanceService()
         self.agent_runtime = ClaudeRuntime(settings)
         self.precise_place_lookup = PrecisePlaceLookupService(
             self.place_service, self.agent_runtime
@@ -50,7 +52,9 @@ class AppContainer:
             agent_runtime=self.agent_runtime,
             metadata_store=self.metadata_store,
         )
-        self.core_job_runtime = CoreJobRuntime(skill_runtime=self.skill_runtime)
+        self.core_job_runtime = CoreJobRuntime(
+            skill_runtime=self.skill_runtime, ai_allowance=self.ai_allowance
+        )
         self.report_exporter = ReportExporter(self.skill_workspace)
         self.admin_sessions = AdminSessionsService(
             workspace=self.skill_workspace,

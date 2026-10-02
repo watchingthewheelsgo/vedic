@@ -118,8 +118,6 @@ CREEM_SUCCESS_URL="https://${SITE_DOMAIN}/account?billing=success"
 
 prompt_value VITE_CLERK_PUBLISHABLE_KEY "Clerk publishable key" "" true true
 prompt_value CLERK_SECRET_KEY "Clerk secret key" "" true true
-prompt_value VEDIC_ADMIN_USER_IDS "Admin Clerk user IDs (comma-separated, optional)" "" false false
-prompt_value VEDIC_ADMIN_EMAILS "Admin emails (comma-separated, optional)" "" false false
 
 prompt_value DATABASE_URL "PostgreSQL connection URL" "" true true
 [[ "${DATABASE_URL}" == postgresql://* || "${DATABASE_URL}" == postgres://* ]] \
@@ -193,8 +191,6 @@ trap 'rm -f "${temp_file}"' EXIT
   printf 'VITE_CLERK_PUBLISHABLE_KEY=%s\n' "$(dotenv_quote "${VITE_CLERK_PUBLISHABLE_KEY}")"
   printf 'CLERK_SECRET_KEY=%s\n' "$(dotenv_quote "${CLERK_SECRET_KEY}")"
   printf 'VEDIC_AUTH_MODE=clerk\n'
-  printf 'VEDIC_ADMIN_USER_IDS=%s\n' "$(dotenv_quote "${VEDIC_ADMIN_USER_IDS}")"
-  printf 'VEDIC_ADMIN_EMAILS=%s\n' "$(dotenv_quote "${VEDIC_ADMIN_EMAILS}")"
   printf '\n'
   printf 'DATABASE_URL=%s\n' "$(dotenv_quote "${DATABASE_URL}")"
   printf 'DATABASE_ECHO=false\n'

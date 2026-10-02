@@ -1,3 +1,4 @@
+import type { FeedbackItem } from "./lib/feedback";
 import { resolveApiUrl } from "./lib/api-url";
 import type {
   AppLocale,
@@ -99,12 +100,26 @@ async function throwApiError(response: Response): Promise<never> {
     detail?: unknown;
   } | null;
   const rawDetail = error?.detail ?? error?.error ?? `Request failed: ${response.status}`;
-  const message =
+  let message =
     typeof rawDetail === "string"
       ? rawDetail
       : rawDetail && typeof rawDetail === "object" && "message" in rawDetail
         ? String(rawDetail.message)
         : `Request failed: ${response.status}`;
+  if (
+    response.status === 402 &&
+    rawDetail &&
+    typeof rawDetail === "object" &&
+    "code" in rawDetail &&
+    rawDetail.code === "ai_allowance_exhausted"
+  ) {
+    const locale = document.documentElement.lang;
+    if (locale.startsWith("zh"))
+      message = "AI 额度不足。记录和已有内容仍可免费使用；请到设置查看额度或邮件申请升级。";
+    if (locale.startsWith("ja"))
+      message =
+        "AI クレジットが不足しています。記録は引き続き無料です。設定からメールでアップグレードを申請できます。";
+  }
   if (isAuthFailure(response.status, message)) {
     await notifyAuthFailure(response.status, message);
     throw new Error(AUTH_EXPIRED_MESSAGE);
@@ -126,6 +141,7 @@ async function postJson<TResponse, TBody>(
     body: JSON.stringify(body)
   });
 
+  window.dispatchEvent(new Event("ai-allowance-changed"));
   if (!response.ok) {
     await throwApiError(response);
   }
@@ -147,7 +163,17 @@ async function getJson<TResponse>(
     await throwApiError(response);
   }
 
-  return (await response.json()) as TResponse;
+  const result = (await response.json()) as TResponse;
+  if (
+    path.startsWith("/api/core-jobs/") &&
+    result &&
+    typeof result === "object" &&
+    "status" in result &&
+    ["completed", "failed"].includes(String(result.status))
+  ) {
+    window.dispatchEvent(new Event("ai-allowance-changed"));
+  }
+  return result;
 }
 
 async function downloadFile(path: string, filename: string): Promise<void> {
@@ -170,6 +196,47 @@ async function downloadFile(path: string, filename: string): Promise<void> {
 }
 
 export const api = {
+  submitFeedback(input: {
+    request_id: string;
+    kind: "feedback" | "upgrade";
+    contact: string;
+    message: string;
+  }) {
+    return postJson<{ id: string; status: string }, typeof input>("/api/feedback", input, {
+      requireAuth: false
+    });
+  },
+  getMembership(userId: string) {
+    return getJson<import("./components/AdminMembership").Membership>(
+      `/api/admin/memberships/${encodeURIComponent(userId)}`
+    );
+  },
+  changeMembership(
+    userId: string,
+    input: {
+      request_id: string;
+      action: "grant" | "renew" | "revoke";
+      days: number;
+      monthly_limit: number;
+      note: string;
+    }
+  ) {
+    return postJson<{ ok: boolean }, typeof input>(
+      `/api/admin/memberships/${encodeURIComponent(userId)}`,
+      input
+    );
+  },
+  listFeedback() {
+    return getJson<{ items: FeedbackItem[] }>("/api/admin/feedback");
+  },
+  async resolveFeedback(id: string, status: "open" | "resolved") {
+    const response = await fetch(resolveApiUrl(`/api/admin/feedback/${encodeURIComponent(id)}`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify({ status })
+    });
+    if (!response.ok) await throwApiError(response);
+  },
   updateReflectionAction(input: {
     day: string;
     reflection_id: string;
