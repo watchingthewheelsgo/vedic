@@ -1,4 +1,5 @@
 import { workspaceCopy } from "../lib/workspace";
+import { daysCopy } from "../lib/days-copy";
 import { Methodology } from "../components/Methodology";
 import { journalCopy } from "../lib/journal";
 import { preferredScrollBehavior } from "../lib/motion";
@@ -118,23 +119,11 @@ export function Landing() {
                 : "Turn everyday moments into a map of your own."}
           </h2>
           <div className="mt-10 grid gap-8 sm:grid-cols-3">
-            {[
-              workspaceCopy[locale].today,
-              workspaceCopy[locale].explore,
-              workspaceCopy[locale].records
-            ].map((title, i) => (
-              <div key={title}>
+            {daysCopy[locale].landingSteps.map((step, i) => (
+              <div key={step.title}>
                 <p className="mb-4 font-mono text-sm text-gold/70">0{i + 1}</p>
-                <h3 className="text-xl">{title}</h3>
-                <p className="mt-3 text-sm leading-7 text-cream/65">
-                  {
-                    [
-                      workspaceCopy[locale].todayBody,
-                      workspaceCopy[locale].exploreBody,
-                      workspaceCopy[locale].recordsBody
-                    ][i]
-                  }
-                </p>
+                <h3 className="text-xl">{step.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-cream/65">{step.body}</p>
               </div>
             ))}
           </div>

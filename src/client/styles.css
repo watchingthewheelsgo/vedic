@@ -15,6 +15,8 @@
   --color-body: #5a4a35;
   --color-red: #b04a38;
   --color-green: #5a9b5a;
+  --color-jade: #6cd4b1;
+  --font-display: "Iowan Old Style", Baskerville, "Noto Serif SC", "Songti SC", serif;
 }
 
 @layer base {
@@ -54,6 +56,14 @@
 }
 
 @layer components {
+  .surface {
+    @apply rounded-3xl border border-white/[0.08] bg-[#15121b]/90;
+  }
+
+  .eyebrow {
+    @apply text-[11px] uppercase tracking-[0.14em] text-cream/50;
+  }
+
   .brand-logo {
     @apply text-[15px] font-bold uppercase tracking-[2px] text-cream;
   }

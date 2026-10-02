@@ -9,9 +9,12 @@ import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
 import { journalCopy, type JournalResponse, type JournalEntry } from "../lib/journal";
+import { daysCopy } from "../lib/days-copy";
+import { readDay, upcoming } from "../lib/patterns";
+import { branchElement, parseDay, stemElement } from "../lib/sexagenary";
 
 const topics = ["life", "work", "relationships", "health", "learning"];
-const panel = "rounded-2xl border border-white/12 bg-[#17131d] p-5 sm:p-7";
+const panel = "surface p-5 sm:p-7";
 const field =
   "min-h-11 rounded-lg border border-white/20 bg-[#211b28] px-3 text-sm text-cream [color-scheme:dark]";
 
@@ -19,9 +22,10 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const selectedDay = params.get("day");
-  const { locale } = useI18n();
+  const { locale, localeTag } = useI18n();
   const c = journalCopy[locale];
   const w = workspaceCopy[locale];
+  const d = daysCopy[locale];
   const [zone] = useState(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai"
   );
@@ -218,12 +222,262 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
     a.click();
     URL.revokeObjectURL(url);
   }
+  if (view === "today" && data) {
+    const todayReading = readDay(data.today.day, data.summary);
+    const ahead = upcoming(data.today.day, data.summary, 30);
+    const bright = ahead.filter((item) => item.fit === "bright").slice(0, 3);
+    const gentle = ahead.find((item) => item.fit === "gentle");
+    const dateLabel = new Intl.DateTimeFormat(localeTag, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC"
+    }).format(parseDay(data.today.day));
+    const shortDate = (value: string) =>
+      new Intl.DateTimeFormat(localeTag, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC"
+      }).format(parseDay(value));
+    return (
+      <div className="mx-auto max-w-[1180px] px-5 py-8 sm:px-8 sm:py-10">
+        <header className="mb-7">
+          <p className="eyebrow mb-2">{dateLabel}</p>
+          <h1 className="font-display text-4xl leading-tight sm:text-5xl">{w.greeting}</h1>
+        </header>
+        {error && (
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-red/50 bg-red/10 p-4 text-sm text-[#ffb5a4]"
+          >
+            {error}
+          </div>
+        )}
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+          <section className="surface relative overflow-hidden p-6 sm:p-8">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full border border-gold/20 shadow-[inset_0_0_0_48px_rgba(201,169,110,0.025)]"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-8 -top-8 size-40 rounded-full border border-jade/20"
+            />
+            <div className="relative flex items-center justify-between">
+              <p className="eyebrow">{d.yourDay}</p>
+              <span
+                className={`rounded-full px-3 py-1 text-xs ${todayReading.fit === "bright" ? "bg-[#f3ece0] text-[#16120c]" : todayReading.fit === "gentle" ? "border border-dashed border-white/30 text-cream/70" : "bg-white/[0.07] text-cream/75"}`}
+              >
+                {d.fit[todayReading.fit]}
+              </span>
+            </div>
+            <div className="relative mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
+              <p className="text-7xl font-semibold leading-none tracking-wide sm:text-8xl">
+                {data.today.pillar}
+              </p>
+              <p className="pb-2 text-sm text-cream/60">
+                {d.elements[stemElement(data.today.stem)]} ·{" "}
+                {d.elements[branchElement(data.today.branch)]}
+              </p>
+            </div>
+            <p className="relative mt-5 max-w-lg font-display text-xl leading-snug sm:text-2xl">
+              {d.fitLong[todayReading.fit]}
+            </p>
+            {todayReading.signals.length > 0 && (
+              <ul className="relative mt-4 space-y-1.5 text-sm text-cream/60">
+                {todayReading.signals.map((signal) => (
+                  <li key={signal.kind}>
+                    <span className={signal.delta >= 0 ? "text-jade" : "text-cream/40"}>● </span>
+                    {d.signal(signal.kind, signal.key, signal.averageMood, signal.count)}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="relative mt-6 text-xs text-cream/40">
+              {c.facts} · {zone}
+            </p>
+          </section>
+
+          <section className="surface p-6 sm:p-7">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-2xl">{d.quick}</h2>
+              <Link
+                to={`/app/records?day=${data.today.day}`}
+                className="text-sm text-cream/55 hover:text-gold"
+              >
+                {d.writeMore}
+              </Link>
+            </div>
+            <fieldset disabled={!!busy} className="mt-4">
+              <legend className="sr-only">{c.mood}</legend>
+              <div className="grid grid-cols-5 gap-2">
+                {c.moods.map((label, i) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={mood === i + 1}
+                    aria-label={label}
+                    title={label}
+                    onClick={() => setMood(i + 1)}
+                    className={`h-12 rounded-xl border text-sm transition-colors ${mood === i + 1 ? "border-cream bg-[#f3ece0] text-[#16120c]" : "border-white/12 bg-white/[0.03] text-cream/65 hover:bg-white/[0.07]"}`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2 flex justify-between text-[11px] text-cream/45">
+                <span>{c.moods[0]}</span>
+                <span>{c.moods[4]}</span>
+              </div>
+            </fieldset>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {topics.map((value, i) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={!!busy}
+                  aria-pressed={topic === value}
+                  onClick={() => setTopic(value)}
+                  className={`h-9 rounded-full border px-3.5 text-xs transition-colors ${topic === value ? "border-gold/70 bg-gold/15 text-gold-light" : "border-white/12 text-cream/60 hover:bg-white/5"}`}
+                >
+                  {c.topics[i]}
+                </button>
+              ))}
+            </div>
+            <label htmlFor="today-note" className="sr-only">
+              {c.note}
+            </label>
+            <Textarea
+              id="today-note"
+              value={note}
+              maxLength={4000}
+              disabled={!!busy}
+              onChange={(e) => {
+                setNote(e.target.value);
+                setNotice("");
+              }}
+              placeholder={c.placeholder}
+              className="mt-4 min-h-24 text-base"
+            />
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span role="status" className="text-xs text-cream/55">
+                {notice ? d.quickSaved : ""}
+              </span>
+              <Button disabled={!!busy || !note.trim() || !dirty} onClick={() => void save()}>
+                {busy === "save" ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Check size={16} />
+                )}
+                {c.save}
+              </Button>
+            </div>
+          </section>
+        </div>
+
+        <Link
+          to={entry ? `/app/explore?day=${data.today.day}` : "/app/explore"}
+          className="press-feedback mt-5 flex min-h-16 items-center gap-4 rounded-full border border-white/10 bg-white/[0.04] px-5 hover:bg-white/[0.07]"
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#f3ece0] text-[#16120c]">
+            <Sparkles size={17} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px]">{d.askCta}</span>
+            <span className="block truncate text-xs text-cream/50">{d.askHint}</span>
+          </span>
+          <span className="text-cream/40">→</span>
+        </Link>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <section className="surface p-6">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-2xl">{d.nextBright}</h2>
+              <Link to="/app/days" className="text-sm text-cream/55 hover:text-gold">
+                {d.nav.calendar} →
+              </Link>
+            </div>
+            {bright.length ? (
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {bright.map((item) => (
+                  <div key={item.day} className="rounded-2xl bg-white/[0.045] p-4">
+                    <p className="text-xs text-cream/50">{shortDate(item.day)}</p>
+                    <p className="mt-1 text-2xl font-semibold">{item.pillar}</p>
+                  </div>
+                ))}
+                {gentle && (
+                  <div className="rounded-2xl border border-dashed border-white/20 p-4">
+                    <p className="text-xs text-cream/50">
+                      {d.nextGentle} · {shortDate(gentle.day)}
+                    </p>
+                    <p className="mt-1 text-2xl font-semibold text-cream/60">{gentle.pillar}</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm leading-6 text-cream/55">{d.noForecast}</p>
+            )}
+          </section>
+
+          <section className="surface p-6">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-2xl">{w.recent}</h2>
+              <Link to="/app/records" className="text-sm text-cream/55 hover:text-gold">
+                {w.all} →
+              </Link>
+            </div>
+            {data.entries.length ? (
+              <ul className="mt-3 divide-y divide-white/[0.06]">
+                {data.entries.slice(0, 4).map((item) => (
+                  <li key={item.day}>
+                    <Link
+                      to={`/app/records?day=${item.day}`}
+                      className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-4 py-3"
+                    >
+                      <span>
+                        <span className="block text-lg font-semibold">{item.calendar.pillar}</span>
+                        <span className="block text-[11px] text-cream/45">{item.day.slice(5)}</span>
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm text-cream/85">{item.note}</span>
+                        <span className="block text-xs text-cream/45">
+                          {c.moods[item.mood - 1]} · {c.topics[topics.indexOf(item.topic)]}
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm leading-6 text-cream/55">{c.empty}</p>
+            )}
+            {charts.length > 0 && (
+              <div className="mt-4 border-t border-white/[0.07] pt-4">
+                <p className="eyebrow mb-2">{w.resume}</p>
+                {charts.slice(0, 2).map((chart) => (
+                  <Link
+                    key={chart.sessionId}
+                    to={`/app/charts/${encodeURIComponent(chart.sessionId)}`}
+                    className="block truncate py-1 text-sm text-gold"
+                  >
+                    {chart.label} →
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen text-cream">
       <main className="mx-auto max-w-[1240px] px-5 py-8 sm:px-8 sm:py-10">
         <div className="mb-8">
           <p className="mb-3 text-[10px] uppercase tracking-[.18em] text-gold">{w.personal}</p>
-          <h1 className="text-3xl font-medium tracking-tight sm:text-4xl">
+          <h1 className="font-display text-4xl leading-tight sm:text-5xl">
             {view === "today" ? w.greeting : w[view]}
           </h1>
           <p className="mt-3 max-w-xl text-sm leading-7 text-cream/60">

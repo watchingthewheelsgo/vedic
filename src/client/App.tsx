@@ -11,6 +11,12 @@ import { Button } from "./components/ui/button";
 import { useI18n } from "./i18n/provider";
 
 const Daily = lazy(() => import("./screens/Daily").then((module) => ({ default: module.Daily })));
+const Patterns = lazy(() =>
+  import("./screens/Patterns").then((module) => ({ default: module.Patterns }))
+);
+const Discover = lazy(() =>
+  import("./screens/Discover").then((module) => ({ default: module.Discover }))
+);
 
 const Landing = lazy(() =>
   import("./screens/Landing").then((module) => ({ default: module.Landing }))
@@ -117,6 +123,8 @@ export function App() {
               }
             >
               <Route index element={<Daily view="today" />} />
+              <Route path="days" element={<Patterns />} />
+              <Route path="discover" element={<Discover />} />
               <Route path="records" element={<Daily view="records" />} />
               <Route path="explore" element={<Daily view="explore" />} />
               <Route path="charts" element={<Account view="charts" />} />
