@@ -70,9 +70,11 @@ export function Landing() {
         <div className="mb-9 inline-block rounded-full border border-gold/25 px-5 py-1.5 text-[11px] uppercase tracking-[4px] text-gold">
           {t("landing.eyebrow")}
         </div>
-        <h1 className="mb-5 text-[42px] font-light leading-[1.18] tracking-normal text-cream sm:text-[52px]">
+        <h1 className="mx-auto mb-6 max-w-[880px] font-display text-[48px] font-normal leading-[1.02] tracking-normal text-cream sm:text-[76px]">
           {t("landing.hero.title")}
-          {heroStrong ? <strong className="font-semibold text-gold">{heroStrong}</strong> : null}
+          {heroStrong ? (
+            <em className="font-display font-normal italic text-gold">{heroStrong}</em>
+          ) : null}
         </h1>
         <p className="mx-auto mb-10 max-w-[540px] text-[17px] leading-[1.75] text-body">
           {t("landing.hero.body")}
@@ -159,7 +161,13 @@ export function Landing() {
                   <span className="text-xs tracking-widest">0{index + 1}</span>
                 </div>
                 <p className="mb-3 text-xs uppercase tracking-widest text-gold">
-                  {t(path === "vedic" ? "landing.paths.live" : "landing.paths.soon")}
+                  {t(
+                    path === "vedic"
+                      ? "landing.paths.live"
+                      : path === "bazi"
+                        ? "landing.paths.preview"
+                        : "landing.paths.soon"
+                  )}
                 </p>
                 <h2 className="mb-4 text-xl font-semibold">{t(`landing.paths.${path}.title`)}</h2>
                 <p className="mb-8 flex-1 text-sm leading-7 text-body">
@@ -167,10 +175,22 @@ export function Landing() {
                 </p>
                 <Button
                   variant={path === "vedic" ? "gold" : "outline"}
-                  disabled={path !== "vedic"}
-                  onClick={path === "vedic" ? start : undefined}
+                  disabled={path === "tarot"}
+                  onClick={
+                    path === "vedic"
+                      ? start
+                      : path === "bazi"
+                        ? () => navigate("/app/charts/bazi")
+                        : undefined
+                  }
                 >
-                  {t(path === "vedic" ? "landing.nav.report" : "landing.paths.soon")}
+                  {t(
+                    path === "vedic"
+                      ? "landing.nav.report"
+                      : path === "bazi"
+                        ? "landing.paths.baziAction"
+                        : "landing.paths.soon"
+                  )}
                 </Button>
               </article>
             ))}

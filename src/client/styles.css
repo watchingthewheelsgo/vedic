@@ -77,15 +77,17 @@
   }
 
   .brand-logo {
-    @apply inline-flex items-center gap-2.5 text-[22px] leading-none text-cream;
+    @apply inline-block whitespace-nowrap text-[22px] leading-none text-cream;
     font-family: var(--font-display);
   }
 
   .brand-logo::before {
     content: "";
+    display: inline-block;
+    vertical-align: middle;
+    margin: -4px 10px 0 0;
     width: 26px;
     height: 26px;
-    flex-shrink: 0;
     border-radius: 999px;
     background:
       radial-gradient(circle, #f3f0e9 0 3px, transparent 3.5px),

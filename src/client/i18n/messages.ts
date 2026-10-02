@@ -30,6 +30,8 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.paths.vedic.title": "Indian Vedic Astrology",
     "landing.paths.vedic.body":
       "Read the birth chart through planetary patterns, life themes, and Dasha timing. A structured reading grounded in Jyotish.",
+    "landing.paths.preview": "Preview",
+    "landing.paths.baziAction": "Try the BaZi preview",
     "landing.paths.bazi.title": "Chinese BaZi",
     "landing.paths.bazi.body":
       "Explore the Four Pillars, Five Elements, and the changing seasons of life through your birth date and time.",
@@ -138,10 +140,10 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.nav.report": "Begin Vedic Reading",
     "landing.nav.reportArrow": "Vedic Reading →",
     "landing.nav.sample": "View Sample",
-    "landing.hero.title": "Traditional perspectives. ",
-    "landing.hero.strong": "Everyday reflection.",
+    "landing.hero.title": "Find the days that are ",
+    "landing.hero.strong": "truly good for you.",
     "landing.hero.body":
-      "A personal space for everyday stories, mood tracking and thoughtful AI conversation. Revisit your experiences, put feelings into words, and explore small next steps through Indian Vedic astrology, Chinese BaZi and Tarot, informed by traditional sources and calendar calculations.",
+      "Sign Atlas reads your Vedic and BaZi charts alongside your own journal. It learns your auspicious days, and Atlas, your AI guide, helps you make sense of them.",
     "landing.meta.pages": "Calculated Chart Layers",
     "landing.meta.planets": "Planetary Signals",
     "landing.meta.lifeAreas": "Life Areas",
@@ -956,6 +958,8 @@ const zhOverrides: Dict = {
   "landing.paths.vedic.title": "印度占星 · Vedic",
   "landing.paths.vedic.body":
     "以出生星盘为起点，结合行星格局、人生主题与 Dasha 周期，展开有结构的 Jyotish 读盘。",
+  "landing.paths.preview": "预览版",
+  "landing.paths.baziAction": "体验八字预览",
   "landing.paths.bazi.title": "东方八字 · BaZi",
   "landing.paths.bazi.body":
     "从出生年月日时出发，透过四柱、五行与运势节奏，探索个人气质与人生阶段。",
@@ -1058,10 +1062,10 @@ const zhOverrides: Dict = {
   "landing.nav.report": "开始印度占星读盘",
   "landing.nav.reportArrow": "印度占星读盘 →",
   "landing.nav.sample": "查看样例",
-  "landing.hero.title": "从传统文化，",
-  "landing.hero.strong": "回到自己的生活。",
+  "landing.hero.title": "找到真正属于你的",
+  "landing.hero.strong": "黄道吉日。",
   "landing.hero.body":
-    "一个记录生活、安放心情、和 AI 一起想一想的个人空间。记下日常与感受，回看自己的经历，再借助印度占星 Vedic、东方八字和塔罗的文化视角，探索可以尝试的小行动。",
+    "Sign Atlas 结合你的 Vedic 命盘、八字与你自己的日记，学习哪些日子真正适合你；AI 向导 Atlas 帮你读懂它们。",
   "landing.meta.pages": "计算盘层",
   "landing.meta.planets": "行星信号",
   "landing.meta.lifeAreas": "人生领域",
@@ -1786,6 +1790,8 @@ const jaOverrides: Dict = {
   "landing.paths.vedic.title": "インド占星術 · Vedic",
   "landing.paths.vedic.body":
     "出生図、惑星の配置、人生のテーマと Dasha の周期から読み解く、構造化された Jyotish 鑑定。",
+  "landing.paths.preview": "プレビュー",
+  "landing.paths.baziAction": "八字プレビューを試す",
   "landing.paths.bazi.title": "東洋の四柱推命 · BaZi",
   "landing.paths.bazi.body":
     "生年月日時から四柱、五行、運の流れをたどり、気質や人生の段階を探ります。",
@@ -1870,10 +1876,10 @@ const jaOverrides: Dict = {
   "landing.nav.report": "ヴェーダ鑑定を始める",
   "landing.nav.reportArrow": "ヴェーダ鑑定 →",
   "landing.nav.sample": "サンプルを見る",
-  "landing.hero.title": "伝統の視点から、",
-  "landing.hero.strong": "日々の自分を見つめる。",
+  "landing.hero.title": "あなたに本当に合う",
+  "landing.hero.strong": "吉日を見つける。",
   "landing.hero.body":
-    "日々の出来事や気分を記録し、AI と一緒に考える、自分のための空間。経験を振り返り、気持ちを言葉にし、ヴェーダ占星術・四柱推命・タロットの文化的な視点から、小さな次の一歩を探します。",
+    "Sign Atlas は Vedic と八字のチャートをあなた自身の日記と合わせて読み、あなたの吉日を学びます。AI ガイドの Atlas がその意味を一緒に読み解きます。",
   "landing.meta.pages": "計算チャート層",
   "landing.meta.planets": "惑星シグナル",
   "landing.meta.lifeAreas": "人生領域",
