@@ -1,4 +1,7 @@
-# VedicDust
+# Sign Atlas
+
+Sign Atlas brings together Indian Vedic astrology, Chinese BaZi, and Western Tarot.
+Visitors see the public website; signed-in users enter a personal workspace for daily journaling, reflection, charts and reports. Product APIs require authenticated users. BaZi chart generation remains a preview; daily Tarot reflection uses 22 upright major arcana.
 
 Product-owned Jyotish calculation, rectification, judgement, and consultation runtime.
 Deterministic code owns astronomical facts and evidence contracts; skills own bounded

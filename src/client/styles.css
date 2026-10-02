@@ -73,11 +73,11 @@
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel label {
-    color: rgb(245 239 230 / 62%) !important;
+    color: rgb(245 239 230 / 72%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .text-muted {
-    color: rgb(245 239 230 / 42%) !important;
+    color: rgb(245 239 230 / 65%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .text-body {
@@ -151,7 +151,7 @@
   }
 
   .cosmic-floating-surface .text-muted {
-    color: rgb(245 239 230 / 48%) !important;
+    color: rgb(245 239 230 / 65%) !important;
   }
 
   .cosmic-floating-surface input,
@@ -225,7 +225,7 @@
 }
 
 .cosmic-site .text-muted {
-  color: rgb(245 239 230 / 46%) !important;
+  color: rgb(245 239 230 / 65%) !important;
 }
 
 .cosmic-site input,
@@ -311,5 +311,27 @@
     margin-bottom: 28px;
     padding-bottom: 24px;
     border-bottom: 1px solid #dfd1b7;
+  }
+}
+
+/* Pointer press feedback; keyboard activation keeps its immediate focus state. */
+@media (prefers-reduced-motion: no-preference) {
+  .press-feedback:active:not(:focus-visible):not(:disabled) {
+    transform: scale(0.97);
+    transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+/* Portal content is outside .cosmic-site: keep its surface and text theme together. */
+.cosmic-floating-surface .bg-cream,
+.cosmic-floating-surface .bg-cream-2,
+.cosmic-floating-surface .bg-cream-3 {
+  background-color: #211c28;
+}
+@layer base {
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 3px;
   }
 }

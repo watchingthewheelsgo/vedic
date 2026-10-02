@@ -9,7 +9,6 @@ type BirthInputStep = {
 };
 
 export function BirthInputLayout({
-  navControls,
   title,
   subtitle,
   icon,
@@ -17,8 +16,7 @@ export function BirthInputLayout({
   steps,
   visual,
   maxWidthClass = "max-w-[560px]",
-  children,
-  onBack
+  children
 }: {
   navControls: ReactNode;
   backLabel: string;
@@ -35,26 +33,9 @@ export function BirthInputLayout({
   return (
     <div
       data-theme="cosmic"
-      className={cn("birth-input-screen relative isolate min-h-screen overflow-x-clip text-cream")}
+      className={cn("birth-input-screen relative isolate min-h-0 overflow-x-clip text-cream")}
     >
-      <nav
-        className={cn(
-          "sticky top-0 z-50 border-b px-5 backdrop-blur-xl sm:px-8",
-          "border-white/[0.07] bg-[#0c0b0b]/92"
-        )}
-      >
-        <div className="mx-auto flex h-[68px] max-w-[1280px] items-center justify-between">
-          <button
-            className="border-0 bg-transparent text-[15px] font-semibold uppercase tracking-[1.8px] text-cream"
-            onClick={onBack}
-          >
-            Vedic<span>Dust</span>
-          </button>
-          {navControls}
-        </div>
-      </nav>
-
-      <main className="relative z-10 min-h-[calc(100vh-68px)] px-4 py-5 sm:px-7 sm:py-7 xl:px-10">
+      <main className="relative z-10 min-h-0 px-4 py-5 sm:px-7 sm:py-7 xl:px-10">
         <div
           className={cn(
             "mx-auto w-full max-w-[1280px]",
@@ -142,8 +123,8 @@ function BirthInputProgress({ steps }: { steps: BirthInputStep[] }) {
       </div>
       <div className="sr-only mt-2 h-0.5 overflow-hidden bg-white/8">
         <div
-          className="h-full bg-gold transition-[width] duration-300"
-          style={{ width: `${percent}%` }}
+          className="h-full bg-gold origin-left transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]"
+          style={{ transform: `scaleX(${percent / 100})` }}
         />
       </div>
     </div>

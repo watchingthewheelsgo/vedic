@@ -1,4 +1,5 @@
-import { SignedIn, SignedOut, SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
+import { preferredScrollBehavior } from "../lib/motion";
+import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -34,9 +35,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { ApiError, api } from "../api";
-import { AccountCenter } from "../components/AccountCenter";
 import { ChartRevealProgress } from "../components/ChartRevealProgress";
-import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import {
   aggregateWorkshopStages,
   WORKSHOP_STAGES,
@@ -1255,7 +1254,7 @@ export function Session() {
     setActiveSection(index);
     document
       .getElementById(`section-${index}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ?.scrollIntoView({ behavior: preferredScrollBehavior(), block: "start" });
   }
 
   async function onExport() {
@@ -1455,13 +1454,13 @@ export function Session() {
   );
 
   return (
-    <div className="app-shell flex h-screen flex-col overflow-hidden bg-cream-2">
+    <div className="app-shell flex h-[calc(100dvh-136px)] lg:h-[calc(100dvh-64px)] flex-col overflow-hidden bg-cream-2">
       <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-3 py-3 backdrop-blur-lg sm:px-8">
         <button
           className="brand-logo mr-1 border-0 bg-transparent sm:mr-3"
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/app/charts")}
         >
-          Vedic<span>Dust</span>
+          ← {t("account.page.libraryTitle")}
         </button>
         <Button
           variant="tab"
@@ -1484,7 +1483,6 @@ export function Session() {
           <span className="hidden sm:inline">{t("session.tab.report")}</span>
         </Button>
         <div className="flex-1" />
-        <SessionAuthControls />
       </div>
 
       {error && (
@@ -1949,31 +1947,6 @@ function ReadingJourneyBar({ phases }: { phases: ReadingProductPhase[] }) {
   );
 }
 
-function SessionAuthControls() {
-  const { t } = useI18n();
-  return (
-    <div className="flex items-center gap-2">
-      <LanguageSwitcher />
-      <SignedOut>
-        <span className="hidden rounded-full border border-gold/25 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold-dim sm:inline-flex">
-          {t("common.trialMode")}
-        </span>
-        <SignInButton mode="modal">
-          <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
-            {t("common.signIn")}
-          </Button>
-        </SignInButton>
-        <SignUpButton mode="modal">
-          <Button size="sm">{t("common.createAccount")}</Button>
-        </SignUpButton>
-      </SignedOut>
-      <SignedIn>
-        <AccountCenter compact />
-      </SignedIn>
-    </div>
-  );
-}
-
 function ReadingRevealPanel({
   session,
   pipelineData,
@@ -2111,8 +2084,8 @@ function ReadingRevealPanel({
               aria-valuemax={100}
             >
               <span
-                className="block h-full rounded-full bg-linear-to-r from-gold-dim via-gold to-gold-light transition-[width] duration-500"
-                style={{ width: `${percent}%` }}
+                className="block h-full rounded-full bg-linear-to-r from-gold-dim via-gold to-gold-light origin-left transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]"
+                style={{ transform: `scaleX(${percent / 100})` }}
               />
             </div>
           </div>
@@ -3017,7 +2990,7 @@ function VedicChartPanel({ record }: { record: Record<string, unknown> }) {
         </div>
       </div>
 
-      <div className="mx-auto grid aspect-square w-full max-w-[430px] grid-cols-4 grid-rows-4 border border-gold/35 bg-[rgba(255,252,244,0.72)] shadow-[0_18px_45px_rgba(45,31,17,0.10)]">
+      <div className="mx-auto grid aspect-square w-full max-w-[430px] grid-cols-4 grid-rows-4 border border-gold/35 bg-[#211c28] shadow-[0_18px_45px_rgba(45,31,17,0.10)]">
         {SOUTH_INDIAN_SIGN_CELLS.map((cell) => {
           const grahas = placementsBySign.get(cell.signIndex) ?? [];
           const hasLagna = lagnaSignIndex === cell.signIndex;
@@ -3922,8 +3895,8 @@ function LifeEventCollector({
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-gold/15">
             <div
-              className="h-full rounded-full bg-gold transition-[width] duration-300"
-              style={{ width: `${Math.min(100, (confirmedEventCount / target) * 100)}%` }}
+              className="h-full rounded-full bg-gold origin-left transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]"
+              style={{ transform: `scaleX(${Math.min(1, confirmedEventCount / target)})` }}
             />
           </div>
         </div>
@@ -4965,8 +4938,8 @@ function ReaderDetail({
                 aria-valuenow={answeredCount}
               >
                 <span
-                  className="block h-full rounded-full bg-gold transition-[width] duration-300"
-                  style={{ width: `${Math.round((answeredCount / anchors.length) * 100)}%` }}
+                  className="block h-full rounded-full bg-gold origin-left transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]"
+                  style={{ transform: `scaleX(${answeredCount / anchors.length})` }}
                 />
               </div>
             )}

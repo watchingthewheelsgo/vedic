@@ -24,6 +24,11 @@ FROM caddy:2-alpine AS web
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=frontend-build /app/dist/client /srv
 
+FROM caddy:2-alpine AS web-vps
+
+COPY deploy/Caddyfile.vps /etc/caddy/Caddyfile
+COPY --from=frontend-build /app/dist/client /srv
+
 
 FROM python:3.11-slim-bookworm AS backend-build
 
@@ -55,7 +60,7 @@ ENV HOME=/home/vedicsign \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PYTHONPATH=/app/backend \
     PYTHONUNBUFFERED=1 \
-    PATH=/app/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin
+    PATH=/app/backend/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 
 WORKDIR /app
 

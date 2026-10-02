@@ -1,0 +1,8 @@
+:80 {
+  encode gzip
+  root * /srv
+  try_files {path} /index.html
+  file_server
+  header /index.html Cache-Control "no-cache"
+  header X-Content-Type-Options nosniff
+}

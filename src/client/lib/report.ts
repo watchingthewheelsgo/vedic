@@ -13,7 +13,7 @@ export const reportOrder = [
 ];
 
 export const reportTitles: Record<string, string> = {
-  "consultation_report.md": "VedicDust Consultation",
+  "consultation_report.md": "Sign Atlas Consultation",
   "rectification_report.md": "Birth Time Review",
   "bazi_data_audit.md": "BaZi Data Audit",
   "bazi_overview.md": "BaZi Overview",

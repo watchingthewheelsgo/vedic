@@ -1,18 +1,14 @@
 import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  type ReactNode
-} from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
-import { api, setAnonymousIdProvider, setAuthFailureHandler, setAuthTokenProvider } from "./api";
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { Navigate, Route, Routes, useLocation, useSearchParams, useParams } from "react-router-dom";
+import { api, setAuthFailureHandler, setAuthTokenProvider } from "./api";
+import { WorkspaceLayout } from "./components/WorkspaceLayout";
+import { safeWorkspaceReturn } from "./lib/workspace";
 import { CosmicBackdrop } from "./components/CosmicBackdrop";
 import { Button } from "./components/ui/button";
 import { useI18n } from "./i18n/provider";
+
+const Daily = lazy(() => import("./screens/Daily").then((module) => ({ default: module.Daily })));
 
 const Landing = lazy(() =>
   import("./screens/Landing").then((module) => ({ default: module.Landing }))
@@ -46,7 +42,6 @@ const ChartRevealPreview = lazy(() =>
 export function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { t } = useI18n();
-  const anonymousId = useMemo(() => ensureAnonymousId(), []);
   const [sessionExpired, setSessionExpired] = useState(false);
 
   useLayoutEffect(() => {
@@ -69,11 +64,6 @@ export function App() {
   useEffect(() => {
     if (isSignedIn) setSessionExpired(false);
   }, [isSignedIn]);
-
-  useLayoutEffect(() => {
-    setAnonymousIdProvider(() => anonymousId);
-    return () => setAnonymousIdProvider(null);
-  }, [anonymousId]);
 
   return (
     <div className="cosmic-site relative min-h-screen overflow-x-clip bg-night text-cream">
@@ -99,19 +89,48 @@ export function App() {
       <div className="relative z-10 min-h-screen">
         <Suspense fallback={<RouteLoadingState />}>
           <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/new" element={<Intake />} />
-            <Route path="/bazi" element={<BaziWorkshop />} />
-            <Route path="/session/:id" element={<Session />} />
-            <Route path="/dev/chart-reveal" element={<ChartRevealPreview />} />
             <Route
-              path="/account"
+              path="/"
               element={
-                <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
-                  <Account />
-                </RequireAuth>
+                !isLoaded ? (
+                  <RouteLoadingState />
+                ) : isSignedIn ? (
+                  <Navigate to="/app" replace />
+                ) : (
+                  <Landing />
+                )
               }
             />
+            <Route path="/welcome" element={<Landing />} />
+            <Route
+              path="/sign-in"
+              element={<SignInPage isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)} />}
+            />
+            <Route
+              path="/app"
+              element={
+                <RequireAuth isLoaded={isLoaded} isSignedIn={Boolean(isSignedIn)}>
+                  <WorkspaceLayout />
+                </RequireAuth>
+              }
+            >
+              <Route index element={<Daily view="today" />} />
+              <Route path="records" element={<Daily view="records" />} />
+              <Route path="explore" element={<Daily view="explore" />} />
+              <Route path="charts" element={<Account view="charts" />} />
+              <Route path="settings" element={<Account view="settings" />} />
+              <Route path="charts/new" element={<Intake />} />
+              <Route path="charts/bazi" element={<BaziWorkshop />} />
+              <Route path="charts/:id" element={<Session />} />
+            </Route>
+            <Route path="/daily" element={<Navigate to="/app" replace />} />
+            <Route path="/account" element={<Navigate to="/app/settings" replace />} />
+            <Route path="/new" element={<Navigate to="/app/charts/new" replace />} />
+            <Route path="/bazi" element={<Navigate to="/app/charts/bazi" replace />} />
+            <Route path="/session/:id" element={<LegacySession />} />
+            {import.meta.env.DEV && (
+              <Route path="/dev/chart-reveal" element={<ChartRevealPreview />} />
+            )}
             <Route path="/admin" element={<Navigate to="/admin/sessions" replace />} />
             <Route
               path="/admin/sessions"
@@ -145,17 +164,40 @@ function RouteLoadingState() {
   );
 }
 
-function ensureAnonymousId() {
-  const key = "vedic.anonymousUserId";
-  const existing = window.localStorage.getItem(key);
-  if (existing?.match(/^anonym_[A-Za-z0-9_-]{8,64}$/)) return existing;
-  const random =
-    "randomUUID" in crypto
-      ? crypto.randomUUID().replaceAll("-", "").slice(0, 18)
-      : Math.random().toString(36).slice(2, 20);
-  const value = `anonym_${random}`;
-  window.localStorage.setItem(key, value);
-  return value;
+function LegacySession() {
+  const { id } = useParams();
+  const location = useLocation();
+  return (
+    <Navigate
+      to={`/app/charts/${encodeURIComponent(id ?? "")}${location.search}${location.hash}`}
+      replace
+    />
+  );
+}
+
+function SignInPage({ isLoaded, isSignedIn }: { isLoaded: boolean; isSignedIn: boolean }) {
+  const [params] = useSearchParams();
+  const { t } = useI18n();
+  const destination = safeWorkspaceReturn(params.get("returnTo"));
+  if (!isLoaded) return <RouteLoadingState />;
+  if (isSignedIn) return <Navigate to={destination} replace />;
+  return (
+    <div className="mx-auto grid min-h-dvh max-w-lg place-content-center gap-5 px-6 text-center">
+      <a href="/welcome" className="brand-logo mb-6">
+        Sign <span>Atlas</span>
+      </a>
+      <h1 className="text-3xl">{t("auth.requiredTitle")}</h1>
+      <p className="text-sm leading-7 text-cream/65">{t("auth.requiredBody")}</p>
+      <div className="flex justify-center gap-3">
+        <SignInButton mode="modal" forceRedirectUrl={destination}>
+          <Button>{t("common.signIn")}</Button>
+        </SignInButton>
+        <SignUpButton mode="modal" forceRedirectUrl={destination}>
+          <Button variant="outline">{t("common.createAccount")}</Button>
+        </SignUpButton>
+      </div>
+    </div>
+  );
 }
 
 function RequireAuth({
@@ -168,6 +210,7 @@ function RequireAuth({
   isSignedIn: boolean;
 }) {
   const { t } = useI18n();
+  const location = useLocation();
 
   if (!isLoaded) {
     return (
@@ -179,23 +222,10 @@ function RequireAuth({
 
   if (!isSignedIn) {
     return (
-      <div className="grid min-h-screen place-items-center px-6 text-cream">
-        <div className="max-w-[460px] rounded-lg border border-gold/25 bg-[rgba(16,12,22,0.72)] p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur-xl">
-          <div className="mb-2 text-[10px] uppercase tracking-[2px] text-gold">
-            {t("auth.requiredEyebrow")}
-          </div>
-          <h1 className="mb-3 text-2xl font-semibold tracking-normal">{t("auth.requiredTitle")}</h1>
-          <p className="mb-5 text-sm leading-[1.7] text-cream/68">{t("auth.requiredBody")}</p>
-          <div className="flex justify-center gap-2">
-            <SignInButton mode="modal">
-              <Button>{t("common.signIn")}</Button>
-            </SignInButton>
-            <SignUpButton mode="modal">
-              <Button variant="outline">{t("common.createAccount")}</Button>
-            </SignUpButton>
-          </div>
-        </div>
-      </div>
+      <Navigate
+        to={`/sign-in?returnTo=${encodeURIComponent(location.pathname + location.search)}`}
+        replace
+      />
     );
   }
 

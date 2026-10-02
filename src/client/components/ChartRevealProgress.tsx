@@ -332,8 +332,8 @@ export function ChartRevealProgress({
                     dominantBaseline="central"
                     className={active ? "fill-gold-light" : "fill-cream/50"}
                     style={{
-                      fontSize: active ? 17 : 13,
-                      transition: "font-size 500ms ease, fill 500ms ease",
+                      fontSize: 13,
+                      transition: "fill 200ms ease",
                       filter: active ? "drop-shadow(0 0 5px rgba(237,217,163,0.75))" : "none"
                     }}
                   >

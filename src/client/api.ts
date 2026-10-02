@@ -1,3 +1,4 @@
+import { resolveApiUrl } from "./lib/api-url";
 import type {
   AppLocale,
   AccountProfileResponse,
@@ -28,13 +29,11 @@ import type {
 } from "../shared/domain";
 
 type AuthTokenProvider = () => Promise<string | null>;
-type AnonymousIdProvider = () => string | null;
 type AuthFailureHandler = (failure: { status: number; detail: string }) => void | Promise<void>;
 const AUTH_EXPIRED_MESSAGE = "Your session expired. Please sign in again.";
 const AUTH_REQUIRED_MESSAGE = "Sign in to continue";
 
 let authTokenProvider: AuthTokenProvider | null = null;
-let anonymousIdProvider: AnonymousIdProvider | null = null;
 let authFailureHandler: AuthFailureHandler | null = null;
 
 export class ApiError extends Error {
@@ -52,16 +51,12 @@ export function setAuthTokenProvider(provider: AuthTokenProvider | null) {
   authTokenProvider = provider;
 }
 
-export function setAnonymousIdProvider(provider: AnonymousIdProvider | null) {
-  anonymousIdProvider = provider;
-}
-
 export function setAuthFailureHandler(handler: AuthFailureHandler | null) {
   authFailureHandler = handler;
 }
 
 async function authHeaders({
-  requireToken = false
+  requireToken = true
 }: {
   requireToken?: boolean;
 } = {}): Promise<Record<string, string>> {
@@ -75,10 +70,8 @@ async function authHeaders({
   if (requireToken && !token) {
     throw new Error(tokenError instanceof Error ? tokenError.message : AUTH_REQUIRED_MESSAGE);
   }
-  const anonymousId = anonymousIdProvider?.();
   return {
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
-    ...(anonymousId ? { "x-vedic-anonymous-id": anonymousId } : {})
+    ...(token ? { authorization: `Bearer ${token}` } : {})
   };
 }
 
@@ -124,7 +117,7 @@ async function postJson<TResponse, TBody>(
   body: TBody,
   options: { requireAuth?: boolean } = {}
 ): Promise<TResponse> {
-  const response = await fetch(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -145,7 +138,7 @@ async function getJson<TResponse>(
   signal?: AbortSignal,
   options: { requireAuth?: boolean } = {}
 ): Promise<TResponse> {
-  const response = await fetch(path, {
+  const response = await fetch(resolveApiUrl(path), {
     headers: await authHeaders({ requireToken: options.requireAuth }),
     signal
   });
@@ -158,7 +151,9 @@ async function getJson<TResponse>(
 }
 
 async function downloadFile(path: string, filename: string): Promise<void> {
-  const response = await fetch(path, { headers: await authHeaders({ requireToken: true }) });
+  const response = await fetch(resolveApiUrl(path), {
+    headers: await authHeaders({ requireToken: true })
+  });
   if (!response.ok) {
     await throwApiError(response);
   }
@@ -175,6 +170,63 @@ async function downloadFile(path: string, filename: string): Promise<void> {
 }
 
 export const api = {
+  updateReflectionAction(input: {
+    day: string;
+    reflection_id: string;
+    lens: "bazi" | "vedic" | "tarot";
+    status: "planned" | "done" | "none";
+  }) {
+    return postJson<import("./lib/journal").Reflection, typeof input>(
+      "/api/me/journal/actions",
+      input,
+      { requireAuth: true }
+    );
+  },
+  reflectJournal(input: {
+    day: string;
+    question: string;
+    request_id: string;
+    locale: string;
+    session_id: string | null;
+  }) {
+    return postJson<import("./lib/journal").Reflection, typeof input>(
+      "/api/me/journal/reflect",
+      input,
+      { requireAuth: true }
+    );
+  },
+  getJournalDay(day: string) {
+    return getJson<import("./lib/journal").JournalEntry>(
+      `/api/me/journal/${encodeURIComponent(day)}`,
+      undefined,
+      { requireAuth: true }
+    );
+  },
+  getJournal(timezone: string) {
+    return getJson<import("./lib/journal").JournalResponse>(
+      `/api/me/journal?timezone=${encodeURIComponent(timezone)}`,
+      undefined,
+      { requireAuth: true }
+    );
+  },
+  async saveJournal(entry: import("./lib/journal").JournalInput) {
+    const response = await fetch(resolveApiUrl("/api/me/journal"), {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...(await authHeaders({ requireToken: true }))
+      },
+      body: JSON.stringify(entry)
+    });
+    if (!response.ok) await throwApiError(response);
+  },
+  async deleteJournal(day: string) {
+    const response = await fetch(resolveApiUrl(`/api/me/journal/${encodeURIComponent(day)}`), {
+      method: "DELETE",
+      headers: await authHeaders({ requireToken: true })
+    });
+    if (!response.ok) await throwApiError(response);
+  },
   searchPlaces(
     input: {
       level: PlaceSearchLevel;
@@ -216,7 +268,7 @@ export const api = {
     if (input.city) params.set("city", input.city);
     if (input.locale) params.set("locale", input.locale);
     if (input.limit) params.set("limit", String(input.limit));
-    const response = await fetch(`/api/precise-places/stream?${params.toString()}`, {
+    const response = await fetch(resolveApiUrl(`/api/precise-places/stream?${params.toString()}`), {
       headers: await authHeaders(),
       signal
     });

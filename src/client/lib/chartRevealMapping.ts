@@ -6,7 +6,7 @@ import {
 import type { PipelineData } from "./pipeline";
 
 /**
- * Maps the native VedicDust pipeline onto the
+ * Maps the native Sign Atlas pipeline onto the
  * ChartRevealProgress visual. This is the single place that translates
  * "what the backend is doing" into "what lights up on the chart wheel" —
  * Pipeline stage details and this reveal view read the exact

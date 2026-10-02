@@ -89,7 +89,7 @@ export function BaziWorkshop() {
         audience: "self",
         topic: topic.trim() || "[not provided]"
       });
-      navigate(`/session/${session.sessionId}?tab=reading`, {
+      navigate(`/app/charts/${session.sessionId}?tab=reading`, {
         state: {
           name,
           concern: topic,

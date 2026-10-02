@@ -8,7 +8,7 @@ import type { PipelineData, PipelineNode } from "../lib/pipeline";
  * Not linked from any nav — visit /dev/chart-reveal directly.
  *
  * The "real pipeline simulation" panel below feeds deriveChartRevealState()
- * a synthetic PipelineData built from the native VedicDust node IDs so
+ * a synthetic PipelineData built from the native Sign Atlas node IDs so
  * this is the same code path Session.tsx will use once phase 3 wires it to
  * the real getCoreJob poll — only the data source changes, not the mapping.
  */

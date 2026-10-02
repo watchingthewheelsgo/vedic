@@ -5,9 +5,9 @@ import os
 
 from alembic import context
 from sqlalchemy import pool
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.db.engine import normalize_database_url
 from app.db.models import Base
 from app.settings import get_settings
 
@@ -18,7 +18,7 @@ target_metadata = Base.metadata
 
 def _database_url() -> str:
     raw = os.getenv("DATABASE_URL") or get_settings().resolved_database_url()
-    return str(make_url(raw))
+    return normalize_database_url(raw).render_as_string(hide_password=False)
 
 
 def run_migrations_offline() -> None:

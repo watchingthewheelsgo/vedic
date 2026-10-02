@@ -1,3 +1,6 @@
+import { workspaceCopy } from "../lib/workspace";
+import { journalCopy } from "../lib/journal";
+import { preferredScrollBehavior } from "../lib/motion";
 import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/clerk-react";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -19,17 +22,20 @@ const FAQS = ["1", "2", "3"];
 
 export function Landing() {
   const navigate = useNavigate();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [openFaq, setOpenFaq] = useState(0);
-  const start = () => navigate("/new");
+  const start = () => navigate("/app/charts/new");
   const heroStrong = t("landing.hero.strong");
 
   return (
     <div className="bg-cream text-ink">
-      <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-6 backdrop-blur-xl sm:px-10">
-        <div className="mx-auto flex h-16 max-w-[1100px] items-center justify-between">
-          <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-            Vedic<span>Dust</span>
+      <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-4 backdrop-blur-xl sm:px-8 lg:px-12">
+        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-3">
+          <button
+            className="brand-logo shrink-0 border-0 bg-transparent"
+            onClick={() => navigate("/welcome")}
+          >
+            Sign <span>Atlas</span>
           </button>
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
@@ -42,7 +48,16 @@ export function Landing() {
               </SignUpButton>
             </SignedOut>
             <SignedIn>
-              <Button onClick={start}>{t("landing.nav.reportArrow")}</Button>
+              <Button
+                variant="ghost"
+                className="hidden sm:inline-flex"
+                onClick={() => navigate("/app")}
+              >
+                {workspaceCopy[locale].space}
+              </Button>
+              <Button className="hidden sm:inline-flex" onClick={start}>
+                {t("landing.nav.reportArrow")}
+              </Button>
               <AccountCenter />
             </SignedIn>
           </div>
@@ -61,25 +76,108 @@ export function Landing() {
           {t("landing.hero.body")}
         </p>
         <div className="flex flex-wrap justify-center gap-3">
-          <Button size="lg" onClick={start} className="px-9">
-            {t("landing.nav.report")}
-          </Button>
+          <SignedIn>
+            <Button size="lg" onClick={() => navigate("/app")} className="px-9">
+              {workspaceCopy[locale].homeAction}
+            </Button>
+            <Button size="lg" variant="outline" onClick={start} className="px-7">
+              {t("landing.nav.report")}
+            </Button>
+          </SignedIn>
+          <SignedOut>
+            <Button size="lg" onClick={() => navigate("/app")} className="px-9">
+              {workspaceCopy[locale].homeAction}
+            </Button>
+          </SignedOut>
           <Button
             size="lg"
             variant="outline"
             className="px-7"
             onClick={() =>
-              document.getElementById("sample")?.scrollIntoView({ behavior: "smooth" })
+              document
+                .getElementById("traditions")
+                ?.scrollIntoView({ behavior: preferredScrollBehavior() })
             }
           >
-            {t("landing.nav.sample")}
+            {t("landing.paths.explore")}
           </Button>
         </div>
-        <div className="mt-14 flex flex-wrap justify-center gap-10 sm:gap-12">
-          <HeroMeta value="15" label={t("landing.meta.pages")} />
-          <HeroMeta value="9" label={t("landing.meta.planets")} />
-          <HeroMeta value="12" label={t("landing.meta.lifeAreas")} />
-          <HeroMeta value="D9" label={t("landing.meta.d9")} />
+      </section>
+
+      <section className="border-y border-white/8 px-6 py-16 sm:px-10">
+        <div className="mx-auto max-w-[1120px]">
+          <p className="mb-3 text-xs tracking-widest text-gold">
+            SIGN ATLAS · {workspaceCopy[locale].space}
+          </p>
+          <h2 className="text-3xl font-medium">
+            {locale === "zh"
+              ? "生活的线索，慢慢连成自己的地图。"
+              : locale === "ja"
+                ? "日々の出来事から、自分の地図を。"
+                : "Turn everyday moments into a map of your own."}
+          </h2>
+          <div className="mt-10 grid gap-8 sm:grid-cols-3">
+            {[
+              workspaceCopy[locale].today,
+              workspaceCopy[locale].explore,
+              workspaceCopy[locale].records
+            ].map((title, i) => (
+              <div key={title}>
+                <p className="mb-4 font-mono text-sm text-gold/70">0{i + 1}</p>
+                <h3 className="text-xl">{title}</h3>
+                <p className="mt-3 text-sm leading-7 text-cream/65">
+                  {
+                    [
+                      workspaceCopy[locale].todayBody,
+                      workspaceCopy[locale].exploreBody,
+                      workspaceCopy[locale].recordsBody
+                    ][i]
+                  }
+                </p>
+              </div>
+            ))}
+          </div>
+          <Button className="mt-8" onClick={() => navigate("/app")}>
+            {workspaceCopy[locale].homeAction} →
+          </Button>
+        </div>
+      </section>
+      <section id="traditions" className="bg-cream-2 px-6 py-16 sm:px-10">
+        <div className="mx-auto max-w-[1100px]">
+          <SectionTitle
+            title={t("landing.paths.title")}
+            strong=""
+            subtitle={t("landing.paths.body")}
+          />
+          <div className="grid gap-5 md:grid-cols-3">
+            {(["vedic", "bazi", "tarot"] as const).map((path, index) => (
+              <article
+                key={path}
+                className="flex flex-col rounded-lg border border-gold/25 bg-cream p-7 sm:p-8"
+              >
+                <div className="mb-8 flex items-center justify-between text-gold">
+                  <span aria-hidden="true" className="font-serif text-5xl">
+                    {["☉", "五", "✧"][index]}
+                  </span>
+                  <span className="text-xs tracking-widest">0{index + 1}</span>
+                </div>
+                <p className="mb-3 text-xs uppercase tracking-widest text-gold">
+                  {t(path === "vedic" ? "landing.paths.live" : "landing.paths.soon")}
+                </p>
+                <h2 className="mb-4 text-xl font-semibold">{t(`landing.paths.${path}.title`)}</h2>
+                <p className="mb-8 flex-1 text-sm leading-7 text-body">
+                  {t(`landing.paths.${path}.body`)}
+                </p>
+                <Button
+                  variant={path === "vedic" ? "gold" : "outline"}
+                  disabled={path !== "vedic"}
+                  onClick={path === "vedic" ? start : undefined}
+                >
+                  {t(path === "vedic" ? "landing.nav.report" : "landing.paths.soon")}
+                </Button>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -152,41 +250,33 @@ export function Landing() {
         </div>
       </section>
 
-      <Section
-        title={t("landing.plan.title")}
-        strong={t("landing.plan.strong")}
-        subtitle={t("landing.plan.subtitle")}
-      >
-        <div className="mx-auto grid max-w-[760px] gap-5 md:grid-cols-2">
-          <PriceCard
-            name={t("landing.plan.essential.name")}
-            price="$39"
-            description={t("landing.plan.essential.description")}
-            features={[
-              t("landing.plan.essential.f1"),
-              t("landing.plan.essential.f2"),
-              t("landing.plan.essential.f3"),
-              t("landing.plan.essential.f4")
-            ]}
-            onClick={start}
-          />
-          <PriceCard
-            featured
-            name={t("landing.plan.pro.name")}
-            price="$79"
-            description={t("landing.plan.pro.description")}
-            features={[
-              t("landing.plan.pro.f1"),
-              t("landing.plan.pro.f2"),
-              t("landing.plan.pro.f3"),
-              t("landing.plan.pro.f4"),
-              t("landing.plan.pro.f5"),
-              t("landing.plan.pro.f6")
-            ]}
-            onClick={start}
-          />
+      <section className="px-6 py-16 sm:px-10">
+        <div className="mx-auto grid max-w-[1000px] gap-5 md:grid-cols-2">
+          <div className="rounded-2xl border border-gold/30 bg-gold/10 p-7">
+            <h2 className="text-2xl font-medium text-cream">{workspaceCopy[locale].space}</h2>
+            <p className="my-4 text-sm leading-7 text-cream/75">{journalCopy[locale].subtitle}</p>
+            <p className="mb-6 text-sm leading-7 text-cream/65">
+              {workspaceCopy[locale].homeAction} · {journalCopy[locale].history} ·{" "}
+              {journalCopy[locale].ask}
+            </p>
+            <Button onClick={() => navigate("/app")}>{workspaceCopy[locale].homeAction}</Button>
+          </div>
+          <div className="rounded-2xl border border-white/15 bg-white/[0.035] p-7">
+            <h2 className="text-2xl font-medium text-cream">{t("landing.paths.vedic.title")}</h2>
+            <p className="my-4 text-sm leading-7 text-cream/75">{t("landing.paths.vedic.body")}</p>
+            <p className="mb-6 text-sm text-cream/65">
+              {locale === "zh"
+                ? "先确认出生信息。付费内容与实际价格以账户方案和结账页为准。"
+                : locale === "ja"
+                  ? "出生情報を確認して開始。料金と利用権限はアカウントと決済画面をご確認ください。"
+                  : "Start with your birth details. See your account and checkout for current pricing and access."}
+            </p>
+            <Button variant="outline" onClick={start}>
+              {t("landing.nav.reportArrow")}
+            </Button>
+          </div>
         </div>
-      </Section>
+      </section>
 
       <Section
         className="bg-cream-2"
@@ -198,6 +288,9 @@ export function Landing() {
             <div key={item} className="border-b border-gold/25 py-5">
               <button
                 className="flex w-full items-center justify-between gap-4 bg-transparent text-left text-[15px] font-medium"
+                id={`faq-trigger-${item}`}
+                aria-expanded={openFaq === index}
+                aria-controls={`faq-panel-${item}`}
                 onClick={() => setOpenFaq(openFaq === index ? -1 : index)}
               >
                 {t(`landing.faq.q${item}`)}
@@ -207,9 +300,14 @@ export function Landing() {
                   ↓
                 </span>
               </button>
-              {openFaq === index && (
+              <div
+                id={`faq-panel-${item}`}
+                role="region"
+                aria-labelledby={`faq-trigger-${item}`}
+                hidden={openFaq !== index}
+              >
                 <p className="mt-3 text-sm leading-[1.85] text-body">{t(`landing.faq.a${item}`)}</p>
-              )}
+              </div>
             </div>
           ))}
         </div>
@@ -217,18 +315,10 @@ export function Landing() {
 
       <footer className="bg-night px-5 py-8 text-center text-[13px] tracking-[0.3px] text-cream/40">
         <p>
-          © 2026 <span className="text-gold/60">VedicDust</span> &nbsp;·&nbsp; {t("landing.footer")}
+          © 2026 <span className="text-gold/60">Sign Atlas</span> &nbsp;·&nbsp;{" "}
+          {t("landing.footer")}
         </p>
       </footer>
-    </div>
-  );
-}
-
-function HeroMeta({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="text-center">
-      <div className="text-[30px] font-semibold text-gold">{value}</div>
-      <div className="mt-0.5 text-xs tracking-[0.5px] text-muted">{label}</div>
     </div>
   );
 }
@@ -321,53 +411,5 @@ function SampleTable() {
         ))}
       </tbody>
     </table>
-  );
-}
-
-function PriceCard({
-  featured = false,
-  name,
-  price,
-  description,
-  features,
-  onClick
-}: {
-  featured?: boolean;
-  name: string;
-  price: string;
-  description: string;
-  features: string[];
-  onClick: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <div
-      className={`relative rounded-md border bg-cream p-9 ${featured ? "border-gold shadow-[0_0_0_1px_var(--color-gold)]" : "border-gold/25"}`}
-    >
-      {featured && (
-        <div className="absolute left-1/2 top-[-13px] -translate-x-1/2 rounded-full bg-gold px-3.5 py-1 text-[10px] uppercase tracking-[2px] text-white">
-          {t("landing.plan.popular")}
-        </div>
-      )}
-      <div className="mb-2 text-xs uppercase tracking-[2px] text-muted">{name}</div>
-      <div className="mb-1 text-[44px] font-semibold text-ink">
-        {price}
-        <span className="text-[15px] font-normal text-muted"> {t("landing.plan.unit")}</span>
-      </div>
-      <p className="mb-6 border-b border-gold/25 pb-6 text-[13px] text-body">{description}</p>
-      <ul className="mb-8 space-y-2">
-        {features.map((feature) => (
-          <li
-            key={feature}
-            className="flex items-start gap-2.5 text-sm text-body before:mt-0.5 before:font-bold before:text-gold before:content-['✓']"
-          >
-            {feature}
-          </li>
-        ))}
-      </ul>
-      <Button variant={featured ? "gold" : "outline"} className="w-full" onClick={onClick}>
-        {t("landing.plan.choose", { name })}
-      </Button>
-    </div>
   );
 }

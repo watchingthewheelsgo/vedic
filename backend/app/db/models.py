@@ -241,3 +241,21 @@ class VedicCoreJobNodeRecord(Base):
     )
 
     __table_args__ = (UniqueConstraint("job_id", "node_id", name="uq_vedic_job_node"),)
+
+
+class JournalEntryRecord(Base):
+    __tablename__ = "journal_entries"
+    __table_args__ = (UniqueConstraint("owner_user_id", "day", name="uq_journal_owner_day"),)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    day: Mapped[str] = mapped_column(String(10))
+    timezone: Mapped[str] = mapped_column(String(80))
+    mood: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(Text)
+    topic: Mapped[str] = mapped_column(String(32))
+    calendar: Mapped[dict] = mapped_column(JSON)
+    reflections: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), onupdate=func.now()
+    )

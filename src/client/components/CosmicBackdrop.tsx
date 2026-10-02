@@ -25,7 +25,7 @@ export function CosmicBackdrop() {
 }
 
 function isImmersiveRoute(pathname: string) {
-  return pathname === "/" || pathname === "/bazi";
+  return pathname === "/" || pathname === "/welcome";
 }
 
 function usePrefersReducedMotion() {

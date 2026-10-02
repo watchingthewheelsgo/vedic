@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
-from app.auth import AuthenticatedUser, require_user, resolve_session_user
+from app.auth import AuthenticatedUser, require_user
 from app.calculator.civil_time import AmbiguousCivilTimeError
 from app.container import get_container
 from app.db.engine import close_db, database_diagnostic_context, init_db
@@ -72,7 +72,11 @@ async def lifespan(_: FastAPI):
         await close_db()
 
 
+from app.services.daily_journal import router as journal_router
+
 app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0", lifespan=lifespan)
+
+app.include_router(journal_router)
 
 _settings = get_settings()
 
@@ -106,7 +110,7 @@ async def health() -> dict[str, object]:
     }
 
 
-@app.get("/api/places", response_model=PlaceSearchResponse)
+@app.get("/api/places", dependencies=[Depends(require_user)], response_model=PlaceSearchResponse)
 async def places(
     level: Literal["country", "region", "city"],
     q: str = Query(default=""),
@@ -128,7 +132,11 @@ async def places(
         raise _internal_server_error("place search", exc) from exc
 
 
-@app.get("/api/precise-places", response_model=PrecisePlaceSearchResponse)
+@app.get(
+    "/api/precise-places",
+    dependencies=[Depends(require_user)],
+    response_model=PrecisePlaceSearchResponse,
+)
 async def precise_places(
     request: Request,
     q: str = Query(default="", min_length=0, max_length=120),
@@ -156,7 +164,7 @@ async def precise_places(
         raise _internal_server_error("precise place search", exc) from exc
 
 
-@app.get("/api/precise-places/stream")
+@app.get("/api/precise-places/stream", dependencies=[Depends(require_user)])
 async def precise_places_stream(
     request: Request,
     q: str = Query(default="", min_length=0, max_length=120),
@@ -368,7 +376,7 @@ async def receive_creem_webhook(
 @app.post("/api/skill-sessions", response_model=SkillSessionResponse)
 async def create_skill_session(
     input_data: SkillBirthInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -392,7 +400,7 @@ async def create_skill_session(
 @app.post("/api/bazi-sessions", response_model=SkillSessionResponse)
 async def create_bazi_session(
     input_data: BaziSessionInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -414,7 +422,7 @@ async def create_bazi_session(
 @app.get("/api/skill-sessions/{session_id}", response_model=SkillSessionResponse)
 async def get_skill_session(
     session_id: str,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -434,7 +442,7 @@ async def get_skill_session(
 @app.post("/api/rectification-life-events", response_model=SkillSessionResponse)
 async def record_rectification_life_events(
     input_data: RectificationLifeEventsInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -463,7 +471,7 @@ async def record_rectification_life_events(
 @app.post("/api/rectification-life-events/reset", response_model=SkillSessionResponse)
 async def reset_rectification_life_events(
     input_data: RectificationLifeEventsResetInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -490,7 +498,7 @@ async def reset_rectification_life_events(
 @app.post("/api/rectification-interview", response_model=SkillSessionResponse)
 async def prepare_rectification_interview(
     input_data: RectificationInterviewInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -514,7 +522,7 @@ async def prepare_rectification_interview(
 @app.post("/api/rectification-confirmation", response_model=SkillSessionResponse)
 async def confirm_rectification_result(
     input_data: RectificationConfirmationInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -638,7 +646,7 @@ async def create_synastry_subject(
 @app.post("/api/skill-runs", response_model=SkillSessionResponse)
 async def run_skill(
     input_data: SkillRunInput,
-    current_user: AuthenticatedUser = Depends(resolve_session_user),
+    current_user: AuthenticatedUser = Depends(require_user),
 ) -> SkillSessionResponse:
     try:
         container = get_container()
@@ -767,16 +775,6 @@ async def _claim_or_assert_session_access(
     session_id: str,
     current_user: AuthenticatedUser,
 ) -> None:
-    if current_user.is_clerk and current_user.anonymous_user_id:
-        try:
-            await container.metadata_store.claim_session_owner(
-                session_id,
-                from_owner_user_id=current_user.anonymous_user_id,
-                to_owner_user_id=current_user.user_id,
-            )
-            return
-        except PermissionError:
-            pass
     await container.metadata_store.assert_session_access(session_id, current_user.owner_user_id)
 
 

@@ -34,21 +34,14 @@ def install_rejecting_clerk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth_module, "_verifier", lambda: RejectingClerkVerifier())
 
 
-def test_resolve_session_user_uses_anonymous_when_clerk_token_is_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.mark.parametrize("token", [None, "Bearer stale-token"])
+def test_anonymous_headers_never_grant_product_access(monkeypatch, token):
     install_rejecting_clerk(monkeypatch)
-
-    user = asyncio.run(
-        auth_module.resolve_session_user(
-            authorization="Bearer stale-token",
-            anonymous_id="anonym_abc12345",
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            auth_module.resolve_session_user(authorization=token, anonymous_id="anonym_abc12345")
         )
-    )
-
-    assert user.user_id == "anonym_abc12345"
-    assert user.auth_mode == "anonymous"
-    assert user.anonymous_user_id is None
+    assert error.value.status_code == 401
 
 
 def test_resolve_session_user_rejects_invalid_clerk_token_without_anonymous_id(
@@ -126,9 +119,9 @@ def test_api_endpoint_auth_dependency_matrix() -> None:
 
     assert route_dependencies == {
         "/api/health": [],
-        "/api/places": [],
-        "/api/precise-places": [],
-        "/api/precise-places/stream": [],
+        "/api/places": ["require_user"],
+        "/api/precise-places": ["require_user"],
+        "/api/precise-places/stream": ["require_user"],
         "/api/admin/sessions": ["require_user"],
         "/api/admin/sessions/{session_id}": ["require_user"],
         "/api/me": ["require_user"],
@@ -137,18 +130,18 @@ def test_api_endpoint_auth_dependency_matrix() -> None:
         "/api/billing/checkout": ["require_user"],
         "/api/billing/portal": ["require_user"],
         "/api/webhooks/creem": [],
-        "/api/skill-sessions": ["resolve_session_user"],
-        "/api/bazi-sessions": ["resolve_session_user"],
-        "/api/skill-sessions/{session_id}": ["resolve_session_user"],
-        "/api/rectification-life-events": ["resolve_session_user"],
-        "/api/rectification-life-events/reset": ["resolve_session_user"],
-        "/api/rectification-interview": ["resolve_session_user"],
-        "/api/rectification-confirmation": ["resolve_session_user"],
+        "/api/skill-sessions": ["require_user"],
+        "/api/bazi-sessions": ["require_user"],
+        "/api/skill-sessions/{session_id}": ["require_user"],
+        "/api/rectification-life-events": ["require_user"],
+        "/api/rectification-life-events/reset": ["require_user"],
+        "/api/rectification-interview": ["require_user"],
+        "/api/rectification-confirmation": ["require_user"],
         "/api/consultation-questions": ["require_user"],
         "/api/consultation-conversations/{session_id}": ["require_user"],
         "/api/skill-sessions/{session_id}/report.pdf": ["require_user"],
         "/api/skill-synastry-subject": ["require_user"],
-        "/api/skill-runs": ["resolve_session_user"],
+        "/api/skill-runs": ["require_user"],
         "/api/core-jobs": ["require_user"],
         "/api/core-jobs/{job_id}": ["require_user"],
         "/api/skill-feedback": ["require_user"],
@@ -394,5 +387,82 @@ def test_user_store_keeps_database_role_as_authority(tmp_path: Path) -> None:
             assert profile.is_admin is False
         finally:
             await close_db()
+
+    asyncio.run(run())
+
+
+def test_journal_routes_require_verified_users():
+    from app.services.daily_journal import router
+
+    for route in router.routes:
+        assert any(
+            dep.call is auth_module.require_user for dep in cast(Any, route).dependant.dependencies
+        )
+
+
+def test_verified_login_does_not_claim_legacy_anonymous_identity(monkeypatch):
+    monkeypatch.setattr(auth_module, "get_settings", lambda: AuthEnabledSettings())
+    verified = auth_module.AuthenticatedUser(user_id="user_verified", auth_mode="clerk")
+    monkeypatch.setattr(
+        auth_module, "_verifier", lambda: SimpleNamespace(verify=lambda _: verified)
+    )
+    user = asyncio.run(
+        auth_module.resolve_session_user(
+            authorization="Bearer valid", anonymous_id="anonym_abc12345"
+        )
+    )
+    assert user.user_id == "user_verified"
+    assert user.anonymous_user_id is None
+
+
+def test_legacy_owner_header_cannot_claim_a_private_report():
+    class Store:
+        async def claim_session_owner(self, *args, **kwargs):
+            pytest.fail("legacy ownership must never be claimed automatically")
+
+        async def assert_session_access(self, session_id, owner):
+            assert owner == "user_verified"
+            raise PermissionError("not owned")
+
+    user = auth_module.AuthenticatedUser(
+        user_id="user_verified", auth_mode="clerk", anonymous_user_id="anonym_abc12345"
+    )
+    with pytest.raises(PermissionError):
+        asyncio.run(
+            main_module._claim_or_assert_session_access(
+                SimpleNamespace(metadata_store=Store()), "old-session", user
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", "/api/me/journal"),
+        ("POST", "/api/me/journal/reflect"),
+        ("POST", "/api/me/journal/actions"),
+        ("POST", "/api/skill-sessions"),
+        ("POST", "/api/bazi-sessions"),
+        ("POST", "/api/skill-runs"),
+        ("GET", "/api/skill-sessions/private-id"),
+        ("GET", "/api/places"),
+        ("GET", "/api/precise-places"),
+    ],
+)
+def test_product_http_endpoints_reject_anonymous_headers(monkeypatch, method, path):
+    import httpx
+
+    install_rejecting_clerk(monkeypatch)
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            for headers in (
+                {"x-vedic-anonymous-id": "anonym_abc12345"},
+                {"authorization": "Bearer stale", "x-vedic-anonymous-id": "anonym_abc12345"},
+            ):
+                response = await client.request(method, path, headers=headers)
+                assert response.status_code == 401, response.text
 
     asyncio.run(run())

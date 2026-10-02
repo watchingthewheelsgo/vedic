@@ -188,7 +188,7 @@ export function Intake() {
     setErrors({});
     try {
       const session = await api.createSkillSession(birth);
-      navigate(`/session/${session.sessionId}?tab=reading`, {
+      navigate(`/app/charts/${session.sessionId}?tab=reading`, {
         state: { name, birth }
       });
     } catch (caught) {

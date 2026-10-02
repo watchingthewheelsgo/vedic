@@ -132,36 +132,12 @@ async def resolve_session_user(
             is_admin=True,
         )
 
-    anonymous = _anonymous_user(anonymous_id)
     if not authorization:
-        if anonymous:
-            return anonymous
-        raise HTTPException(status_code=401, detail="Missing anonymous session id")
+        raise HTTPException(status_code=401, detail="Sign in to continue")
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(status_code=401, detail="Expected Bearer token")
-    try:
-        user = _verifier().verify(token.strip())
-    except HTTPException as exc:
-        # Public reading endpoints accept anonymous sessions. If the browser has a
-        # stale/misconfigured Clerk token but still sends a valid anonymous id,
-        # keep the trial flow working as anonymous. Protected endpoints call
-        # require_user(), which will still reject the anonymous user below.
-        if exc.status_code == 401 and anonymous:
-            return AuthenticatedUser(
-                user_id=anonymous.user_id,
-                auth_mode=anonymous.auth_mode,
-                auth_error_detail=str(exc.detail),
-            )
-        raise
-    return AuthenticatedUser(
-        user_id=user.user_id,
-        auth_mode=user.auth_mode,
-        anonymous_user_id=anonymous.user_id if anonymous else None,
-        email=user.email,
-        role=user.role,
-        is_admin=user.is_admin,
-    )
+    return _verifier().verify(token.strip())
 
 
 async def require_user(

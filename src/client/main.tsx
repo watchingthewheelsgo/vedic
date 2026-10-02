@@ -28,7 +28,7 @@ const clerkAppearance = {
     socialButtonsBlockButton:
       "border-gold/25 bg-white/5 text-cream hover:bg-gold/10 hover:border-gold/50",
     formButtonPrimary:
-      "bg-gold text-white shadow-none hover:bg-gold-dim focus:ring-4 focus:ring-gold/20",
+      "bg-gold text-[#17120b] shadow-none hover:bg-gold-dim focus:ring-4 focus:ring-gold/20",
     formFieldInput:
       "border-gold/30 bg-white/5 text-cream focus:border-gold focus:ring-4 focus:ring-gold/15",
     footerActionLink: "text-gold-light hover:text-gold",
@@ -41,7 +41,12 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <AppI18nProvider>
       {clerkPublishableKey ? (
-        <ClerkProvider publishableKey={clerkPublishableKey} appearance={clerkAppearance}>
+        <ClerkProvider
+          publishableKey={clerkPublishableKey}
+          appearance={clerkAppearance}
+          signInFallbackRedirectUrl="/app"
+          signUpFallbackRedirectUrl="/app"
+        >
           <BrowserRouter>
             <App />
           </BrowserRouter>

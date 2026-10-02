@@ -23,6 +23,24 @@ export const reportTitleKeys: Record<string, string> = {
 
 export const messages: Record<LocaleCode, Dict> = {
   en: {
+    "landing.eyebrow": "A map for self-discovery",
+    "landing.paths.title": "Choose your lens",
+    "landing.paths.body":
+      "Three traditions, each with its own language. Explore them on their own terms.",
+    "landing.paths.vedic.title": "Indian Vedic Astrology",
+    "landing.paths.vedic.body":
+      "Read the birth chart through planetary patterns, life themes, and Dasha timing. A structured reading grounded in Jyotish.",
+    "landing.paths.bazi.title": "Chinese BaZi",
+    "landing.paths.bazi.body":
+      "Explore the Four Pillars, Five Elements, and the changing seasons of life through your birth date and time.",
+    "landing.paths.tarot.title": "Western Tarot",
+    "landing.paths.tarot.body":
+      "Use symbolic cards and intentional spreads to reflect on a question, explore perspectives, and consider your next step.",
+    "landing.paths.live": "Available now",
+    "landing.paths.soon": "Coming soon",
+    "landing.paths.explore": "Explore the three traditions",
+    "landing.paths.detail": "Discover what is inside a Vedic reading ↓",
+
     "lang.zh": "中文",
     "lang.en": "English",
     "lang.ja": "日本語",
@@ -79,7 +97,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "account.page.completed": "Done",
     "account.page.running": "Active",
     "account.page.privacyNote":
-      "Reports are tied to your account. Anonymous trial reports are claimed when you sign in from the same browser.",
+      "Your charts and reports are private and belong to your signed-in account.",
     "account.page.libraryEyebrow": "Reading library",
     "account.page.libraryTitle": "Your reports",
     "account.page.libraryBody":
@@ -116,20 +134,19 @@ export const messages: Record<LocaleCode, Dict> = {
     "clerk.missingEyebrow": "Clerk setup",
     "clerk.missingTitle": "Missing Clerk publishable key",
     "clerk.missingBody": "Set {key} in your local env, then restart the Vite dev server.",
-    "landing.nav.report": "Get My Report",
-    "landing.nav.reportArrow": "Get My Report ->",
+    "landing.nav.report": "Begin Vedic Reading",
+    "landing.nav.reportArrow": "Vedic Reading →",
     "landing.nav.sample": "View Sample",
-    "landing.eyebrow": "Parashari-first Jyotish · 7-karaka profile",
-    "landing.hero.title": "By Vedic light, ",
-    "landing.hero.strong": "read the turning of time",
+    "landing.hero.title": "Three traditions. ",
+    "landing.hero.strong": "Your own direction.",
     "landing.hero.body":
-      "Share your birth details. VedicDust prepares a structured Jyotish reading, checks a few lived-experience signals with you, then turns the chart into guidance, cautions, and themes to reflect on.",
+      "Sign Atlas brings together Indian Vedic astrology, Chinese BaZi, and Western Tarot: distinct traditions for exploring your patterns, timing, and choices. Begin with a Vedic reading today.",
     "landing.meta.pages": "Calculated Chart Layers",
     "landing.meta.planets": "Planetary Signals",
     "landing.meta.lifeAreas": "Life Areas",
     "landing.meta.d9": "Deeper Lens",
-    "landing.inside.title": "What's Inside",
-    "landing.inside.strong": "Your Reading",
+    "landing.inside.title": "Inside a",
+    "landing.inside.strong": "Vedic Reading",
     "landing.inside.subtitle":
       "Chart-based guidance without generic horoscope lines or fixed answers",
     "landing.feature.core.title": "Your Core Pattern",
@@ -167,7 +184,7 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.sample.row3": "Visibility through networks and long-range goals",
     "landing.plan.title": "Choose Your",
     "landing.plan.strong": "Plan",
-    "landing.plan.subtitle": "One-time · Lifetime access",
+    "landing.plan.subtitle": "Vedic readings · BaZi and Tarot are not yet available",
     "landing.plan.popular": "Most Popular",
     "landing.plan.unit": "/reading",
     "landing.plan.choose": "Choose {name}",
@@ -189,14 +206,14 @@ export const messages: Record<LocaleCode, Dict> = {
     "landing.faq.strong": "Questions",
     "landing.faq.q1": "How is Vedic Astrology different from Western Astrology?",
     "landing.faq.a1":
-      "Vedic Astrology (Jyotish) uses the sidereal zodiac and puts strong weight on the Ascendant (Lagna), planetary strength, and Dasha timing. In VedicDust, those methods are used for reflective guidance, timing awareness, and practical reminders - not fixed answers.",
+      "Vedic Astrology (Jyotish) uses the sidereal zodiac and puts strong weight on the Ascendant (Lagna), planetary strength, and Dasha timing. In Sign Atlas, those methods are used for reflective guidance, timing awareness, and practical reminders - not fixed answers.",
     "landing.faq.q2": "Do I need my exact birth time?",
     "landing.faq.a2":
       "The more precise, the better. Exact birth time makes the reading sharper, especially for timing and deeper chart layers. If you only know an approximate time, you can still continue; the reading will treat uncertain areas more carefully.",
     "landing.faq.q3": "How long does the reading take?",
     "landing.faq.a3":
       "A full reading usually takes several minutes. You can watch the reading progress live, and completed sections are saved as they become ready.",
-    "landing.footer": "Parashari-first method · 7-karaka profile · For self-reflection purposes",
+    "landing.footer": "Vedic · BaZi · Tarot · For reflection, not fixed predictions",
     "intake.step.personal": "Personal Info",
     "intake.step.birth": "Birth",
     "intake.step.location": "Location",
@@ -287,10 +304,9 @@ export const messages: Record<LocaleCode, Dict> = {
       "Daylight-saving time changed that night. Choose the occurrence that matches the birth record.",
     "intake.ambiguousTime.first": "Earlier occurrence",
     "intake.ambiguousTime.second": "Later occurrence",
-    "bazi.title": "BaZi Workshop",
-    "bazi.subtitle":
-      "Prepare the four pillars and luck-cycle workspace first, then run the classical report from the workshop page.",
-    "bazi.hiddenBadge": "Hidden BaZi Workshop",
+    "bazi.title": "BaZi birth chart",
+    "bazi.subtitle": "Enter your birth details to explore the four pillars and life cycles.",
+    "bazi.hiddenBadge": "Preview",
     "bazi.step.chart": "Chart",
     "bazi.calendar.label": "Calendar",
     "bazi.calendar.hint": "Default is solar.",
@@ -909,7 +925,7 @@ export const messages: Record<LocaleCode, Dict> = {
       "Completed sections have been saved. Resume will continue from the unfinished part.",
     "stage.failed.fallback":
       "This part did not finish. Resume will keep completed sections and retry the unfinished work.",
-    "report.title.consultation": "VedicDust Consultation",
+    "report.title.consultation": "Sign Atlas Consultation",
     "report.title.rectification": "Birth Time Review"
   },
   zh: {
@@ -925,6 +941,23 @@ export const messages: Record<LocaleCode, Dict> = {
 };
 
 const zhOverrides: Dict = {
+  "landing.eyebrow": "绘制属于你的自我探索地图",
+  "landing.paths.title": "选择一种视角",
+  "landing.paths.body": "三种传统，各有语言。从不同视角，认识同一个自己。",
+  "landing.paths.vedic.title": "印度占星 · Vedic",
+  "landing.paths.vedic.body":
+    "以出生星盘为起点，结合行星格局、人生主题与 Dasha 周期，展开有结构的 Jyotish 读盘。",
+  "landing.paths.bazi.title": "东方八字 · BaZi",
+  "landing.paths.bazi.body":
+    "从出生年月日时出发，透过四柱、五行与运势节奏，探索个人气质与人生阶段。",
+  "landing.paths.tarot.title": "西方塔罗 · Tarot",
+  "landing.paths.tarot.body":
+    "围绕当下的问题，以牌面象征与牌阵打开新的视角，梳理感受、可能性与下一步选择。",
+  "landing.paths.live": "已开放",
+  "landing.paths.soon": "即将上线",
+  "landing.paths.explore": "探索三种命理体系",
+  "landing.paths.detail": "了解印度占星读盘内容 ↓",
+
   "common.back": "返回",
   "common.cancel": "取消",
   "common.clear": "清除",
@@ -977,7 +1010,7 @@ const zhOverrides: Dict = {
   "account.page.completed": "完成",
   "account.page.running": "进行中",
   "account.page.privacyNote":
-    "报告会绑定到你的账户。同一浏览器中产生的匿名试用报告，会在登录后归入当前账户。",
+    "报告会绑定到你的账户。登录后创建的记录与报告，都保存在你的个人空间中。",
   "account.page.libraryEyebrow": "报告库",
   "account.page.libraryTitle": "你的报告",
   "account.page.libraryBody": "继续查看读盘、下载最终 PDF，或开始一份新报告。",
@@ -1012,19 +1045,19 @@ const zhOverrides: Dict = {
   "clerk.missingEyebrow": "Clerk 设置",
   "clerk.missingTitle": "缺少 Clerk publishable key",
   "clerk.missingBody": "请在本地环境中设置 {key}，然后重启 Vite 开发服务器。",
-  "landing.nav.report": "获取我的报告",
-  "landing.nav.reportArrow": "获取我的报告 ->",
+  "landing.nav.report": "开始印度占星读盘",
+  "landing.nav.reportArrow": "印度占星读盘 →",
   "landing.nav.sample": "查看样例",
-  "landing.hero.title": "借吠陀之光，",
-  "landing.hero.strong": "知时运之往",
+  "landing.hero.title": "三种智慧，",
+  "landing.hero.strong": "找到自己的方向。",
   "landing.hero.body":
-    "输入出生信息后，VedicDust 会准备结构化 Jyotish 读盘，先与你核对几个真实经历信号，再把命盘转化为可反思的主题、提醒与谨慎点。",
+    "Sign Atlas 汇集印度占星 Vedic、东方八字与西方塔罗，从不同传统理解自我、人生节奏与当下选择。把日常记录与个人命盘连接起来，在生活中持续发现自己的节奏。",
   "landing.meta.pages": "计算盘层",
   "landing.meta.planets": "行星信号",
   "landing.meta.lifeAreas": "人生领域",
   "landing.meta.d9": "深层视角",
-  "landing.inside.title": "报告包含",
-  "landing.inside.strong": "哪些内容",
+  "landing.inside.title": "印度占星",
+  "landing.inside.strong": "读盘内容",
   "landing.inside.subtitle": "基于命盘证据的解读，不做泛泛星座话术或绝对断言",
   "landing.feature.core.title": "核心模式",
   "landing.feature.core.body": "理解影响你行动方式的气质、内在需要和反复出现的压力主题。",
@@ -1058,7 +1091,7 @@ const zhOverrides: Dict = {
   "landing.sample.row3": "通过网络和长期目标获得可见度",
   "landing.plan.title": "选择",
   "landing.plan.strong": "方案",
-  "landing.plan.subtitle": "一次付费 · 长期访问",
+  "landing.plan.subtitle": "印度占星读盘方案 · 八字与塔罗暂未开放",
   "landing.plan.popular": "最受欢迎",
   "landing.plan.unit": "/份报告",
   "landing.plan.choose": "选择 {name}",
@@ -1080,13 +1113,13 @@ const zhOverrides: Dict = {
   "landing.faq.strong": "问题",
   "landing.faq.q1": "吠陀占星和西方占星有什么不同？",
   "landing.faq.a1":
-    "吠陀占星（Jyotish）使用恒星黄道，并重视上升点（Lagna）、行星力量和 Dasha 时间周期。在 VedicDust 中，这些方法用于反思指引、时间感知和实际提醒，而不是固定答案。",
+    "吠陀占星（Jyotish）使用恒星黄道，并重视上升点（Lagna）、行星力量和 Dasha 时间周期。在 Sign Atlas 中，这些方法用于反思指引、时间感知和实际提醒，而不是固定答案。",
   "landing.faq.q2": "我一定需要准确出生时间吗？",
   "landing.faq.a2":
     "越准确越好。准确出生时间会让读盘更清晰，尤其是时间和分盘相关部分。如果你只知道大概时间，也可以继续，报告会对不确定部分更谨慎。",
   "landing.faq.q3": "生成报告需要多久？",
   "landing.faq.a3": "完整读盘通常需要几分钟。你可以实时查看进度，已完成的章节会自动保存。",
-  "landing.footer": "Parashari 优先方法 · 7-karaka 配置 · 仅供自我反思",
+  "landing.footer": "印度占星 · 东方八字 · 西方塔罗 · 用于自我探索，不作确定性预言",
   "intake.step.personal": "个人信息",
   "intake.step.birth": "出生",
   "intake.step.location": "地点",
@@ -1166,9 +1199,9 @@ const zhOverrides: Dict = {
   "intake.ambiguousTime.body": "当晚发生了夏令时切换，请选择与出生记录相符的那一次。",
   "intake.ambiguousTime.first": "较早的一次",
   "intake.ambiguousTime.second": "较晚的一次",
-  "bazi.title": "八字工作台",
-  "bazi.subtitle": "先生成四柱与大运工作区，再在工作台中运行经典八字报告。",
-  "bazi.hiddenBadge": "隐藏八字入口",
+  "bazi.title": "八字命盘",
+  "bazi.subtitle": "填写出生信息，探索四柱、五行与人生节奏。",
+  "bazi.hiddenBadge": "预览版",
   "bazi.step.chart": "命盘",
   "bazi.calendar.label": "历法",
   "bazi.calendar.hint": "默认使用阳历。",
@@ -1181,7 +1214,7 @@ const zhOverrides: Dict = {
   "bazi.error.gender": "请选择性别，用于判断大运顺逆。",
   "bazi.error.start": "无法开始八字工作台。",
   "bazi.submit.busy": "正在准备八字工作台...",
-  "bazi.submit": "打开八字工作台",
+  "bazi.submit": "创建八字命盘",
   "time.hour": "小时",
   "time.minute": "分钟",
   "place.label": "出生地点",
@@ -1726,11 +1759,28 @@ const zhOverrides: Dict = {
   "stage.result.showLess": "收起",
   "stage.result.showFull": "查看全文",
   "stage.result.more": "完整结果中还有 {count} 个章节。",
-  "report.title.consultation": "VedicDust 专业咨询档案",
+  "report.title.consultation": "Sign Atlas 专业咨询档案",
   "report.title.rectification": "出生时间校验"
 };
 
 const jaOverrides: Dict = {
+  "landing.eyebrow": "自分を知るための地図",
+  "landing.paths.title": "視点を選ぶ",
+  "landing.paths.body": "それぞれ異なる言葉を持つ三つの伝統から、自分自身を見つめます。",
+  "landing.paths.vedic.title": "インド占星術 · Vedic",
+  "landing.paths.vedic.body":
+    "出生図、惑星の配置、人生のテーマと Dasha の周期から読み解く、構造化された Jyotish 鑑定。",
+  "landing.paths.bazi.title": "東洋の四柱推命 · BaZi",
+  "landing.paths.bazi.body":
+    "生年月日時から四柱、五行、運の流れをたどり、気質や人生の段階を探ります。",
+  "landing.paths.tarot.title": "西洋のタロット · Tarot",
+  "landing.paths.tarot.body":
+    "カードの象徴とスプレッドを通じて、今の問いを見つめ直し、可能性と次の一歩を考えます。",
+  "landing.paths.live": "公開中",
+  "landing.paths.soon": "近日公開",
+  "landing.paths.explore": "三つの伝統を探る",
+  "landing.paths.detail": "ヴェーダ鑑定の内容を見る ↓",
+
   "common.back": "戻る",
   "common.cancel": "キャンセル",
   "common.clear": "クリア",
@@ -1801,18 +1851,18 @@ const jaOverrides: Dict = {
   "clerk.missingEyebrow": "Clerk 設定",
   "clerk.missingTitle": "Clerk publishable key がありません",
   "clerk.missingBody": "ローカル環境で {key} を設定し、Vite 開発サーバーを再起動してください。",
-  "landing.nav.report": "レポートを作成",
-  "landing.nav.reportArrow": "レポートを作成 ->",
+  "landing.nav.report": "ヴェーダ鑑定を始める",
+  "landing.nav.reportArrow": "ヴェーダ鑑定 →",
   "landing.nav.sample": "サンプルを見る",
-  "landing.hero.title": "ヴェーダの光で、",
-  "landing.hero.strong": "時運の流れを読む",
+  "landing.hero.title": "三つの叡智、",
+  "landing.hero.strong": "自分だけの道へ。",
   "landing.hero.body":
-    "出生情報を入力すると、VedicDust が構造化された Jyotish リーディングを準備し、いくつかの実体験シグナルを確認したうえで、チャートを内省のテーマ、注意点、実用的なヒントへ翻訳します。",
+    "Sign Atlas はインドのヴェーダ占星術、東洋の四柱推命、西洋のタロットを通じて、自分の傾向、時の流れ、選択を見つめる場所です。まずはヴェーダのリーディングから。",
   "landing.meta.pages": "計算チャート層",
   "landing.meta.planets": "惑星シグナル",
   "landing.meta.lifeAreas": "人生領域",
   "landing.meta.d9": "深層レンズ",
-  "landing.inside.title": "含まれる",
+  "landing.inside.title": "ヴェーダ鑑定の",
   "landing.inside.strong": "内容",
   "landing.inside.subtitle": "一般的な星占いではなく、チャート根拠に基づくガイダンス",
   "landing.feature.core.title": "核となるパターン",
@@ -1850,7 +1900,7 @@ const jaOverrides: Dict = {
   "landing.sample.row3": "ネットワークと長期目標を通じた可視性",
   "landing.plan.title": "プランを",
   "landing.plan.strong": "選択",
-  "landing.plan.subtitle": "一回払い · 継続アクセス",
+  "landing.plan.subtitle": "ヴェーダ鑑定プラン · 四柱推命とタロットは準備中",
   "landing.plan.popular": "人気",
   "landing.plan.unit": "/リーディング",
   "landing.plan.choose": "{name} を選ぶ",
@@ -1872,14 +1922,14 @@ const jaOverrides: Dict = {
   "landing.faq.strong": "質問",
   "landing.faq.q1": "ヴェーダ占星術は西洋占星術とどう違いますか？",
   "landing.faq.a1":
-    "ヴェーダ占星術（Jyotish）は恒星黄道を用い、アセンダント（Lagna）、惑星の強さ、Dasha の時期を重視します。VedicDust では、固定的な予言ではなく、内省、タイミング理解、実用的な注意点として扱います。",
+    "ヴェーダ占星術（Jyotish）は恒星黄道を用い、アセンダント（Lagna）、惑星の強さ、Dasha の時期を重視します。Sign Atlas では、固定的な予言ではなく、内省、タイミング理解、実用的な注意点として扱います。",
   "landing.faq.q2": "正確な出生時刻は必要ですか？",
   "landing.faq.a2":
     "正確であるほど読みは鋭くなります。特に時期や分割図に関わる部分で重要です。おおよその時刻でも続行でき、不確かな部分は慎重に扱います。",
   "landing.faq.q3": "レポート生成にはどれくらいかかりますか？",
   "landing.faq.a3":
     "完全なリーディングは通常数分かかります。進捗をライブで確認でき、完了した節は順次保存されます。",
-  "landing.footer": "Parashari-first 手法 · 7-karaka 構成 · 自己内省目的",
+  "landing.footer": "ヴェーダ占星術 · 四柱推命 · タロット · 自己理解のために",
   "intake.step.personal": "個人情報",
   "intake.step.birth": "出生情報",
   "intake.step.location": "場所",
@@ -1949,9 +1999,9 @@ const jaOverrides: Dict = {
     "その夜に夏時間が切り替わりました。出生記録に合う方を選んでください。",
   "intake.ambiguousTime.first": "早い方",
   "intake.ambiguousTime.second": "遅い方",
-  "bazi.title": "八字ワークショップ",
-  "bazi.subtitle": "まず四柱と大運の作業データを準備し、その後クラシック八字レポートを実行します。",
-  "bazi.hiddenBadge": "非公開 BaZi 入口",
+  "bazi.title": "八字命盤",
+  "bazi.subtitle": "出生情報を入力して、四柱と人生のリズムを見てみましょう。",
+  "bazi.hiddenBadge": "プレビュー版",
   "bazi.step.chart": "命盤",
   "bazi.calendar.label": "暦",
   "bazi.calendar.hint": "既定は太陽暦です。",
@@ -2534,7 +2584,7 @@ const jaOverrides: Dict = {
   "stage.result.showLess": "閉じる",
   "stage.result.showFull": "全文を見る",
   "stage.result.more": "完全な結果にはさらに {count} セクションがあります。",
-  "report.title.consultation": "VedicDust コンサルテーション記録",
+  "report.title.consultation": "Sign Atlas コンサルテーション記録",
   "report.title.rectification": "出生時刻レビュー"
 };
 

@@ -129,7 +129,7 @@ export function AdminSessionDetail() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate(`/session/${encodeURIComponent(id)}`)}
+            onClick={() => navigate(`/app/charts/${encodeURIComponent(id)}`)}
           >
             <ExternalLink size={14} />
             Open Reading

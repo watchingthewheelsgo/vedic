@@ -164,10 +164,14 @@ function TimeWheel({
   const viewportRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const selectedIndex = Math.max(0, values.indexOf(value));
+  const localIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    // Scroll-originated changes must not snap the wheel during a gesture.
+    if (localIndexRef.current === selectedIndex) return;
+    localIndexRef.current = selectedIndex;
     const target = selectedIndex * WHEEL_ITEM_HEIGHT;
     if (Math.abs(viewport.scrollTop - target) > 1) viewport.scrollTop = target;
   }, [selectedIndex]);
@@ -181,12 +185,17 @@ function TimeWheel({
     []
   );
 
-  function selectIndex(nextIndex: number, behavior: ScrollBehavior = "smooth") {
+  function selectIndex(nextIndex: number) {
     const boundedIndex = Math.max(0, Math.min(values.length - 1, nextIndex));
+    if (animationFrameRef.current !== null) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    localIndexRef.current = boundedIndex;
     onSelect(values[boundedIndex]);
     viewportRef.current?.scrollTo({
       top: boundedIndex * WHEEL_ITEM_HEIGHT,
-      behavior
+      behavior: "instant"
     });
   }
 
@@ -200,6 +209,7 @@ function TimeWheel({
         0,
         Math.min(values.length - 1, Math.round(viewportRef.current!.scrollTop / WHEEL_ITEM_HEIGHT))
       );
+      localIndexRef.current = nextIndex;
       if (values[nextIndex] !== value) onSelect(values[nextIndex]);
     });
   }
@@ -257,10 +267,8 @@ function TimeWheel({
               disabled={disabled}
               onClick={() => selectIndex(index)}
               className={cn(
-                "flex h-[42px] w-full snap-center items-center justify-center text-base tabular-nums transition-[color,transform] focus-visible:outline-none",
-                option === value
-                  ? "scale-105 font-semibold text-cream"
-                  : "text-cream/35 hover:text-cream/65"
+                "flex h-[42px] w-full snap-center items-center justify-center text-base tabular-nums focus-visible:outline-none",
+                option === value ? "font-semibold text-cream" : "text-cream/35 hover:text-cream/65"
               )}
             >
               {padTimeUnit(option)}

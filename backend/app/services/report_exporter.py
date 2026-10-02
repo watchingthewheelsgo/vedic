@@ -31,7 +31,7 @@ REPORT_COPY = {
         "recorded": "recorded",
         "wave": "Wave",
         "sections": {
-            "consultation_report.md": "VedicDust Consultation",
+            "consultation_report.md": "Sign Atlas Consultation",
         },
     },
     "zh": {
@@ -46,7 +46,7 @@ REPORT_COPY = {
         "recorded": "已记录",
         "wave": "批次",
         "sections": {
-            "consultation_report.md": "VedicDust 专业咨询档案",
+            "consultation_report.md": "Sign Atlas 专业咨询档案",
         },
     },
     "ja": {
@@ -61,7 +61,7 @@ REPORT_COPY = {
         "recorded": "記録済み",
         "wave": "Wave",
         "sections": {
-            "consultation_report.md": "VedicDust コンサルテーション記録",
+            "consultation_report.md": "Sign Atlas コンサルテーション記録",
         },
     },
 }

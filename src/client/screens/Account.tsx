@@ -1,6 +1,5 @@
 import { useClerk, useUser } from "@clerk/clerk-react";
 import {
-  ArrowLeft,
   CreditCard,
   Crown,
   Download,
@@ -16,12 +15,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { workspaceCopy } from "../lib/workspace";
 import { api } from "../api";
 import { AccountAvatar } from "../components/AccountAvatar";
-import { AccountCenter } from "../components/AccountCenter";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { useI18n } from "../i18n/provider";
 import { cn } from "../lib/cn";
 import { formatDuration } from "../lib/pipeline";
@@ -34,11 +32,12 @@ import type {
 } from "../../shared/domain";
 import { StatusBadge, formatDateTime } from "./AdminSessions";
 
-export function Account() {
+export function Account({ view }: { view: "charts" | "settings" }) {
   const navigate = useNavigate();
   const { openUserProfile, signOut } = useClerk();
   const { user } = useUser();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const w = workspaceCopy[locale];
   const [profile, setProfile] = useState<AccountProfileResponse | null>(null);
   const [sessions, setSessions] = useState<AdminSessionListResponse | null>(null);
   const [billing, setBilling] = useState<BillingAccountResponse | null>(null);
@@ -62,14 +61,21 @@ export function Account() {
       if (options.quiet) setRefreshing(true);
       else setLoading(true);
       try {
-        const [profileResult, sessionResult, billingResult] = await Promise.all([
+        const [profileResult, sessionResult, billingResult] = await Promise.allSettled([
           api.getMe(),
           api.listMySessions(),
           api.getBillingAccount()
         ]);
-        setProfile(profileResult);
-        setSessions(sessionResult);
-        setBilling(billingResult);
+        if (profileResult.status === "fulfilled") setProfile(profileResult.value);
+        if (sessionResult.status === "fulfilled") setSessions(sessionResult.value);
+        if (billingResult.status === "fulfilled") setBilling(billingResult.value);
+        if (
+          [profileResult, sessionResult, billingResult].some(
+            (result) => result.status === "rejected"
+          )
+        ) {
+          setError(t("account.page.error"));
+        }
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : t("account.page.error"));
       } finally {
@@ -128,159 +134,180 @@ export function Account() {
   ).length;
 
   return (
-    <div className="min-h-screen bg-cream-2 text-ink">
-      <header className="border-b border-gold/25 bg-cream/95 px-5 py-4 backdrop-blur-lg sm:px-8">
-        <div className="mx-auto flex max-w-[1180px] flex-wrap items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            title={t("common.back")}
-            onClick={() => navigate("/")}
+    <div className="min-h-0 text-cream">
+      <main className="mx-auto w-full max-w-[1240px] px-5 py-8 sm:px-8 sm:py-10">
+        <p className="mb-3 text-[10px] tracking-[.18em] text-gold">{w.personal}</p>
+        <h1 className="text-3xl font-medium sm:text-4xl">{w[view]}</h1>
+        <p className="mb-8 mt-3 text-sm leading-7 text-cream/60">
+          {view === "charts" ? w.chartBody : t("account.manageProfileBody")}
+        </p>
+        {view === "charts" && (
+          <div className="mb-8 flex flex-wrap gap-3">
+            <Button onClick={() => navigate("/app/charts/new")}>
+              <Sparkles size={16} />
+              {w.deep}
+            </Button>
+            <Button variant="outline" onClick={() => navigate("/app/charts/bazi")}>
+              {w.bazi}
+            </Button>
+          </div>
+        )}
+        {error && view === "settings" && (
+          <p
+            role="alert"
+            className="mb-5 rounded-lg border border-red/30 p-4 text-sm text-[#ffb5a4]"
           >
-            <ArrowLeft size={17} />
-          </Button>
-          <button className="brand-logo border-0 bg-transparent" onClick={() => navigate("/")}>
-            Vedic<span>Dust</span>
-          </button>
-          <div className="flex-1" />
-          <LanguageSwitcher />
-          <AccountCenter compact />
-        </div>
-      </header>
+            {error}
+          </p>
+        )}
+        {view === "settings" && (
+          <aside className="grid max-w-[980px] gap-5 lg:grid-cols-2">
+            <section className="relative overflow-hidden rounded-lg border border-gold/20 bg-night px-5 py-5 text-cream shadow-[0_20px_60px_rgba(44,31,15,0.18)]">
+              <div className="pointer-events-none absolute -right-16 -top-20 size-44 rounded-full bg-gold/18 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-20 left-6 size-36 rounded-full bg-green/10 blur-3xl" />
 
-      <main className="mx-auto grid w-full max-w-[1180px] gap-5 px-5 py-6 sm:px-8 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <aside className="flex flex-col gap-5">
-          <section className="relative overflow-hidden rounded-lg border border-gold/20 bg-night px-5 py-5 text-cream shadow-[0_20px_60px_rgba(44,31,15,0.18)]">
-            <div className="pointer-events-none absolute -right-16 -top-20 size-44 rounded-full bg-gold/18 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-20 left-6 size-36 rounded-full bg-green/10 blur-3xl" />
-
-            <div className="relative flex items-start gap-4">
-              <AccountAvatar imageUrl={user?.imageUrl} initials={initials} size="xl" showStatus />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-lg font-semibold tracking-normal text-cream">
-                  {displayName}
-                </div>
-                <div className="mt-1 truncate text-sm text-cream/55">{email}</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge variant="gold">{t("account.signedIn")}</Badge>
-                  {profile?.isAdmin && (
-                    <Badge className="border-green/35 bg-green/15 text-green" variant="done">
-                      {t("account.page.adminBadge")}
-                    </Badge>
-                  )}
+              <div className="relative flex items-start gap-4">
+                <AccountAvatar imageUrl={user?.imageUrl} initials={initials} size="xl" showStatus />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-lg font-semibold tracking-normal text-cream">
+                    {displayName}
+                  </div>
+                  <div className="mt-1 truncate text-sm text-cream/55">{email}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge variant="gold">{t("account.signedIn")}</Badge>
+                    {profile?.isAdmin && (
+                      <Badge className="border-green/35 bg-green/15 text-green" variant="done">
+                        {t("account.page.adminBadge")}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="relative mt-5 grid gap-2">
-              <AccountAction
-                icon={<Settings size={15} />}
-                title={t("account.manageProfile")}
-                body={t("account.manageProfileBody")}
-                onClick={() => openUserProfile()}
-                dark
-              />
-              {profile?.isAdmin && (
+              <div className="relative mt-5 grid gap-2">
                 <AccountAction
-                  icon={<ShieldCheck size={15} />}
-                  title={t("account.page.adminTitle")}
-                  body={t("account.page.adminBody")}
-                  onClick={() => navigate("/admin/sessions")}
+                  icon={<Settings size={15} />}
+                  title={t("account.manageProfile")}
+                  body={t("account.manageProfileBody")}
+                  onClick={() => openUserProfile()}
                   dark
                 />
-              )}
-              <AccountAction
-                danger
-                dark
-                icon={<LockKeyhole size={15} />}
-                title={t("account.signOut")}
-                body={t("account.page.signOutBody")}
-                onClick={() => void signOut({ redirectUrl: "/" })}
+                {profile?.isAdmin && (
+                  <AccountAction
+                    icon={<ShieldCheck size={15} />}
+                    title={t("account.page.adminTitle")}
+                    body={t("account.page.adminBody")}
+                    onClick={() => navigate("/admin/sessions")}
+                    dark
+                  />
+                )}
+                <AccountAction
+                  danger
+                  dark
+                  icon={<LockKeyhole size={15} />}
+                  title={t("account.signOut")}
+                  body={t("account.page.signOutBody")}
+                  onClick={() => void signOut({ redirectUrl: "/" })}
+                />
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-gold/25 bg-cream px-5 py-5 shadow-[0_18px_48px_rgba(44,31,15,0.06)]">
+              <div className="mb-4 text-[10px] uppercase tracking-[2.2px] text-gold">
+                {t("account.page.privateSpace")}
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Metric label={t("account.page.total")} value={reports.length} />
+                <Metric label={t("account.page.completed")} value={completed} />
+                <Metric label={t("account.page.running")} value={running} />
+              </div>
+              <p className="mt-4 text-sm leading-[1.7] text-body">
+                {t("account.page.privacyNote")}
+              </p>
+            </section>
+
+            <div id="billing">
+              <BillingCard
+                billing={billing}
+                loading={loading || refreshing}
+                busy={billingAction}
+                onCheckout={(plan) => void startCheckout(plan)}
+                onPortal={() => void openBillingPortal()}
               />
             </div>
-          </section>
+          </aside>
+        )}
 
-          <section className="rounded-lg border border-gold/25 bg-cream px-5 py-5 shadow-[0_18px_48px_rgba(44,31,15,0.06)]">
-            <div className="mb-4 text-[10px] uppercase tracking-[2.2px] text-gold">
-              {t("account.page.privateSpace")}
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <Metric label={t("account.page.total")} value={reports.length} />
-              <Metric label={t("account.page.completed")} value={completed} />
-              <Metric label={t("account.page.running")} value={running} />
-            </div>
-            <p className="mt-4 text-sm leading-[1.7] text-body">{t("account.page.privacyNote")}</p>
-          </section>
-
-          <BillingCard
-            billing={billing}
-            busy={billingAction}
-            onCheckout={(plan) => void startCheckout(plan)}
-            onPortal={() => void openBillingPortal()}
-          />
-        </aside>
-
-        <section className="rounded-lg border border-gold/25 bg-cream shadow-[0_18px_48px_rgba(44,31,15,0.07)]">
-          <div className="flex flex-col gap-3 border-b border-gold/20 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-[10px] uppercase tracking-[2.2px] text-gold">
-                {t("account.page.libraryEyebrow")}
+        {view === "charts" && (
+          <section
+            id="reports"
+            className="rounded-lg border border-gold/25 bg-cream shadow-[0_18px_48px_rgba(44,31,15,0.07)]"
+          >
+            <div className="flex flex-col gap-3 border-b border-gold/20 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-[2.2px] text-gold">
+                  {t("account.page.libraryEyebrow")}
+                </div>
+                <h1 className="mt-1 text-2xl font-semibold tracking-normal">
+                  {t("account.page.libraryTitle")}
+                </h1>
+                <p className="mt-1 text-sm text-muted">{t("account.page.libraryBody")}</p>
               </div>
-              <h1 className="mt-1 text-2xl font-semibold tracking-normal">
-                {t("account.page.libraryTitle")}
-              </h1>
-              <p className="mt-1 text-sm text-muted">{t("account.page.libraryBody")}</p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void load({ quiet: true })}
-                disabled={refreshing}
-              >
-                {refreshing ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <RefreshCw size={14} />
-                )}
-                {t("account.page.refresh")}
-              </Button>
-              <Button size="sm" onClick={() => navigate("/new")}>
-                <Sparkles size={14} />
-                {t("account.page.newReading")}
-              </Button>
-            </div>
-          </div>
-
-          {error && (
-            <div className="mx-5 mt-5 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-sm text-red">
-              {error}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="grid min-h-[420px] place-items-center text-muted">
-              <div className="text-center">
-                <LoaderCircle className="mx-auto size-8 animate-spin text-gold" />
-                <p className="mt-2 text-sm">{t("account.page.loading")}</p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void load({ quiet: true })}
+                  disabled={refreshing}
+                >
+                  {refreshing ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : (
+                    <RefreshCw size={14} />
+                  )}
+                  {t("account.page.refresh")}
+                </Button>
+                <Button size="sm" onClick={() => navigate("/app/charts/new")}>
+                  <Sparkles size={14} />
+                  {t("account.page.newReading")}
+                </Button>
               </div>
             </div>
-          ) : reports.length === 0 ? (
-            <EmptyReports onStart={() => navigate("/new")} />
-          ) : (
-            <div className="divide-y divide-gold/15">
-              {reports.map((session) => (
-                <ReportRow
-                  key={session.sessionId}
-                  session={session}
-                  downloading={downloadingId === session.sessionId}
-                  onOpen={() => navigate(`/session/${encodeURIComponent(session.sessionId)}`)}
-                  onDownload={() => void downloadPdf(session.sessionId)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+
+            {error && (
+              <div className="mx-5 mt-5 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-sm text-red">
+                {error}
+              </div>
+            )}
+
+            {loading ? (
+              <div className="grid min-h-[420px] place-items-center text-muted">
+                <div className="text-center">
+                  <LoaderCircle className="mx-auto size-8 animate-spin text-gold" />
+                  <p className="mt-2 text-sm">{t("account.page.loading")}</p>
+                </div>
+              </div>
+            ) : !sessions ? (
+              <p role="status" className="px-5 py-12 text-sm text-cream/70">
+                {t("account.page.error")}
+              </p>
+            ) : reports.length === 0 ? (
+              <EmptyReports onStart={() => navigate("/app/charts/new")} />
+            ) : (
+              <div className="divide-y divide-gold/15">
+                {reports.map((session) => (
+                  <ReportRow
+                    key={session.sessionId}
+                    session={session}
+                    downloading={downloadingId === session.sessionId}
+                    onOpen={() => navigate(`/app/charts/${encodeURIComponent(session.sessionId)}`)}
+                    onDownload={() => void downloadPdf(session.sessionId)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </main>
     </div>
   );
@@ -356,11 +383,13 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function BillingCard({
   billing,
+  loading,
   busy,
   onCheckout,
   onPortal
 }: {
   billing: BillingAccountResponse | null;
+  loading: boolean;
   busy: "checkout" | "portal" | "";
   onCheckout: (plan: BillingPlanResponse) => void;
   onPortal: () => void;
@@ -379,10 +408,12 @@ function BillingCard({
             </h2>
           </div>
           <span className="grid size-9 place-items-center rounded-full border border-gold/25 bg-gold/10 text-gold">
-            <LoaderCircle className="size-4 animate-spin" />
+            {loading ? <LoaderCircle className="size-4 animate-spin" /> : <CreditCard size={16} />}
           </span>
         </div>
-        <p className="mt-4 text-sm text-cream/65">{t("common.loading")}</p>
+        <p className="mt-4 text-sm text-cream/65">
+          {t(loading ? "common.loading" : "account.page.error")}
+        </p>
       </section>
     );
   }
