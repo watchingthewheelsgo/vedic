@@ -1,4 +1,5 @@
 import { workspaceCopy } from "../lib/workspace";
+import { Methodology } from "../components/Methodology";
 import { journalCopy } from "../lib/journal";
 import { preferredScrollBehavior } from "../lib/motion";
 import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/clerk-react";
@@ -278,6 +279,7 @@ export function Landing() {
         </div>
       </section>
 
+      <Methodology />
       <Section
         className="bg-cream-2"
         title={t("landing.faq.title")}
@@ -314,6 +316,18 @@ export function Landing() {
       </Section>
 
       <footer className="bg-night px-5 py-8 text-center text-[13px] tracking-[0.3px] text-cream/40">
+        <div className="mb-4 flex flex-wrap justify-center gap-x-6 gap-y-3 text-cream/75">
+          <a href="#sources" className="underline underline-offset-4">
+            {locale === "zh"
+              ? "方法与来源"
+              : locale === "ja"
+                ? "方法と参考文献"
+                : "Methods & sources"}
+          </a>
+          <a href="mailto:lizero.why@gmail.com" className="underline underline-offset-4">
+            lizero.why@gmail.com
+          </a>
+        </div>
         <p>
           © 2026 <span className="text-gold/60">Sign Atlas</span> &nbsp;·&nbsp;{" "}
           {t("landing.footer")}
