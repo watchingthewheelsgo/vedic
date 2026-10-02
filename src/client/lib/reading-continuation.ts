@@ -31,6 +31,13 @@ export function canStartFullReadingFromArtifacts(
     ) {
       return true;
     }
+    if (
+      status === "window_scoped" &&
+      gate?.fullReportAllowed === true &&
+      gate.reportScope === "stable_intersection_only"
+    ) {
+      return true;
+    }
     if (status) return false;
   }
   const decision = objectValue(prevalidationResult, "decision");

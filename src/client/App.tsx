@@ -14,6 +14,10 @@ const Daily = lazy(() => import("./screens/Daily").then((module) => ({ default: 
 const Patterns = lazy(() =>
   import("./screens/Patterns").then((module) => ({ default: module.Patterns }))
 );
+const Charts = lazy(() =>
+  import("./screens/Charts").then((module) => ({ default: module.Charts }))
+);
+const Ask = lazy(() => import("./screens/Ask").then((module) => ({ default: module.Ask })));
 const Discover = lazy(() =>
   import("./screens/Discover").then((module) => ({ default: module.Discover }))
 );
@@ -125,9 +129,10 @@ export function App() {
               <Route index element={<Daily view="today" />} />
               <Route path="days" element={<Patterns />} />
               <Route path="discover" element={<Discover />} />
+              <Route path="ask" element={<Ask />} />
               <Route path="records" element={<Daily view="records" />} />
               <Route path="explore" element={<Daily view="explore" />} />
-              <Route path="charts" element={<Account view="charts" />} />
+              <Route path="charts" element={<Charts />} />
               <Route path="settings" element={<Account view="settings" />} />
               <Route path="charts/new" element={<Intake />} />
               <Route path="charts/bazi" element={<BaziWorkshop />} />

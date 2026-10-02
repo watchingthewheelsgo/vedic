@@ -1,22 +1,28 @@
 @import "tailwindcss";
 
 @theme {
-  --color-gold: #c9a96e;
-  --color-gold-dim: #9a7a4a;
-  --color-gold-light: #edd9a3;
-  --color-night: #0f0c09;
-  --color-night-2: #1c1610;
-  --color-night-3: #2a2018;
-  --color-cream: #faf5ec;
-  --color-cream-2: #f0e8d8;
-  --color-cream-3: #e5d9c5;
-  --color-ink: #2c1f0f;
-  --color-muted: #8a7a65;
-  --color-body: #5a4a35;
-  --color-red: #b04a38;
-  --color-green: #5a9b5a;
+  /* Sign Atlas: near-black ground, warm white primary, saffron for Vedic, jade for BaZi. */
+  --color-gold: #f4a259;
+  --color-gold-dim: #b8793f;
+  --color-gold-light: #f8c48e;
+  --color-night: #0a0b10;
+  --color-night-2: #14161f;
+  --color-night-3: #1c1f2b;
+  --color-cream: #f3f0e9;
+  --color-cream-2: #e8e3d8;
+  --color-cream-3: #d9d3c6;
+  --color-ink: #1a1712;
+  --color-muted: #8a8796;
+  --color-body: #5a5866;
+  --color-red: #d0735f;
+  --color-green: #6cd4b1;
   --color-jade: #6cd4b1;
-  --font-display: "Iowan Old Style", Baskerville, "Noto Serif SC", "Songti SC", serif;
+  --color-paper: #f3f0e9;
+  --font-sans:
+    "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans",
+    "Microsoft YaHei", sans-serif;
+  --font-display: "Instrument Serif", "Noto Serif SC", "Songti SC", serif;
+  --font-han: "Noto Serif SC", "Songti SC", serif;
 }
 
 @layer base {
@@ -32,9 +38,7 @@
     margin: 0;
     background: theme(colors.night);
     color: theme(colors.cream);
-    font-family:
-      -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, "PingFang SC",
-      "Microsoft YaHei", sans-serif;
+    font-family: var(--font-sans);
     font-size: 16px;
     line-height: 1.7;
   }
@@ -57,7 +61,15 @@
 
 @layer components {
   .surface {
-    @apply rounded-3xl border border-white/[0.08] bg-[#15121b]/90;
+    @apply rounded-3xl border border-white/[0.08] bg-night-2;
+  }
+
+  .surface-2 {
+    @apply rounded-2xl bg-night-3;
+  }
+
+  .han {
+    font-family: var(--font-han);
   }
 
   .eyebrow {
@@ -65,11 +77,34 @@
   }
 
   .brand-logo {
-    @apply text-[15px] font-bold uppercase tracking-[2px] text-cream;
+    @apply inline-flex items-center gap-2.5 text-[22px] leading-none text-cream;
+    font-family: var(--font-display);
+  }
+
+  .brand-logo::before {
+    content: "";
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle, #f3f0e9 0 3px, transparent 3.5px),
+      radial-gradient(
+        circle,
+        transparent 0 7px,
+        rgb(244 162 89 / 75%) 7.5px 8.5px,
+        transparent 9px
+      ),
+      radial-gradient(
+        circle,
+        transparent 0 11.5px,
+        rgb(108 212 177 / 60%) 12px 13px,
+        transparent 13.5px
+      );
   }
 
   .brand-logo span {
-    @apply text-gold;
+    color: inherit;
   }
 
   .birth-input-screen {
@@ -78,7 +113,7 @@
   }
 
   .birth-input-display {
-    font-family: "Iowan Old Style", Baskerville, "Noto Serif SC", "Songti SC", serif;
+    font-family: var(--font-display);
     letter-spacing: 0;
   }
 
@@ -178,10 +213,8 @@
 
 .cosmic-site {
   background:
-    radial-gradient(ellipse 90% 55% at 50% -5%, rgb(110 82 170 / 34%), transparent 60%),
-    radial-gradient(ellipse 70% 50% at 82% 96%, rgb(201 169 110 / 18%), transparent 60%),
-    radial-gradient(circle at 15% 78%, rgb(130 90 185 / 16%), transparent 55%),
-    linear-gradient(180deg, rgb(8 5 16 / 96%) 0%, rgb(15 12 9 / 94%) 100%);
+    radial-gradient(ellipse 80% 45% at 50% -10%, rgb(120 130 175 / 10%), transparent 65%),
+    radial-gradient(ellipse 60% 40% at 85% 100%, rgb(244 162 89 / 6%), transparent 60%), #0a0b10;
 }
 
 .cosmic-site .brand-logo,
@@ -196,12 +229,12 @@
 .cosmic-site .bg-cream\/80,
 .cosmic-site .bg-cream\/72,
 .cosmic-site .bg-\[\#fff9ed\] {
-  background-color: rgb(16 12 22 / 78%) !important;
+  background-color: rgb(20 22 31 / 92%) !important;
 }
 
 .cosmic-site .bg-cream-2,
 .cosmic-site .bg-cream-2\/70 {
-  background-color: rgb(8 5 16 / 72%) !important;
+  background-color: rgb(10 11 16 / 80%) !important;
 }
 
 .cosmic-site .bg-cream-3 {
@@ -217,13 +250,13 @@
 }
 
 .cosmic-site .from-cream {
-  --tw-gradient-from: rgb(8 5 16 / 96%) var(--tw-gradient-from-position) !important;
-  --tw-gradient-to: rgb(8 5 16 / 0%) var(--tw-gradient-to-position) !important;
+  --tw-gradient-from: rgb(10 11 16 / 96%) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(10 11 16 / 0%) var(--tw-gradient-to-position) !important;
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
 }
 
 .cosmic-site .to-cream-2 {
-  --tw-gradient-to: rgb(16 12 22 / 92%) var(--tw-gradient-to-position) !important;
+  --tw-gradient-to: rgb(20 22 31 / 92%) var(--tw-gradient-to-position) !important;
 }
 
 .cosmic-site .text-ink {
@@ -336,12 +369,12 @@
 .cosmic-floating-surface .bg-cream,
 .cosmic-floating-surface .bg-cream-2,
 .cosmic-floating-surface .bg-cream-3 {
-  background-color: #211c28;
+  background-color: #1c1f2b;
 }
 @layer base {
   button:focus-visible,
   a:focus-visible {
-    outline: 2px solid var(--color-gold);
+    outline: 2px solid var(--color-cream);
     outline-offset: 3px;
   }
 }

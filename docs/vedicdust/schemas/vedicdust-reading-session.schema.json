@@ -62,7 +62,8 @@
         "comparing_candidates",
         "bounded_interval",
         "multiple_equivalent",
-        "underdetermined"
+        "underdetermined",
+        "window_scoped"
       ],
       "title": "Rectificationstatus",
       "type": "string"

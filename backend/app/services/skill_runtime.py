@@ -30,6 +30,7 @@ from app.schemas import (
     RectificationInterviewInput,
     RectificationLifeEventsInput,
     RectificationLifeEventsResetInput,
+    RectificationWindowScopeInput,
     SkillBirthInput,
     SkillRunInput,
     SkillSessionResponse,
@@ -105,6 +106,17 @@ LIFE_EVENT_EVIDENCE_VALIDATION_JSON = "life_event_evidence_validation.json"
 CONSULTATION_GROUNDING_AUDIT_JSON = "consultation_grounding_audit.json"
 CONSULTATION_TOPIC_SELECTION_JSON = ".runtime/consultation-topic-selection.json"
 CONSULTATION_SUBJECT_CONTEXT_JSON = ".runtime/consultation-subject-context.json"
+CONSULTATION_BRIEF_JSON = ".runtime/consultation-brief.json"
+CONSULTATION_FIXED_SECTIONS = (
+    "scope",
+    "executive_synthesis",
+    "chart_foundation",
+    "core_architecture",
+    "timing_outlook",
+    "decision_support",
+    "follow_up",
+    "technical_evidence",
+)
 CHART_RECORD_B_JSON = "chart_record_B.json"
 SYNASTRY_CONTEXT_JSON = "synastry_context.json"
 PREVALIDATION_DEPENDENCY_PATHS = [
@@ -975,6 +987,7 @@ class SkillRuntime:
                 "collecting_evidence",
                 "underdetermined",
                 "rectification_confirmation_required",
+                "window_scoped",
             }:
                 raise ValueError("this session is not accepting rectification evidence changes")
             current_record = ChartRecord.model_validate_json(artifacts[CHART_RECORD_JSON])
@@ -1334,6 +1347,37 @@ class SkillRuntime:
                 session_id,
                 next_state,
                 message=message,
+                owner_user_id=owner_user_id,
+            )
+
+    async def accept_window_scope(
+        self,
+        input_data: RectificationWindowScopeInput,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SkillSessionResponse:
+        """Let the user read now on window-stable facts; rectification stays optional."""
+
+        async with self._rectification_transaction_lock(input_data.session_id):
+            session_id = input_data.session_id
+            state = self._json_dict(
+                self.workspace.read_artifact_text(session_id, "chart_rectification_state.json")
+                or ""
+            )
+            chart_record_text = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
+            if not state or not chart_record_text:
+                raise ValueError("session is missing the chart required for a scoped report")
+            chart_record = ChartRecord.model_validate_json(chart_record_text)
+            if input_data.expected_chart_revision != chart_record.revision:
+                raise ValueError("This chart changed. Refresh the session before continuing.")
+            next_state = self.rectification.apply_window_scope(state)
+            return await self._persist_rectification_state(
+                session_id,
+                next_state,
+                message=(
+                    "Your reading will use the chart facts that hold across your whole birth "
+                    "window. You can sharpen the birth time later to unlock divisional details."
+                ),
                 owner_user_id=owner_user_id,
             )
 
@@ -2214,8 +2258,10 @@ class SkillRuntime:
                     self._prepare_judgement_context(session_id)
             return
         if (
-            state_status == "multiple_equivalent"
-            and state.get("holdoutResult") == "passed"
+            (
+                (state_status == "multiple_equivalent" and state.get("holdoutResult") == "passed")
+                or state_status == "window_scoped"
+            )
             and state_gate.get("fullReportAllowed") is True
             and state_gate.get("reportScope") == "stable_intersection_only"
         ):
@@ -2459,13 +2505,21 @@ class SkillRuntime:
             }
             workspace_snapshot = self._snapshot_agent_workspace(session_dir, expected)
             try:
-                result = await self.agent_runtime.run_skill_task(
-                    str(batch.get("task_name") or input_data.skill),
-                    prompt,
-                    cwd=session_dir,
-                    skills=selected_skills,
-                    max_turns=max(self._max_turns_for(skill) for skill in selected_skills),
-                )
+                if is_consultation_batch and self._direct_consultation_available():
+                    result = await self._run_direct_consultation(
+                        input_data.session_id,
+                        session_dir,
+                        str(batch.get("task_name") or input_data.skill),
+                        prompt,
+                    )
+                else:
+                    result = await self.agent_runtime.run_skill_task(
+                        str(batch.get("task_name") or input_data.skill),
+                        prompt,
+                        cwd=session_dir,
+                        skills=selected_skills,
+                        max_turns=max(self._max_turns_for(skill) for skill in selected_skills),
+                    )
             except Exception as exc:
                 self._restore_failed_agent_attempt(
                     session_dir,
@@ -2631,6 +2685,50 @@ class SkillRuntime:
             int(getattr(settings, "agent_transient_retries", 2)),
             int(getattr(settings, "agent_retry_base_delay_ms", 0)),
         )
+
+    def _direct_consultation_available(self) -> bool:
+        return callable(getattr(self.agent_runtime, "run_direct_prompt_task", None))
+
+    async def _run_direct_consultation(
+        self,
+        session_id: str,
+        session_dir: Path,
+        task_name: str,
+        prompt: str,
+    ) -> AgentRunResult:
+        """One structured call: the brief goes inline and the backend writes the dossier.
+
+        The brief already holds every input, so a tool-using session only adds file
+        round trips. The response passes the same contract validation and retry loop.
+        """
+
+        brief = self.workspace.read_artifact_text(session_id, CONSULTATION_BRIEF_JSON)
+        if not brief:
+            raise ValueError("consultation brief is missing; rebuild the judgement context")
+        settings = getattr(self.agent_runtime, "settings", None)
+        result = await self.agent_runtime.run_direct_prompt_task(
+            task_name,
+            f"""{prompt}
+
+You have no tools in this run. The complete content of {CONSULTATION_BRIEF_JSON} follows.
+Instead of writing a file, return ONLY the completed dossier JSON object (no markdown fence,
+no commentary); the backend writes it to {CONSULTATION_DOSSIER_JSON}.
+
+{CONSULTATION_BRIEF_JSON}
+{brief}""",
+            model_name=getattr(settings, "anthropic_model", None),
+            max_tokens=12000,
+        )
+        try:
+            content = json.dumps(
+                self._parse_json_object(result.raw_text), ensure_ascii=False, indent=2
+            )
+        except ValueError:
+            # Keep the raw reply so contract validation rejects it and the retry
+            # prompt carries the parse error back to the model.
+            content = result.raw_text
+        (session_dir / CONSULTATION_DOSSIER_JSON).write_text(content + "\n", encoding="utf-8")
+        return result
 
     async def _run_bounded_audit_prompt(
         self,
@@ -3848,6 +3946,8 @@ Return JSON only:
             decision_status = "underdetermined"
         elif rectification_state_status == "multiple_equivalent":
             decision_status = "multiple_equivalent"
+        elif rectification_state_status == "window_scoped":
+            decision_status = "window_scoped"
         elif rectification_state_status == "needs_recalculation":
             decision_status = "comparing_candidates"
         else:
@@ -3953,6 +4053,15 @@ Return JSON only:
                 "time or additional dated life events."
             ]
             record.rectification.decision.resulting_intervals = []
+        elif decision_status == "window_scoped":
+            record.status = "ready_for_judgement"
+            record.rectification.decision.selected_candidate_ids = []
+            record.rectification.decision.resulting_interval = None
+            record.rectification.decision.resulting_intervals = []
+            record.rectification.decision.unresolved_questions = [
+                "The exact birth time was not verified; only facts stable across the complete "
+                "reported birth window are used."
+            ]
         elif decision_status == "multiple_equivalent":
             record.status = "ready_for_judgement"
             record.rectification.decision.resulting_interval = None
@@ -4108,7 +4217,7 @@ Return JSON only:
             "reader_validation": (
                 "ready_for_judgement"
                 if rectification_status
-                in {"not_required", "bounded_interval", "multiple_equivalent"}
+                in {"not_required", "bounded_interval", "multiple_equivalent", "window_scoped"}
                 else "rectification"
             ),
             "core_in_progress": "report_in_progress",
@@ -4116,7 +4225,7 @@ Return JSON only:
             "rectifier_complete": (
                 "ready_for_judgement"
                 if rectification_status
-                in {"not_required", "bounded_interval", "multiple_equivalent"}
+                in {"not_required", "bounded_interval", "multiple_equivalent", "window_scoped"}
                 else "rectification"
             ),
             "qa_complete": "report_ready",
@@ -4968,33 +5077,33 @@ Rules:
                 "skills": ["vedicdust-consultation"],
                 "prompt": f"""Build the native VedicDust Consultation Dossier.
 
-Read:
-- chart_record.json and chart_audit.json;
-- .runtime/consultation-subject-context.json for the authoritative current age,
-  life stage, and reader relationship for this consultation;
-- judgement_context.json;
-- claim_graph.json;
-- prevalidation_result.json and chart_rectification_state.json.
+Read exactly one file: {CONSULTATION_BRIEF_JSON}
+It is complete: the released Claims with plain-language statements, the subject's
+life stage and reader relationship, topic priority, the rectification note, and a
+valid `dossierTemplate`. Do not open chart_record.json, judgement_context.json,
+sensitivity files, any other artifact, or any source code; they are large and add
+nothing to this task. Use relative paths from the current working directory.
 
-Use only the listed typed contracts. Do not add a new astrological judgement.
-Your primary value is synthesis: turn approved Claims into concise, humane prose
-without changing their meaning.
+Do not add a new astrological judgement. Your primary value is synthesis: turn the
+approved Claims into concise, humane prose without changing their meaning.
 
 {language_instruction}
 
-Write exactly one file: {CONSULTATION_DOSSIER_JSON}
-The file must be valid camelCase JSON conforming to
-vedicdust-consultation-dossier/1.0.0. Do not write the final report or any
-other file; the backend renders consultation_report.md deterministically.
+Fill in `dossierTemplate` and write it, in one Write call, as exactly one file:
+{CONSULTATION_DOSSIER_JSON} (camelCase JSON, vedicdust-consultation-dossier/1.0.0).
+The Claim placement in the template is final: do not add, move or remove sections,
+claimIds, executiveClaimIds or omittedClaimIds. You author only the `narratives` of each
+section and set releaseStatus to "approved". Keep every other template value as given. Do not write the report or any other file; the
+backend renders consultation_report.md deterministically.
+
+Voice for narratives: speak to the reader as "you" (or about the child or partner
+when the reader relationship says so), warm and direct, everyday words first. Turn
+house and planet language into what it means in life; mention a technical term only
+with a short explanation. A low-certainty Claim is a tendency ("may", "often"),
+never a promise.
 
 Hard contract:
-- Copy chartRecordId, chartRevision, methodProfileId, and claimGraphVersion.
-- Select 3 to 5 executive Claims.
-- Use exactly one each of scope, executive_synthesis, chart_foundation,
-  timing_outlook, decision_support, follow_up, and technical_evidence; add
-  core_architecture when useful and at most five priority_domain sections.
-- Assign every released Claim to exactly one section, or record its omission in
-  omittedClaimIds. Executive Claims belong to executive_synthesis.
+- Keep chartRecordId, chartRevision, methodProfileId, and claimGraphVersion from the template.
 - For executive_synthesis, chart_foundation, core_architecture, priority_domain,
   timing_outlook, and decision_support, write one or two `narratives`. Every
   narrative must have a unique narrativeId, kind, readable text, and 1-4 claimIds.
@@ -5008,12 +5117,10 @@ Hard contract:
   Claims contain it, and state the most important counterweight. Do not repeat titles,
   confidence labels, or technical evidence that the deterministic renderer already supplies.
 - Leave narratives empty in scope, follow_up, and technical_evidence.
-- chart_foundation and decision_support each require their own assigned Claim.
-  technical_evidence must keep claimIds empty.
-- Assign timing Claims only to timing_outlook. Return timingWindows as an empty list;
-  the backend materializes exact windows, intervals, evidence, language, and confidence.
-- Organize priority domains by requested topic and judgementContext priority,
-  not by the calculator's technical order.
+- Keep timingWindows as an empty list; the backend materializes exact windows,
+  intervals, evidence, language, and confidence.
+- In the executive_synthesis narrative, connect the section's Claims into the reader's
+  three to five most useful takeaways; do not cite Claims of other sections.
 - The backend replaces dossier ID, scope, confidence, timing windows, locale,
   audience, section titles/order/purpose, omission reasons, unresolved questions,
   visual references, and confidence-disclosure flags from authoritative contracts.
@@ -5023,9 +5130,10 @@ Hard contract:
 - releaseStatus may be approved only when chart_audit permits judgement, all
   released Claims are accounted for, and dossier qualityChecks pass. Otherwise
   block and explain unresolvedQuestions.
-- When rectification status is multiple_equivalent, retain every interval as valid.
-  Use only non-restricted, scan-stable Claims and never imply that the calculation
-  reference moment is the uniquely corrected birth time.
+- When rectification status is multiple_equivalent or window_scoped, the birth time is a
+  range. Use only the released Claims and never imply that the calculation reference
+  moment is the uniquely corrected birth time.
+- Claims listed in withheldClaimIds are not released; put them in omittedClaimIds.
 
 User request:
 {user_line}""",
@@ -5187,6 +5295,187 @@ User request:
             producer="vedicdust-claim-graph",
             dependency_paths=[JUDGEMENT_CONTEXT_JSON],
         )
+        self.workspace.write_artifact(
+            session_id,
+            CONSULTATION_BRIEF_JSON,
+            json.dumps(
+                self._consultation_brief(record, context, graph, subject_context),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
+
+    @staticmethod
+    def _consultation_brief(
+        record: ChartRecord,
+        context: JudgementContext,
+        graph: ClaimGraph,
+        subject_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The complete, compact input of the consultation Agent.
+
+        The Agent's only authored content is claim placement, executive selection and
+        grounded narratives. Everything else is prefilled here and re-derived by the
+        backend, so the Agent never needs the multi-megabyte calculation artifacts.
+        """
+
+        def first(values: list[str], limit: int) -> list[str]:
+            return [value for value in values if value][:limit]
+
+        released = [claim for claim in graph.claims if claim.status != "withheld"]
+        topic_order = [
+            topic.topic_id
+            for topic in sorted(
+                context.topics, key=lambda topic: (-int(topic.requested), -topic.priority_score)
+            )
+        ]
+        rectification_status = (
+            record.rectification.decision.status if record.rectification else "not_required"
+        )
+        placement = SkillRuntime._consultation_placement(released, topic_order)
+        template = {
+            "schemaVersion": "vedicdust-consultation-dossier/1.0.0",
+            "dossierId": f"dossier.{record.chart_record_id}.r{record.revision}",
+            "chartRecordId": graph.chart_record_id,
+            "chartRevision": graph.chart_revision,
+            "methodProfileId": graph.method_profile_id,
+            "claimGraphVersion": graph.schema_version,
+            "generatedAt": graph.generated_at.isoformat(),
+            "locale": record.subject.locale,
+            "audience": record.subject.reader_relationship,
+            "scope": {"requestedTopics": list(context.requested_topics)},
+            "confidence": {
+                "overall": "low",
+                "inputConfidence": "provisional",
+                "rectificationConfidence": "provisional",
+                "judgementConfidence": "low",
+                "rationale": ["Derived by the backend."],
+            },
+            "executiveClaimIds": placement["executiveClaimIds"],
+            "sections": placement["sections"],
+            "timingWindows": [],
+            "omittedClaimIds": {claim_id: "omitted" for claim_id in placement["omitted"]},
+            "unresolvedQuestions": [],
+            "releaseStatus": "draft",
+            "qualityChecks": [],
+        }
+        return {
+            "schemaVersion": "vedicdust-consultation-brief/1.0.0",
+            "locale": record.subject.locale,
+            "subject": subject_context.get("subject") or {},
+            "requestedTopics": list(context.requested_topics),
+            "topicPriority": topic_order,
+            "rectificationStatus": rectification_status,
+            "rectificationNote": (
+                "The exact birth time was not verified. Every released Claim is stable across "
+                "the reported birth window; never present a single minute as the birth time."
+                if rectification_status in {"window_scoped", "multiple_equivalent"}
+                else None
+            ),
+            "withheldClaimIds": [
+                claim.claim_id for claim in graph.claims if claim.status == "withheld"
+            ],
+            "claims": [
+                {
+                    "claimId": claim.claim_id,
+                    "topic": claim.topic,
+                    "scope": claim.scope,
+                    "title": claim.title,
+                    "statement": claim.plain_statement,
+                    "realWorldExpressions": first(claim.real_world_expressions, 3),
+                    "practicalImplications": first(claim.practical_implications, 2),
+                    "counterStatements": first(claim.counter_statements, 2),
+                    "conditions": first(claim.conditions, 2),
+                    "certainty": claim.certainty,
+                    "evidenceConfidence": claim.evidence_confidence,
+                }
+                for claim in released
+            ],
+            "dossierTemplate": template,
+            "shapes": {
+                "narrative": {
+                    "narrativeId": "narrative.executive_synthesis.1",
+                    "kind": "synthesis | integration | reflection (exactly one of these)",
+                    "text": "20-900 characters of reader-facing prose",
+                    "claimIds": ["1 to 4 Claim IDs assigned to the same section"],
+                },
+                "priorityDomainSection": {
+                    "sectionId": "section.priority_domain.career",
+                    "sectionKind": "priority_domain",
+                    "title": "career",
+                    "purpose": "career",
+                    "claimIds": ["claim IDs of one topic"],
+                    "narratives": ["one or two narrative objects"],
+                },
+            },
+        }
+
+    @staticmethod
+    def _consultation_placement(claims: list[Any], topic_order: list[str]) -> dict[str, Any]:
+        """A valid section layout by topic priority; the Agent writes prose for it.
+
+        Timing Claims go to timing_outlook, the foundation Claim to chart_foundation,
+        the three highest-priority Claims to executive_synthesis, the next one to
+        decision_support, and the rest to at most five priority_domain sections with
+        any overflow in core_architecture.
+        """
+
+        rank = {topic: index for index, topic in enumerate(topic_order)}
+        ordered = sorted(
+            (claim for claim in claims if claim.scope != "timing"),
+            key=lambda claim: (rank.get(claim.topic, len(rank)), claim.claim_id),
+        )
+        foundation = next((c for c in ordered if c.topic == "foundation"), None) or (
+            ordered[0] if ordered else None
+        )
+        rest = [claim for claim in ordered if claim is not foundation]
+        executive, decision, remainder = rest[:3], rest[3:4], rest[4:]
+        domains: dict[str, list[str]] = {}
+        architecture: list[str] = []
+        for claim in remainder:
+            if claim.topic in domains or len(domains) < 5:
+                domains.setdefault(claim.topic, []).append(claim.claim_id)
+            else:
+                architecture.append(claim.claim_id)
+
+        def section(kind: str, claim_ids: list[str], suffix: str = "") -> dict[str, Any]:
+            return {
+                "sectionId": f"section.{kind}{suffix}",
+                "sectionKind": kind,
+                "title": kind,
+                "purpose": kind,
+                "claimIds": claim_ids,
+                "narratives": [],
+            }
+
+        sections = [
+            section("scope", []),
+            section("executive_synthesis", [claim.claim_id for claim in executive]),
+            section("chart_foundation", [foundation.claim_id] if foundation else []),
+        ]
+        if architecture:
+            sections.append(section("core_architecture", architecture))
+        sections.extend(
+            section("priority_domain", claim_ids, f".{topic}")
+            for topic, claim_ids in domains.items()
+        )
+        sections.extend(
+            [
+                section(
+                    "timing_outlook",
+                    [claim.claim_id for claim in claims if claim.scope == "timing"],
+                ),
+                section("decision_support", [claim.claim_id for claim in decision]),
+                section("follow_up", []),
+                section("technical_evidence", []),
+            ]
+        )
+        return {
+            "executiveClaimIds": [claim.claim_id for claim in executive],
+            "sections": sections,
+            "omitted": [],
+        }
 
     def _judgement_sensitivity(self, session_id: str) -> dict[str, object]:
         active = self.workspace.read_artifact_text(session_id, ACTIVE_CHART_SENSITIVITY_JSON)
@@ -5427,6 +5716,123 @@ User request:
                 )
         return restricted, restrict_timing
 
+    @staticmethod
+    def _normalize_dossier_draft(
+        dossier_json: str,
+        timing_claim_ids: frozenset[str] = frozenset(),
+        *,
+        template: dict[str, Any] | None = None,
+    ) -> str:
+        """Repair presentation the backend owns; never touches Claim content or prose.
+
+        Timing Claims live only in timing_outlook, each Claim appears in one section,
+        narratives cite only Claims of their own section, and narrative labels use the
+        contract vocabulary.
+        """
+
+        try:
+            payload = json.loads(dossier_json)
+        except json.JSONDecodeError:
+            return dossier_json
+        if not isinstance(payload, dict) or not isinstance(payload.get("sections"), list):
+            return dossier_json
+        if isinstance(template, dict) and isinstance(template.get("sections"), list):
+            # The backend placement is final: keep the Agent's prose, restore its layout.
+            prose = {
+                str(section.get("sectionId")): section.get("narratives") or []
+                for section in payload["sections"]
+                if isinstance(section, dict)
+            }
+            by_kind = {
+                str(section.get("sectionKind")): section.get("narratives") or []
+                for section in payload["sections"]
+                if isinstance(section, dict)
+            }
+            payload["sections"] = [
+                {
+                    **section,
+                    "narratives": prose.get(str(section.get("sectionId")))
+                    or by_kind.get(str(section.get("sectionKind")))
+                    or [],
+                }
+                for section in template["sections"]
+                if isinstance(section, dict)
+            ]
+            payload["executiveClaimIds"] = list(template.get("executiveClaimIds") or [])
+            payload["omittedClaimIds"] = dict(template.get("omittedClaimIds") or {})
+        sections = [section for section in payload["sections"] if isinstance(section, dict)]
+        timing_section = next(
+            (section for section in sections if section.get("sectionKind") == "timing_outlook"),
+            None,
+        )
+        # chart_foundation and decision_support each need their own Claim: reserve the
+        # first one they list before duplicates elsewhere are dropped.
+        reserved: dict[str, str] = {}
+        for required in ("chart_foundation", "decision_support"):
+            section = next((s for s in sections if s.get("sectionKind") == required), None)
+            listed = section.get("claimIds") or [] if section else []
+            candidate = next(
+                (
+                    claim_id
+                    for claim_id in listed
+                    if isinstance(claim_id, str)
+                    and claim_id not in timing_claim_ids
+                    and claim_id not in reserved
+                ),
+                None,
+            )
+            if candidate:
+                reserved[candidate] = required
+        moved: list[str] = []
+        seen: set[str] = set(reserved)
+        for section in sections:
+            kind = section.get("sectionKind")
+            kept: list[str] = []
+            for claim_id in section.get("claimIds") or []:
+                if not isinstance(claim_id, str):
+                    continue
+                if claim_id in timing_claim_ids and kind != "timing_outlook":
+                    moved.append(claim_id)
+                    continue
+                if claim_id in reserved:
+                    if reserved[claim_id] == kind and claim_id not in kept:
+                        kept.append(claim_id)
+                    continue
+                if claim_id in seen:
+                    continue
+                seen.add(claim_id)
+                kept.append(claim_id)
+            section["claimIds"] = kept
+        if timing_section is not None:
+            for claim_id in moved:
+                if claim_id not in seen:
+                    seen.add(claim_id)
+                    timing_section["claimIds"].append(claim_id)
+        for section in sections:
+            allowed = set(section["claimIds"])
+            narratives = []
+            for narrative in section.get("narratives") or []:
+                if not isinstance(narrative, dict):
+                    continue
+                if narrative.get("kind") not in {"synthesis", "integration", "reflection"}:
+                    narrative["kind"] = "synthesis"
+                cited = [
+                    claim_id for claim_id in narrative.get("claimIds") or [] if claim_id in allowed
+                ]
+                if cited:
+                    narrative["claimIds"] = cited
+                    narratives.append(narrative)
+            section["narratives"] = narratives
+        executive = next(
+            (s for s in sections if s.get("sectionKind") == "executive_synthesis"), None
+        )
+        if executive is not None and isinstance(payload.get("executiveClaimIds"), list):
+            executive_ids = set(executive["claimIds"])
+            payload["executiveClaimIds"] = [
+                claim_id for claim_id in payload["executiveClaimIds"] if claim_id in executive_ids
+            ]
+        return json.dumps(payload, ensure_ascii=False)
+
     async def _finalize_consultation_artifacts(self, session_id: str) -> None:
         chart_record_json = self.workspace.read_artifact_text(session_id, CHART_RECORD_JSON)
         judgement_context_json = self.workspace.read_artifact_text(
@@ -5441,6 +5847,18 @@ User request:
             or not dossier_json
         ):
             return
+        brief = self._json_dict(
+            self.workspace.read_artifact_text(session_id, CONSULTATION_BRIEF_JSON) or ""
+        )
+        dossier_json = self._normalize_dossier_draft(
+            dossier_json,
+            frozenset(
+                claim["claimId"]
+                for claim in json.loads(claim_graph_json).get("claims", [])
+                if isinstance(claim, dict) and claim.get("scope") == "timing"
+            ),
+            template=brief.get("dossierTemplate"),
+        )
 
         self.assert_core_readiness(session_id, prepare_judgement=False)
 
@@ -5535,7 +5953,9 @@ User request:
                                 "limitations": claims_by_id[claim_id].limitations,
                                 "certainty": claims_by_id[claim_id].certainty,
                                 "timeScope": (
-                                    claims_by_id[claim_id].time_scope.model_dump(by_alias=True)
+                                    claims_by_id[claim_id].time_scope.model_dump(
+                                        mode="json", by_alias=True
+                                    )
                                     if claims_by_id[claim_id].time_scope is not None
                                     else None
                                 ),

@@ -33,6 +33,7 @@ from app.schemas import (
     PrecisePlaceSearchResponse,
     PlaceSearchResponse,
     RectificationConfirmationInput,
+    RectificationWindowScopeInput,
     RectificationInterviewInput,
     RectificationLifeEventsInput,
     RectificationLifeEventsResetInput,
@@ -72,6 +73,8 @@ async def lifespan(_: FastAPI):
         await close_db()
 
 
+from app.services.atlas import router as atlas_router
+from app.services.daily_guidance import router as daily_guidance_router
 from app.services.daily_journal import router as journal_router
 from app.services.feedback import router as feedback_router
 from app.services.memberships import router as memberships_router
@@ -79,6 +82,8 @@ from app.services.memberships import router as memberships_router
 app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0", lifespan=lifespan)
 
 app.include_router(journal_router)
+app.include_router(daily_guidance_router)
+app.include_router(atlas_router)
 
 app.include_router(feedback_router)
 app.include_router(memberships_router)
@@ -567,6 +572,29 @@ async def confirm_rectification_result(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise _internal_server_error("rectification confirmation", exc) from exc
+
+
+@app.post("/api/rectification-window-scope", response_model=SkillSessionResponse)
+async def accept_rectification_window_scope(
+    input_data: RectificationWindowScopeInput,
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> SkillSessionResponse:
+    try:
+        container = get_container()
+        account_user = await _sync_account_user(container, current_user)
+        await _claim_or_assert_session_access(container, input_data.session_id, account_user)
+        return await container.skill_runtime.accept_window_scope(
+            input_data,
+            owner_user_id=account_user.owner_user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _internal_server_error("rectification window scope", exc) from exc
 
 
 @app.post("/api/consultation-questions", response_model=ConsultationAnswerResponse)

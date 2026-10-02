@@ -9,7 +9,7 @@ import { learnedRules, MIN_GROUP_DAYS, readDay, unlockProgress, type Fit } from 
 import { monthDays, weekdayIndex } from "../lib/sexagenary";
 
 const fitCell: Record<Fit, string> = {
-  bright: "border-transparent bg-[#f3ece0] text-[#16120c]",
+  bright: "border-transparent bg-paper text-[#16120c]",
   steady: "border-transparent bg-white/[0.06] text-cream/80",
   gentle: "border-dashed border-white/25 bg-transparent text-cream/55",
   unknown: "border-transparent bg-white/[0.025] text-cream/45"
@@ -86,7 +86,7 @@ export function Patterns() {
         <p className="mt-3 text-sm leading-7 text-cream/60">{d.daysBody}</p>
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-5 @4xl:grid-cols-[minmax(0,1fr)_340px]">
         <section className="surface self-start p-4 sm:p-6" aria-label={d.daysTitle}>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-2xl">

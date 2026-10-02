@@ -151,7 +151,7 @@ export function FeedbackWidget() {
     "mt-2 w-full rounded-xl border border-white/20 bg-[#231c2c] px-3 py-3 text-base text-cream outline-none focus:border-gold focus:ring-2 focus:ring-gold/25 disabled:opacity-60";
   return (
     <div
-      className={`fixed right-4 z-[70] sm:right-6 ${pathname.startsWith("/app") ? "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-6" : "bottom-[calc(1.5rem+env(safe-area-inset-bottom))]"}`}
+      className={`fixed right-4 z-[70] sm:right-6 ${pathname.startsWith("/app") ? "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-5 lg:left-[268px] lg:right-auto" : "bottom-[calc(1.5rem+env(safe-area-inset-bottom))]"}`}
     >
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>

@@ -1841,7 +1841,7 @@ def test_reference_calculation_builds_a_typed_chart_record(case: dict[str, Any])
     assert agent_context.reported_birth_date == localized.birth_assertion.local_date
     assert agent_context.rejected_hypotheses == []
     report = render_consultation_report(localized, graph, dossier)
-    assert "# VedicDust" in report
+    assert "# 你的 Vedic 解读" in report
     assert "用户报告的出生信息" in report
     assert "本次盘面采用的计算依据" in report
     assert "12岁 · 儿童 · 由父母阅读" in report

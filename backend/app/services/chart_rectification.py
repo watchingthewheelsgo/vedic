@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
-from app.schemas import BirthInput, ReaderRelationship
+from app.schemas import BIRTH_PLACE_MAX_LENGTH, BirthInput, ReaderRelationship
 from app.services.life_event_rectification import (
     MAX_RECTIFICATION_EVENTS,
     build_life_event_focus,
@@ -21,6 +21,8 @@ from app.vedicdust.rectification_policy import (
     RECTIFICATION_SCORING_POLICY,
     RECTIFICATION_SOURCE_IDS,
     RECTIFICATION_VALIDATION_STATUS,
+    WINDOW_SCOPE_POLICY_ID,
+    window_scope_available,
 )
 
 
@@ -381,6 +383,44 @@ class ChartRectificationService:
             "factPolicy": "release_only_scan_stable_facts",
             "timingPolicy": "withhold_if_dasha_or_lunar_timing_changes",
         }
+
+    def apply_window_scope(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Release a report on window-stable facts without selecting a birth time."""
+
+        if not window_scope_available(state):
+            raise ValueError("A window-scoped report is not available for this chart.")
+        next_state = copy.deepcopy(state)
+        candidate_ids = [
+            str(candidate["candidateId"])
+            for candidate in next_state.get("candidates") or []
+            if isinstance(candidate, dict) and candidate.get("candidateId")
+        ]
+        intersection = self._equivalent_candidate_intersection(next_state, candidate_ids)
+        intersection["policyId"] = WINDOW_SCOPE_POLICY_ID
+        next_state.update(
+            {
+                "status": "window_scoped",
+                "selectedCandidateId": None,
+                "provisionalCandidateId": None,
+                "equivalentCandidateIds": candidate_ids,
+                "selectionConfidence": "low",
+                "equivalentCandidateIntersection": intersection,
+                "revision": int(next_state.get("revision") or 0) + 1,
+                "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "reportGate": {
+                    "fullReportAllowed": True,
+                    "reportScope": "stable_intersection_only",
+                    "reason": (
+                        "The D1 ascendant and house structure hold across the complete reported "
+                        "birth window. The report releases only facts stable across that window; "
+                        "time-sensitive divisional charts, degrees and timing stay withheld."
+                    ),
+                    "nextStep": "report_allowed_with_stable_intersection",
+                },
+            }
+        )
+        next_state["rectificationPlan"] = self._build_rectification_plan(next_state)
+        return next_state
 
     @staticmethod
     def _set_additional_event_request(state: dict[str, Any]) -> None:
@@ -1227,7 +1267,16 @@ class ChartRectificationService:
             parts.append(f"source={source}")
         if accuracy:
             parts.append(f"accuracy={accuracy}")
-        return f"{label} | {', '.join(parts)}"
+        # BirthInput.birthPlace is capped; keep every calculation parameter and shorten
+        # only the display label. A label that is itself a coordinate spec adds nothing.
+        params = ", ".join(parts)
+        while len(params) > BIRTH_PLACE_MAX_LENGTH and len(parts) > 3:
+            parts.pop()
+            params = ", ".join(parts)
+        room = BIRTH_PLACE_MAX_LENGTH - len(params) - len(" | ")
+        if not label or room < 2 or ("lat=" in label and "lon=" in label):
+            return params
+        return f"{label[:room].rstrip(' ,')} | {params}"
 
     @staticmethod
     def _reported_time_window_input(time_context: dict[str, Any]) -> dict[str, Any] | None:
@@ -1438,6 +1487,17 @@ class ChartRectificationService:
                     "reportScope": "prevalidation_or_d1_only",
                     "reason": gate.get("reason")
                     or "The reported birth-time interval remains underdetermined.",
+                }
+            )
+        elif status == "window_scoped":
+            next_decision.update(
+                {
+                    "nextStep": "report_allowed_with_stable_intersection",
+                    "timeConfidence": "low",
+                    "reportAllowed": gate.get("fullReportAllowed") is True,
+                    "reportScope": "stable_intersection_only",
+                    "reason": gate.get("reason")
+                    or "The report is limited to facts stable across the reported window.",
                 }
             )
         elif status == "multiple_equivalent":

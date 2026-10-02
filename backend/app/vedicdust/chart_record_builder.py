@@ -221,6 +221,7 @@ def build_chart_record(source: ChartRecordBuildInput) -> ChartRecord:
         "not_required",
         "bounded_interval",
         "multiple_equivalent",
+        "window_scoped",
     }
     status = (
         "blocked"

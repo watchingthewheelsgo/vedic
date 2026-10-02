@@ -72,34 +72,89 @@ export function chartRevealCoordinatesFromRecord(
 
 // Generic per-stage messaging for stages that aren't further subdivided by a
 // specific planet/house. Stage ids match WORKSHOP_STAGES exactly.
-const STAGE_MESSAGING: Record<string, { title: string; caption: string; focus: ChartRevealFocus }> =
-  {
-    src: {
-      title: "接收出生信息",
-      caption: "已收到你的出生日期、时间、地点——排盘马上开始。",
-      focus: { kind: "lagna" }
-    },
+type StageMessage = { title: string; caption: string; focus: ChartRevealFocus };
+type RevealLocale = "zh" | "en" | "ja";
+
+const STAGE_FOCUS: Record<string, ChartRevealFocus> = {
+  src: { kind: "lagna" },
+  chart: { kind: "lagna" },
+  reader: { kind: "lagna" },
+  judgement: { kind: "synthesis" },
+  consultation: { kind: "synthesis" }
+};
+
+const STAGE_TEXT: Record<RevealLocale, Record<string, { title: string; caption: string }>> = {
+  zh: {
+    src: { title: "接收出生信息", caption: "已收到你的出生日期、时间、地点——排盘马上开始。" },
     chart: {
       title: "确定上升点与行星落位",
-      caption: "正在计算你的上升点和9颗行星的位置——这是你星盘的基础骨架。",
-      focus: { kind: "lagna" }
+      caption: "正在计算你的上升点和9颗行星的位置——这是你星盘的基础骨架。"
     },
     reader: {
       title: "校准出生时间",
-      caption: "正在核对你之前确认过的几条推断，用来校准这张盘的可信度。",
-      focus: { kind: "lagna" }
+      caption: "正在核对你之前确认过的几条推断，用来校准这张盘的可信度。"
     },
     judgement: {
       title: "合成有证据的判断",
-      caption: "正在把本命承诺、能力强弱、可用分盘与时间周期合成为少量可追溯结论。",
-      focus: { kind: "synthesis" }
+      caption: "正在把本命承诺、能力强弱、可用分盘与时间周期合成为少量可追溯结论。"
     },
     consultation: {
-      title: "生成专业咨询档案",
-      caption: "正在按你的关注重点组织结论、时间窗口、现实启示与专业证据。",
-      focus: { kind: "synthesis" }
+      title: "撰写你的解读",
+      caption: "正在按你的关注重点组织结论、时间窗口、现实启示与专业证据。"
     }
-  };
+  },
+  en: {
+    src: {
+      title: "Receiving your birth details",
+      caption: "Your birth date, time and place are in. Your chart is about to be drawn."
+    },
+    chart: {
+      title: "Placing your ascendant and planets",
+      caption: "Calculating your rising sign and the nine planets: the skeleton of your chart."
+    },
+    reader: {
+      title: "Checking your birth time",
+      caption: "Weighing what you confirmed earlier to judge how firm this chart is."
+    },
+    judgement: {
+      title: "Building evidence-backed findings",
+      caption:
+        "Combining your natal promise, strengths, divisional charts and life periods into a few traceable findings."
+    },
+    consultation: {
+      title: "Writing your reading",
+      caption:
+        "Organizing findings, timing windows and practical takeaways around what you asked about."
+    }
+  },
+  ja: {
+    src: {
+      title: "出生情報を受け取りました",
+      caption: "生年月日・時刻・場所を受け取りました。まもなくチャートを作成します。"
+    },
+    chart: {
+      title: "上昇点と惑星を配置中",
+      caption: "上昇宮と9つの惑星の位置を計算しています。チャートの骨格です。"
+    },
+    reader: {
+      title: "出生時刻を確認中",
+      caption: "確認済みの内容から、このチャートの確かさを見極めています。"
+    },
+    judgement: {
+      title: "根拠のある判断を統合中",
+      caption: "出生図の約束、強さ、分割図、時期を少数の追跡可能な結論にまとめています。"
+    },
+    consultation: {
+      title: "リーディングを執筆中",
+      caption: "ご相談のテーマに沿って、結論・時期・実践的なポイントを整理しています。"
+    }
+  }
+};
+
+function stageMessage(stageId: string, locale: RevealLocale): StageMessage | null {
+  const text = STAGE_TEXT[locale]?.[stageId] ?? STAGE_TEXT.en[stageId];
+  return text ? { ...text, focus: STAGE_FOCUS[stageId] ?? { kind: "synthesis" } } : null;
+}
 
 function pickActiveStage(
   agg: Record<string, { status: string; done: number; total: number }>,
@@ -116,12 +171,16 @@ function pickActiveStage(
   return lastDone;
 }
 
-export function deriveChartRevealState(data: PipelineData | null): ChartRevealState {
+export function deriveChartRevealState(
+  data: PipelineData | null,
+  locale: RevealLocale = "en"
+): ChartRevealState {
+  const initial = stageMessage("src", locale)!;
   if (!data || data.nodes.length === 0) {
     return {
-      title: STAGE_MESSAGING.src.title,
-      caption: STAGE_MESSAGING.src.caption,
-      focus: STAGE_MESSAGING.src.focus,
+      title: initial.title,
+      caption: initial.caption,
+      focus: initial.focus,
       lagnaRevealed: false,
       planetsRevealed: false,
       housesCompleted: [],
@@ -138,11 +197,10 @@ export function deriveChartRevealState(data: PipelineData | null): ChartRevealSt
       ? Array.from({ length: 12 }, (_, index) => index + 1)
       : [];
 
-  const title = STAGE_MESSAGING[activeStage.id]?.title ?? activeStage.label;
-  const caption = STAGE_MESSAGING[activeStage.id]?.caption ?? "";
-  const focus: ChartRevealFocus = STAGE_MESSAGING[activeStage.id]?.focus ?? {
-    kind: "synthesis"
-  };
+  const message = stageMessage(activeStage.id, locale);
+  const title = message?.title ?? activeStage.label;
+  const caption = message?.caption ?? "";
+  const focus: ChartRevealFocus = message?.focus ?? { kind: "synthesis" };
 
   return {
     title,

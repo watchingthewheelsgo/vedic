@@ -249,6 +249,11 @@ export const api = {
       { requireAuth: true }
     );
   },
+  askAtlas(input: import("./lib/atlas").AtlasRequest) {
+    return postJson<import("./lib/atlas").AtlasResponse, typeof input>("/api/me/atlas/ask", input, {
+      requireAuth: true
+    });
+  },
   reflectJournal(input: {
     day: string;
     question: string;
@@ -273,6 +278,15 @@ export const api = {
     return getJson<import("./lib/journal").JournalResponse>(
       `/api/me/journal?timezone=${encodeURIComponent(timezone)}`,
       undefined,
+      { requireAuth: true }
+    );
+  },
+  getDailyGuidance(input: { timezone: string; day?: string }, signal?: AbortSignal) {
+    const params = new URLSearchParams({ timezone: input.timezone });
+    if (input.day) params.set("day", input.day);
+    return getJson<import("./lib/journal").DailyGuidanceResponse>(
+      `/api/me/daily-guidance?${params.toString()}`,
+      signal,
       { requireAuth: true }
     );
   },
@@ -402,6 +416,9 @@ export const api = {
       "/api/rectification-life-events/reset",
       input
     );
+  },
+  acceptWindowScope(input: { sessionId: string; expectedChartRevision: number }) {
+    return postJson<SkillSessionResponse, typeof input>("/api/rectification-window-scope", input);
   },
   prepareRectificationInterview(input: RectificationInterviewInput) {
     return postJson<SkillSessionResponse, RectificationInterviewInput>(

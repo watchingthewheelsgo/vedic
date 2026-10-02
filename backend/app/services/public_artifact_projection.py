@@ -4,6 +4,8 @@ import copy
 import json
 from typing import Any, Callable
 
+from app.vedicdust.rectification_policy import window_scope_available
+
 
 PUBLIC_PROJECTED_ARTIFACTS = frozenset(
     {
@@ -102,6 +104,7 @@ def _public_rectification_state(payload: dict[str, Any]) -> dict[str, Any]:
             "availableRectificationCategories",
         ),
     )
+    result["windowScopeAvailable"] = window_scope_available(payload)
     result["schemaVersion"] = "vedicdust-rectification-public/1.0.0"
     result["sourceSchemaVersion"] = payload.get("schemaVersion")
 

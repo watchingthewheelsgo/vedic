@@ -4799,10 +4799,10 @@ def test_core_batch_prompts_enforce_input_confidence_contract() -> None:
 
     assert [batch["id"] for batch in batches] == ["vedicdust_consultation"]
     consultation_prompt = prompts[0]
-    assert "judgement_context.json" in consultation_prompt
-    assert "claim_graph.json" in consultation_prompt
+    assert ".runtime/consultation-brief.json" in consultation_prompt
     assert "consultation_dossier.json" in consultation_prompt
-    assert "Use only the listed typed contracts" in consultation_prompt
+    assert "Do not add a new astrological judgement" in consultation_prompt
+    assert "Claim placement in the template is final" in consultation_prompt
 
 
 def test_reader_prompt_cannot_select_birth_time_candidates() -> None:
@@ -6881,3 +6881,37 @@ def test_round_candidate_metrics_do_not_pair_a_leader_with_another_candidates_sc
     assert metrics["leaderCandidateId"] == "A"
     assert metrics["leaderScore"] is None
     assert metrics["leaderMargin"] is None
+
+
+def test_life_event_recalculation_keeps_long_places_within_input_limit() -> None:
+    service = ChartRectificationService()
+    base_place = {
+        "coordinates": {"lat": 25.4333, "lon": 119.0},
+        "timezone": "Asia/Shanghai",
+        "source": "manual",
+        "accuracy": "coordinate",
+        "coordinateSystem": "WGS84",
+    }
+    coordinate_label = (
+        "lat=25.4333, lon=119.0, tz=Asia/Shanghai, source=manual, accuracy=coordinate"
+    )
+    long_label = "Licheng District, Putian, Fujian Province, People's Republic of China, Asia"
+
+    for label in (coordinate_label, long_label):
+        birth_input = service.birth_input_with_life_events(
+            {
+                "time": {"date": "2002-12-11", "reported": "20:47", "precision": "exact"},
+                "place": {**base_place, "reported": label, "resolvedLabel": label},
+            },
+            {
+                "subject": {"locale": "en"},
+                "birthAssertion": {"localDate": "2002-12-11", "reportedLocalTime": "20:47"},
+            },
+            "2021-03 career",
+        )
+        assert len(birth_input.birth_place) <= 160
+        assert "lat=25.433300, lon=119.000000, coord=WGS84, tz=Asia/Shanghai" in (
+            birth_input.birth_place
+        )
+
+    assert not birth_input.birth_place.startswith("lat=")

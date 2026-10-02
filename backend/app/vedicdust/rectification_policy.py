@@ -602,3 +602,28 @@ def rectification_outcome_polarity(category: str, event_subtype: str | None = No
 
     subtype = str(event_subtype or "").strip().casefold()
     return RECTIFICATION_EVENT_OUTCOME_POLARITY.get((category, subtype), "neutral")
+
+
+# Window-scoped reports: when the D1 ascendant sign and house structure hold across
+# the complete reported birth window, a reading can proceed without selecting a time.
+# It releases only scan-stable facts (the same envelope as an equivalent-candidate
+# intersection); time-sensitive vargas, degrees and timing stay withheld until the
+# user optionally completes rectification.
+WINDOW_SCOPE_POLICY_ID = "vedicdust-window-scoped-report/1.0.0"
+WINDOW_SCOPE_ELIGIBLE_STATUSES = frozenset({"collecting_evidence", "underdetermined"})
+WINDOW_SCOPE_BLOCKING_FIELDS = frozenset({"lagnaSign", "d1Structure"})
+
+
+def window_scope_available(state: Mapping[str, Any]) -> bool:
+    if str(state.get("status") or "") not in WINDOW_SCOPE_ELIGIBLE_STATUSES:
+        return False
+    invalidation = state.get("evidenceInvalidation")
+    if isinstance(invalidation, Mapping) and invalidation.get("requiresReset"):
+        return False
+    candidates = [
+        candidate
+        for candidate in state.get("candidates") or []
+        if isinstance(candidate, Mapping) and candidate.get("candidateId")
+    ]
+    changed = {str(field) for field in state.get("scanChangedFields") or []}
+    return bool(candidates) and not (changed & WINDOW_SCOPE_BLOCKING_FIELDS)

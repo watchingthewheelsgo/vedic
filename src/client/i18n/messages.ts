@@ -652,6 +652,13 @@ export const messages: Record<LocaleCode, Dict> = {
     "session.rectification.evidenceReset.body":
       "That event participated in the previous comparison, so the result cannot be reused safely. Restart the event check before continuing to the report.",
     "session.rectification.evidenceReset.action": "Restart event check",
+    "session.windowScope.title": "Read your chart now",
+    "session.windowScope.body":
+      "Your rising sign and houses hold across your whole birth window, so your reading can start right away. It uses only the chart facts that stay the same across that window. Adding dated life events later sharpens the time and unlocks divisional-chart detail.",
+    "session.windowScope.action": "Generate my reading",
+    "session.windowScope.secondary":
+      "Or answer a few questions below to sharpen your birth time first.",
+    "session.error.windowScope": "Couldn't start the reading. Please try again.",
     "session.rectification.stableReport": "View the stable shared reading",
     "session.rectification.advanced": "Advanced chart candidates",
     "session.rectification.baseCandidate": "base",
@@ -1529,6 +1536,12 @@ const zhOverrides: Dict = {
   "session.rectification.evidenceReset.body":
     "这条经历参与过上一轮候选盘比较，因此旧结论不能继续使用。请重新开始经历校验，再进入正式报告。",
   "session.rectification.evidenceReset.action": "重新开始经历校验",
+  "session.windowScope.title": "现在就可以读盘",
+  "session.windowScope.body":
+    "在你给出的出生时间范围内，上升星座和宫位都保持不变，所以可以直接生成报告。报告只使用在整个时间范围内都不变的命盘事实；之后补充有日期的经历，可以进一步校准时间，解锁分盘细节。",
+  "session.windowScope.action": "生成我的报告",
+  "session.windowScope.secondary": "也可以先回答下面几个问题，校准出生时间。",
+  "session.error.windowScope": "暂时无法开始生成报告，请重试。",
   "session.rectification.stableReport": "查看共享稳定解读",
   "session.rectification.advanced": "高级候选盘",
   "session.rectification.baseCandidate": "基础盘",
@@ -2340,6 +2353,12 @@ const jaOverrides: Dict = {
   "session.rectification.evidenceReset.body":
     "その出来事は前回の候補比較に使われたため、以前の結論は安全に再利用できません。レポートへ進む前に出来事の確認をやり直してください。",
   "session.rectification.evidenceReset.action": "出来事の確認をやり直す",
+  "session.windowScope.title": "今すぐチャートを読む",
+  "session.windowScope.body":
+    "申告された出生時刻の範囲全体で、上昇宮とハウスは変わりません。そのため今すぐレポートを作成できます。範囲全体で変わらない事実だけを使い、日付のある出来事を後から加えると時刻が絞り込まれ、分割図の詳細が解放されます。",
+  "session.windowScope.action": "レポートを作成",
+  "session.windowScope.secondary": "先に下の質問に答えて、出生時刻を絞り込むこともできます。",
+  "session.error.windowScope": "レポートを開始できませんでした。もう一度お試しください。",
   "session.rectification.stableReport": "共通して安定した解釈を見る",
   "session.rectification.advanced": "高度な候補チャート",
   "session.rectification.baseCandidate": "基準",

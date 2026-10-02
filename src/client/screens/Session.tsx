@@ -43,7 +43,7 @@ import {
   type StageDef,
   type StageStatus
 } from "../components/PipelineFlow";
-import { MarkdownReport } from "../components/MarkdownReport";
+import { MarkdownReport, reportHeadingId, reportHeadings } from "../components/MarkdownReport";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
@@ -128,6 +128,7 @@ type ResultPreviewSection = {
 
 type RectificationState = {
   status?: string;
+  windowScopeAvailable?: boolean;
   riskLevel?: string;
   reportReadinessMode?: string;
   equivalentCandidateCount?: number;
@@ -975,7 +976,7 @@ export function Session() {
   const location = useLocation();
   const navState = location.state as NavState;
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "report" ? "report" : "reading";
+  const tabParam = searchParams.get("tab");
 
   const [session, setSession] = useState<SkillSessionResponse | null>(null);
   const [coreJob, setCoreJob] = useState<CoreJobResponse | null>(null);
@@ -1006,6 +1007,18 @@ export function Session() {
 
   const baziMode = useMemo(() => isBaziSession(session), [session]);
   const reportSections = useMemo(() => getReportSections(session), [session]);
+  const consultationDoc = !isBaziSession(session) && reportSections.length === 1;
+  const consultationHeadings = useMemo(
+    () => (consultationDoc ? reportHeadings(reportSections[0].content) : []),
+    [consultationDoc, reportSections]
+  );
+  // A finished reading opens on the report; the generation view stays one tap away.
+  const tab =
+    tabParam === "report" || tabParam === "reading"
+      ? tabParam
+      : reportSections.length > 0
+        ? "report"
+        : "reading";
   const runMetrics = useMemo(() => parseRunMetrics(session), [session]);
   const baziPipelineData = useMemo(
     () => getBaziPipelineData(session, baziRunning),
@@ -1391,6 +1404,36 @@ export function Session() {
     }
   }
 
+  async function onAcceptWindowScope() {
+    if (!authLoaded) {
+      setError(t("session.error.accountLoading"));
+      return;
+    }
+    if (!isSignedIn) {
+      setError(t("session.error.signInRectification"));
+      return;
+    }
+    setError("");
+    setSubmittingLifeEvents(true);
+    try {
+      const chartRecord = parseJsonArtifact(session, CHART_RECORD_JSON);
+      const expectedChartRevision = numberLike(chartRecord?.revision);
+      if (expectedChartRevision == null) {
+        throw new Error(t("session.error.missingChartRevision"));
+      }
+      const updated = await api.acceptWindowScope({ sessionId: id, expectedChartRevision });
+      setSession(updated);
+      readerStartedRef.current = false;
+      if (readingContinuationAction(updated) === "full_report") {
+        await startCoreReport({ sessionOverride: updated });
+      }
+    } catch (caught) {
+      setError(userFacingError(caught, t("session.error.windowScope")));
+    } finally {
+      setSubmittingLifeEvents(false);
+    }
+  }
+
   async function onSubmitRectificationConfirmation(responses: RectificationConfirmationResponse[]) {
     if (!authLoaded) {
       setError(t("session.error.accountLoading"));
@@ -1549,6 +1592,7 @@ export function Session() {
             onSubmitFeedback={onSubmitFeedback}
             onSubmitLifeEvents={onSubmitLifeEvents}
             onResetLifeEvents={onResetLifeEvents}
+            onAcceptWindowScope={onAcceptWindowScope}
             onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
             onPrepareRectificationInterview={prepareRectificationInterview}
             onResumeCoreReport={resumeCoreReport}
@@ -1563,9 +1607,9 @@ export function Session() {
         </div>
       ) : complete && reportSections.length > 0 ? (
         <div className="report-doc grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_260px]">
-          <main className="report-main overflow-y-auto bg-cream px-6 py-9 pb-20 sm:px-11">
-            <div className="report-doc-head mb-7 flex flex-wrap items-center justify-between gap-4">
-              <h1 className="text-[28px] font-light tracking-normal">
+          <main className="report-main overflow-y-auto bg-night px-6 py-10 pb-24 sm:px-11">
+            <div className="report-doc-head mx-auto mb-10 flex max-w-[720px] flex-wrap items-center justify-between gap-4">
+              <h1 className="font-display text-[44px] leading-none tracking-normal">
                 {baziMode ? "Your BaZi Report" : t("session.report.heading")}
               </h1>
               <Button onClick={() => void onExport()} disabled={exportingPdf}>
@@ -1577,55 +1621,78 @@ export function Session() {
                 {exportingPdf ? t("session.report.pdfPreparing") : t("session.report.downloadPdf")}
               </Button>
             </div>
-            <ReportOverview
-              session={session}
-              reportSections={reportSections}
-              baziMode={baziMode}
-              onJump={scrollToSection}
-            />
-            {reportSections.map((artifact, index) => (
-              <section
-                className="report-section mb-12 scroll-mt-20 border-b border-gold/25 pb-12 last:border-0"
-                id={`section-${index}`}
-                key={artifact.path}
-              >
-                <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
-                  {t("session.report.section", { number: String(index + 1).padStart(2, "0") })}
-                </div>
-                <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">
-                  {titleForArtifact(artifact, locale)}
-                </div>
-                <MarkdownReport content={artifact.content} />
-              </section>
-            ))}
+            {consultationDoc ? (
+              <article className="mx-auto max-w-[720px]">
+                <MarkdownReport content={reportSections[0].content} skipTitle />
+              </article>
+            ) : (
+              <ReportOverview
+                session={session}
+                reportSections={reportSections}
+                baziMode={baziMode}
+                onJump={scrollToSection}
+              />
+            )}
+            {!consultationDoc &&
+              reportSections.map((artifact, index) => (
+                <section
+                  className="report-section mb-12 scroll-mt-20 border-b border-gold/25 pb-12 last:border-0"
+                  id={`section-${index}`}
+                  key={artifact.path}
+                >
+                  <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
+                    {t("session.report.section", { number: String(index + 1).padStart(2, "0") })}
+                  </div>
+                  <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">
+                    {titleForArtifact(artifact, locale)}
+                  </div>
+                  <MarkdownReport content={artifact.content} />
+                </section>
+              ))}
             {!baziMode && (
               <ConsultationQuestionPanel sessionId={id} isSignedIn={Boolean(isSignedIn)} />
             )}
           </main>
-          <nav className="report-toc hidden overflow-y-auto border-l border-gold/25 bg-cream-2 px-4 py-6 lg:block">
+          <nav className="report-toc hidden overflow-y-auto border-l border-white/[0.07] bg-night px-4 py-6 lg:block">
             <h4 className="mb-3.5 text-[11px] uppercase tracking-[2px] text-muted">
               {t("session.report.contents")}
             </h4>
-            {reportSections.map((artifact, index) => (
-              <button
-                key={artifact.path}
-                className={cn(
-                  "flex w-full items-baseline gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-body transition hover:bg-gold/10 hover:text-ink",
-                  activeSection === index && "bg-gold text-white hover:bg-gold hover:text-white"
-                )}
-                onClick={() => scrollToSection(index)}
-              >
-                <span
-                  className={cn(
-                    "shrink-0 text-[11px] font-bold text-gold",
-                    activeSection === index && "text-white"
-                  )}
+            {consultationDoc &&
+              consultationHeadings.map((heading, index) => (
+                <button
+                  key={heading + index}
+                  type="button"
+                  className="flex w-full rounded-lg px-2.5 py-2 text-left text-[13px] text-cream/60 transition hover:bg-white/[0.05] hover:text-cream"
+                  onClick={() =>
+                    document
+                      .getElementById(reportHeadingId(index))
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
                 >
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                {titleForArtifact(artifact, locale)}
-              </button>
-            ))}
+                  {heading}
+                </button>
+              ))}
+            {!consultationDoc &&
+              reportSections.map((artifact, index) => (
+                <button
+                  key={artifact.path}
+                  className={cn(
+                    "flex w-full items-baseline gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-body transition hover:bg-gold/10 hover:text-ink",
+                    activeSection === index && "bg-gold text-white hover:bg-gold hover:text-white"
+                  )}
+                  onClick={() => scrollToSection(index)}
+                >
+                  <span
+                    className={cn(
+                      "shrink-0 text-[11px] font-bold text-gold",
+                      activeSection === index && "text-white"
+                    )}
+                  >
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  {titleForArtifact(artifact, locale)}
+                </button>
+              ))}
           </nav>
         </div>
       ) : (
@@ -1972,7 +2039,7 @@ function ReadingRevealPanel({
   onOpenReport: () => void;
   onSelectStage: (stageId: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const stageAgg = useMemo(
     () => (pipelineData ? aggregateWorkshopStages(pipelineData.nodes, stages) : null),
     [pipelineData, stages]
@@ -1982,8 +2049,8 @@ function ReadingRevealPanel({
     [stageAgg, stages]
   );
   const revealState = useMemo(
-    () => (baziMode ? null : deriveChartRevealState(pipelineData)),
-    [baziMode, pipelineData]
+    () => (baziMode ? null : deriveChartRevealState(pipelineData, locale)),
+    [baziMode, pipelineData, locale]
   );
   const revealCoordinates = useMemo(
     () =>
@@ -2295,6 +2362,7 @@ function WorkshopDetailPanel({
   onSubmitFeedback,
   onSubmitLifeEvents,
   onResetLifeEvents,
+  onAcceptWindowScope,
   onSubmitRectificationConfirmation,
   onPrepareRectificationInterview,
   onResumeCoreReport,
@@ -2325,6 +2393,7 @@ function WorkshopDetailPanel({
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
   onResetLifeEvents: () => Promise<void>;
+  onAcceptWindowScope: () => Promise<void>;
   onSubmitRectificationConfirmation: (
     responses: RectificationConfirmationResponse[]
   ) => Promise<void>;
@@ -2426,6 +2495,7 @@ function WorkshopDetailPanel({
             onSubmitFeedback={onSubmitFeedback}
             onSubmitLifeEvents={onSubmitLifeEvents}
             onResetLifeEvents={onResetLifeEvents}
+            onAcceptWindowScope={onAcceptWindowScope}
             onSubmitRectificationConfirmation={onSubmitRectificationConfirmation}
             onPrepareRectificationInterview={onPrepareRectificationInterview}
             authLoaded={authLoaded}
@@ -2768,7 +2838,7 @@ function BirthDetail({ birthInfo }: { birthInfo: BirthInfo }) {
         <InfoRow label={t("session.birth.name")} value={birthInfo.name} />
         <InfoRow label={t("session.birth.date")} value={birthInfo.date} />
         <InfoRow label={t("session.birth.time")} value={birthInfo.time} />
-        <InfoRow label={t("session.birth.place")} value={birthInfo.place} />
+        <InfoRow label={t("session.birth.place")} value={displayPlace(birthInfo.place)} />
         <InfoRow label={t("session.birth.latitude")} value={birthInfo.latitude} />
         <InfoRow label={t("session.birth.longitude")} value={birthInfo.longitude} />
         <InfoRow label={t("session.birth.precision")} value={birthInfo.timePrecision} />
@@ -3116,7 +3186,7 @@ function ChartConfirmationCard({
         />
         <ChartConfirmationRow
           label={t("session.chart.confirmed.place")}
-          value={birthInfo.place || "—"}
+          value={displayPlace(birthInfo.place) || "—"}
           detail={locationMode}
         />
         <ChartConfirmationRow
@@ -4678,6 +4748,7 @@ function ReaderDetail({
   onSubmitFeedback,
   onSubmitLifeEvents,
   onResetLifeEvents,
+  onAcceptWindowScope,
   onSubmitRectificationConfirmation,
   onPrepareRectificationInterview,
   authLoaded,
@@ -4697,6 +4768,7 @@ function ReaderDetail({
   onSubmitFeedback: (event: FormEvent) => void;
   onSubmitLifeEvents: (events: RectificationLifeEventInput[]) => Promise<void>;
   onResetLifeEvents: () => Promise<void>;
+  onAcceptWindowScope: () => Promise<void>;
   onSubmitRectificationConfirmation: (
     responses: RectificationConfirmationResponse[]
   ) => Promise<void>;
@@ -4867,20 +4939,29 @@ function ReaderDetail({
   if (!prevalidation) {
     if (collectingLifeEvents || continuingLifeEvents) {
       return (
-        <LifeEventCollector
-          state={rectificationState}
-          interviewContent={interviewArtifact?.content ?? ""}
-          lifeStage={lifeStage}
-          birthDate={birthDate}
-          preparing={preparingRectificationInterview}
-          onPrepare={onPrepareRectificationInterview}
-          submitting={submittingLifeEvents}
-          onSubmit={onSubmitLifeEvents}
-          onReset={onResetLifeEvents}
-          clarification={rectificationClarification}
-          authLoaded={authLoaded}
-          isSignedIn={isSignedIn}
-        />
+        <>
+          {rectificationState?.windowScopeAvailable && (
+            <WindowScopeOffer
+              submitting={submittingLifeEvents}
+              disabled={!authLoaded || !isSignedIn}
+              onAccept={onAcceptWindowScope}
+            />
+          )}
+          <LifeEventCollector
+            state={rectificationState}
+            interviewContent={interviewArtifact?.content ?? ""}
+            lifeStage={lifeStage}
+            birthDate={birthDate}
+            preparing={preparingRectificationInterview}
+            onPrepare={onPrepareRectificationInterview}
+            submitting={submittingLifeEvents}
+            onSubmit={onSubmitLifeEvents}
+            onReset={onResetLifeEvents}
+            clarification={rectificationClarification}
+            authLoaded={authLoaded}
+            isSignedIn={isSignedIn}
+          />
+        </>
       );
     }
     return (
@@ -5085,6 +5166,34 @@ function ReaderDetail({
         </form>
       )}
     </>
+  );
+}
+
+function WindowScopeOffer({
+  submitting,
+  disabled,
+  onAccept
+}: {
+  submitting: boolean;
+  disabled: boolean;
+  onAccept: () => Promise<void>;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className="mb-6 rounded-3xl border border-gold/30 bg-gold/[0.06] p-5 sm:p-6">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-gold">Vedic</p>
+      <h3 className="mt-2 font-display text-2xl leading-tight text-cream">
+        {t("session.windowScope.title")}
+      </h3>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-cream/70">
+        {t("session.windowScope.body")}
+      </p>
+      <Button className="mt-4" disabled={submitting || disabled} onClick={() => void onAccept()}>
+        {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles size={16} />}
+        {t("session.windowScope.action")}
+      </Button>
+      <p className="mt-3 text-xs text-cream/50">{t("session.windowScope.secondary")}</p>
+    </section>
   );
 }
 
@@ -6174,6 +6283,12 @@ function displayCollected(value: string | undefined) {
   if (!value || value === "—" || value.includes("not-collected") || value.includes("待填"))
     return "";
   return value;
+}
+
+// Stored places may carry calculation parameters after "|"; people see only the name.
+function displayPlace(place: string | undefined) {
+  const name = (place ?? "").split("|")[0].trim();
+  return name.startsWith("lat=") ? (place ?? "") : name;
 }
 
 function extractConcern(userContext: string) {

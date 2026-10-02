@@ -71,3 +71,21 @@ test("collects one more event only when the backend plan requests it", () => {
     "stop"
   );
 });
+
+test("a window-scoped chart can start the stable-fact report", () => {
+  const state = {
+    status: "window_scoped",
+    reportGate: { fullReportAllowed: true, reportScope: "stable_intersection_only" }
+  };
+  assert.equal(canStartFullReadingFromArtifacts(state, null), true);
+  assert.equal(
+    canStartFullReadingFromArtifacts(
+      {
+        ...state,
+        reportGate: { fullReportAllowed: false, reportScope: "stable_intersection_only" }
+      },
+      null
+    ),
+    false
+  );
+});

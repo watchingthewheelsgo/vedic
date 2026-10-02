@@ -62,6 +62,32 @@ type Copy = {
   stems: Record<string, string>;
   lessons: { title: string; body: string }[];
   landingSteps: { title: string; body: string }[];
+  goodFor: string;
+  avoid: string;
+  tenGodDay: (tenGod: string, dayMaster: string) => string;
+  addBirthTitle: string;
+  addBirthBody: string;
+  addBirthAction: string;
+  fromNotes: string;
+  greeting: (hour: number, name?: string | null) => string;
+};
+
+function greet(hour: number, parts: [string, string, string], name?: string | null, sep = ", ") {
+  const base = hour < 12 ? parts[0] : hour < 18 ? parts[1] : parts[2];
+  return name ? `${base}${sep}${name}` : base;
+}
+
+const TEN_GODS_EN: Record<string, string> = {
+  比肩: "Friend",
+  劫财: "Rob Wealth",
+  食神: "Eating God",
+  伤官: "Hurting Officer",
+  偏财: "Indirect Wealth",
+  正财: "Direct Wealth",
+  七杀: "Seven Killings",
+  正官: "Direct Officer",
+  偏印: "Indirect Resource",
+  正印: "Direct Resource"
 };
 
 const zh: Copy = {
@@ -152,6 +178,14 @@ const zh: Copy = {
       body: "Vedic 占星把黄道分成 27 个月宿，出生时月亮所在的月宿刻画你的情绪本性。"
     }
   ],
+  goodFor: "宜",
+  avoid: "忌",
+  tenGodDay: (tenGod, dayMaster) => `对你的${dayMaster}日主来说，今天是${tenGod}日`,
+  addBirthTitle: "解锁你的个人宜忌",
+  addBirthBody: "添加出生资料后，每天的宜忌会根据你自己的八字计算，而不是通用黄历。",
+  addBirthAction: "添加出生资料",
+  fromNotes: "来自你的记录",
+  greeting: (hour, name) => greet(hour, ["早上好", "下午好", "晚上好"], name, "，"),
   landingSteps: [
     { title: "记录今天", body: "一个心情、一句话。每条记录都会与当天的干支一起保存。" },
     {
@@ -270,6 +304,16 @@ const en: Copy = {
       body: "Vedic astrology divides the sky into 27 lunar mansions. The one holding your birth Moon describes your emotional nature."
     }
   ],
+  goodFor: "Good for",
+  avoid: "Avoid",
+  tenGodDay: (tenGod, dayMaster) =>
+    `A ${TEN_GODS_EN[tenGod] ?? tenGod} day (${tenGod}) for your ${dayMaster} Day Master`,
+  addBirthTitle: "Unlock your personal Good for / Avoid",
+  addBirthBody:
+    "Add your birth details and each day's guidance is calculated from your own BaZi chart, not a generic almanac.",
+  addBirthAction: "Add birth details",
+  fromNotes: "From your notes",
+  greeting: (hour, name) => greet(hour, ["Good morning", "Good afternoon", "Good evening"], name),
   landingSteps: [
     {
       title: "Log your day",
@@ -351,6 +395,15 @@ const ja: Copy = {
   tarotBody: "日記とつながるタロットの振り返り。近日公開。",
   soon: "近日",
   compareAsk: "AI と比較する",
+  goodFor: "宜",
+  avoid: "忌",
+  tenGodDay: (tenGod, dayMaster) => `あなたの日主${dayMaster}にとって今日は${tenGod}の日`,
+  addBirthTitle: "あなた専用の宜忌を解放",
+  addBirthBody: "出生情報を追加すると、毎日の宜忌があなた自身の命式から計算されます。",
+  addBirthAction: "出生情報を追加",
+  fromNotes: "あなたの記録から",
+  greeting: (hour, name) =>
+    greet(hour, ["おはようございます", "こんにちは", "こんばんは"], name, "、"),
   landingSteps: [
     { title: "今日を記録", body: "気分とひとこと。記録はその日の干支と一緒に保存されます。" },
     {

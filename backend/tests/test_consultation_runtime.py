@@ -614,3 +614,15 @@ def test_followup_requires_current_rendered_artifacts(
     with pytest.raises(ValueError, match=expected_error):
         asyncio.run(runtime.answer_consultation_question(question))
     assert agent.calls == 0
+
+
+def test_narrative_audit_serializes_timing_claims(narrative_audit) -> None:
+    from app.vedicdust.models import TimeRange
+
+    runtime, session_id, dossier, graph, agent = narrative_audit
+    graph.claims[0].time_scope = TimeRange(
+        start=datetime(2027, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2028, 1, 1, tzinfo=timezone.utc),
+    )
+    asyncio.run(runtime._audit_consultation_narratives(session_id, dossier, graph))
+    assert agent.calls == 1

@@ -2919,9 +2919,11 @@ class VedicCalculator:
             interval = round(120 / factor, 3)
             structure_field = f"d{factor}Structure"
             degree_field = "lagnaDegree" if factor == 1 else f"d{factor}LagnaDegree"
-            division_changed = (
-                field in changed or structure_field in changed or degree_field in changed
-            )
+            # Sign and house structure decide whether a division can carry evidence.
+            # A degree that moves inside the same sign restricts only degree-dependent
+            # facts, which carry their own input-stability grade.
+            division_changed = field in changed or structure_field in changed
+            degree_changed = degree_field in changed
             confidence = VedicCalculator._confidence_for_division(
                 precision,
                 radius_minutes,
@@ -2932,7 +2934,7 @@ class VedicCalculator:
                 f"reported time window radius is +/-{radius_minutes}m",
                 f"approx average {key} Lagna slice is {interval}m",
             ]
-            if division_changed:
+            if division_changed or degree_changed:
                 changed_parts = [
                     item for item in (field, degree_field, structure_field) if item in changed
                 ]
@@ -2965,6 +2967,7 @@ class VedicCalculator:
                 "timeSensitive": True,
                 "locationSensitive": True,
                 "changedInScan": division_changed,
+                "degreeChangedInScan": degree_changed,
                 "recommendedUse": recommended_use,
                 "useAsPrimaryEvidence": recommended_use == "primary_or_strong_support",
                 "reasons": reasons,

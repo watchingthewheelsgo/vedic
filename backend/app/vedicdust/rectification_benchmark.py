@@ -686,6 +686,7 @@ def _evaluate_case(
     expected_record_status = {
         "bounded_interval": "rectified",
         "multiple_equivalent": "ready_for_judgement",
+        "window_scoped": "ready_for_judgement",
         "not_required": "ready_for_judgement",
         "underdetermined": "rectification_required",
         "calculation_failed": "blocked",

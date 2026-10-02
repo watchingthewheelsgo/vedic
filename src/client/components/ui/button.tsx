@@ -4,20 +4,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/cn";
 
 const buttonVariants = cva(
-  "press-feedback inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] text-sm font-medium transition-[background,border-color,color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/15 disabled:pointer-events-none disabled:opacity-50",
+  "press-feedback inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-[background,border-color,color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cream/20 disabled:pointer-events-none disabled:opacity-45",
   {
     variants: {
       variant: {
-        gold: "border border-gold bg-gold text-[#17120b] shadow-[0_8px_24px_rgba(201,169,110,0.12)] hover:border-gold-light hover:bg-gold-light",
+        gold: "border border-paper bg-paper text-[#16130e] shadow-[0_10px_30px_rgba(0,0,0,0.35)] hover:bg-white",
         outline:
-          "border border-white/14 bg-transparent text-cream/72 hover:border-gold/45 hover:bg-gold/8 hover:text-cream",
+          "border border-white/15 bg-transparent text-cream/80 hover:border-white/30 hover:bg-white/[0.05] hover:text-cream",
         ghost:
-          "border border-transparent bg-transparent text-cream/50 hover:bg-gold/10 hover:text-cream",
-        dark: "border border-gold/25 bg-night text-gold hover:bg-night-2",
-        tab: "rounded-full border border-transparent bg-transparent px-4 py-2 text-cream/50 hover:text-cream data-[active=true]:border-gold data-[active=true]:bg-gold data-[active=true]:text-white"
+          "border border-transparent bg-transparent text-cream/60 hover:bg-white/[0.06] hover:text-cream",
+        dark: "border border-white/10 bg-night-3 text-cream hover:bg-night-2",
+        tab: "rounded-full border border-transparent bg-transparent px-4 py-2 text-cream/50 hover:text-cream data-[active=true]:border-paper data-[active=true]:bg-paper data-[active=true]:text-[#16130e]"
       },
       size: {
-        sm: "h-9 px-3 text-xs",
+        sm: "h-9 px-3.5 text-xs",
         md: "h-11 px-5",
         lg: "h-[52px] px-7 text-[15px]",
         icon: "h-10 w-10 p-0"

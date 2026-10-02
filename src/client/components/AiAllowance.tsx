@@ -135,11 +135,26 @@ export function AiAllowanceProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={{ allowance, error, refresh }}>{children}</Context.Provider>;
 }
 
-export function AiAllowanceSummary() {
+export function AiAllowanceSummary({ compact = false }: { compact?: boolean }) {
   const { allowance } = useContext(Context);
   const { locale } = useI18n();
   const c = copy[locale];
   if (!allowance) return null;
+  if (compact) {
+    return (
+      <Link
+        to="/app/settings#billing"
+        className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs text-cream/50 hover:bg-white/[0.04] hover:text-cream"
+      >
+        <span className="truncate">
+          {allowance.unlimited
+            ? c.unlimited
+            : `${allowance.remaining} / ${allowance.limit} ${c.units}`}
+        </span>
+        <span className="text-gold">{c.title}</span>
+      </Link>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/8 px-5 py-3 text-xs text-cream/65 sm:px-8">
       <span>

@@ -10,32 +10,71 @@ type MarkdownBlock =
   | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "code"; text: string };
 
-export function MarkdownReport({ content }: { content: string }) {
-  const blocks = useMemo(() => parseMarkdown(content), [content]);
+// The parser maps "#" to level 2 and "##" to level 3.
+const TITLE_LEVEL = 2;
+const SECTION_LEVEL = 3;
+
+/** The report's "##" sections, in order: the document's table of contents. */
+export function reportHeadings(content: string): string[] {
+  return parseMarkdown(content)
+    .filter((block) => block.type === "heading" && block.level === SECTION_LEVEL)
+    .map((block) => (block as { text: string }).text);
+}
+
+export function reportHeadingId(index: number) {
+  return `report-h-${index}`;
+}
+
+export function MarkdownReport({
+  content,
+  skipTitle = false
+}: {
+  content: string;
+  /** Drop the document's own H1 when the page already shows a title. */
+  skipTitle?: boolean;
+}) {
+  const blocks = useMemo(() => {
+    const parsed = parseMarkdown(content);
+    const visible = skipTitle
+      ? parsed.filter((block) => !(block.type === "heading" && block.level === TITLE_LEVEL))
+      : parsed;
+    const withAnchors: { block: MarkdownBlock; anchor?: string }[] = [];
+    let section = 0;
+    for (const block of visible) {
+      const isSection = block.type === "heading" && block.level === SECTION_LEVEL;
+      withAnchors.push({ block, anchor: isSection ? reportHeadingId(section) : undefined });
+      if (isSection) section += 1;
+    }
+    return withAnchors;
+  }, [content, skipTitle]);
   return (
     <div>
-      {blocks.map((block, index) => (
-        <MarkdownBlockView key={index} block={block} />
+      {blocks.map(({ block, anchor }, index) => (
+        <MarkdownBlockView key={index} block={block} anchor={anchor} />
       ))}
     </div>
   );
 }
 
-function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
+function MarkdownBlockView({ block, anchor }: { block: MarkdownBlock; anchor?: string }) {
   if (block.type === "heading") {
     const level = Math.min(Math.max(block.level, 2), 4);
     const Tag = `h${level}` as "h2" | "h3" | "h4";
     const className =
       level === 2
-        ? "my-3 mt-6 text-lg font-semibold tracking-normal text-gold-dim"
+        ? "mb-4 mt-6 font-display text-[34px] leading-tight tracking-normal text-cream first:mt-0"
         : level === 3
-          ? "my-2.5 mt-5 text-base font-semibold tracking-normal text-ink"
-          : "my-2 mt-4 text-sm font-semibold tracking-normal text-ink";
-    return <Tag className={className}>{renderInline(block.text)}</Tag>;
+          ? "mb-3 mt-12 scroll-mt-24 border-t border-white/[0.07] pt-10 font-display text-[28px] leading-tight tracking-normal text-cream"
+          : "mb-2 mt-6 text-[17px] font-medium tracking-normal text-cream";
+    return (
+      <Tag id={anchor} className={className}>
+        {renderInline(block.text)}
+      </Tag>
+    );
   }
   if (block.type === "quote") {
     return (
-      <blockquote className="my-3.5 rounded-r border-l-[3px] border-gold bg-gold/10 px-4 py-3 text-[13px] leading-[1.8] text-body">
+      <blockquote className="my-4 rounded-2xl border border-white/10 bg-night-2 px-5 py-4 text-[14px] leading-7 text-cream/75">
         {renderInline(block.text)}
       </blockquote>
     );
@@ -44,7 +83,7 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
     return (
       <ul className="my-3.5 list-disc pl-5">
         {block.items.map((item, index) => (
-          <li key={index} className="text-sm leading-[1.85] text-body marker:text-gold">
+          <li key={index} className="text-[15px] leading-7 text-cream/80 marker:text-gold">
             {renderInline(item)}
           </li>
         ))}
@@ -94,7 +133,7 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
       </pre>
     );
   }
-  return <p className="my-2.5 text-sm leading-[1.9] text-body">{renderInline(block.text)}</p>;
+  return <p className="my-3 text-[16px] leading-8 text-cream/85">{renderInline(block.text)}</p>;
 }
 
 function parseMarkdown(content: string): MarkdownBlock[] {

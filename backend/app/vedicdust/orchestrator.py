@@ -60,10 +60,15 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
     )
     stable_intersection_ready = bool(
         record.rectification
-        and rectification_status == "multiple_equivalent"
-        and record.status == "ready_for_judgement"
-        and record.rectification.decision.holdout_result == "passed"
-        and len(record.rectification.decision.resulting_intervals) >= 2
+        and (
+            (
+                rectification_status == "multiple_equivalent"
+                and record.status == "ready_for_judgement"
+                and record.rectification.decision.holdout_result == "passed"
+                and len(record.rectification.decision.resulting_intervals) >= 2
+            )
+            or (rectification_status == "window_scoped" and record.status == "ready_for_judgement")
+        )
     )
     if rectification_status == "input_resolution_required":
         findings.append(
@@ -98,6 +103,7 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
         "comparing_candidates",
         "multiple_equivalent",
         "underdetermined",
+        "window_scoped",
     }:
         findings.append(
             AuditFinding(
@@ -126,6 +132,7 @@ def audit_chart_record(record: ChartRecord) -> ChartAudit:
             "comparing_candidates",
             "multiple_equivalent",
             "underdetermined",
+            "window_scoped",
         }
         and not stable_intersection_ready
     ):

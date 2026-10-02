@@ -22,7 +22,7 @@ export function Discover() {
         <p className="mt-3 text-sm leading-7 text-cream/60">{d.discoverBody}</p>
       </header>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid items-start gap-5 @3xl:grid-cols-2">
         <section className="surface p-5 sm:p-7">
           <form
             className="flex flex-wrap items-end gap-3"
@@ -44,7 +44,7 @@ export function Discover() {
             <button
               type="submit"
               disabled={!valid}
-              className="press-feedback h-12 rounded-full bg-[#f3ece0] px-6 text-sm font-medium text-[#16120c] disabled:opacity-40"
+              className="press-feedback h-12 rounded-full bg-paper px-6 text-sm font-medium text-[#16120c] disabled:opacity-40"
             >
               {d.findTwin}
             </button>
@@ -73,7 +73,7 @@ export function Discover() {
               ))}
               <Link
                 to="/app/explore"
-                className="press-feedback mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-[#f3ece0] px-5 text-sm font-medium text-[#16120c]"
+                className="press-feedback mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-paper px-5 text-sm font-medium text-[#16120c]"
               >
                 <Sparkles size={15} />
                 {d.compareAsk}
@@ -97,7 +97,7 @@ export function Discover() {
       </div>
 
       <h2 className="mb-4 mt-10 font-display text-2xl">{d.learnTitle}</h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 @xl:grid-cols-2 @5xl:grid-cols-4">
         {d.lessons.map((lesson) => (
           <article key={lesson.title} className="surface p-5">
             <h3 className="text-base font-medium">{lesson.title}</h3>

@@ -39,6 +39,45 @@ export type JournalResponse = {
   };
   limit: number;
 };
+// Personal BaZi 宜/忌 for a day: deterministic backend rules (bazi-daily-guidance/v1)
+// comparing the civil day pillar with the user's natal pillars. Never LLM-generated.
+export type GuidanceItem = { id: string; zh: string; en: string; ja: string; ruleIds: string[] };
+export type BranchRelation = { natalPillar: "year" | "month" | "day" | "hour"; branches: string };
+export type DailyGuidance = {
+  version: string;
+  catalogVersion: string;
+  dayPillar: string;
+  goodFor: GuidanceItem[];
+  avoid: GuidanceItem[];
+  ruleIds: string[];
+  facts: {
+    dayMaster: string;
+    tenGod: string;
+    stemCombination: string | null;
+    clashes: BranchRelation[];
+    combinations: (BranchRelation & { label: string })[];
+    trines: { branches: string; label: string; kind: "三合" | "半合" }[];
+    punishments: (BranchRelation & { label: string })[];
+    harms: BranchRelation[];
+  };
+  limitations: string[];
+  natal: {
+    source: "bazi_chart_record" | "vedic_chart_record";
+    sessionId: string;
+    dayMaster: string;
+    dayMasterElement: string | null;
+    pillars: Record<"year" | "month" | "day", string> & { hour: string | null };
+    warnings: string[];
+  };
+};
+export type DailyGuidanceResponse =
+  | { calendar: CalendarDay; guidance: DailyGuidance; reason: null }
+  | { calendar: CalendarDay; guidance: null; reason: "no_birth_details" };
+
+export function guidanceText(item: GuidanceItem, locale: string): string {
+  return locale === "zh" || locale === "ja" ? item[locale] : item.en;
+}
+
 export const journalCopy = {
   zh: {
     title: "我的日常",

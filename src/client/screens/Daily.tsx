@@ -1,14 +1,21 @@
 import { AiCostNotice } from "../components/AiAllowance";
+import { useUser } from "@clerk/clerk-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
-import { Check, LoaderCircle, Sparkles } from "lucide-react";
+import { Check, LoaderCircle, Minus, Sparkles } from "lucide-react";
 import { api, ApiError } from "../api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
-import { journalCopy, type JournalResponse, type JournalEntry } from "../lib/journal";
+import {
+  guidanceText,
+  journalCopy,
+  type DailyGuidanceResponse,
+  type JournalResponse,
+  type JournalEntry
+} from "../lib/journal";
 import { daysCopy } from "../lib/days-copy";
 import { readDay, upcoming } from "../lib/patterns";
 import { branchElement, parseDay, stemElement } from "../lib/sexagenary";
@@ -16,13 +23,14 @@ import { branchElement, parseDay, stemElement } from "../lib/sexagenary";
 const topics = ["life", "work", "relationships", "health", "learning"];
 const panel = "surface p-5 sm:p-7";
 const field =
-  "min-h-11 rounded-lg border border-white/20 bg-[#211b28] px-3 text-sm text-cream [color-scheme:dark]";
+  "min-h-11 rounded-xl border border-white/15 bg-night-3 px-3 text-sm text-cream [color-scheme:dark]";
 
 export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const selectedDay = params.get("day");
   const { locale, localeTag } = useI18n();
+  const { user } = useUser();
   const c = journalCopy[locale];
   const w = workspaceCopy[locale];
   const d = daysCopy[locale];
@@ -37,6 +45,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const [question, setQuestion] = useState("");
   const [sessionId, setSessionId] = useState(params.get("chart") ?? "");
   const [charts, setCharts] = useState<{ sessionId: string; label: string }[]>([]);
+  const [guidance, setGuidance] = useState<DailyGuidanceResponse | null>(null);
   const [groupBy, setGroupBy] = useState<"byStem" | "byBranch" | "byPillar">("byStem");
   const pendingQuestion = useRef<{ key: string; id: string } | null>(null);
   const [busy, setBusy] = useState("");
@@ -112,6 +121,12 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
       .finally(() => {
         if (alive) setBusy("");
       });
+    if (view === "today") {
+      api
+        .getDailyGuidance({ timezone: zone })
+        .then((result) => alive && setGuidance(result))
+        .catch(() => {});
+    }
     api
       .listMySessions()
       .then((result) => {
@@ -119,7 +134,12 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           setCharts(
             result.sessions.map((s) => ({
               sessionId: s.sessionId,
-              label: `${s.subject?.birthDate ?? s.createdAt?.slice(0, 10) ?? ""} · ${s.subject?.birthPlace ?? s.sessionId}`
+              label: [
+                s.subject?.birthDate ?? s.createdAt?.slice(0, 10),
+                s.subject?.birthPlace?.split("|")[0].trim()
+              ]
+                .filter((part) => part && !part.startsWith("lat="))
+                .join(" · ")
             }))
           );
       })
@@ -244,7 +264,10 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
       <div className="mx-auto max-w-[1180px] px-5 py-8 sm:px-8 sm:py-10">
         <header className="mb-7">
           <p className="eyebrow mb-2">{dateLabel}</p>
-          <h1 className="font-display text-4xl leading-tight sm:text-5xl">{w.greeting}</h1>
+          <h1 className="font-display text-4xl leading-tight sm:text-5xl">
+            {d.greeting(new Date().getHours(), user?.firstName)}
+          </h1>
+          <p className="mt-2 text-sm text-cream/55">{w.greeting}</p>
         </header>
         {error && (
           <div
@@ -254,49 +277,95 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
             {error}
           </div>
         )}
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-          <section className="surface relative overflow-hidden p-6 sm:p-8">
+        <div className="grid gap-5 @4xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+          <section className="surface @container relative overflow-hidden p-6 sm:p-8">
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full border border-gold/20 shadow-[inset_0_0_0_48px_rgba(201,169,110,0.025)]"
+              className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full border border-gold/20"
             />
             <div
               aria-hidden="true"
               className="pointer-events-none absolute -right-8 -top-8 size-40 rounded-full border border-jade/20"
             />
-            <div className="relative flex items-center justify-between">
+            <div className="relative flex items-center justify-between gap-3">
               <p className="eyebrow">{d.yourDay}</p>
               <span
-                className={`rounded-full px-3 py-1 text-xs ${todayReading.fit === "bright" ? "bg-[#f3ece0] text-[#16120c]" : todayReading.fit === "gentle" ? "border border-dashed border-white/30 text-cream/70" : "bg-white/[0.07] text-cream/75"}`}
+                className={`rounded-full px-3 py-1 text-xs ${todayReading.fit === "bright" ? "bg-paper text-[#16130e]" : todayReading.fit === "gentle" ? "border border-dashed border-white/30 text-cream/70" : "bg-white/[0.07] text-cream/75"}`}
               >
                 {d.fit[todayReading.fit]}
               </span>
             </div>
-            <div className="relative mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
-              <p className="text-7xl font-semibold leading-none tracking-wide sm:text-8xl">
-                {data.today.pillar}
-              </p>
-              <p className="pb-2 text-sm text-cream/60">
-                {d.elements[stemElement(data.today.stem)]} ·{" "}
-                {d.elements[branchElement(data.today.branch)]}
-              </p>
+            <div className="relative mt-4 flex flex-wrap items-end gap-x-5 gap-y-2">
+              <p className="han text-7xl font-bold leading-none sm:text-8xl">{data.today.pillar}</p>
+              <div className="pb-1.5">
+                <p className="text-sm text-cream/55">
+                  {d.elements[stemElement(data.today.stem)]} ·{" "}
+                  {d.elements[branchElement(data.today.branch)]}
+                </p>
+                {guidance?.guidance && (
+                  <p className="mt-1 font-display text-lg italic text-cream/85">
+                    {d.tenGodDay(guidance.guidance.facts.tenGod, guidance.guidance.facts.dayMaster)}
+                  </p>
+                )}
+              </div>
             </div>
-            <p className="relative mt-5 max-w-lg font-display text-xl leading-snug sm:text-2xl">
-              {d.fitLong[todayReading.fit]}
-            </p>
-            {todayReading.signals.length > 0 && (
-              <ul className="relative mt-4 space-y-1.5 text-sm text-cream/60">
-                {todayReading.signals.map((signal) => (
-                  <li key={signal.kind}>
-                    <span className={signal.delta >= 0 ? "text-jade" : "text-cream/40"}>● </span>
-                    {d.signal(signal.kind, signal.key, signal.averageMood, signal.count)}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="relative mt-6 text-xs text-cream/40">
-              {c.facts} · {zone}
-            </p>
+
+            {guidance?.guidance ? (
+              <div className="relative mt-6 grid gap-3 @lg:grid-cols-2">
+                <div className="rounded-2xl bg-night-3 p-4">
+                  <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
+                    <span className="grid size-6 place-items-center rounded-lg bg-paper text-[#16130e]">
+                      <Check size={13} strokeWidth={2.6} />
+                    </span>
+                    {d.goodFor}
+                  </p>
+                  <ul className="space-y-1 text-[15px] leading-6">
+                    {guidance.guidance.goodFor.map((item) => (
+                      <li key={item.id}>{guidanceText(item, locale)}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-2xl bg-night-3 p-4">
+                  <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
+                    <span className="grid size-6 place-items-center rounded-lg border border-cream/40 text-cream/70">
+                      <Minus size={13} strokeWidth={2.6} />
+                    </span>
+                    {d.avoid}
+                  </p>
+                  <ul className="space-y-1 text-[15px] leading-6 text-cream/80">
+                    {guidance.guidance.avoid.map((item) => (
+                      <li key={item.id}>{guidanceText(item, locale)}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : guidance ? (
+              <div className="relative mt-6 rounded-2xl border border-dashed border-white/20 p-4">
+                <p className="text-[15px] font-medium">{d.addBirthTitle}</p>
+                <p className="mt-1 text-sm leading-6 text-cream/60">{d.addBirthBody}</p>
+                <Link
+                  to="/app/charts/new"
+                  className="mt-3 inline-flex h-9 items-center rounded-full bg-paper px-4 text-xs font-medium text-[#16130e]"
+                >
+                  {d.addBirthAction}
+                </Link>
+              </div>
+            ) : null}
+
+            <div className="relative mt-5 border-t border-white/[0.07] pt-4">
+              <p className="eyebrow mb-1.5">{d.fromNotes}</p>
+              <p className="text-sm leading-6 text-cream/75">{d.fitLong[todayReading.fit]}</p>
+              {todayReading.signals.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[13px] text-cream/55">
+                  {todayReading.signals.map((signal) => (
+                    <li key={signal.kind}>
+                      <span className={signal.delta >= 0 ? "text-jade" : "text-cream/40"}>● </span>
+                      {d.signal(signal.kind, signal.key, signal.averageMood, signal.count)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
 
           <section className="surface p-6 sm:p-7">
@@ -320,7 +389,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                     aria-label={label}
                     title={label}
                     onClick={() => setMood(i + 1)}
-                    className={`h-12 rounded-xl border text-sm transition-colors ${mood === i + 1 ? "border-cream bg-[#f3ece0] text-[#16120c]" : "border-white/12 bg-white/[0.03] text-cream/65 hover:bg-white/[0.07]"}`}
+                    className={`h-12 rounded-xl border text-sm transition-colors ${mood === i + 1 ? "border-cream bg-paper text-[#16120c]" : "border-white/12 bg-white/[0.03] text-cream/65 hover:bg-white/[0.07]"}`}
                   >
                     {i + 1}
                   </button>
@@ -339,7 +408,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                   disabled={!!busy}
                   aria-pressed={topic === value}
                   onClick={() => setTopic(value)}
-                  className={`h-9 rounded-full border px-3.5 text-xs transition-colors ${topic === value ? "border-gold/70 bg-gold/15 text-gold-light" : "border-white/12 text-cream/60 hover:bg-white/5"}`}
+                  className={`h-9 rounded-full border px-3.5 text-xs transition-colors ${topic === value ? "border-paper bg-paper text-[#16130e]" : "border-white/12 text-cream/60 hover:bg-white/5"}`}
                 >
                   {c.topics[i]}
                 </button>
@@ -380,7 +449,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           to={entry ? `/app/explore?day=${data.today.day}` : "/app/explore"}
           className="press-feedback mt-5 flex min-h-16 items-center gap-4 rounded-full border border-white/10 bg-white/[0.04] px-5 hover:bg-white/[0.07]"
         >
-          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#f3ece0] text-[#16120c]">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-paper text-[#16120c]">
             <Sparkles size={17} />
           </span>
           <span className="min-w-0 flex-1">
@@ -390,7 +459,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           <span className="text-cream/40">→</span>
         </Link>
 
-        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="mt-5 grid gap-5 @3xl:grid-cols-2">
           <section className="surface p-6">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="font-display text-2xl">{d.nextBright}</h2>
@@ -500,7 +569,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
         {!data ? (
           <p role="status">{!error && c.loading}</p>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid gap-6 @4xl:grid-cols-[minmax(0,1fr)_320px]">
             <div className="min-w-0 space-y-6">
               {view !== "explore" && (
                 <section className={panel}>
@@ -541,9 +610,9 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                           type="button"
                           aria-pressed={mood === i + 1}
                           onClick={() => setMood(i + 1)}
-                          className={`min-h-16 rounded-xl border px-1 py-2 text-xs transition-colors ${mood === i + 1 ? "border-gold bg-gold/15 text-gold-light" : "border-white/10 text-cream/65 hover:bg-white/5"}`}
+                          className={`min-h-16 rounded-xl border px-1 py-2 text-xs transition-colors ${mood === i + 1 ? "border-paper bg-paper text-[#16130e]" : "border-white/10 bg-white/[0.03] text-cream/65 hover:bg-white/[0.07]"}`}
                         >
-                          <span className="mb-1 block text-lg">{["☁", "☂", "○", "◒", "☀"][i]}</span>
+                          <span className="mb-1 block text-lg font-medium">{i + 1}</span>
                           {label}
                         </button>
                       ))}
@@ -835,7 +904,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                               else void selectDate(item.day);
                             }
                           }}
-                          className={`w-full rounded-xl border p-3 text-left ${day === item.day ? "border-gold/60 bg-gold/10" : "border-white/10 hover:bg-white/5"}`}
+                          className={`w-full rounded-2xl border p-3 text-left ${day === item.day ? "border-white/30 bg-night-3" : "border-white/[0.07] hover:bg-white/[0.04]"}`}
                         >
                           <span className="flex justify-between text-sm">
                             <span>{item.day}</span>

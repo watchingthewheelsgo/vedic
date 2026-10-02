@@ -53,11 +53,14 @@ class ReportedTimeWindow(ApiModel):
         return self
 
 
+BIRTH_PLACE_MAX_LENGTH = 160
+
+
 class BirthInput(ApiModel):
     display_name: str | None = Field(default=None, alias="displayName", max_length=120)
     birth_date: str = Field(alias="birthDate", min_length=8, max_length=20)
     birth_time: str = Field(default="", alias="birthTime", max_length=20)
-    birth_place: str = Field(alias="birthPlace", min_length=2, max_length=160)
+    birth_place: str = Field(alias="birthPlace", min_length=2, max_length=BIRTH_PLACE_MAX_LENGTH)
     birth_time_precision: BirthTimePrecision = Field(alias="birthTimePrecision")
     reported_time_window: ReportedTimeWindow | None = Field(
         default=None,
@@ -220,6 +223,11 @@ class RectificationConfirmationInput(ApiModel):
         if len(example_ids) != len(set(example_ids)):
             raise ValueError("rectification confirmation responses must be distinct")
         return self
+
+
+class RectificationWindowScopeInput(ApiModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    expected_chart_revision: int = Field(alias="expectedChartRevision", ge=1)
 
 
 class ConsultationQuestionInput(ApiModel):

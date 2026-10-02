@@ -1016,6 +1016,7 @@ class RectificationDecision(ContractModel):
         "bounded_interval",
         "multiple_equivalent",
         "underdetermined",
+        "window_scoped",
     ]
     selected_candidate_ids: list[str] = Field(default_factory=list)
     resulting_interval: TimeRange | None = None
@@ -1471,6 +1472,7 @@ class ReadingSession(ContractModel):
         "bounded_interval",
         "multiple_equivalent",
         "underdetermined",
+        "window_scoped",
     ]
     report_status: Literal["not_started", "in_progress", "ready", "blocked"] = "not_started"
 

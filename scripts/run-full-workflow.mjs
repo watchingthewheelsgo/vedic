@@ -138,9 +138,11 @@ async function completePrevalidation(initialSession) {
         const [event] = pendingEvents.splice(eventIndex, 1);
         session = await postJson("/api/rectification-life-events", {
           sessionId: session.sessionId,
+          expectedChartRevision: chartRevision(interviewSession),
           events: [
             {
               ...event,
+              eventSubtype: event.eventSubtype ?? "other",
               questionId: question.questionId,
               category: question.category
             }
@@ -238,6 +240,12 @@ function canStartFullReading(session) {
   return canStartFullReadingFromArtifacts(state, prevalidationResult);
 }
 
+function chartRevision(session) {
+  const revision = Number(parseArtifact(session, "chart_record.json")?.revision);
+  if (!Number.isInteger(revision)) throw new Error("chart_record.json has no revision.");
+  return revision;
+}
+
 function rectificationState(session) {
   return parseArtifact(session, "chart_rectification_state.json");
 }
@@ -306,7 +314,14 @@ async function readResponse(response) {
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    throw new Error(payload?.detail ?? payload?.error ?? `HTTP ${response.status}`);
+    const detail = payload?.detail ?? payload?.error;
+    throw new Error(
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : `HTTP ${response.status}`
+    );
   }
   return payload;
 }

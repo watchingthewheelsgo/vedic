@@ -1,0 +1,164 @@
+import type { LocaleCode } from "../i18n/messages";
+
+export type AtlasRequest = {
+  message: string;
+  history: { role: "user" | "atlas"; text: string }[];
+  locale: LocaleCode;
+  timezone: string;
+  sessionId?: string | null;
+  useNotes: boolean;
+};
+
+export type AtlasLens = { source: "vedic" | "bazi" | "notes"; text: string; refs: string[] };
+
+export type AtlasResponse = {
+  headline: string;
+  answer: string;
+  lenses: AtlasLens[];
+  followUps: string[];
+  day: string;
+  sources: { vedic: boolean; journalDays: number; notesShared: boolean };
+};
+
+export type AtlasTurn =
+  { id: string; role: "user"; text: string } | { id: string; role: "atlas"; answer: AtlasResponse };
+
+export type AtlasContextKey =
+  "today" | "days" | "journal" | "charts" | "reading" | "discover" | "ask";
+
+export function atlasContextFor(pathname: string): AtlasContextKey {
+  if (pathname.startsWith("/app/days")) return "days";
+  if (pathname.startsWith("/app/records") || pathname.startsWith("/app/explore")) return "journal";
+  if (/^\/app\/charts\/(?!new|bazi)[^/]+/.test(pathname)) return "reading";
+  if (pathname.startsWith("/app/charts")) return "charts";
+  if (pathname.startsWith("/app/discover")) return "discover";
+  if (pathname.startsWith("/app/ask")) return "ask";
+  return "today";
+}
+
+/** Plain-text transcript entry sent back as conversation history. */
+export function turnText(turn: AtlasTurn): string {
+  return turn.role === "user" ? turn.text : `${turn.answer.headline}\n${turn.answer.answer}`;
+}
+
+type Copy = {
+  name: string;
+  tagline: string;
+  placeholder: string;
+  send: string;
+  thinking: string;
+  open: string;
+  close: string;
+  newChat: string;
+  useNotes: string;
+  notesHint: string;
+  chart: string;
+  noChart: string;
+  journalDays: (n: number) => string;
+  lens: Record<AtlasLens["source"], string>;
+  disclaimer: string;
+  error: string;
+  emptyTitle: string;
+  emptyBody: string;
+  suggestions: Record<AtlasContextKey, string[]>;
+};
+
+const zh: Copy = {
+  name: "Atlas",
+  tagline: "结合你的命盘与记录",
+  placeholder: "问问感情、事业、家庭……",
+  send: "发送",
+  thinking: "Atlas 正在思考……",
+  open: "打开 Atlas",
+  close: "关闭",
+  newChat: "新对话",
+  useNotes: "参考我最近的记录",
+  notesHint: "会把最近 7 天的记录内容发送给 AI 服务。",
+  chart: "Vedic 报告",
+  noChart: "暂无完成的报告",
+  journalDays: (n) => `${n} 天记录`,
+  lens: { vedic: "Vedic", bazi: "八字", notes: "你的记录" },
+  disclaimer: "仅供反思，不是确定的预言。",
+  error: "Atlas 暂时无法回答，请稍后再试。",
+  emptyTitle: "想聊点什么？",
+  emptyBody: "Atlas 会结合今天的干支、你的记录和已完成的 Vedic 报告来回答。",
+  suggestions: {
+    today: ["今天我该关注什么？", "这周哪几天适合做重要的事？"],
+    days: ["为什么有些日子对我更顺？", "下个月有哪些顺日？"],
+    journal: ["最近我的情绪有什么规律？", "帮我回顾这一周"],
+    charts: ["用三句话总结我的报告", "我的事业重点在哪里？"],
+    reading: ["这一章对我意味着什么？", "接下来一年要注意什么？"],
+    discover: ["我的日主说明了我什么？", "我和李小龙的命盘有什么不同？"],
+    ask: ["今天我该关注什么？", "我的感情会怎样发展？", "适合换工作吗？"]
+  }
+};
+
+const en: Copy = {
+  name: "Atlas",
+  tagline: "Reads your charts and notes together",
+  placeholder: "Ask about love, career, family…",
+  send: "Send",
+  thinking: "Atlas is thinking…",
+  open: "Open Atlas",
+  close: "Close",
+  newChat: "New chat",
+  useNotes: "Use my recent notes",
+  notesHint: "Sends your last 7 journal entries to our AI provider.",
+  chart: "Vedic reading",
+  noChart: "No finished reading yet",
+  journalDays: (n) => `${n} journal days`,
+  lens: { vedic: "Vedic", bazi: "BaZi", notes: "Your notes" },
+  disclaimer: "A reflection to think with, not a certainty.",
+  error: "Atlas couldn't answer just now. Please try again.",
+  emptyTitle: "What's on your mind?",
+  emptyBody:
+    "Atlas answers with today's stem-branch, your journal and your finished Vedic reading.",
+  suggestions: {
+    today: ["What should I focus on today?", "Which days this week suit big decisions?"],
+    days: ["Why are some days brighter for me?", "What are my bright days next month?"],
+    journal: ["What patterns do you see in my moods?", "Help me review this week"],
+    charts: ["Summarize my reading in three sentences", "Where is my career focus?"],
+    reading: ["What does this chapter mean for me?", "What should I watch for this year?"],
+    discover: [
+      "What does my Day Master say about me?",
+      "How is my chart different from Bruce Lee's?"
+    ],
+    ask: [
+      "What should I focus on today?",
+      "How will my relationship develop?",
+      "Is this a good time to change jobs?"
+    ]
+  }
+};
+
+const ja: Copy = {
+  ...en,
+  tagline: "チャートと記録をあわせて読み解く",
+  placeholder: "恋愛・仕事・家族について質問…",
+  send: "送信",
+  thinking: "Atlas が考えています…",
+  open: "Atlas を開く",
+  close: "閉じる",
+  newChat: "新しい会話",
+  useNotes: "最近の記録を参考にする",
+  notesHint: "直近7日分の記録を AI サービスに送信します。",
+  chart: "Vedic レポート",
+  noChart: "完了したレポートはまだありません",
+  journalDays: (n) => `${n}日分の記録`,
+  lens: { vedic: "Vedic", bazi: "八字", notes: "あなたの記録" },
+  disclaimer: "確定的な予言ではなく、考えるための視点です。",
+  error: "Atlas が応答できませんでした。もう一度お試しください。",
+  emptyTitle: "何を話しましょう？",
+  emptyBody: "今日の干支、あなたの記録、完了した Vedic レポートをもとに答えます。",
+  suggestions: {
+    today: ["今日は何に集中すべき？", "今週、大事な決断に向く日は？"],
+    days: ["なぜ一部の日が自分に合うの？", "来月の吉日は？"],
+    journal: ["気分にどんなパターンがある？", "今週を振り返りたい"],
+    charts: ["レポートを3文で要約して", "仕事の重点はどこ？"],
+    reading: ["この章は私にとって何を意味する？", "今年気をつけることは？"],
+    discover: ["私の日主は何を表している？", "ブルース・リーとの違いは？"],
+    ask: ["今日は何に集中すべき？", "恋愛はどう進む？", "転職に向いている時期？"]
+  }
+};
+
+export const atlasCopy = { zh, en, ja };

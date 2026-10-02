@@ -8,20 +8,40 @@ import {
   Orbit,
   ArrowUpRight,
   CalendarDays,
-  Compass
+  Compass,
+  Settings
 } from "lucide-react";
+import { useUser } from "@clerk/clerk-react";
 import { AccountCenter } from "./AccountCenter";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { AtlasLauncher, AtlasPanel, AtlasProvider, useAtlas } from "./Atlas";
 import { useI18n } from "../i18n/provider";
 import { DraftContext } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { daysCopy } from "../lib/days-copy";
 
+// Chart creation and report reading need the full width; Atlas stays one click away there.
+function isWideRoute(pathname: string) {
+  return /^\/app\/charts\/.+/.test(pathname);
+}
+
 export function WorkspaceLayout() {
+  return (
+    <AiAllowanceProvider>
+      <AtlasProvider>
+        <WorkspaceShell />
+      </AtlasProvider>
+    </AiAllowanceProvider>
+  );
+}
+
+function WorkspaceShell() {
   const { locale } = useI18n();
   const w = workspaceCopy[locale];
   const d = daysCopy[locale];
   const location = useLocation();
+  const wide = isWideRoute(location.pathname);
+  const onAsk = location.pathname.startsWith("/app/ask");
   const dirty = useRef(false);
   const setDirty = useCallback((value: boolean) => {
     dirty.current = value;
@@ -46,7 +66,7 @@ export function WorkspaceLayout() {
       mobile: true
     },
     { to: "/app/records", label: d.nav.journal, icon: NotebookPen, mobile: false },
-    { to: "/app/explore", label: d.nav.ask, icon: Sparkles, mobile: true },
+    { to: "/app/ask", label: d.nav.ask, icon: Sparkles, mobile: true },
     { to: "/app/charts", label: w.charts, icon: Orbit, mobile: true },
     { to: "/app/discover", label: d.nav.discover, icon: Compass, mobile: true }
   ];
@@ -64,97 +84,153 @@ export function WorkspaceLayout() {
           to={to}
           end={end}
           className={({ isActive }) =>
-            `${mobile ? "flex min-h-14 flex-1 flex-col items-center justify-center gap-1 text-[11px]" : "flex h-11 items-center gap-3 rounded-xl px-3.5 text-sm"} transition-colors ${isActive ? (mobile ? "text-gold-light" : "bg-white/[0.07] text-cream") : "text-cream/55 hover:bg-white/5 hover:text-cream"}`
+            `${mobile ? "flex min-h-14 flex-1 flex-col items-center justify-center gap-1 text-[11px]" : "flex h-11 items-center gap-3 rounded-xl px-3.5 text-[14px]"} transition-colors ${isActive ? (mobile ? "text-cream" : "bg-night-3 text-cream") : "text-cream/50 hover:bg-white/[0.04] hover:text-cream"}`
           }
         >
-          {({ isActive }) => (
-            <>
-              <Icon
-                size={mobile ? 20 : 18}
-                strokeWidth={1.6}
-                className={isActive && !mobile ? "text-gold" : undefined}
-              />
-              <span className={mobile ? "max-w-[72px] truncate" : undefined}>
-                {mobile && short ? short : label}
-              </span>
-            </>
-          )}
+          <Icon size={mobile ? 20 : 18} strokeWidth={1.6} />
+          <span className={mobile ? "max-w-[72px] truncate" : undefined}>
+            {mobile && short ? short : label}
+          </span>
         </NavLink>
       ));
   return (
-    <AiAllowanceProvider>
-      <DraftContext.Provider
-        value={{ setDirty, confirmLeave: () => !dirty.current || window.confirm(w.discard) }}
+    <DraftContext.Provider
+      value={{ setDirty, confirmLeave: () => !dirty.current || window.confirm(w.discard) }}
+    >
+      <div
+        className="workspace-layout min-h-dvh bg-night text-cream"
+        onClickCapture={(event) => {
+          const anchor = (event.target as HTMLElement).closest("a[href]");
+          if (
+            anchor &&
+            dirty.current &&
+            anchor.getAttribute("href") !== location.pathname + location.search &&
+            !window.confirm(w.discard)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
       >
-        <div
-          className="workspace-layout min-h-dvh bg-[#0e0c13] bg-[radial-gradient(ellipse_70%_40%_at_60%_-10%,rgba(110,82,170,0.16),transparent_70%)] text-cream"
-          onClickCapture={(event) => {
-            const anchor = (event.target as HTMLElement).closest("a[href]");
-            if (
-              anchor &&
-              dirty.current &&
-              anchor.getAttribute("href") !== location.pathname + location.search &&
-              !window.confirm(w.discard)
-            ) {
-              event.preventDefault();
-              event.stopPropagation();
-            }
-          }}
+        <a
+          href="#workspace-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:z-[100] focus:bg-night focus:p-4"
         >
-          <a
-            href="#workspace-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:z-[100] focus:bg-night focus:p-4"
-          >
-            {current}
-          </a>
-          <aside className="fixed inset-y-0 left-0 z-40 hidden w-[232px] flex-col border-r border-white/[0.07] bg-[#0c0a10]/90 px-3 py-7 backdrop-blur-xl lg:flex">
-            <Link to="/app" className="brand-logo mb-10 px-3.5">
-              Sign <span>Atlas</span>
-            </Link>
-            <nav aria-label={w.space} className="space-y-1">
-              {nav()}
-            </nav>
-            <div className="mt-auto space-y-4 px-3.5 pt-8">
-              <Link to="/app/settings" className="block text-sm text-cream/65 hover:text-gold">
-                {w.settings}
-              </Link>
+          {current}
+        </a>
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-white/[0.07] bg-night px-3 pb-4 pt-7 lg:flex">
+          <Link to="/app" className="brand-logo mb-9 px-3">
+            Sign Atlas
+          </Link>
+          <nav aria-label={w.space} className="space-y-0.5">
+            {nav()}
+          </nav>
+          <SidebarCharts />
+          <div className="mt-auto space-y-1 pt-6">
+            <AiAllowanceSummary compact />
+            <div className="flex items-center gap-2 px-2 pb-2">
+              <LanguageSwitcher />
               <Link
                 to="/welcome"
-                className="flex items-center gap-2 text-xs text-cream/50 hover:text-gold"
+                className="ml-auto flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs text-cream/45 hover:text-cream"
               >
                 {w.website}
-                <ArrowUpRight size={13} />
+                <ArrowUpRight size={12} />
               </Link>
             </div>
-          </aside>
-          <div className="lg:pl-[232px]">
-            <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/[0.07] bg-[#0e0c13]/85 px-5 backdrop-blur-xl sm:px-8">
-              <Link to="/app" className="brand-logo lg:hidden">
-                Sign <span>Atlas</span>
+            <div className="flex items-center gap-2 rounded-2xl bg-night-2 p-2">
+              <AccountCenter compact />
+              <SidebarName />
+              <Link
+                to="/app/settings"
+                aria-label={w.settings}
+                title={w.settings}
+                className="ml-auto grid size-9 place-items-center rounded-full text-cream/55 hover:bg-white/[0.06] hover:text-cream"
+              >
+                <Settings size={16} />
               </Link>
-              <span className="hidden text-sm text-cream/60 lg:block">
-                {w.space}
-                <span className="mx-3 text-cream/25">/</span>
-                {current}
-              </span>
-              <div className="flex items-center gap-2">
-                <LanguageSwitcher />
-                <AccountCenter compact />
-              </div>
-            </header>
-            <AiAllowanceSummary />
-            <main id="workspace-content" className="min-w-0 pb-28 lg:pb-0">
-              <Outlet />
-            </main>
+            </div>
           </div>
-          <nav
-            aria-label={w.space}
-            className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/10 bg-[#0c0a10]/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
-          >
-            {nav(true)}
-          </nav>
+        </aside>
+
+        <div className={`lg:pl-[248px] ${wide || onAsk ? "" : "xl:pr-[380px]"}`}>
+          <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-white/[0.07] bg-night/90 px-4 backdrop-blur-xl lg:hidden">
+            <Link to="/app" className="brand-logo text-[20px]">
+              Sign Atlas
+            </Link>
+            <div className="flex items-center gap-1.5">
+              <LanguageSwitcher />
+              <AccountCenter compact />
+            </div>
+          </header>
+          <div className="lg:hidden">
+            <AiAllowanceSummary />
+          </div>
+          <main id="workspace-content" className="@container min-w-0 pb-28 lg:pb-12">
+            <Outlet />
+          </main>
         </div>
-      </DraftContext.Provider>
-    </AiAllowanceProvider>
+
+        {!onAsk && (
+          <>
+            <AtlasPanel mode={wide ? "drawer" : "rail"} />
+            <AtlasLauncher always={wide} />
+          </>
+        )}
+
+        <nav
+          aria-label={w.space}
+          className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/10 bg-night/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
+        >
+          {nav(true)}
+        </nav>
+      </div>
+    </DraftContext.Provider>
+  );
+}
+
+function SidebarName() {
+  const { user } = useUser();
+  const name = user?.firstName || user?.fullName || user?.primaryEmailAddress?.emailAddress;
+  return name ? <span className="min-w-0 truncate text-sm text-cream/80">{name}</span> : null;
+}
+
+function SidebarCharts() {
+  const { locale } = useI18n();
+  const d = daysCopy[locale];
+  const w = workspaceCopy[locale];
+  const { charts } = useAtlas();
+  return (
+    <div className="mt-8 px-3">
+      <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-cream/35">{w.charts}</p>
+      <ul className="space-y-0.5">
+        {charts.slice(0, 4).map((chart) => (
+          <li key={chart.sessionId}>
+            <Link
+              to={`/app/charts/${encodeURIComponent(chart.sessionId)}`}
+              className="flex min-h-9 items-center gap-2.5 rounded-lg text-[13px] text-cream/55 hover:text-cream"
+            >
+              <span
+                className={`size-2 shrink-0 rounded-full ${chart.kind === "vedic" ? "bg-gold" : "bg-jade"}`}
+              />
+              <span className="truncate">{chart.label || chart.sessionId}</span>
+            </Link>
+          </li>
+        ))}
+        <li>
+          <Link
+            to="/app/charts/new"
+            className="flex min-h-9 items-center gap-2.5 text-[13px] text-cream/45 hover:text-cream"
+          >
+            <span className="grid size-2 place-items-center text-[13px] leading-none">+</span>
+            {w.deep}
+          </Link>
+        </li>
+        <li className="flex min-h-9 items-center gap-2.5 text-[13px] text-cream/30">
+          <span className="size-2 shrink-0 rounded-full border border-dashed border-cream/35" />
+          {d.tarotTitle} · {d.soon}
+        </li>
+      </ul>
+    </div>
   );
 }

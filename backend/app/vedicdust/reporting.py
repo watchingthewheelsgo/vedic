@@ -24,7 +24,9 @@ from .confidence import effective_fact_confidence
 
 COPY = {
     "en": {
-        "report_title": "VedicDust Consultation",
+        "report_title": "Your Vedic Reading",
+        "why": "Why it is here",
+        "limits": "Limits",
         "scope": "Reading scope",
         "reported_birth": "Reported birth details",
         "calculation_basis": "Chart calculation basis",
@@ -60,12 +62,14 @@ COPY = {
         "counter_facts": "Counter-evidence",
         "certainty": "Certainty",
         "assurance_note": (
-            "Stable findings are presented first. Method details and traceable evidence are kept "
-            "in the professional appendix."
+            "This reading uses only chart findings that hold across your birth details. "
+            "Method notes and traceable evidence are in the appendix at the end."
         ),
     },
     "zh": {
-        "report_title": "VedicDust 专业咨询档案",
+        "report_title": "你的 Vedic 解读",
+        "why": "为什么在这里",
+        "limits": "限制",
         "scope": "本次解读范围",
         "reported_birth": "用户报告的出生信息",
         "calculation_basis": "本次盘面采用的计算依据",
@@ -100,10 +104,12 @@ COPY = {
         "rules": "方法规则",
         "counter_facts": "相反证据",
         "certainty": "可信度",
-        "assurance_note": "正文优先呈现稳定且与你有关的结论；计算方法和可追溯依据集中放在专业附录。",
+        "assurance_note": "本报告只采用在你的出生信息范围内都成立的盘面结论；方法说明与可追溯依据放在文末附录。",
     },
     "ja": {
-        "report_title": "VedicDust コンサルテーション記録",
+        "report_title": "あなたの Vedic リーディング",
+        "why": "取り上げた理由",
+        "limits": "制約",
         "scope": "今回のリーディング範囲",
         "reported_birth": "申告された出生情報",
         "calculation_basis": "今回のチャート計算基準",
@@ -274,8 +280,9 @@ def _materialize_report_sections(
             "technical_evidence": "専門的根拠",
         },
     }
+    # The answer comes first; reading scope and evidence close the document.
     priorities = {
-        "scope": 10,
+        "scope": 95,
         "executive_synthesis": 20,
         "chart_foundation": 30,
         "core_architecture": 40,
@@ -315,7 +322,7 @@ def _materialize_report_sections(
             if claim_id in claims_by_id
         )
         materialized.append(section)
-    return materialized
+    return sorted(materialized, key=lambda item: item.priority)
 
 
 def _omitted_claim_reason(locale: str) -> str:
@@ -754,8 +761,9 @@ def _render_scope(
 ) -> list[str]:
     assertion = record.birth_assertion
     reported_time = assertion.reported_local_time or "unknown"
+    reported_place = assertion.reported_place.split("|", 1)[0].strip() or assertion.reported_place
     reported_birth = (
-        f"{assertion.local_date} {reported_time} · {assertion.reported_place} · "
+        f"{assertion.local_date} {reported_time} · {reported_place} · "
         f"{_time_certainty_label(assertion.time_certainty, dossier.locale)}"
     )
     canonical = record.canonical_moment
@@ -855,9 +863,19 @@ def _render_claim_takeaways(claims: list[Claim], copy: dict[str, str], locale: s
     lines = [heading, ""]
     for claim in claims:
         title = claim.title or claim.topic
-        lines.append(f"- **{title}** ({_grade(claim.certainty, locale)}): {claim.plain_statement}")
+        # The engine statement stays in the technical appendix; the body shows how the
+        # finding may be lived.
+        lived = next(
+            (
+                item
+                for item in [*claim.real_world_expressions, *claim.practical_implications]
+                if item
+            ),
+            claim.plain_statement,
+        )
+        lines.append(f"- **{title}** ({_grade(claim.certainty, locale)}): {lived}")
         if claim.user_relevance:
-            lines.append(f"  - **{copy['meaning']}**: {claim.user_relevance}")
+            lines.append(f"  - **{copy['why']}**: {claim.user_relevance}")
     lines.append("")
     return lines
 
@@ -885,7 +903,6 @@ def _render_timing_window(
         (copy["opportunities"], window.opportunities),
         (copy["pressures"], window.pressures),
         (copy["conditions"], window.conditions),
-        (copy["counterweight"], window.limitations),
     ):
         if values:
             lines.extend(["", f"**{label}**", ""])
@@ -913,6 +930,8 @@ def _render_evidence(
             [
                 f"#### {title}",
                 "",
+                claim.plain_statement,
+                "",
                 claim.technical_statement,
                 "",
                 f"- **{copy['certainty']}**: {claim.certainty}",
@@ -923,6 +942,10 @@ def _render_evidence(
                 "",
             ]
         )
+        if claim.limitations:
+            lines.extend([f"**{copy['limits']}**", ""])
+            lines.extend(f"- {item}" for item in claim.limitations)
+            lines.append("")
     return lines
 
 
