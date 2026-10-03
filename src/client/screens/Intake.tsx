@@ -6,7 +6,8 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ReactNode
+  type ReactNode,
+  useRef
 } from "react";
 import {
   ArrowRight,
@@ -42,6 +43,7 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { formatBirthDate, REQUIRED_GENDER_OPTIONS } from "../lib/birth-details";
+import { useOwnerBirth } from "../lib/owner-birth";
 import { formatBirthTime, normalizeTimeForPrecision } from "../lib/birth-time";
 import { useI18n } from "../i18n/provider";
 import { cn } from "../lib/cn";
@@ -100,6 +102,31 @@ export function Intake() {
   const [busy, setBusy] = useState(false);
   const [visualLocation, setVisualLocation] = useState<BirthPlaceVisualState | null>(null);
   const [locationConfirmed, setLocationConfirmed] = useState(false);
+  // New readings start from the account owner's birth details; every field stays editable.
+  const owner = useOwnerBirth();
+  const [prefilled, setPrefilled] = useState(false);
+  const appliedOwner = useRef(false);
+  useEffect(() => {
+    if (!owner || appliedOwner.current) return;
+    appliedOwner.current = true;
+    setBirthDate((current) => current ?? owner.birthDate);
+    setBirthTime((current) => current ?? owner.birthTime);
+    setVisualBirthTime((current) => current ?? owner.birthTime);
+    setTimePrecision((current) => current || owner.timePrecision);
+    setPlace((current) => current || owner.place);
+    setGender((current) => current || owner.gender);
+    setPrefilled(true);
+  }, [owner]);
+  function clearPrefill() {
+    setBirthDate(null);
+    setBirthTime(null);
+    setVisualBirthTime(null);
+    setTimePrecision("");
+    setPlace("");
+    setGender("");
+    setLocationConfirmed(false);
+    setPrefilled(false);
+  }
   const handleVisualLocationChange = useCallback((next: BirthPlaceVisualState | null) => {
     setVisualLocation(next);
   }, []);
@@ -245,6 +272,18 @@ export function Intake() {
       onBack={() => navigate("/")}
     >
       <form className="grid gap-4" onSubmit={onStart} noValidate>
+        {prefilled && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[13px] text-cream/65">
+            <span>{t("intake.prefilled")}</span>
+            <button
+              type="button"
+              onClick={clearPrefill}
+              className="text-cream/50 underline-offset-4 hover:text-cream hover:underline"
+            >
+              {t("intake.prefilledClear")}
+            </button>
+          </div>
+        )}
         <IntakeFlowSection
           index={1}
           title={t("intake.flow.birth.title")}
@@ -310,6 +349,7 @@ export function Intake() {
             summaryDetail={locationDetail}
           >
             <BirthPlaceField
+              key={prefilled ? "owner" : "blank"}
               value={place}
               onVisualStateChange={handleVisualLocationChange}
               onChange={(value) => {

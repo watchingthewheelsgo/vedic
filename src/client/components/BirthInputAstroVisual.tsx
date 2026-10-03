@@ -504,7 +504,7 @@ export function BirthInputAstroVisual({
           ctx.arc(0, 0, 3.2 * dpr, 0, TAU);
           ctx.fill();
 
-          const haloRadius = (10 + Math.sin(time * 3) * 2) * dpr * timeReveal;
+          const haloRadius = Math.max(0, (10 + Math.sin(time * 3) * 2) * dpr * timeReveal);
           ctx.fillStyle = `rgba(${tone},${0.2 * pulse})`;
           ctx.beginPath();
           ctx.arc(tipX, tipY, haloRadius, 0, TAU);
@@ -512,7 +512,7 @@ export function BirthInputAstroVisual({
 
           ctx.save();
           ctx.translate(tipX, tipY);
-          const iconRadius = 4.2 * dpr * timeReveal;
+          const iconRadius = Math.max(0, 4.2 * dpr * timeReveal);
           if (isDay) {
             ctx.fillStyle = `rgba(${tone},${0.98 * timeReveal})`;
             ctx.beginPath();

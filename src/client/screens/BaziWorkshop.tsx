@@ -1,5 +1,13 @@
 import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/clerk-react";
-import { FormEvent, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction
+} from "react";
 import { Compass, ScrollText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -26,6 +34,7 @@ import { Textarea } from "../components/ui/textarea";
 import { useI18n } from "../i18n/provider";
 import { REQUIRED_GENDER_OPTIONS, formatBirthDate } from "../lib/birth-details";
 import { formatBirthTime, normalizeTimeForPrecision } from "../lib/birth-time";
+import { useOwnerBirth } from "../lib/owner-birth";
 import type { BaziCalendarType, BirthTimePrecision } from "../../shared/domain";
 
 type FormErrors = Partial<
@@ -52,6 +61,29 @@ export function BaziWorkshop() {
   const [busy, setBusy] = useState(false);
 
   const today = useMemo(() => new Date(), []);
+
+  // New charts start from the account owner's birth details; every field stays editable.
+  const owner = useOwnerBirth();
+  const [prefilled, setPrefilled] = useState(false);
+  const appliedOwner = useRef(false);
+  useEffect(() => {
+    if (!owner || appliedOwner.current) return;
+    appliedOwner.current = true;
+    setBirthDate((current) => current ?? owner.birthDate);
+    setBirthTime((current) => current ?? owner.birthTime);
+    setTimePrecision(owner.timePrecision);
+    setPlace((current) => current || owner.place);
+    setGender((current) => current || owner.gender);
+    setPrefilled(true);
+  }, [owner]);
+  function clearPrefill() {
+    setBirthDate(null);
+    setBirthTime(null);
+    setTimePrecision("exact");
+    setPlace("");
+    setGender("");
+    setPrefilled(false);
+  }
 
   async function onStart(event: FormEvent) {
     event.preventDefault();
@@ -133,7 +165,19 @@ export function BaziWorkshop() {
       maxWidthClass="max-w-[620px]"
       onBack={() => navigate("/")}
     >
-      <form onSubmit={onStart} noValidate>
+      <form onSubmit={onStart} noValidate className="grid gap-4">
+        {prefilled && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[13px] text-cream/65">
+            <span>{t("intake.prefilled")}</span>
+            <button
+              type="button"
+              onClick={clearPrefill}
+              className="text-cream/50 underline-offset-4 hover:text-cream hover:underline"
+            >
+              {t("intake.prefilledClear")}
+            </button>
+          </div>
+        )}
         <BirthDateTimeFields
           birthDate={birthDate}
           birthTime={birthTime}
@@ -185,6 +229,7 @@ export function BaziWorkshop() {
         </div>
 
         <BirthPlaceField
+          key={prefilled ? "owner" : "blank"}
           value={place}
           onChange={(value) => {
             setPlace(value);
