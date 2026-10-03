@@ -30,7 +30,7 @@ const copy = {
     retry: "重试",
     exhausted: "本月 AI 额度已用完，记录和已有内容仍可使用。",
     quote: "本次 AI 生成消耗",
-    unlimited: "内部使用",
+    unlimited: "不限量",
     subject: "Sign Atlas 升级申请",
     request: "你好，我想了解 Sign Atlas 会员升级方案。",
     account: "账号",
@@ -59,7 +59,7 @@ const copy = {
     retry: "Retry",
     exhausted: "Your monthly AI credits are used up. Records and saved content remain available.",
     quote: "This AI generation costs",
-    unlimited: "Internal access",
+    unlimited: "Unlimited",
     subject: "Sign Atlas upgrade request",
     request: "Hello, I would like to learn about upgrading my Sign Atlas membership.",
     account: "Account",
@@ -88,7 +88,7 @@ const copy = {
     exhausted:
       "今月の AI クレジットを使い切りました。記録と保存済みコンテンツは引き続き利用できます。",
     quote: "この AI 生成の消費量",
-    unlimited: "内部利用",
+    unlimited: "無制限",
     subject: "Sign Atlas アップグレード申請",
     request: "Sign Atlas の会員プランについて教えてください。",
     account: "アカウント",
@@ -260,4 +260,10 @@ export function AiAllowanceCard() {
       </p>
     </section>
   );
+}
+
+/** Allowance state and copy for screens that lay out their own credits UI. */
+export function useAiAllowance() {
+  const { locale } = useI18n();
+  return { ...useContext(Context), copy: copy[locale] };
 }

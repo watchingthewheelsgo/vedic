@@ -1,4 +1,3 @@
-import { AiCostNotice } from "../components/AiAllowance";
 import { preferredScrollBehavior } from "../lib/motion";
 import { SignInButton, SignUpButton, useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -44,6 +43,9 @@ import {
   type StageStatus
 } from "../components/PipelineFlow";
 import { MarkdownReport, reportHeadingId, reportHeadings } from "../components/MarkdownReport";
+import { ReadingChart } from "../components/ReadingChart";
+import { readingChartFrom } from "../lib/reading-chart";
+import { useAtlas } from "../components/Atlas";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
@@ -1079,6 +1081,14 @@ export function Session() {
     ]
   );
 
+  const readingChart = useMemo(
+    () =>
+      baziMode || !complete
+        ? null
+        : readingChartFrom(parseJsonArtifact(session, CHART_RECORD_JSON)),
+    [baziMode, complete, session]
+  );
+
   const setTab = useCallback(
     (next: "reading" | "report") => {
       const params = new URLSearchParams(searchParams);
@@ -1497,66 +1507,93 @@ export function Session() {
     [authLoaded, id, isSignedIn, locale, preparingRectificationInterview, t]
   );
 
+  const readyToRead = complete && reportSections.length > 0;
+  const showReport = tab === "report" && readyToRead;
+  const birthLine = [
+    birthInfo.date,
+    birthInfo.time,
+    birthInfo.place ? displayPlace(birthInfo.place) : ""
+  ]
+    .filter((part) => part && part !== "—")
+    .join(" · ");
+
   return (
-    <div className="app-shell flex h-[calc(100dvh-180px)] lg:h-[calc(100dvh-108px)] flex-col overflow-hidden bg-cream-2">
-      <div className="shrink-0 bg-night px-5">
-        <AiCostNotice report />
-      </div>
-      <div className="app-tabs z-10 flex shrink-0 items-center gap-2 border-b border-gold/25 bg-cream/95 px-3 py-3 backdrop-blur-lg sm:px-8">
-        <button
-          className="brand-logo mr-1 border-0 bg-transparent sm:mr-3"
-          onClick={() => navigate("/app/charts")}
-        >
-          ← {t("account.page.libraryTitle")}
-        </button>
-        <Button
-          variant="tab"
-          size="sm"
-          data-active={tab === "reading"}
-          aria-label={t("session.tab.reading")}
-          onClick={() => setTab("reading")}
-        >
-          <Workflow size={14} />
-          <span className="hidden sm:inline">{t("session.tab.reading")}</span>
-        </Button>
-        <Button
-          variant="tab"
-          size="sm"
-          data-active={tab === "report"}
-          aria-label={t("session.tab.report")}
-          onClick={() => setTab("report")}
-        >
-          <BookOpen size={14} />
-          <span className="hidden sm:inline">{t("session.tab.report")}</span>
-        </Button>
-        <div className="flex-1" />
-      </div>
+    <div className="app-shell flex min-h-[calc(100dvh-56px)] flex-col lg:min-h-dvh">
+      <header className="app-tabs sticky top-14 z-20 border-b border-white/[0.07] bg-night/85 backdrop-blur-xl lg:top-0">
+        <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-3 px-4 sm:px-8">
+          <button
+            type="button"
+            onClick={() => navigate("/app/charts")}
+            className="-ml-2 flex h-10 items-center gap-1 rounded-full px-2 text-sm text-cream/55 transition-colors hover:text-cream"
+          >
+            <ChevronLeft size={18} />
+            <span className="hidden sm:inline">{t("session.header.back")}</span>
+          </button>
+          <span aria-hidden className="hidden h-4 w-px bg-white/10 sm:block" />
+          <p className="min-w-0 flex-1 truncate text-sm">
+            <span className="text-cream">
+              {baziMode ? t("session.header.bazi") : t("session.header.vedic")}
+            </span>
+            {birthLine && <span className="text-cream/45"> · {birthLine}</span>}
+          </p>
+          {readyToRead && !showReport && (
+            <Button size="sm" onClick={() => setTab("report")}>
+              <BookOpen size={15} />
+              {t("session.header.openReading")}
+            </Button>
+          )}
+          {showReport && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setTab("reading")}
+                aria-label={t("session.header.behind")}
+              >
+                <Workflow size={15} />
+                <span className="hidden md:inline">{t("session.header.behind")}</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void onExport()}
+                disabled={exportingPdf}
+                aria-label={t("session.report.downloadPdf")}
+              >
+                {exportingPdf ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Download size={15} />
+                )}
+                <span className="hidden md:inline">PDF</span>
+              </Button>
+            </>
+          )}
+        </div>
+      </header>
 
       {error && (
         <div
-          className="screen-error mx-5 mt-3 shrink-0 rounded-md border border-red/30 bg-red/10 px-4 py-3 text-[13px] text-red sm:mx-8"
+          className="screen-error mx-auto mt-4 w-[calc(100%-2.5rem)] max-w-[1120px] rounded-2xl border border-red/40 bg-red/10 px-4 py-3 text-[13px] text-[#ffb5a4]"
           role="alert"
         >
           {error}
         </div>
       )}
 
-      {!calibrationFocus && <ReadingJourneyBar phases={productPhases} />}
-
-      {tab === "reading" ? (
+      {!showReport ? (
         <div
           className={cn(
-            "min-h-0 flex-1 bg-night",
+            "min-h-0 flex-1",
             calibrationFocus
-              ? "relative isolate overflow-y-auto px-4 py-5 sm:px-6 sm:py-6"
-              : "grid grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(360px,430px)] lg:overflow-hidden"
+              ? "relative isolate px-4 py-6 sm:px-6 sm:py-8"
+              : "grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]"
           )}
         >
           {calibrationFocus && (
             <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden>
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(201,169,110,0.17),transparent_34%),radial-gradient(circle_at_82%_36%,rgba(105,72,142,0.16),transparent_34%),linear-gradient(180deg,#08070d_0%,#120d17_58%,#08070d_100%)]" />
-              <div className="absolute left-1/2 top-24 size-[680px] -translate-x-1/2 rounded-full border border-gold/8 shadow-[0_0_120px_rgba(201,169,110,0.08)]" />
-              <div className="absolute left-[14%] top-[22%] size-1 rounded-full bg-gold/45 shadow-[180px_110px_0_rgba(237,217,163,0.22),620px_70px_0_rgba(201,169,110,0.2),850px_260px_0_rgba(237,217,163,0.16)]" />
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_40%_at_50%_0%,rgba(244,162,89,0.10),transparent_70%),radial-gradient(ellipse_50%_40%_at_90%_40%,rgba(120,130,175,0.10),transparent_70%)]" />
+              <div className="absolute left-1/2 top-24 size-[680px] -translate-x-1/2 rounded-full border border-white/[0.05]" />
             </div>
           )}
           {!calibrationFocus && (
@@ -1566,7 +1603,8 @@ export function Session() {
               selectedStageId={selectedStageId}
               stages={pipelineStages}
               baziMode={baziMode}
-              reportReady={complete && reportSections.length > 0}
+              phases={productPhases}
+              reportReady={readyToRead}
               reportSectionCount={reportSections.length}
               onOpenReport={() => setTab("report")}
               onSelectStage={setSelectedStageId}
@@ -1605,159 +1643,120 @@ export function Session() {
             secondary={!calibrationFocus}
           />
         </div>
-      ) : complete && reportSections.length > 0 ? (
-        <div className="report-doc grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_260px]">
-          <main className="report-main overflow-y-auto bg-night px-6 py-10 pb-24 sm:px-11">
-            <div className="report-doc-head mx-auto mb-10 flex max-w-[720px] flex-wrap items-center justify-between gap-4">
-              <h1 className="font-display text-[44px] leading-none tracking-normal">
+      ) : (
+        <div className="report-doc mx-auto grid w-full max-w-[1180px] flex-1 grid-cols-1 gap-12 px-5 pb-28 pt-10 sm:px-8 sm:pt-14 xl:grid-cols-[minmax(0,1fr)_220px]">
+          <main className="report-main min-w-0">
+            <div className="report-doc-head rise-in mx-auto mb-10 max-w-[720px]">
+              {birthLine && <p className="eyebrow mb-3">{birthLine}</p>}
+              <h1 className="font-display text-[44px] leading-[1.02] tracking-normal sm:text-[60px]">
                 {baziMode ? "Your BaZi Report" : t("session.report.heading")}
               </h1>
-              <Button onClick={() => void onExport()} disabled={exportingPdf}>
-                {exportingPdf ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <Download size={15} />
-                )}
-                {exportingPdf ? t("session.report.pdfPreparing") : t("session.report.downloadPdf")}
-              </Button>
             </div>
+            {readingChart && (
+              <div className="rise-in mx-auto max-w-[720px]" style={{ animationDelay: "120ms" }}>
+                <ReadingChart chart={readingChart} locale={locale} />
+              </div>
+            )}
             {consultationDoc ? (
-              <article className="mx-auto max-w-[720px]">
-                <MarkdownReport content={reportSections[0].content} skipTitle />
+              <article
+                className="rise-in mx-auto max-w-[720px]"
+                style={{ animationDelay: "220ms" }}
+              >
+                <MarkdownReport
+                  content={reportSections[0].content}
+                  skipTitle
+                  sectionAction={(heading) => <AskAboutSection heading={heading} />}
+                />
               </article>
             ) : (
-              <ReportOverview
-                session={session}
-                reportSections={reportSections}
-                baziMode={baziMode}
-                onJump={scrollToSection}
-              />
+              <div className="mx-auto max-w-[720px]">
+                <ReportOverview
+                  session={session}
+                  reportSections={reportSections}
+                  baziMode={baziMode}
+                  onJump={scrollToSection}
+                />
+                {reportSections.map((artifact, index) => (
+                  <section
+                    className="report-section mb-12 scroll-mt-24 border-b border-white/[0.07] pb-12 last:border-0"
+                    id={`section-${index}`}
+                    key={artifact.path}
+                  >
+                    <div className="eyebrow mb-2">
+                      {t("session.report.section", {
+                        number: String(index + 1).padStart(2, "0")
+                      })}
+                    </div>
+                    <h2 className="mb-4 font-display text-[28px] leading-tight text-cream">
+                      {titleForArtifact(artifact, locale)}
+                    </h2>
+                    <MarkdownReport content={artifact.content} />
+                  </section>
+                ))}
+              </div>
             )}
-            {!consultationDoc &&
-              reportSections.map((artifact, index) => (
-                <section
-                  className="report-section mb-12 scroll-mt-20 border-b border-gold/25 pb-12 last:border-0"
-                  id={`section-${index}`}
-                  key={artifact.path}
-                >
-                  <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold">
-                    {t("session.report.section", { number: String(index + 1).padStart(2, "0") })}
-                  </div>
-                  <div className="mb-4 text-[22px] font-medium tracking-normal text-ink">
-                    {titleForArtifact(artifact, locale)}
-                  </div>
-                  <MarkdownReport content={artifact.content} />
-                </section>
-              ))}
             {!baziMode && (
-              <ConsultationQuestionPanel sessionId={id} isSignedIn={Boolean(isSignedIn)} />
+              <div className="mx-auto mt-16 max-w-[720px]">
+                <ConsultationQuestionPanel sessionId={id} isSignedIn={Boolean(isSignedIn)} />
+              </div>
             )}
           </main>
-          <nav className="report-toc hidden overflow-y-auto border-l border-white/[0.07] bg-night px-4 py-6 lg:block">
-            <h4 className="mb-3.5 text-[11px] uppercase tracking-[2px] text-muted">
-              {t("session.report.contents")}
-            </h4>
-            {consultationDoc &&
-              consultationHeadings.map((heading, index) => (
-                <button
-                  key={heading + index}
-                  type="button"
-                  className="flex w-full rounded-lg px-2.5 py-2 text-left text-[13px] text-cream/60 transition hover:bg-white/[0.05] hover:text-cream"
-                  onClick={() =>
-                    document
-                      .getElementById(reportHeadingId(index))
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                  }
-                >
-                  {heading}
-                </button>
-              ))}
-            {!consultationDoc &&
-              reportSections.map((artifact, index) => (
-                <button
-                  key={artifact.path}
-                  className={cn(
-                    "flex w-full items-baseline gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-body transition hover:bg-gold/10 hover:text-ink",
-                    activeSection === index && "bg-gold text-white hover:bg-gold hover:text-white"
-                  )}
-                  onClick={() => scrollToSection(index)}
-                >
-                  <span
-                    className={cn(
-                      "shrink-0 text-[11px] font-bold text-gold",
-                      activeSection === index && "text-white"
-                    )}
+          <nav className="report-toc hidden xl:block" aria-label={t("session.report.contents")}>
+            <div className="sticky top-24">
+              <p className="eyebrow mb-3 px-2.5">{t("session.report.contents")}</p>
+              {consultationDoc &&
+                consultationHeadings.map((heading, index) => (
+                  <button
+                    key={heading + index}
+                    type="button"
+                    className="flex w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] leading-5 text-cream/50 transition-colors hover:bg-white/[0.04] hover:text-cream"
+                    onClick={() =>
+                      document
+                        .getElementById(reportHeadingId(index))
+                        ?.scrollIntoView({ behavior: preferredScrollBehavior(), block: "start" })
+                    }
                   >
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  {titleForArtifact(artifact, locale)}
-                </button>
-              ))}
-          </nav>
-        </div>
-      ) : (
-        <div className="grid min-h-0 flex-1 place-items-center px-6 py-10 text-center">
-          <div>
-            <div className="mx-auto mb-5 size-11 animate-spin rounded-full border-[3px] border-gold/25 border-t-gold" />
-            <h2 className="mb-2 text-2xl font-light">
-              {baziMode
-                ? baziRunning
-                  ? "Generating BaZi report"
-                  : "BaZi chart facts are ready"
-                : coreInterrupted
-                  ? t("session.empty.paused")
-                  : awaitingValidationFeedback
-                    ? t("session.empty.firstCheckReady")
-                    : readerRunning
-                      ? t("session.empty.preparingCheck")
-                      : t("session.empty.preparing")}
-            </h2>
-            <p className="mx-auto mb-6 max-w-[420px] text-sm text-body">
-              {baziMode
-                ? "Review the chart workspace in the Reading tab, then generate the classical report when ready."
-                : coreInterrupted
-                  ? sanitizeUserMessage(coreJob?.message, t("session.interrupted"))
-                  : awaitingValidationFeedback
-                    ? t("session.empty.answerChecks")
-                    : t("session.empty.progress", {
-                        progress: pipelineData
-                          ? t("session.empty.partsReady", {
-                              completed: pipelineData.completed,
-                              total: pipelineData.total
-                            })
-                          : ""
-                      })}
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {baziMode && !complete && (
-                <Button
-                  disabled={baziRunning || !authLoaded || !isSignedIn}
-                  onClick={() => void startBaziReport()}
-                >
-                  {baziRunning ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <BookOpen size={15} />
-                  )}
-                  {baziRunning ? "Generating..." : "Generate Classical Report"}
-                </Button>
-              )}
-              {coreInterrupted && (
-                <Button onClick={() => void resumeCoreReport()}>
-                  <RefreshCw size={15} /> {t("session.empty.resume")}
-                </Button>
-              )}
-              <Button
-                variant={coreInterrupted ? "outline" : "gold"}
-                onClick={() => setTab("reading")}
-              >
-                <Workflow size={15} /> {t("session.empty.viewProgress")}
-              </Button>
+                    {heading}
+                  </button>
+                ))}
+              {!consultationDoc &&
+                reportSections.map((artifact, index) => (
+                  <button
+                    key={artifact.path}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-cream/50 transition-colors hover:bg-white/[0.04] hover:text-cream",
+                      activeSection === index && "bg-white/[0.06] text-cream"
+                    )}
+                    onClick={() => scrollToSection(index)}
+                  >
+                    <span className="shrink-0 text-[11px] tabular-nums text-gold">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    {titleForArtifact(artifact, locale)}
+                  </button>
+                ))}
             </div>
-          </div>
+          </nav>
         </div>
       )}
     </div>
+  );
+}
+
+function AskAboutSection({ heading }: { heading: string }) {
+  const { t } = useI18n();
+  const { askAbout, busy } = useAtlas();
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => askAbout(t("session.report.askPrompt", { heading }))}
+      className="press-feedback mb-1 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-white/12 px-3 text-xs text-cream/60 transition-colors hover:border-gold/50 hover:text-gold-light disabled:opacity-40"
+    >
+      <Sparkles size={13} />
+      {t("session.report.ask")}
+    </button>
   );
 }
 
@@ -1948,73 +1947,59 @@ function deriveReadingProductPhases({
   ];
 }
 
-function ReadingJourneyBar({ phases }: { phases: ReadingProductPhase[] }) {
-  const activeIndex = Math.max(
-    0,
-    phases.findIndex((phase) => phase.status === "active")
-  );
-  const activePhase = phases[activeIndex] ?? phases[0];
-
+/** Three plain steps: birth-time check, your chart, your reading. */
+function RevealSteps({ phases }: { phases: ReadingProductPhase[] }) {
+  const { t } = useI18n();
+  const byId = new Map(phases.map((phase) => [phase.id, phase.status]));
+  const readingStatus: ReadingProductPhaseStatus =
+    byId.get("report") === "done"
+      ? "done"
+      : byId.get("reveal") !== "pending" || byId.get("report") !== "pending"
+        ? "active"
+        : "pending";
+  const steps: { label: string; status: ReadingProductPhaseStatus }[] = [
+    { label: t("session.steps.check"), status: byId.get("calibration") ?? "pending" },
+    { label: t("session.steps.chart"), status: byId.get("chart") ?? "pending" },
+    { label: t("session.steps.reading"), status: readingStatus }
+  ];
   return (
-    <nav
-      className="relative z-10 shrink-0 border-b border-gold/18 bg-night/88 px-4 py-3 text-cream shadow-[0_14px_44px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:px-8"
-      aria-label="Reading progress"
+    <ol
+      className="mx-auto flex items-center gap-2 text-[12px]"
+      aria-label={t("session.steps.label")}
     >
-      <div className="mx-auto max-w-[1120px]">
-        <div className="flex items-center justify-between gap-4 md:hidden">
-          <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-[1.8px] text-gold/70">
-              {activeIndex + 1} / {phases.length}
-            </div>
-            <div className="truncate text-sm font-semibold text-cream">{activePhase.label}</div>
-          </div>
-          <div className="truncate text-right text-[12px] text-cream/48">{activePhase.detail}</div>
-        </div>
-        <div className="hidden grid-cols-5 gap-5 md:grid">
-          {phases.map((phase, index) => (
-            <div
-              key={phase.id}
-              className={cn("min-w-0", phase.status === "pending" && "opacity-45")}
-              aria-current={phase.status === "active" ? "step" : undefined}
-            >
-              <div className="mb-1 flex items-center gap-2">
-                <span
-                  className={cn(
-                    "grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
-                    phase.status === "done"
-                      ? "border-gold bg-gold text-night"
-                      : phase.status === "active"
-                        ? "border-gold bg-gold/14 text-gold-light"
-                        : "border-gold/25 text-cream/40"
-                  )}
-                >
-                  {phase.status === "done" ? "✓" : index + 1}
-                </span>
-                <span className="truncate text-[12.5px] font-semibold text-cream">
-                  {phase.label}
-                </span>
-              </div>
-              <div className="truncate pl-7 text-[11px] text-cream/42">{phase.detail}</div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 grid grid-cols-5 gap-1.5">
-          {phases.map((phase) => (
+      {steps.map((step, index) => (
+        <li
+          key={step.label}
+          className="flex items-center gap-2"
+          aria-current={step.status === "active" ? "step" : undefined}
+        >
+          {index > 0 && <span aria-hidden className="h-px w-5 bg-white/15 sm:w-8" />}
+          <span
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors",
+              step.status === "done"
+                ? "text-cream/70"
+                : step.status === "active"
+                  ? "bg-white/[0.07] text-cream"
+                  : "text-cream/35"
+            )}
+          >
             <span
-              key={phase.id}
+              aria-hidden
               className={cn(
-                "h-0.5 rounded-full",
-                phase.status === "done"
-                  ? "bg-gold"
-                  : phase.status === "active"
-                    ? "bg-gold/65"
-                    : "bg-white/10"
+                "size-1.5 rounded-full",
+                step.status === "done"
+                  ? "bg-jade"
+                  : step.status === "active"
+                    ? "animate-pulse bg-gold"
+                    : "bg-white/25"
               )}
             />
-          ))}
-        </div>
-      </div>
-    </nav>
+            {step.label}
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -2024,6 +2009,7 @@ function ReadingRevealPanel({
   selectedStageId,
   stages,
   baziMode,
+  phases,
   reportReady,
   reportSectionCount,
   onOpenReport,
@@ -2034,6 +2020,7 @@ function ReadingRevealPanel({
   selectedStageId: string;
   stages: StageDef[];
   baziMode: boolean;
+  phases: ReadingProductPhase[];
   reportReady: boolean;
   reportSectionCount: number;
   onOpenReport: () => void;
@@ -2078,29 +2065,27 @@ function ReadingRevealPanel({
   return (
     <section
       className={cn(
-        "relative min-w-0 overflow-hidden bg-night text-cream max-lg:min-h-[720px] lg:order-1 lg:min-h-0",
+        "relative min-w-0 overflow-hidden bg-night text-cream lg:sticky lg:top-14 lg:order-1 lg:h-[calc(100dvh-56px)]",
         reportReady ? "order-1" : "order-2"
       )}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-90">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(201,169,110,0.16),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(237,217,163,0.08),transparent_28%),linear-gradient(180deg,rgba(15,12,9,0.78),rgba(28,22,16,0.96))]" />
-        <div className="absolute left-1/2 top-[48%] h-[720px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold/10 shadow-[0_0_120px_rgba(201,169,110,0.08)]" />
-        <div className="absolute left-1/2 top-[48%] h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold/10" />
+      <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_45%_at_50%_35%,rgba(244,162,89,0.09),transparent_70%),radial-gradient(ellipse_45%_35%_at_85%_10%,rgba(120,130,175,0.10),transparent_70%)]" />
+        <div className="absolute left-1/2 top-[46%] size-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/[0.04]" />
+        <div className="absolute left-1/2 top-[46%] size-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/[0.05]" />
       </div>
 
       <div className="relative z-[1] mx-auto flex min-h-full max-w-[760px] flex-col justify-center gap-6 px-5 py-8 sm:px-8 lg:h-full lg:overflow-y-auto">
+        <RevealSteps phases={phases} />
         <div className="text-center">
-          <div className="mb-2 text-[10px] uppercase tracking-[3px] text-gold/72">
-            {reportReady ? readyCopy.eyebrow : t("session.reveal.eyebrow")}
-          </div>
-          <h2 className="mx-auto max-w-[620px] text-[25px] font-light leading-tight tracking-normal text-cream sm:text-[32px]">
+          <h2 className="mx-auto max-w-[620px] font-display text-[34px] leading-tight tracking-normal text-cream sm:text-[44px]">
             {reportReady
               ? readyCopy.title
               : baziMode
                 ? t("session.reveal.baziTitle")
                 : t("session.reveal.title")}
           </h2>
-          <p className="mx-auto mt-3 max-w-[520px] text-[13.5px] leading-[1.8] text-cream/62">
+          <p className="mx-auto mt-3 max-w-[520px] text-[14px] leading-[1.8] text-cream/60">
             {reportReady
               ? readyCopy.body
               : baziMode
@@ -2129,12 +2114,10 @@ function ReadingRevealPanel({
           )}
         </div>
 
-        <div className="rounded-[18px] border border-gold/25 bg-[rgba(16,12,22,0.68)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+        <div className="rounded-3xl border border-white/[0.08] bg-night-2/80 p-5 backdrop-blur-xl">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-[2px] text-gold/75">
-                {t("session.reveal.currentFocus")}
-              </div>
+              <div className="eyebrow mb-1">{t("session.reveal.currentFocus")}</div>
               <h3 className="m-0 text-base font-semibold tracking-normal text-cream">{title}</h3>
             </div>
             <Badge variant={statusBadgeVariant(stageAgg?.[activeStage.id]?.status ?? "pending")}>
@@ -2143,19 +2126,19 @@ function ReadingRevealPanel({
           </div>
           <p className="m-0 text-[13px] leading-[1.75] text-cream/66">{caption}</p>
           <div className="mt-4">
-            <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[1.4px] text-cream/45">
+            <div className="mb-2 flex items-center justify-between text-[11px] tabular-nums text-cream/45">
               <span>{progressLabel}</span>
               <span>{percent}%</span>
             </div>
             <div
-              className="h-[7px] overflow-hidden rounded-full bg-white/8"
+              className="h-1 overflow-hidden rounded-full bg-white/[0.08]"
               role="progressbar"
               aria-valuenow={percent}
               aria-valuemin={0}
               aria-valuemax={100}
             >
               <span
-                className="block h-full rounded-full bg-linear-to-r from-gold-dim via-gold to-gold-light origin-left transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]"
+                className="block h-full origin-left rounded-full bg-linear-to-r from-gold to-gold-light transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)]"
                 style={{ transform: `scaleX(${percent / 100})` }}
               />
             </div>
@@ -2163,8 +2146,8 @@ function ReadingRevealPanel({
         </div>
 
         {reportReady && (
-          <div className="rounded-[18px] border border-gold/40 bg-gold/12 p-5 text-center shadow-[0_24px_80px_rgba(201,169,110,0.12)] backdrop-blur-xl">
-            <div className="mx-auto grid size-10 place-items-center rounded-full border border-gold/45 bg-gold text-night">
+          <div className="rise-in rounded-3xl border border-gold/30 bg-gold/[0.07] p-6 text-center backdrop-blur-xl">
+            <div className="mx-auto grid size-10 place-items-center rounded-full bg-gold text-night">
               <CheckCircle2 className="size-5" aria-hidden="true" />
             </div>
             <p className="mx-auto mb-4 mt-3 max-w-[520px] text-[13px] leading-6 text-cream/62">
@@ -2178,8 +2161,8 @@ function ReadingRevealPanel({
         )}
 
         {pipelineData && stageAgg && (
-          <details className="rounded-[18px] border border-gold/18 bg-[rgba(16,12,22,0.46)] p-4 backdrop-blur-xl">
-            <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[2px] text-gold/72 outline-none">
+          <details className="rounded-3xl border border-white/[0.06] bg-night-2/50 p-4 backdrop-blur-xl">
+            <summary className="eyebrow cursor-pointer select-none outline-none">
               {t("session.reveal.details")}
             </summary>
             <div className="mt-4 grid gap-2">
@@ -2194,8 +2177,8 @@ function ReadingRevealPanel({
                     className={cn(
                       "flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition",
                       selected
-                        ? "border-gold bg-gold/15 text-cream shadow-[0_0_0_1px_rgba(201,169,110,0.24)]"
-                        : "border-gold/16 bg-white/[0.035] text-cream/68 hover:border-gold/40 hover:bg-gold/8"
+                        ? "border-gold/50 bg-gold/[0.08] text-cream"
+                        : "border-white/[0.06] bg-white/[0.02] text-cream/70 hover:border-white/20"
                     )}
                     onClick={() => onSelectStage(stage.id)}
                   >
@@ -2206,7 +2189,7 @@ function ReadingRevealPanel({
                           ? "border-gold bg-gold text-night"
                           : selected
                             ? "border-gold/70 bg-gold/20 text-gold-light"
-                            : "border-gold/25 bg-night-3 text-cream/48"
+                            : "border-white/10 bg-night-3 text-cream/50"
                       )}
                     >
                       {String(index + 1).padStart(2, "0")}
@@ -2430,10 +2413,10 @@ function WorkshopDetailPanel({
         focused
           ? focusedCalibration
             ? "mx-auto w-full max-w-[780px] bg-transparent sm:px-8 sm:py-5"
-            : "mx-auto w-full max-w-[780px] rounded-[22px] border border-gold/24 bg-cream shadow-[0_32px_100px_rgba(0,0,0,0.42)] sm:px-8 sm:py-7"
+            : "mx-auto w-full max-w-[780px] rounded-3xl border border-white/[0.08] bg-night-2 sm:px-8 sm:py-7"
           : secondary
-            ? "order-1 border-t border-gold/20 bg-cream max-lg:border-t lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
-            : "border-r border-gold/25 bg-cream max-lg:border-b max-lg:border-r-0 lg:min-h-0 lg:overflow-y-auto"
+            ? "order-1 border-t border-white/[0.07] bg-night-2/50 lg:order-2 lg:border-l lg:border-t-0"
+            : "border-r border-white/[0.07] bg-night-2/50 max-lg:border-b max-lg:border-r-0"
       )}
     >
       {focusedCalibration && (
@@ -2448,7 +2431,7 @@ function WorkshopDetailPanel({
       )}
       {!focusedCalibration && (
         <>
-          <div className="mb-2 pr-9 text-[10px] uppercase tracking-[2.4px] text-gold">
+          <div className="eyebrow mb-2 pr-9">
             {focused ? t("session.phase.calibration") : t("session.detail.eyebrow")}
           </div>
           <div className={cn("mb-5 flex items-start justify-between gap-3", !focused && "pr-9")}>
@@ -2461,7 +2444,7 @@ function WorkshopDetailPanel({
       <div
         className={cn(
           focusedCalibration &&
-            "rounded-[22px] border border-gold/24 bg-cream px-5 py-5 shadow-[0_32px_100px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.55)] sm:px-7"
+            "rounded-3xl border border-white/[0.08] bg-night-2 px-5 py-5 sm:px-7"
         )}
       >
         {stage.id === "src" ? (

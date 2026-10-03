@@ -37,10 +37,13 @@ def test_calendar_cycle_and_validation():
     )
     with pytest.raises(ValueError):
         calendar_day(start, "Not/AZone")
-    for changes in ({"note": "  "}, {"mood": 6}, {"timezone": "No/Zone"}):
+    for changes in ({"mood": 6}, {"timezone": "No/Zone"}):
         values = {"day": start, "timezone": "UTC", "mood": 3, "note": "A quiet day"} | changes
         with pytest.raises(ValidationError):
             JournalInput(**values)
+    # A mood alone is a complete check-in.
+    assert JournalInput(day=start, timezone="UTC", mood=4, note="  ").note == ""
+    assert JournalInput(day=start, timezone="UTC", mood=4).note == ""
 
 
 def test_owner_isolation_idempotent_save_and_delete(tmp_path):

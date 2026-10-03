@@ -23,14 +23,13 @@ class JournalInput(BaseModel):
     day: date
     timezone: str = Field(max_length=80)
     mood: int = Field(ge=1, le=5)
-    note: str = Field(min_length=1, max_length=4000)
+    # A mood alone is a complete check-in; the note is optional.
+    note: str = Field(default="", max_length=4000)
     topic: str = Field(default="life", pattern="^(life|work|relationships|health|learning)$")
 
     @field_validator("note")
     @classmethod
-    def nonempty_note(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Write a note before saving")
+    def trimmed_note(cls, value: str) -> str:
         return value.strip()
 
     @field_validator("timezone")
@@ -275,6 +274,8 @@ async def reflect_on_entry(
         )
         if record is None:
             raise HTTPException(404, "Save this day's note first")
+        if not record.note.strip():
+            raise HTTPException(409, "Write a few words about the day first")
         history = record.reflections or []
         existing = next((item for item in history if item["requestId"] == payload.request_id), None)
         if existing:

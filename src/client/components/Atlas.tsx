@@ -8,11 +8,21 @@ import {
   useState,
   type ReactNode
 } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
 import { ArrowUp, LoaderCircle, Plus, Sparkles, X } from "lucide-react";
 import { api } from "../api";
 import { useI18n } from "../i18n/provider";
-import { atlasContextFor, atlasCopy, turnText, type AtlasLens, type AtlasTurn } from "../lib/atlas";
+import {
+  atlasContextFor,
+  atlasCopy,
+  chartLabel,
+  readStoredTurns,
+  storeTurns,
+  turnText,
+  type AtlasLens,
+  type AtlasTurn
+} from "../lib/atlas";
 import type { AdminSessionSummary } from "../../shared/domain";
 
 export type WorkspaceChart = {
@@ -29,8 +39,12 @@ type AtlasState = {
   useNotes: boolean;
   setUseNotes: (value: boolean) => void;
   ask: (message: string) => Promise<void>;
+  /** Open Atlas (drawer or rail) and ask right away. */
+  askAbout: (message: string) => void;
   reset: () => void;
   charts: WorkspaceChart[];
+  /** null while loading; Atlas needs a chart (Vedic or BaZi) to speak about a person. */
+  hasChart: boolean | null;
   reading: WorkspaceChart | null;
   drawerOpen: boolean;
   setDrawerOpen: (value: boolean) => void;
@@ -38,45 +52,53 @@ type AtlasState = {
 
 const AtlasContext = createContext<AtlasState | null>(null);
 
-function chartFrom(session: AdminSessionSummary): WorkspaceChart {
-  const subject = session.subject;
-  const place = subject?.birthPlace?.split("|")[0].trim();
+function chartFrom(session: AdminSessionSummary, localeTag: string): WorkspaceChart {
   return {
     sessionId: session.sessionId,
     kind: session.stage.startsWith("bazi_") ? "bazi" : "vedic",
-    label: [subject?.birthDate, place && !place.startsWith("lat=") ? place : null]
-      .filter(Boolean)
-      .join(" · "),
+    label: chartLabel(session.subject, localeTag),
     completed: session.status === "completed"
   };
 }
 
 export function AtlasProvider({ children }: { children: ReactNode }) {
-  const { locale } = useI18n();
+  const { locale, localeTag } = useI18n();
+  const { user } = useUser();
+  const { pathname } = useLocation();
   const copy = atlasCopy[locale];
-  const [turns, setTurns] = useState<AtlasTurn[]>([]);
+  const storageKey = `signatlas.atlas.${user?.id ?? "me"}`;
+  const [turns, setTurns] = useState<AtlasTurn[]>(() => readStoredTurns(storageKey));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [useNotes, setUseNotes] = useState(true);
   const [charts, setCharts] = useState<WorkspaceChart[]>([]);
+  const [chartsLoaded, setChartsLoaded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const turnsRef = useRef(turns);
   useEffect(() => {
     turnsRef.current = turns;
-  }, [turns]);
+    storeTurns(storageKey, turns);
+  }, [turns, storageKey]);
 
   useEffect(() => {
     let alive = true;
     api
       .listMySessions()
-      .then((result) => alive && setCharts(result.sessions.map(chartFrom)))
+      .then((result) => {
+        if (!alive) return;
+        setCharts(result.sessions.map((session) => chartFrom(session, localeTag)));
+        setChartsLoaded(true);
+      })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, []);
+  }, [localeTag]);
 
-  const reading = charts.find((chart) => chart.kind === "vedic" && chart.completed) ?? null;
+  // The reading on screen wins; otherwise the newest finished Vedic reading.
+  const viewing = pathname.match(/^\/app\/charts\/([^/]+)/)?.[1];
+  const finished = charts.filter((chart) => chart.kind === "vedic" && chart.completed);
+  const reading = finished.find((chart) => chart.sessionId === viewing) ?? finished[0] ?? null;
   const readingId = reading?.sessionId ?? null;
 
   const ask = useCallback(
@@ -109,6 +131,14 @@ export function AtlasProvider({ children }: { children: ReactNode }) {
     [busy, copy.error, locale, readingId, useNotes]
   );
 
+  const askAbout = useCallback(
+    (message: string) => {
+      setDrawerOpen(true);
+      void ask(message);
+    },
+    [ask]
+  );
+
   const value = useMemo(
     () => ({
       turns,
@@ -117,16 +147,18 @@ export function AtlasProvider({ children }: { children: ReactNode }) {
       useNotes,
       setUseNotes,
       ask,
+      askAbout,
       reset: () => {
         setTurns([]);
         setError("");
       },
       charts,
+      hasChart: chartsLoaded ? charts.length > 0 : null,
       reading,
       drawerOpen,
       setDrawerOpen
     }),
-    [turns, busy, error, useNotes, ask, charts, reading, drawerOpen]
+    [turns, busy, error, useNotes, ask, askAbout, charts, chartsLoaded, reading, drawerOpen]
   );
   return <AtlasContext.Provider value={value}>{children}</AtlasContext.Provider>;
 }
@@ -383,69 +415,97 @@ function AtlasHeader({ onClose }: { onClose?: () => void }) {
   );
 }
 
-/** Persistent right rail on wide screens (rail mode) or a slide-over drawer. */
-export function AtlasPanel({ mode = "rail" }: { mode?: "rail" | "drawer" }) {
+/** Shown instead of the composer until the user has a chart. */
+export function AtlasChartFirst({ compact = false }: { compact?: boolean }) {
   const { locale } = useI18n();
   const copy = atlasCopy[locale];
-  const { drawerOpen, setDrawerOpen } = useAtlas();
-  const body = (onClose?: () => void) => (
-    <div className="flex h-full flex-col gap-4 px-5 pb-5 pt-6">
-      <AtlasHeader onClose={onClose} />
-      <AtlasSources />
-      <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-        <AtlasConversation compact />
-      </div>
-      <div className="space-y-2">
-        <AtlasComposer />
-        <p className="text-center text-[11px] text-cream/35">{copy.disclaimer}</p>
+  const { setDrawerOpen } = useAtlas();
+  return (
+    <div className={compact ? "pt-2" : "pt-6"}>
+      <p className={`font-display ${compact ? "text-2xl" : "text-4xl"} text-cream`}>
+        {copy.chartFirstTitle}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-cream/60">{copy.chartFirstBody}</p>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <Link
+          to="/app/charts/new"
+          onClick={() => setDrawerOpen(false)}
+          className="inline-flex h-10 items-center rounded-full bg-paper px-4 text-sm font-medium text-[#16130e]"
+        >
+          {copy.chartFirstVedic}
+        </Link>
+        <Link
+          to="/app/charts/bazi"
+          onClick={() => setDrawerOpen(false)}
+          className="inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-sm text-cream/80 hover:bg-white/[0.05]"
+        >
+          {copy.chartFirstBazi}
+        </Link>
       </div>
     </div>
   );
+}
+
+/** Atlas as a pop-out window (full screen on phones), opened from the launcher. */
+export function AtlasPanel() {
+  const { locale } = useI18n();
+  const copy = atlasCopy[locale];
+  const { drawerOpen, setDrawerOpen, hasChart } = useAtlas();
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const close = (event: KeyboardEvent) => event.key === "Escape" && setDrawerOpen(false);
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [drawerOpen, setDrawerOpen]);
+  if (!drawerOpen) return null;
   return (
-    <>
-      {mode === "rail" && (
-        <aside
-          aria-label={copy.name}
-          className="fixed inset-y-0 right-0 z-30 hidden w-[380px] border-l border-white/[0.07] bg-[#0d0e14] xl:block"
-        >
-          {body()}
-        </aside>
-      )}
-      {drawerOpen && (
-        <div
-          className={`fixed inset-0 z-50 ${mode === "rail" ? "xl:hidden" : ""}`}
-          role="dialog"
-          aria-modal="true"
-          aria-label={copy.name}
-        >
-          <button
-            type="button"
-            aria-label={copy.close}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div className="absolute inset-y-0 right-0 w-full max-w-[420px] border-l border-white/10 bg-[#0d0e14] shadow-2xl">
-            {body(() => setDrawerOpen(false))}
-          </div>
-        </div>
-      )}
-    </>
+    <div
+      role="dialog"
+      aria-label={copy.name}
+      className="rise-in fixed inset-0 z-[60] flex flex-col bg-[#0d0e14] sm:inset-auto sm:bottom-24 sm:right-6 sm:h-[min(660px,calc(100dvh-128px))] sm:w-[400px] sm:overflow-hidden sm:rounded-3xl sm:border sm:border-white/10 sm:shadow-[0_30px_90px_rgba(0,0,0,0.6)]"
+    >
+      <div className="flex h-full flex-col gap-4 px-5 pb-5 pt-5">
+        <AtlasHeader onClose={() => setDrawerOpen(false)} />
+        {hasChart === false ? (
+          <AtlasChartFirst compact />
+        ) : (
+          <>
+            <AtlasSources />
+            <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+              <AtlasConversation compact />
+            </div>
+            <div className="space-y-2">
+              <AtlasComposer />
+              <p className="text-center text-[11px] text-cream/35">{copy.disclaimer}</p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
-export function AtlasLauncher({ always = false }: { always?: boolean }) {
+/** Round launcher in the bottom-right corner, next to the feedback button. */
+export function AtlasLauncher() {
   const { locale } = useI18n();
-  const { setDrawerOpen, busy } = useAtlas();
+  const copy = atlasCopy[locale];
+  const { drawerOpen, setDrawerOpen, busy } = useAtlas();
   return (
     <button
       type="button"
-      onClick={() => setDrawerOpen(true)}
-      className={`press-feedback fixed bottom-24 right-4 z-40 hidden h-12 items-center gap-2 rounded-full bg-paper pl-2 pr-4 text-sm font-medium text-[#16130e] shadow-[0_14px_40px_rgba(0,0,0,0.5)] lg:bottom-6 lg:flex ${always ? "" : "xl:hidden"}`}
+      onClick={() => setDrawerOpen(!drawerOpen)}
+      aria-label={drawerOpen ? copy.close : copy.open}
+      aria-expanded={drawerOpen}
+      title={copy.open}
+      className="press-feedback fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-4 z-[61] grid size-[52px] place-items-center rounded-full bg-paper text-[#16130e] shadow-[0_14px_40px_rgba(0,0,0,0.55)] transition-transform hover:scale-105 max-sm:aria-expanded:hidden lg:bottom-6 lg:right-6"
     >
-      <span className="grid size-8 place-items-center rounded-full bg-[#16130e] text-paper">
-        {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Sparkles size={15} />}
-      </span>
-      {atlasCopy[locale].open}
+      {busy ? (
+        <LoaderCircle size={20} className="animate-spin" />
+      ) : drawerOpen ? (
+        <X size={20} />
+      ) : (
+        <Sparkles size={20} strokeWidth={1.8} />
+      )}
     </button>
   );
 }

@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -5333,7 +5334,9 @@ User request:
         rectification_status = (
             record.rectification.decision.status if record.rectification else "not_required"
         )
-        placement = SkillRuntime._consultation_placement(released, topic_order)
+        placement = SkillRuntime._consultation_placement(
+            released, topic_order, set(context.requested_topics)
+        )
         template = {
             "schemaVersion": "vedicdust-consultation-dossier/1.0.0",
             "dossierId": f"dossier.{record.chart_record_id}.r{record.revision}",
@@ -5412,13 +5415,17 @@ User request:
         }
 
     @staticmethod
-    def _consultation_placement(claims: list[Any], topic_order: list[str]) -> dict[str, Any]:
+    def _consultation_placement(
+        claims: list[Any], topic_order: list[str], requested: Collection[str] = ()
+    ) -> dict[str, Any]:
         """A valid section layout by topic priority; the Agent writes prose for it.
 
         Timing Claims go to timing_outlook, the foundation Claim to chart_foundation,
         the three highest-priority Claims to executive_synthesis, the next one to
         decision_support, and the rest to at most five priority_domain sections with
-        any overflow in core_architecture.
+        any overflow in core_architecture. When the user named topics, only those get
+        their own section; other topics share core_architecture so the reading stays
+        on what was asked.
         """
 
         rank = {topic: index for index, topic in enumerate(topic_order)}
@@ -5434,7 +5441,9 @@ User request:
         domains: dict[str, list[str]] = {}
         architecture: list[str] = []
         for claim in remainder:
-            if claim.topic in domains or len(domains) < 5:
+            if requested and claim.topic not in requested:
+                architecture.append(claim.claim_id)
+            elif claim.topic in domains or len(domains) < 5:
                 domains.setdefault(claim.topic, []).append(claim.claim_id)
             else:
                 architecture.append(claim.claim_id)

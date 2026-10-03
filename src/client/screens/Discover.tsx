@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PageHeader } from "../components/PageHeader";
 import { Link } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { useI18n } from "../i18n/provider";
@@ -17,10 +18,7 @@ export function Discover() {
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 py-8 sm:px-8 sm:py-10">
-      <header className="mb-8 max-w-2xl">
-        <h1 className="font-display text-4xl leading-tight sm:text-5xl">{d.discoverTitle}</h1>
-        <p className="mt-3 text-sm leading-7 text-cream/60">{d.discoverBody}</p>
-      </header>
+      <PageHeader title={d.discoverTitle} note={d.discoverBody} />
 
       <div className="grid items-start gap-5 @3xl:grid-cols-2">
         <section className="surface p-5 sm:p-7">

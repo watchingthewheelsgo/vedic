@@ -11,3 +11,7 @@ export type FeedbackItem = {
   status: "open" | "resolved";
   createdAt: string;
 };
+
+export function openFeedback() {
+  window.dispatchEvent(new CustomEvent("sign-atlas-feedback", { detail: { kind: "feedback" } }));
+}

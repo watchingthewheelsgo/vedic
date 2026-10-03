@@ -73,6 +73,20 @@ _HOUSE_DOMAINS = {
         11: "収益、共同体、長期目標",
         12: "退隠、海外、資源消耗",
     },
+    "en": {
+        1: "your self and direction",
+        2: "money, family and voice",
+        3: "communication, skills and initiative",
+        4: "home, roots and inner calm",
+        5: "creativity, learning and children",
+        6: "daily work, service and stress",
+        7: "partnership and commitments",
+        8: "change, risk and shared resources",
+        9: "belief, study and long journeys",
+        10: "career and public role",
+        11: "gains, friends and long-term goals",
+        12: "rest, distance and letting go",
+    },
 }
 
 _PLANET_LABELS = {
@@ -1432,14 +1446,31 @@ def _localized_anchor_expression(finding: JudgementFinding, locale: str) -> str:
             return f"现实中重点观察第{house}宫主题如何在具体选择中反复出现。"
         if locale == "ja":
             return f"現実では第{house}室のテーマが具体的な選択にどう反復するかを確認します。"
-        return f"Observe how H{house} themes recur through concrete choices."
+        return f"Notice how {_house_domain(house, locale)} recurs through concrete choices."
     source = _house_domain(house, locale)
     target = _house_domain(lord_house, locale)
     if locale == "zh":
-        return f"现实观察重点：处理“{target}”时，“{source}”议题是否同步被带动。"
+        if source == target:
+            return f"留意“{source}”需要你全心投入的时刻。"
+        return f"“{source}”往往与“{target}”联动：一方有动静时，也看看另一方。"
     if locale == "ja":
-        return f"現実の観察点: 「{target}」を扱う時に「{source}」も連動するか。"
-    return f"Observe whether {source} becomes active when dealing with {target}."
+        if source == target:
+            return f"「{source}」に全力を注ぐ場面に注目してください。"
+        return f"「{source}」は「{target}」と連動しやすく、一方が動くときはもう一方にも目を向けてください。"
+    subject = f"{source[0].upper()}{source[1:]}"
+    if source == target:
+        return f"{subject} stands on its own in your chart: notice when it asks for your full attention."
+    # Vary the sentence so a reading with several linked pairs doesn't repeat itself.
+    variants = (
+        f"{subject} tends to move together with {target}: when one is in play, look at the other.",
+        f"Shifts in {target} often ripple into {source[0].lower()}{source[1:]}.",
+        f"{subject} is wired to {target} in your chart; what happens in one tends to show up in the other.",
+    )
+    return (
+        variants[(int(house) + lord_house) % len(variants)]
+        if isinstance(house, int)
+        else variants[0]
+    )
 
 
 def _localized_finding_statement(finding: JudgementFinding, locale: str) -> str:
@@ -1820,10 +1851,10 @@ def _localized_topic_title(locale: str, topic_title: str) -> str:
 
 def _localized_user_relevance(locale: str, topic_title: str) -> str:
     if locale == "zh":
-        return f"你在本次咨询中明确关注了{topic_title}。"
+        return f"这是你本次想了解的主题：{topic_title}。"
     if locale == "ja":
         return f"今回の相談で{topic_title}が明確なテーマとして指定されています。"
-    return f"You explicitly requested {topic_title.lower()} in this consultation."
+    return f"You asked about {topic_title.lower()}."
 
 
 def _localized_structural_condition(locale: str) -> str:
@@ -1841,7 +1872,7 @@ def _localized_timing_condition(locale: str) -> str:
         return "该时间范围只表示对应宫主被大运系统激活；不保证具体事件发生。"
     if locale == "ja":
         return "この期間は該当ハウス支配星の活性化を示すだけで、出来事を保証しません。"
-    return "This interval indicates relevant house-lord activation; it does not guarantee an event."
+    return "The planet that rules this life area is active in this period; it does not guarantee an event."
 
 
 def _localized_timing_synthesis(
@@ -1863,10 +1894,8 @@ def _localized_timing_synthesis(
         )
     return (
         f"{topic_title}: a reviewable dasha activation window runs from {start_label} to {end_label}.",
-        [
-            "The topic may become more active, while expression still depends on choices and context."
-        ],
-        ["Use the window for review and decision observation, not as an event promise."],
+        [f"{topic_title} is likely to be more in focus; how it unfolds depends on your choices."],
+        ["A good period to review and decide, not a promise of a specific event."],
     )
 
 

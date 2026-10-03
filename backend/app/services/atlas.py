@@ -21,6 +21,7 @@ from app.auth import AuthenticatedUser, require_user
 from app.db.engine import get_session_factory
 from app.db.models import JournalEntryRecord
 from app.services.ai_allowance import AiAllowanceService
+from app.services.daily_guidance import build_guidance, resolve_natal
 from app.services.daily_journal import calendar_day, project, summarize, timezone_for
 
 router = APIRouter(prefix="/api/me/atlas", tags=["atlas"])
@@ -125,8 +126,9 @@ def build_prompt(payload: AtlasQuestion, evidence: dict) -> str:
         "- answer: 2-4 short paragraphs of practical, warm, specific guidance.\n"
         "- lenses: up to three, only for sources present in the evidence. 'vedic' only if "
         "vedicReading is not null: use only its approved claims, timing windows and limits; never "
-        "invent placements, dashas or transits. 'bazi' may use only the day pillar facts and the "
-        "user's learned day patterns; there is no personal BaZi birth chart. 'notes' only if journal "
+        "invent placements, dashas or transits. 'bazi' may use only the day pillar facts, the "
+        "personal baziToday facts (the user's Day Master, natal pillars, today's ten god, good-for "
+        "and avoid items) and the user's learned day patterns. 'notes' only if journal "
         "entries or learned patterns exist; never claim a pattern from fewer than 7 days.\n"
         "- refs: copy IDs exactly from the evidence (claim or fact IDs from vedicReading, "
         "'day:<pillar>', 'pattern:<stem|branch>:<key>'). Omit refs you cannot copy exactly.\n"
@@ -140,6 +142,7 @@ def build_prompt(payload: AtlasQuestion, evidence: dict) -> str:
 
 def allowed_refs(evidence: dict) -> set[str]:
     allowed = collect_reference_ids(evidence.get("vedicReading"))
+    allowed |= collect_reference_ids(evidence.get("baziToday"))
     day = evidence.get("day") or {}
     if day.get("pillar"):
         allowed.add(f"day:{day['pillar']}")
@@ -193,6 +196,11 @@ async def ask_atlas(
         zone = timezone_for("UTC")
     day = payload.day or datetime.now(zone).date()
 
+    # Atlas speaks about a person, so it needs their chart first (Vedic or BaZi).
+    natal = await resolve_natal(container, user.owner_user_id)
+    if natal is None:
+        raise HTTPException(409, "Add your birth details to create your chart first.")
+
     async with get_session_factory()() as db:
         rows = await db.scalars(
             select(JournalEntryRecord)
@@ -207,8 +215,10 @@ async def ask_atlas(
         if payload.session_id
         else None
     )
+    calendar = calendar_day(day, zone.key)
     evidence = {
-        "day": calendar_day(day, zone.key),
+        "day": calendar,
+        "baziToday": build_guidance(natal, calendar)["guidance"],
         "journal": journal_evidence(entries, payload.use_notes),
         "vedicReading": vedic,
         "vedicReadingNote": None

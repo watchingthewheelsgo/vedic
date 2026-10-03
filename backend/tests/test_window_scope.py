@@ -225,3 +225,21 @@ def test_dossier_draft_restores_backend_placement_and_keeps_prose():
     assert executive["narratives"][0]["text"] == "Prose kept."
     assert decision["claimIds"] == ["c.b"]
     assert fixed["executiveClaimIds"] == ["c.a"]
+
+
+def test_consultation_placement_keeps_unrequested_topics_together():
+    from types import SimpleNamespace
+
+    from app.services.skill_runtime import SkillRuntime
+
+    def claim(topic):
+        return SimpleNamespace(claim_id=f"claim.{topic}", topic=topic, scope="natal_promise")
+
+    topics = ["career", "relationship", "foundation", "identity", "learning", "home", "health"]
+    layout = SkillRuntime._consultation_placement(
+        [claim(topic) for topic in topics], topics, {"career", "relationship"}
+    )
+    kinds = [section["sectionKind"] for section in layout["sections"]]
+    assert "priority_domain" not in kinds
+    architecture = next(s for s in layout["sections"] if s["sectionKind"] == "core_architecture")
+    assert architecture["claimIds"] == ["claim.home", "claim.health"]

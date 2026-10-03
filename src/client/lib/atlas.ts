@@ -36,6 +36,64 @@ export function atlasContextFor(pathname: string): AtlasContextKey {
   return "today";
 }
 
+const MAX_STORED_TURNS = 30;
+
+/** Saved conversation; storage can be missing or blocked, so every access is guarded. */
+export function readStoredTurns(key: string): AtlasTurn[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (turn): turn is AtlasTurn =>
+            typeof turn === "object" &&
+            turn !== null &&
+            ((turn as AtlasTurn).role === "user" || (turn as AtlasTurn).role === "atlas")
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function storeTurns(key: string, turns: AtlasTurn[]) {
+  try {
+    if (turns.length) localStorage.setItem(key, JSON.stringify(turns.slice(-MAX_STORED_TURNS)));
+    else localStorage.removeItem(key);
+  } catch {
+    // Private mode or blocked storage: the conversation simply isn't kept.
+  }
+}
+
+type ChartSubject = { birthDate?: string | null; birthPlace?: string | null } | null | undefined;
+
+/** "May 18, 1992 · Shanghai"; raw coordinates are never shown as a place. */
+export function chartLabel(subject: ChartSubject, localeTag: string): string {
+  const place = subject?.birthPlace?.split("|")[0].trim();
+  let date = subject?.birthDate ?? "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    date = new Intl.DateTimeFormat(localeTag, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC"
+    }).format(new Date(`${date}T00:00:00Z`));
+  }
+  return [date, place && !place.startsWith("lat=") ? place : null].filter(Boolean).join(" · ");
+}
+
+/** One row per person and tradition: the newest finished chart, else the newest. */
+export function uniqueCharts<T extends { kind: string; label: string; completed: boolean }>(
+  charts: T[]
+): T[] {
+  const picked = new Map<string, T>();
+  for (const chart of charts) {
+    const key = `${chart.kind}|${chart.label}`;
+    const current = picked.get(key);
+    if (!current || (!current.completed && chart.completed)) picked.set(key, chart);
+  }
+  return [...picked.values()];
+}
+
 /** Plain-text transcript entry sent back as conversation history. */
 export function turnText(turn: AtlasTurn): string {
   return turn.role === "user" ? turn.text : `${turn.answer.headline}\n${turn.answer.answer}`;
@@ -60,6 +118,10 @@ type Copy = {
   error: string;
   emptyTitle: string;
   emptyBody: string;
+  chartFirstTitle: string;
+  chartFirstBody: string;
+  chartFirstVedic: string;
+  chartFirstBazi: string;
   suggestions: Record<AtlasContextKey, string[]>;
 };
 
@@ -81,7 +143,12 @@ const zh: Copy = {
   disclaimer: "仅供反思，不是确定的预言。",
   error: "Atlas 暂时无法回答，请稍后再试。",
   emptyTitle: "想聊点什么？",
-  emptyBody: "Atlas 会结合今天的干支、你的记录和已完成的 Vedic 报告来回答。",
+  emptyBody: "Atlas 会结合你的命盘、今天的干支和你的记录来回答。",
+  chartFirstTitle: "先认识你，再陪你聊",
+  chartFirstBody:
+    "Atlas 需要你的命盘才能给出属于你的回答。填一次出生信息，就能解锁对话、每日宜忌和顺日分析。",
+  chartFirstVedic: "创建 Vedic 命盘",
+  chartFirstBazi: "创建八字命盘",
   suggestions: {
     today: ["今天我该关注什么？", "这周哪几天适合做重要的事？"],
     days: ["为什么有些日子对我更顺？", "下个月有哪些顺日？"],
@@ -111,8 +178,12 @@ const en: Copy = {
   disclaimer: "A reflection to think with, not a certainty.",
   error: "Atlas couldn't answer just now. Please try again.",
   emptyTitle: "What's on your mind?",
-  emptyBody:
-    "Atlas answers with today's stem-branch, your journal and your finished Vedic reading.",
+  emptyBody: "Atlas answers from your chart, today's stem-branch and your journal.",
+  chartFirstTitle: "Let Atlas get to know you",
+  chartFirstBody:
+    "Atlas needs your chart to answer about you, not people in general. Add your birth details once to unlock chat, daily Good for / Avoid and your auspicious days.",
+  chartFirstVedic: "Create my Vedic chart",
+  chartFirstBazi: "Create my BaZi chart",
   suggestions: {
     today: ["What should I focus on today?", "Which days this week suit big decisions?"],
     days: ["Why are some days brighter for me?", "What are my bright days next month?"],
@@ -149,7 +220,12 @@ const ja: Copy = {
   disclaimer: "確定的な予言ではなく、考えるための視点です。",
   error: "Atlas が応答できませんでした。もう一度お試しください。",
   emptyTitle: "何を話しましょう？",
-  emptyBody: "今日の干支、あなたの記録、完了した Vedic レポートをもとに答えます。",
+  emptyBody: "あなたのチャート、今日の干支、記録をもとに答えます。",
+  chartFirstTitle: "まずはあなたのことを教えてください",
+  chartFirstBody:
+    "Atlas はあなたのチャートをもとに答えます。出生情報を一度入力すると、チャット、毎日の宜忌、吉日分析が使えるようになります。",
+  chartFirstVedic: "Vedic チャートを作成",
+  chartFirstBazi: "八字チャートを作成",
   suggestions: {
     today: ["今日は何に集中すべき？", "今週、大事な決断に向く日は？"],
     days: ["なぜ一部の日が自分に合うの？", "来月の吉日は？"],

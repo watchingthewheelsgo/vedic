@@ -102,8 +102,9 @@ export function FeedbackWidget() {
   const [receipt, setReceipt] = useState("");
   const request = useRef<{ key: string; id: string } | null>(null);
   useEffect(() => {
-    const show = () => {
-      setKind("upgrade");
+    const show = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: "feedback" | "upgrade" }>).detail;
+      setKind(detail?.kind ?? "upgrade");
       setReceipt("");
       setError("");
       setOpen(true);
@@ -148,20 +149,32 @@ export function FeedbackWidget() {
   }
 
   const field =
-    "mt-2 w-full rounded-xl border border-white/20 bg-[#231c2c] px-3 py-3 text-base text-cream outline-none focus:border-gold focus:ring-2 focus:ring-gold/25 disabled:opacity-60";
+    "mt-2 w-full rounded-xl border border-white/20 bg-night px-3 py-3 text-base text-cream outline-none focus:border-gold focus:ring-2 focus:ring-gold/25 disabled:opacity-60";
+  // Inside the app it is a small round icon beside the Atlas launcher (bottom right).
+  const inApp = pathname.startsWith("/app");
+  const besideAtlas = inApp && !pathname.startsWith("/app/ask");
   return (
     <div
-      className={`fixed right-4 z-[70] sm:right-6 ${pathname.startsWith("/app") ? "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-5 lg:left-[268px] lg:right-auto" : "bottom-[calc(1.5rem+env(safe-area-inset-bottom))]"}`}
+      className={`fixed z-[61] ${
+        inApp
+          ? `bottom-[calc(5.25rem+4px+env(safe-area-inset-bottom))] lg:bottom-[28px] ${besideAtlas ? "right-[80px] lg:right-[88px]" : "right-4 lg:right-6"}`
+          : "bottom-[calc(1.5rem+env(safe-area-inset-bottom))] right-4 sm:right-6"
+      }`}
     >
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             aria-label={c.trigger}
-            className="flex min-h-12 items-center gap-2 rounded-full border border-gold/45 bg-[#211a2a] px-4 text-sm font-medium text-gold-light shadow-lg outline-none transition-[background-color,transform] duration-150 hover:bg-[#30253b] focus-visible:ring-2 focus-visible:ring-gold active:scale-[0.97] motion-reduce:transition-none"
+            title={c.trigger}
+            className={`press-feedback rounded-full border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-gold ${
+              inApp
+                ? "grid size-11 place-items-center border-white/12 bg-night-3 text-cream/70 shadow-[0_10px_30px_rgba(0,0,0,0.45)] hover:text-cream"
+                : "flex min-h-12 items-center gap-2 border-gold/45 bg-[#211a2a] px-4 text-sm font-medium text-gold-light shadow-lg hover:bg-[#30253b]"
+            }`}
           >
-            <MessageSquare size={19} />
-            <span className="hidden sm:inline">{c.trigger}</span>
+            <MessageSquare size={inApp ? 17 : 19} />
+            {!inApp && <span className="hidden sm:inline">{c.trigger}</span>}
           </button>
         </PopoverTrigger>
         <PopoverContent
@@ -169,7 +182,7 @@ export function FeedbackWidget() {
           align="end"
           collisionPadding={12}
           aria-labelledby="feedback-title"
-          className="!z-[80] max-h-[min(75dvh,var(--radix-popover-content-available-height))] w-[min(380px,calc(100vw-24px))] overflow-y-auto rounded-2xl !bg-[#17121f] !p-5 text-cream shadow-[0_20px_70px_#0008]"
+          className="!z-[80] max-h-[min(75dvh,var(--radix-popover-content-available-height))] w-[min(380px,calc(100vw-24px))] overflow-y-auto rounded-3xl border border-white/10 !bg-[#0d0e14] !p-5 text-cream shadow-[0_20px_70px_#0008]"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("feedback-message")?.focus({ preventScroll: true });

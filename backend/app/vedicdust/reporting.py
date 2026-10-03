@@ -27,12 +27,14 @@ COPY = {
         "report_title": "Your Vedic Reading",
         "why": "Why it is here",
         "limits": "Limits",
-        "scope": "Reading scope",
+        "scope": "About this reading",
         "reported_birth": "Reported birth details",
         "calculation_basis": "Chart calculation basis",
         "calculation_assurance": "Calculation assurance",
         "method": "Method",
-        "confidence": "Confidence",
+        "confidence": "Strength of evidence",
+        "when": "When",
+        "ages": "ages",
         "requested_topics": "Requested topics",
         "included_topics": "Included topics",
         "omitted_topics": "Not included",
@@ -70,12 +72,14 @@ COPY = {
         "report_title": "你的 Vedic 解读",
         "why": "为什么在这里",
         "limits": "限制",
-        "scope": "本次解读范围",
+        "scope": "关于这份解读",
         "reported_birth": "用户报告的出生信息",
         "calculation_basis": "本次盘面采用的计算依据",
         "calculation_assurance": "计算验证范围",
         "method": "计算与解读方法",
-        "confidence": "整体可信度",
+        "confidence": "证据强度",
+        "when": "时间",
+        "ages": "年龄",
         "requested_topics": "本次关注",
         "included_topics": "纳入解读",
         "omitted_topics": "本次未纳入",
@@ -110,12 +114,14 @@ COPY = {
         "report_title": "あなたの Vedic リーディング",
         "why": "取り上げた理由",
         "limits": "制約",
-        "scope": "今回のリーディング範囲",
+        "scope": "このリーディングについて",
         "reported_birth": "申告された出生情報",
         "calculation_basis": "今回のチャート計算基準",
         "calculation_assurance": "計算検証の範囲",
         "method": "計算と判断方法",
-        "confidence": "総合的な確度",
+        "confidence": "根拠の強さ",
+        "when": "時期",
+        "ages": "年齢",
         "requested_topics": "相談テーマ",
         "included_topics": "今回扱うテーマ",
         "omitted_topics": "今回扱わないテーマ",
@@ -247,42 +253,42 @@ def _materialize_report_sections(
     claims_by_id = {claim.claim_id: claim for claim in graph.claims}
     titles = {
         "en": {
-            "scope": "Reading scope",
-            "executive_synthesis": "Executive synthesis",
-            "chart_foundation": "Chart foundation",
-            "core_architecture": "Core chart architecture",
+            "scope": "About this reading",
+            "executive_synthesis": "The short version",
+            "chart_foundation": "Who you are at the core",
+            "core_architecture": "Other patterns in your chart",
             "priority_domain": "Priority domain",
-            "timing_outlook": "Timing outlook",
-            "decision_support": "Decision support",
+            "timing_outlook": "Timing: the chapters ahead",
+            "decision_support": "When you face a decision",
             "follow_up": "Questions to carry forward",
-            "technical_evidence": "Technical evidence",
+            "technical_evidence": "Appendix: how this was read",
         },
         "zh": {
-            "scope": "本次解读范围",
-            "executive_synthesis": "核心结论",
-            "chart_foundation": "盘面基础",
-            "core_architecture": "核心结构",
+            "scope": "关于这份解读",
+            "executive_synthesis": "一句话看懂",
+            "chart_foundation": "你的底色",
+            "core_architecture": "盘中的其他模式",
             "priority_domain": "重点领域",
-            "timing_outlook": "时间窗口",
-            "decision_support": "现实决策参考",
+            "timing_outlook": "接下来的人生阶段",
+            "decision_support": "面对选择时",
             "follow_up": "值得继续讨论的问题",
-            "technical_evidence": "专业证据附录",
+            "technical_evidence": "附录：解读依据",
         },
         "ja": {
-            "scope": "今回のリーディング範囲",
-            "executive_synthesis": "主要な結論",
-            "chart_foundation": "チャートの基礎",
+            "scope": "このリーディングについて",
+            "executive_synthesis": "要点",
+            "chart_foundation": "あなたの土台",
             "core_architecture": "チャートの中核構造",
             "priority_domain": "優先テーマ",
-            "timing_outlook": "時期の見通し",
-            "decision_support": "意思決定の参考",
+            "timing_outlook": "これからの章",
+            "decision_support": "選択に迷ったとき",
             "follow_up": "今後の相談テーマ",
             "technical_evidence": "専門的根拠",
         },
     }
     # The answer comes first; reading scope and evidence close the document.
     priorities = {
-        "scope": 95,
+        "scope": 88,
         "executive_synthesis": 20,
         "chart_foundation": 30,
         "core_architecture": 40,
@@ -704,7 +710,7 @@ def render_consultation_report(
     lines = [
         f"# {copy['report_title']}",
         "",
-        f"> {copy['confidence']}: **{_grade(dossier.confidence.overall, dossier.locale)}**",
+        f"> {_reading_stance(dossier.confidence.overall, dossier.locale)}",
         f"> {copy['assurance_note']}",
         "",
     ]
@@ -725,11 +731,14 @@ def render_consultation_report(
             if not rendered_window:
                 lines.extend([copy["no_timing"], ""])
         elif section.section_kind == "follow_up":
-            if dossier.unresolved_questions:
-                lines.extend([f"- {question}" for question in dossier.unresolved_questions])
+            stated = set(dossier.scope.residual_uncertainties)
+            questions = [q for q in dossier.unresolved_questions if q not in stated]
+            if questions:
+                lines.extend([f"- {question}" for question in questions])
                 lines.append("")
-            else:
-                lines.extend([copy["no_questions"], ""])
+            elif not section.narratives:
+                # Nothing new to carry forward: drop the empty heading.
+                lines = lines[:-2]
         elif section.section_kind == "technical_evidence":
             lines.extend(_render_evidence(graph, section, copy))
         else:
@@ -786,31 +795,38 @@ def _render_scope(
                 for interval in decision.resulting_intervals
             )
             calculation_basis += f" · {_equivalent_intervals_label(dossier.locale)} {retained}"
+    # The reader-facing scope: what was read and what stays open. Calculation basis and
+    # method assurance follow in a nested list, kept for audit but visually secondary.
     lines = [
         f"- **{copy['reported_birth']}**: {reported_birth}",
-        f"- **{copy['calculation_basis']}**: {calculation_basis}",
-        f"- **{copy['calculation_assurance']}**: {_calculation_assurance_label(record, dossier.locale)}",
         f"- **{copy['confidence']}**: {_grade(dossier.confidence.overall, dossier.locale)}",
-        f"- **{copy['report_depth']}**: {_report_depth_label(dossier.scope.report_depth, dossier.locale)}",
-        f"- **{copy['reading_frame']}**: {_reading_frame(record)}",
     ]
     if dossier.scope.requested_topics:
         lines.append(
             f"- **{copy['requested_topics']}**: " + ", ".join(dossier.scope.requested_topics)
         )
+    if dossier.scope.residual_uncertainties:
+        lines.append(f"- **{copy['residual_uncertainty']}**:")
+        lines.extend(f"  - {uncertainty}" for uncertainty in dossier.scope.residual_uncertainties)
+    lines.extend(
+        [
+            f"- **{copy['method']}**:",
+            f"  - {copy['calculation_basis']}: {calculation_basis}",
+            f"  - {copy['calculation_assurance']}: "
+            f"{_calculation_assurance_label(record, dossier.locale)}",
+            f"  - {copy['report_depth']}: "
+            f"{_report_depth_label(dossier.scope.report_depth, dossier.locale)}",
+            f"  - {copy['reading_frame']}: {_reading_frame(record)}",
+        ]
+    )
     if dossier.scope.included_topics:
-        lines.append(
-            f"- **{copy['included_topics']}**: " + ", ".join(dossier.scope.included_topics)
-        )
+        lines.append(f"  - {copy['included_topics']}: " + ", ".join(dossier.scope.included_topics))
+    lines.extend(f"  - {rationale}" for rationale in dossier.confidence.rationale)
     if dossier.scope.omitted_topics:
         lines.append(f"- **{copy['omitted_topics']}**:")
         lines.extend(
             f"  - {topic}: {reason}" for topic, reason in dossier.scope.omitted_topics.items()
         )
-    if dossier.scope.residual_uncertainties:
-        lines.append(f"- **{copy['residual_uncertainty']}**:")
-        lines.extend(f"  - {uncertainty}" for uncertainty in dossier.scope.residual_uncertainties)
-    lines.extend(f"- {rationale}" for rationale in dossier.confidence.rationale)
     lines.append("")
     return lines
 
@@ -873,7 +889,8 @@ def _render_claim_takeaways(claims: list[Claim], copy: dict[str, str], locale: s
             ),
             claim.plain_statement,
         )
-        lines.append(f"- **{title}** ({_grade(claim.certainty, locale)}): {lived}")
+        grade = "" if claim.certainty == "low" else f" ({_grade(claim.certainty, locale)})"
+        lines.append(f"- **{title}**{grade}: {lived}")
         if claim.user_relevance:
             lines.append(f"  - **{copy['why']}**: {claim.user_relevance}")
     lines.append("")
@@ -886,27 +903,16 @@ def _render_timing_window(
     locale: str,
     record: ChartRecord,
 ) -> list[str]:
-    lines = [
-        f"### {window.title}",
-        "",
-        f"**{copy['timing']}**: {window.interval.start.date().isoformat()} – "
-        f"{window.interval.end.date().isoformat()}",
-        "",
-        f"**{copy['confidence']}**: {_grade(window.confidence, locale)}",
-    ]
+    when = f"{_month_label(window.interval.start, locale)} – {_month_label(window.interval.end, locale)}"
     age_range = _age_range_for_interval(record.birth_assertion.local_date, window.interval)
     if age_range is not None:
         start_age, end_age = age_range
-        label = str(start_age) if start_age == end_age else f"{start_age}-{end_age}"
-        lines.extend(["", f"**{copy['age_during_window']}**: {label}"])
-    for label, values in (
-        (copy["opportunities"], window.opportunities),
-        (copy["pressures"], window.pressures),
-        (copy["conditions"], window.conditions),
-    ):
-        if values:
-            lines.extend(["", f"**{label}**", ""])
-            lines.extend(f"- {value}" for value in values)
+        label = str(start_age) if start_age == end_age else f"{start_age}–{end_age}"
+        when += f" · {copy['ages']} {label}"
+    if window.confidence != "low":
+        when += f" · {_grade(window.confidence, locale)}"
+    lines = [f"### {window.title}", "", f"**{copy['when']}**: {when}", ""]
+    lines.extend(f"- {value}" for value in [*window.opportunities, *window.pressures])
     lines.append("")
     return lines
 
@@ -1101,22 +1107,53 @@ def _age_on_date(born: date, target: date) -> int:
 def _grade(value: str, locale: str) -> str:
     labels = {
         "en": {
-            "high": "High",
-            "moderate": "Moderate",
-            "low": "Low",
-            "blocked": "Blocked",
+            "high": "Strong",
+            "moderate": "Clear",
+            "low": "Tentative",
+            "blocked": "Withheld",
         },
         "zh": {
-            "high": "高",
-            "moderate": "中等",
-            "low": "低",
-            "blocked": "暂不可发布",
+            "high": "明确",
+            "moderate": "较明确",
+            "low": "倾向性",
+            "blocked": "暂不发布",
         },
         "ja": {
-            "high": "高",
-            "moderate": "中",
-            "low": "低",
-            "blocked": "公開不可",
+            "high": "明確",
+            "moderate": "おおむね明確",
+            "low": "傾向",
+            "blocked": "非公開",
         },
     }
     return labels.get(locale, labels["en"]).get(value, value)
+
+
+def _reading_stance(overall: str, locale: str) -> str:
+    stances = {
+        "en": {
+            "high": "**A well-supported reading.** Several methods agree on what follows.",
+            "moderate": "**A grounded reading.** The main findings rest on clear chart evidence.",
+            "low": (
+                "**An exploratory reading.** These are tendencies to notice in your own life, "
+                "not predictions."
+            ),
+        },
+        "zh": {
+            "high": "**依据充分的解读。** 下面的结论得到多种方法相互印证。",
+            "moderate": "**依据清晰的解读。** 主要结论都有明确的盘面依据。",
+            "low": "**探索性的解读。** 以下是值得你在生活中留意的倾向，而不是预言。",
+        },
+        "ja": {
+            "high": "**十分な根拠のあるリーディング。** 複数の方法が一致しています。",
+            "moderate": "**明確な根拠のあるリーディング。** 主な結論はチャート上の根拠に基づきます。",
+            "low": "**探索的なリーディング。** 予言ではなく、日々の中で気づいてほしい傾向です。",
+        },
+    }
+    localized = stances.get(locale, stances["en"])
+    return localized.get(overall, localized["low"])
+
+
+def _month_label(moment: datetime, locale: str) -> str:
+    if locale in {"zh", "ja"}:
+        return f"{moment.year}年{moment.month}月"
+    return moment.strftime("%b %Y")

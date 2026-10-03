@@ -25,13 +25,25 @@ export function reportHeadingId(index: number) {
   return `report-h-${index}`;
 }
 
+/** Appendix headings (every locale, current and earlier renderer versions). */
+const APPENDIX_HEADINGS = new Set([
+  "Appendix: how this was read",
+  "Technical evidence",
+  "附录：解读依据",
+  "专业证据附录",
+  "専門的根拠"
+]);
+
 export function MarkdownReport({
   content,
-  skipTitle = false
+  skipTitle = false,
+  sectionAction
 }: {
   content: string;
   /** Drop the document's own H1 when the page already shows a title. */
   skipTitle?: boolean;
+  /** Rendered beside each "##" section heading (for example "Ask about this"). */
+  sectionAction?: (heading: string) => ReactNode;
 }) {
   const blocks = useMemo(() => {
     const parsed = parseMarkdown(content);
@@ -47,16 +59,56 @@ export function MarkdownReport({
     }
     return withAnchors;
   }, [content, skipTitle]);
+  // The method appendix stays one tap away instead of filling the page.
+  const appendixAt = blocks.findIndex(
+    ({ block }) =>
+      block.type === "heading" && block.level === SECTION_LEVEL && APPENDIX_HEADINGS.has(block.text)
+  );
+  const body = appendixAt >= 0 ? blocks.slice(0, appendixAt) : blocks;
+  const appendix = appendixAt >= 0 ? blocks.slice(appendixAt + 1) : [];
+  const render = (items: typeof blocks, offset = 0) =>
+    items.map(({ block, anchor }, index) => (
+      <MarkdownBlockView
+        key={index + offset}
+        block={block}
+        anchor={anchor}
+        action={
+          sectionAction && anchor && block.type === "heading"
+            ? sectionAction(block.text)
+            : undefined
+        }
+      />
+    ));
   return (
     <div>
-      {blocks.map(({ block, anchor }, index) => (
-        <MarkdownBlockView key={index} block={block} anchor={anchor} />
-      ))}
+      {render(body)}
+      {appendixAt >= 0 && (
+        <details
+          id={blocks[appendixAt].anchor}
+          className="group mt-14 scroll-mt-24 rounded-3xl border border-white/[0.08] bg-night-2/60"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 font-display text-2xl text-cream/80 [&::-webkit-details-marker]:hidden">
+            {(blocks[appendixAt].block as { text: string }).text}
+            <span className="text-base text-cream/40 transition-transform group-open:rotate-45">
+              +
+            </span>
+          </summary>
+          <div className="px-6 pb-6 text-[14px] opacity-80">{render(appendix, appendixAt + 1)}</div>
+        </details>
+      )}
     </div>
   );
 }
 
-function MarkdownBlockView({ block, anchor }: { block: MarkdownBlock; anchor?: string }) {
+function MarkdownBlockView({
+  block,
+  anchor,
+  action
+}: {
+  block: MarkdownBlock;
+  anchor?: string;
+  action?: ReactNode;
+}) {
   if (block.type === "heading") {
     const level = Math.min(Math.max(block.level, 2), 4);
     const Tag = `h${level}` as "h2" | "h3" | "h4";
@@ -66,6 +118,19 @@ function MarkdownBlockView({ block, anchor }: { block: MarkdownBlock; anchor?: s
         : level === 3
           ? "mb-3 mt-12 scroll-mt-24 border-t border-white/[0.07] pt-10 font-display text-[28px] leading-tight tracking-normal text-cream"
           : "mb-2 mt-6 text-[17px] font-medium tracking-normal text-cream";
+    if (action) {
+      return (
+        <div className="mb-3 mt-12 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-t border-white/[0.07] pt-10">
+          <Tag
+            id={anchor}
+            className="scroll-mt-24 font-display text-[28px] leading-tight tracking-normal text-cream"
+          >
+            {renderInline(block.text)}
+          </Tag>
+          {action}
+        </div>
+      );
+    }
     return (
       <Tag id={anchor} className={className}>
         {renderInline(block.text)}
@@ -74,7 +139,7 @@ function MarkdownBlockView({ block, anchor }: { block: MarkdownBlock; anchor?: s
   }
   if (block.type === "quote") {
     return (
-      <blockquote className="my-4 rounded-2xl border border-white/10 bg-night-2 px-5 py-4 text-[14px] leading-7 text-cream/75">
+      <blockquote className="my-4 rounded-2xl border-l-2 border-gold/70 bg-gold/[0.06] px-5 py-4 text-[15px] leading-7 text-cream/80">
         {renderInline(block.text)}
       </blockquote>
     );

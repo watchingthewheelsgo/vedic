@@ -19,6 +19,14 @@ type Copy = {
   todayFit: string;
   quick: string;
   quickSaved: string;
+  oneTap: string;
+  how: string[];
+  startTitle: string;
+  startBody: string;
+  startVedic: string;
+  startBazi: string;
+  askToday: string;
+  checkedIn: string;
   writeMore: string;
   nextBright: string;
   nextGentle: string;
@@ -113,11 +121,23 @@ const zh: Copy = {
   todayFit: "根据你的记录",
   quick: "今天感觉如何？",
   quickSaved: "已与今天的干支一起保存。",
+  oneTap: "轻点一下就算打卡，想写再写。",
+  how: [
+    "每天轻点一下记录心情，想写再写几句。",
+    "每一天都有自己的干支，记录会和它一起保存。",
+    "同一天干或地支累计 7 天后，日历就会标出适合你的顺日与宜放缓的日子。"
+  ],
+  startTitle: "先建立你的命盘",
+  startBody: "填一次出生信息，就能解锁每日宜忌、Atlas 对话和属于你的顺日分析。",
+  startVedic: "创建 Vedic 命盘",
+  startBazi: "创建八字命盘",
+  askToday: "结合我的命盘和今天的干支，今天我最该把精力放在哪里？",
+  checkedIn: "今天已打卡。想补充几句也可以。",
   writeMore: "写下更多",
   nextBright: "接下来的顺日",
   nextGentle: "宜放缓",
   noForecast: "记录满 7 天同类日子后，这里会出现你的个人吉日。",
-  askCta: "问问 AI 今天该关注什么",
+  askCta: "问问 Atlas 今天怎么过",
   askHint: "结合你的记录、命盘与三种传统视角",
   daysTitle: "你的黄道吉日",
   daysBody: "不是通用黄历，而是从你自己的心情记录里学到的吉日规律。",
@@ -235,11 +255,24 @@ const en: Copy = {
   todayFit: "From your notes",
   quick: "How's today?",
   quickSaved: "Saved with today's stem-branch.",
+  oneTap: "One tap checks you in. Words are optional.",
+  how: [
+    "Check in each day with one tap. Add a line if you like.",
+    "Every day has its own stem-branch, saved with your entry.",
+    "After 7 days of the same stem or branch, the calendar marks your bright and go-gently days."
+  ],
+  startTitle: "Start with your chart",
+  startBody:
+    "Add your birth details once to unlock daily Good for / Avoid, chats with Atlas and your own auspicious days.",
+  startVedic: "Create my Vedic chart",
+  startBazi: "Create my BaZi chart",
+  askToday: "Given my chart and today's stem-branch, where should I put my energy today?",
+  checkedIn: "You're checked in for today. Add a line if you like.",
   writeMore: "Write more",
   nextBright: "Your next bright days",
   nextGentle: "Go gently",
   noForecast: "Once you've logged 7 days of a kind, your personal auspicious days appear here.",
-  askCta: "Ask AI what to focus on today",
+  askCta: "Ask Atlas about today",
   askHint: "Uses your notes, your charts and three traditions",
   daysTitle: "Your auspicious days",
   daysBody: "Not a generic almanac: these are the days your own mood records say suit you.",
@@ -354,11 +387,24 @@ const ja: Copy = {
   todayFit: "あなたの記録から",
   quick: "今日の気分は？",
   quickSaved: "今日の干支と一緒に保存しました。",
+  oneTap: "タップひとつで記録完了。メモは任意です。",
+  how: [
+    "毎日タップひとつで気分を記録。メモは任意です。",
+    "どの日にも干支があり、記録と一緒に保存されます。",
+    "同じ天干・地支が7日分たまると、カレンダーにあなたの吉日と控えめに過ごす日が表示されます。"
+  ],
+  startTitle: "まずはチャートを作りましょう",
+  startBody:
+    "出生情報を一度入力すると、毎日の宜忌、Atlas との会話、あなただけの吉日分析が使えます。",
+  startVedic: "Vedic チャートを作成",
+  startBazi: "八字チャートを作成",
+  askToday: "私のチャートと今日の干支から、今日はどこに力を注ぐべき？",
+  checkedIn: "今日の記録は完了。ひとこと添えてもOK。",
   writeMore: "詳しく書く",
   nextBright: "次の吉日",
   nextGentle: "控えめに",
   noForecast: "同じ種類の日を7日記録すると、あなたの吉日がここに表示されます。",
-  askCta: "今日のポイントを AI に聞く",
+  askCta: "今日のことを Atlas に聞く",
   askHint: "記録・チャート・3つの伝統を使います",
   daysTitle: "あなたの吉日",
   daysBody: "一般的な暦ではなく、あなた自身の気分の記録から学んだ吉日です。",

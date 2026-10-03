@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { PageHeader } from "../components/PageHeader";
+import { chartLabel } from "../lib/atlas";
 import { Link } from "react-router-dom";
 import { Download, LoaderCircle, Plus, Sparkles } from "lucide-react";
 import { api } from "../api";
@@ -117,7 +119,7 @@ const copy: Record<
 const isBazi = (session: AdminSessionSummary) => session.stage.startsWith("bazi_");
 
 export function Charts() {
-  const { locale } = useI18n();
+  const { locale, localeTag } = useI18n();
   const c = copy[locale];
   const [tab, setTab] = useState<Tab>("vedic");
   const [sessions, setSessions] = useState<AdminSessionSummary[] | null>(null);
@@ -154,10 +156,7 @@ export function Charts() {
 
   return (
     <div className="mx-auto max-w-[1080px] px-5 py-8 sm:px-8 sm:py-10">
-      <header className="mb-6 max-w-2xl">
-        <h1 className="font-display text-4xl leading-tight sm:text-5xl">{c.title}</h1>
-        <p className="mt-3 text-sm leading-7 text-cream/60">{c.body}</p>
-      </header>
+      <PageHeader title={c.title} note={c.body} />
 
       <div className="mb-6 flex flex-wrap items-center gap-2" role="tablist">
         {(["vedic", "bazi", "tarot"] as const).map((key) => (
@@ -247,7 +246,7 @@ export function Charts() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-display text-2xl leading-tight">
-                      {session.subject?.birthDate ?? c.untitled}
+                      {chartLabel(session.subject, localeTag).split(" · ")[0] || c.untitled}
                     </p>
                     <p className="mt-1 truncate text-sm text-cream/50">
                       {[

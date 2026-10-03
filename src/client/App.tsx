@@ -31,8 +31,8 @@ const Intake = lazy(() =>
 const BaziWorkshop = lazy(() =>
   import("./screens/BaziWorkshop").then((module) => ({ default: module.BaziWorkshop }))
 );
-const Account = lazy(() =>
-  import("./screens/Account").then((module) => ({ default: module.Account }))
+const Settings = lazy(() =>
+  import("./screens/Settings").then((module) => ({ default: module.Settings }))
 );
 const Session = lazy(() =>
   import("./screens/Session").then((module) => ({ default: module.Session }))
@@ -133,7 +133,7 @@ export function App() {
               <Route path="records" element={<Daily view="records" />} />
               <Route path="explore" element={<Daily view="explore" />} />
               <Route path="charts" element={<Charts />} />
-              <Route path="settings" element={<Account view="settings" />} />
+              <Route path="settings" element={<Settings />} />
               <Route path="charts/new" element={<Intake />} />
               <Route path="charts/bazi" element={<BaziWorkshop />} />
               <Route path="charts/:id" element={<Session />} />

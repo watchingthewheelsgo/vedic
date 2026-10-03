@@ -1,29 +1,15 @@
-import { AiAllowanceProvider, AiAllowanceSummary } from "./AiAllowance";
+import { AiAllowanceProvider } from "./AiAllowance";
 import { useRef, useEffect, useCallback, type ReactNode } from "react";
 import { NavLink, Link, Outlet, useLocation } from "react-router-dom";
-import {
-  Sun,
-  NotebookPen,
-  Sparkles,
-  Orbit,
-  ArrowUpRight,
-  CalendarDays,
-  Compass,
-  Settings
-} from "lucide-react";
+import { Sun, NotebookPen, Sparkles, Orbit, CalendarDays, Compass } from "lucide-react";
 import { useUser } from "@clerk/clerk-react";
-import { AccountCenter } from "./AccountCenter";
-import { LanguageSwitcher } from "./LanguageSwitcher";
+import { AccountAvatar } from "./AccountAvatar";
 import { AtlasLauncher, AtlasPanel, AtlasProvider, useAtlas } from "./Atlas";
 import { useI18n } from "../i18n/provider";
 import { DraftContext } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { daysCopy } from "../lib/days-copy";
-
-// Chart creation and report reading need the full width; Atlas stays one click away there.
-function isWideRoute(pathname: string) {
-  return /^\/app\/charts\/.+/.test(pathname);
-}
+import { uniqueCharts } from "../lib/atlas";
 
 export function WorkspaceLayout() {
   return (
@@ -40,7 +26,6 @@ function WorkspaceShell() {
   const w = workspaceCopy[locale];
   const d = daysCopy[locale];
   const location = useLocation();
-  const wide = isWideRoute(location.pathname);
   const onAsk = location.pathname.startsWith("/app/ask");
   const dirty = useRef(false);
   const setDirty = useCallback((value: boolean) => {
@@ -126,46 +111,20 @@ function WorkspaceShell() {
             {nav()}
           </nav>
           <SidebarCharts />
-          <div className="mt-auto space-y-1 pt-6">
-            <AiAllowanceSummary compact />
-            <div className="flex items-center gap-2 px-2 pb-2">
-              <LanguageSwitcher />
-              <Link
-                to="/welcome"
-                className="ml-auto flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs text-cream/45 hover:text-cream"
-              >
-                {w.website}
-                <ArrowUpRight size={12} />
-              </Link>
-            </div>
-            <div className="flex items-center gap-2 rounded-2xl bg-night-2 p-2">
-              <AccountCenter compact />
-              <SidebarName />
-              <Link
-                to="/app/settings"
-                aria-label={w.settings}
-                title={w.settings}
-                className="ml-auto grid size-9 place-items-center rounded-full text-cream/55 hover:bg-white/[0.06] hover:text-cream"
-              >
-                <Settings size={16} />
-              </Link>
-            </div>
+          <div className="mt-auto pt-6">
+            <SidebarAccount />
           </div>
         </aside>
 
-        <div className={`lg:pl-[248px] ${wide || onAsk ? "" : "xl:pr-[380px]"}`}>
+        <div className="lg:pl-[248px]">
           <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-white/[0.07] bg-night/90 px-4 backdrop-blur-xl lg:hidden">
             <Link to="/app" className="brand-logo text-[20px]">
               Sign Atlas
             </Link>
-            <div className="flex items-center gap-1.5">
-              <LanguageSwitcher />
-              <AccountCenter compact />
-            </div>
+            <Link to="/app/settings" aria-label={w.settings}>
+              <AccountBadge size="sm" />
+            </Link>
           </header>
-          <div className="lg:hidden">
-            <AiAllowanceSummary />
-          </div>
           <main id="workspace-content" className="@container min-w-0 pb-28 lg:pb-12">
             <Outlet />
           </main>
@@ -173,8 +132,8 @@ function WorkspaceShell() {
 
         {!onAsk && (
           <>
-            <AtlasPanel mode={wide ? "drawer" : "rail"} />
-            <AtlasLauncher always={wide} />
+            <AtlasPanel />
+            <AtlasLauncher />
           </>
         )}
 
@@ -189,10 +148,39 @@ function WorkspaceShell() {
   );
 }
 
-function SidebarName() {
+function useDisplayName() {
   const { user } = useUser();
-  const name = user?.firstName || user?.fullName || user?.primaryEmailAddress?.emailAddress;
-  return name ? <span className="min-w-0 truncate text-sm text-cream/80">{name}</span> : null;
+  return user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || "";
+}
+
+function AccountBadge({ size = "sm" }: { size?: "sm" | "md" }) {
+  const { user } = useUser();
+  const name = useDisplayName();
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const initials = parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : name.slice(0, 2);
+  return <AccountAvatar imageUrl={user?.imageUrl} initials={initials || "·"} size={size} />;
+}
+
+/** The whole row opens the Account page (plan, language, feedback, sign out). */
+function SidebarAccount() {
+  const { locale } = useI18n();
+  const w = workspaceCopy[locale];
+  const { user } = useUser();
+  const name = useDisplayName();
+  return (
+    <NavLink
+      to="/app/settings"
+      className={({ isActive }) =>
+        `flex items-center gap-3 rounded-2xl p-2 transition-colors ${isActive ? "bg-night-3" : "hover:bg-white/[0.04]"}`
+      }
+    >
+      <AccountBadge />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-cream/90">{user?.firstName || name}</span>
+        <span className="block truncate text-xs text-cream/40">{w.settings}</span>
+      </span>
+    </NavLink>
+  );
 }
 
 function SidebarCharts() {
@@ -204,19 +192,21 @@ function SidebarCharts() {
     <div className="mt-8 px-3">
       <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-cream/35">{w.charts}</p>
       <ul className="space-y-0.5">
-        {charts.slice(0, 4).map((chart) => (
-          <li key={chart.sessionId}>
-            <Link
-              to={`/app/charts/${encodeURIComponent(chart.sessionId)}`}
-              className="flex min-h-9 items-center gap-2.5 rounded-lg text-[13px] text-cream/55 hover:text-cream"
-            >
-              <span
-                className={`size-2 shrink-0 rounded-full ${chart.kind === "vedic" ? "bg-gold" : "bg-jade"}`}
-              />
-              <span className="truncate">{chart.label || chart.sessionId}</span>
-            </Link>
-          </li>
-        ))}
+        {uniqueCharts(charts)
+          .slice(0, 4)
+          .map((chart) => (
+            <li key={chart.sessionId}>
+              <Link
+                to={`/app/charts/${encodeURIComponent(chart.sessionId)}`}
+                className="flex min-h-9 items-center gap-2.5 rounded-lg text-[13px] text-cream/55 hover:text-cream"
+              >
+                <span
+                  className={`size-2 shrink-0 rounded-full ${chart.kind === "vedic" ? "bg-gold" : "bg-jade"}`}
+                />
+                <span className="truncate">{chart.label || chart.sessionId}</span>
+              </Link>
+            </li>
+          ))}
         <li>
           <Link
             to="/app/charts/new"

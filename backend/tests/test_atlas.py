@@ -78,6 +78,17 @@ def test_atlas_uses_only_the_callers_journal(monkeypatch, tmp_path):
     monkeypatch.setattr(
         app.container, "get_container", lambda: SimpleNamespace(agent_runtime=runtime)
     )
+    import app.services.atlas as atlas_module
+
+    async def natal(container, owner_user_id):
+        return {"dayMaster": "甲"}
+
+    monkeypatch.setattr(atlas_module, "resolve_natal", natal)
+    monkeypatch.setattr(
+        atlas_module,
+        "build_guidance",
+        lambda natal, calendar: {"guidance": {"facts": {"tenGod": "正财"}}},
+    )
 
     async def run():
         await init_db(
@@ -132,3 +143,26 @@ def test_atlas_reads_the_owned_agent_context(monkeypatch):
     reading = asyncio.run(load_vedic_reading("session_1", "alice"))
     assert reading == {"claims": [{"claimId": "c1"}]}
     assert checked == [("session_1", "alice")]
+
+
+def test_atlas_needs_a_chart_first(monkeypatch):
+    import app.container
+    import app.services.atlas as atlas_module
+    from fastapi import HTTPException
+
+    runtime = SimpleNamespace(is_configured=lambda: True)
+    monkeypatch.setattr(
+        app.container, "get_container", lambda: SimpleNamespace(agent_runtime=runtime)
+    )
+
+    async def no_natal(container, owner_user_id):
+        return None
+
+    monkeypatch.setattr(atlas_module, "resolve_natal", no_natal)
+    user = AuthenticatedUser(user_id="alice", auth_mode="clerk")
+    try:
+        asyncio.run(ask_atlas(AtlasQuestion(message="Hello there"), user))
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:
+        raise AssertionError("Atlas answered without a chart")

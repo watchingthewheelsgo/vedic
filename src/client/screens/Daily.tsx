@@ -1,11 +1,14 @@
-import { AiCostNotice } from "../components/AiAllowance";
 import { useUser } from "@clerk/clerk-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
-import { Check, LoaderCircle, Minus, Sparkles } from "lucide-react";
+import { Check, Download, LoaderCircle, Minus, Sparkles } from "lucide-react";
+import { PageHeader } from "../components/PageHeader";
+import { chartLabel, uniqueCharts } from "../lib/atlas";
+import { AtlasChartFirst, useAtlas } from "../components/Atlas";
 import { api, ApiError } from "../api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
+import { MoodPicker } from "../components/MoodMoon";
 import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
@@ -31,6 +34,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const selectedDay = params.get("day");
   const { locale, localeTag } = useI18n();
   const { user } = useUser();
+  const { hasChart, askAbout } = useAtlas();
   const c = journalCopy[locale];
   const w = workspaceCopy[locale];
   const d = daysCopy[locale];
@@ -46,7 +50,6 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const [sessionId, setSessionId] = useState(params.get("chart") ?? "");
   const [charts, setCharts] = useState<{ sessionId: string; label: string }[]>([]);
   const [guidance, setGuidance] = useState<DailyGuidanceResponse | null>(null);
-  const [groupBy, setGroupBy] = useState<"byStem" | "byBranch" | "byPillar">("byStem");
   const pendingQuestion = useRef<{ key: string; id: string } | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -132,15 +135,14 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
       .then((result) => {
         if (alive)
           setCharts(
-            result.sessions.map((s) => ({
-              sessionId: s.sessionId,
-              label: [
-                s.subject?.birthDate ?? s.createdAt?.slice(0, 10),
-                s.subject?.birthPlace?.split("|")[0].trim()
-              ]
-                .filter((part) => part && !part.startsWith("lat="))
-                .join(" · ")
-            }))
+            uniqueCharts(
+              result.sessions.map((s) => ({
+                sessionId: s.sessionId,
+                kind: s.stage.startsWith("bazi_") ? "bazi" : "vedic",
+                completed: s.status === "completed",
+                label: chartLabel(s.subject, localeTag) || s.createdAt?.slice(0, 10) || ""
+              }))
+            )
           );
       })
       .catch(() => {});
@@ -158,12 +160,18 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
     }
     setData(next);
   }
-  async function save() {
+  async function save(nextMood = mood) {
     setBusy("save");
     setError("");
     setNotice("");
     try {
-      await api.saveJournal({ day, timezone: entry?.timezone ?? zone, mood, note, topic });
+      await api.saveJournal({
+        day,
+        timezone: entry?.timezone ?? zone,
+        mood: nextMood,
+        note,
+        topic
+      });
       await refreshSelected();
       setNote(note.trim());
       setNotice(c.saved);
@@ -262,13 +270,32 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
       }).format(parseDay(value));
     return (
       <div className="mx-auto max-w-[1180px] px-5 py-8 sm:px-8 sm:py-10">
-        <header className="mb-7">
-          <p className="eyebrow mb-2">{dateLabel}</p>
-          <h1 className="font-display text-4xl leading-tight sm:text-5xl">
-            {d.greeting(new Date().getHours(), user?.firstName)}
-          </h1>
-          <p className="mt-2 text-sm text-cream/55">{w.greeting}</p>
-        </header>
+        <PageHeader title={d.greeting(new Date().getHours(), user?.firstName)} note={dateLabel} />
+        {hasChart === false && (
+          <section className="rise-in mb-5 flex flex-wrap items-center gap-4 rounded-3xl border border-gold/30 bg-gold/[0.07] p-5">
+            <span className="grid size-11 shrink-0 place-items-center rounded-full bg-gold text-night">
+              <Sparkles size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-medium">{d.startTitle}</p>
+              <p className="mt-0.5 text-sm leading-6 text-cream/60">{d.startBody}</p>
+            </div>
+            <div className="flex gap-2">
+              <Link
+                to="/app/charts/new"
+                className="inline-flex h-10 items-center rounded-full bg-paper px-4 text-sm font-medium text-[#16130e]"
+              >
+                {d.startVedic}
+              </Link>
+              <Link
+                to="/app/charts/bazi"
+                className="inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-sm text-cream/80 hover:bg-white/[0.05]"
+              >
+                {d.startBazi}
+              </Link>
+            </div>
+          </section>
+        )}
         {error && (
           <div
             role="alert"
@@ -352,6 +379,16 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               </div>
             ) : null}
 
+            {hasChart && (
+              <button
+                type="button"
+                onClick={() => askAbout(d.askToday)}
+                className="press-feedback relative mt-4 inline-flex h-10 items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 text-sm text-cream/80 transition-colors hover:border-gold/50 hover:text-gold-light"
+              >
+                <Sparkles size={15} />
+                {d.askCta}
+              </button>
+            )}
             <div className="relative mt-5 border-t border-white/[0.07] pt-4">
               <p className="eyebrow mb-1.5">{d.fromNotes}</p>
               <p className="text-sm leading-6 text-cream/75">{d.fitLong[todayReading.fit]}</p>
@@ -378,28 +415,19 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                 {d.writeMore}
               </Link>
             </div>
-            <fieldset disabled={!!busy} className="mt-4">
-              <legend className="sr-only">{c.mood}</legend>
-              <div className="grid grid-cols-5 gap-2">
-                {c.moods.map((label, i) => (
-                  <button
-                    key={label}
-                    type="button"
-                    aria-pressed={mood === i + 1}
-                    aria-label={label}
-                    title={label}
-                    onClick={() => setMood(i + 1)}
-                    className={`h-12 rounded-xl border text-sm transition-colors ${mood === i + 1 ? "border-cream bg-paper text-[#16120c]" : "border-white/12 bg-white/[0.03] text-cream/65 hover:bg-white/[0.07]"}`}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2 flex justify-between text-[11px] text-cream/45">
-                <span>{c.moods[0]}</span>
-                <span>{c.moods[4]}</span>
-              </div>
-            </fieldset>
+            <p className="mt-1 text-sm text-cream/50">{entry ? d.checkedIn : d.oneTap}</p>
+            <div className="mt-4">
+              <MoodPicker
+                labels={c.moods}
+                legend={c.mood}
+                value={entry || busy === "save" ? mood : null}
+                disabled={!!busy}
+                onPick={(next) => {
+                  setMood(next);
+                  void save(next);
+                }}
+              />
+            </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {topics.map((value, i) => (
                 <button
@@ -433,7 +461,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               <span role="status" className="text-xs text-cream/55">
                 {notice ? d.quickSaved : ""}
               </span>
-              <Button disabled={!!busy || !note.trim() || !dirty} onClick={() => void save()}>
+              <Button disabled={!!busy || !dirty} onClick={() => void save()}>
                 {busy === "save" ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : (
@@ -444,20 +472,6 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
             </div>
           </section>
         </div>
-
-        <Link
-          to={entry ? `/app/explore?day=${data.today.day}` : "/app/explore"}
-          className="press-feedback mt-5 flex min-h-16 items-center gap-4 rounded-full border border-white/10 bg-white/[0.04] px-5 hover:bg-white/[0.07]"
-        >
-          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-paper text-[#16120c]">
-            <Sparkles size={17} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[15px]">{d.askCta}</span>
-            <span className="block truncate text-xs text-cream/50">{d.askHint}</span>
-          </span>
-          <span className="text-cream/40">→</span>
-        </Link>
 
         <div className="mt-5 grid gap-5 @3xl:grid-cols-2">
           <section className="surface p-6">
@@ -544,15 +558,18 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   return (
     <div className="min-h-screen text-cream">
       <main className="mx-auto max-w-[1240px] px-5 py-8 sm:px-8 sm:py-10">
-        <div className="mb-8">
-          <p className="mb-3 text-[10px] uppercase tracking-[.18em] text-gold">{w.personal}</p>
-          <h1 className="font-display text-4xl leading-tight sm:text-5xl">
-            {view === "today" ? w.greeting : w[view]}
-          </h1>
-          <p className="mt-3 max-w-xl text-sm leading-7 text-cream/60">
-            {view === "today" ? w.todayBody : view === "records" ? w.recordsBody : w.exploreBody}
-          </p>
-        </div>
+        <PageHeader
+          title={w[view === "today" ? "records" : view]}
+          note={view === "explore" ? w.exploreBody : w.recordsBody}
+          action={
+            view === "records" && data?.entries.length ? (
+              <Button variant="ghost" size="sm" onClick={exportEntries}>
+                <Download size={15} />
+                {c.export}
+              </Button>
+            ) : undefined
+          }
+        />
         {error && (
           <div
             role="alert"
@@ -574,7 +591,12 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               {view !== "explore" && (
                 <section className={panel}>
                   <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-xl font-medium">{c.record}</h2>
+                    <h2 className="flex items-baseline gap-3 font-display text-2xl">
+                      {entry?.calendar.pillar && (
+                        <span className="han text-3xl">{entry.calendar.pillar}</span>
+                      )}
+                      {c.record}
+                    </h2>
                     <input
                       aria-label={c.record}
                       className={field}
@@ -603,36 +625,22 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                   )}
                   <fieldset disabled={!!busy}>
                     <legend className="mb-3 text-sm text-cream/75">{c.mood}</legend>
-                    <div className="grid grid-cols-5 gap-2">
-                      {c.moods.map((label, i) => (
-                        <button
-                          key={label}
-                          type="button"
-                          aria-pressed={mood === i + 1}
-                          onClick={() => setMood(i + 1)}
-                          className={`min-h-16 rounded-xl border px-1 py-2 text-xs transition-colors ${mood === i + 1 ? "border-paper bg-paper text-[#16130e]" : "border-white/10 bg-white/[0.03] text-cream/65 hover:bg-white/[0.07]"}`}
-                        >
-                          <span className="mb-1 block text-lg font-medium">{i + 1}</span>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                    <MoodPicker labels={c.moods} legend={c.mood} value={mood} onPick={setMood} />
                   </fieldset>
-                  <label className="mt-5 block text-sm text-cream/75">
-                    {c.topic}
-                    <select
-                      className={`${field} ml-3`}
-                      value={topic}
-                      disabled={!!busy}
-                      onChange={(e) => setTopic(e.target.value)}
-                    >
-                      {topics.map((value, i) => (
-                        <option key={value} value={value}>
-                          {c.topics[i]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label={c.topic}>
+                    {topics.map((value, i) => (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={!!busy}
+                        aria-pressed={topic === value}
+                        onClick={() => setTopic(value)}
+                        className={`h-9 rounded-full border px-3.5 text-xs transition-colors ${topic === value ? "border-paper bg-paper text-[#16130e]" : "border-white/12 text-cream/60 hover:bg-white/5"}`}
+                      >
+                        {c.topics[i]}
+                      </button>
+                    ))}
+                  </div>
                   <label htmlFor="daily-note" className="mb-2 mt-5 block text-sm text-cream/75">
                     {c.note}
                   </label>
@@ -663,7 +671,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                           {c.remove}
                         </Button>
                       )}
-                      <Button disabled={!!busy || !note.trim()} onClick={() => void save()}>
+                      <Button disabled={!!busy} onClick={() => void save()}>
                         {busy === "save" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : (
@@ -673,13 +681,21 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                       </Button>
                     </div>
                   </div>
-                  {entry && !dirty && (
+                  {entry && !dirty && entry.note && (
                     <Link
                       to={`/app/explore?day=${day}`}
-                      className="mt-6 inline-flex items-center gap-2 text-sm text-gold"
+                      className="press-feedback mt-6 flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 transition-colors hover:border-gold/40"
                     >
-                      <Sparkles size={15} />
-                      {w.continue} →
+                      <span className="grid size-9 place-items-center rounded-full bg-paper text-[#16130e]">
+                        <Sparkles size={15} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm text-cream">{w.continue}</span>
+                        <span className="block truncate text-xs text-cream/45">
+                          {w.exploreBody}
+                        </span>
+                      </span>
+                      <span className="text-cream/40">→</span>
                     </Link>
                   )}
                 </section>
@@ -688,8 +704,8 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                 <section className={panel}>
                   <h2 className="text-xl font-medium">{w.context}</h2>
                   {entry ? (
-                    <div className="mt-4 rounded-xl border border-gold/20 bg-gold/5 p-4">
-                      <p className="text-xs text-gold">
+                    <div className="surface-2 mt-4 p-4">
+                      <p className="text-xs text-cream/55">
                         {entry.day} · {entry.calendar.pillar} · {c.moods[entry.mood - 1]}
                       </p>
                       <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-cream/80">
@@ -711,7 +727,11 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                     </div>
                   )}
                   <h2 className="mt-8 text-xl font-medium">{c.ask}</h2>
-                  <AiCostNotice />
+                  {hasChart === false && (
+                    <div className="mt-4">
+                      <AtlasChartFirst compact />
+                    </div>
+                  )}
                   <label
                     htmlFor="reflection-question"
                     className="mb-2 mt-5 block text-sm text-cream/75"
@@ -744,7 +764,9 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                   </label>
                   <p className="my-4 text-xs leading-relaxed text-cream/65">{c.consent}</p>
                   <Button
-                    disabled={!!busy || question.trim().length < 3 || !entry || dirty}
+                    disabled={
+                      !!busy || question.trim().length < 3 || !entry || dirty || hasChart === false
+                    }
                     onClick={() => void ask()}
                   >
                     {busy === "ask" ? (
@@ -923,15 +945,6 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                     <p className="text-sm leading-7 text-cream/65">{c.empty}</p>
                   )}
                 </div>
-                <Button
-                  className="mt-4"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!data.entries.length}
-                  onClick={exportEntries}
-                >
-                  {c.export}
-                </Button>
                 {view === "today" && (
                   <Link to="/app/records" className="mt-4 block text-sm text-gold">
                     {w.all} →
@@ -939,45 +952,21 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                 )}
               </section>
               {view === "records" && (
-                <section className={panel}>
-                  <h2 className="text-lg font-medium">{c.trends}</h2>
-                  <p className="mt-3 text-2xl text-gold">
-                    {data.summary.recordedDays}{" "}
-                    <span className="text-xs text-cream/65">{c.samples}</span>
+                <Link
+                  to="/app/days"
+                  className="surface block p-5 transition-colors hover:border-white/20"
+                >
+                  <p className="eyebrow">{c.trends}</p>
+                  <p className="mt-3 flex items-baseline gap-2">
+                    <span className="font-display text-4xl">{data.summary.recordedDays}</span>
+                    <span className="text-sm text-cream/50">{c.samples}</span>
                   </p>
-                  <p className="mt-2 text-xs text-cream/65">
-                    {c.baseline}：{data.summary.averageMood ?? "—"}/5
+                  <p className="mt-1 text-sm text-cream/50">
+                    {c.baseline}: {data.summary.averageMood ?? "—"}/5
                   </p>
-                  <select
-                    aria-label={c.trends}
-                    className={`${field} mt-4 w-full`}
-                    value={groupBy}
-                    onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}
-                  >
-                    <option value="byStem">{locale === "zh" ? "按天干" : "Heavenly stem"}</option>
-                    <option value="byBranch">
-                      {locale === "zh" ? "按地支" : "Earthly branch"}
-                    </option>
-                    <option value="byPillar">{locale === "zh" ? "按日柱" : "Day pillar"}</option>
-                  </select>
-                  <div className="mt-4 space-y-3">
-                    {data.summary[groupBy].map((group) => (
-                      <div key={group.stem} className="flex justify-between gap-2 text-sm">
-                        <span>
-                          {group.stem} · {group.count} {c.samples}
-                        </span>
-                        <span className="text-cream/65">
-                          {group.averageMood === null ? c.insufficient : `${group.averageMood}/5`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-5 text-xs leading-6 text-cream/65">{c.caution}</p>
-                </section>
+                  <p className="mt-4 text-sm text-gold">{d.nav.days} →</p>
+                </Link>
               )}
-              <Link className="inline-flex items-center gap-2 text-sm text-gold" to="/app/charts">
-                {w.chartLink} →
-              </Link>
             </aside>
           </div>
         )}

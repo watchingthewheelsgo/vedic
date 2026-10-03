@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PageHeader } from "../components/PageHeader";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { api } from "../api";
@@ -80,11 +81,28 @@ export function Patterns() {
 
   return (
     <div className="mx-auto max-w-[1180px] px-5 py-8 sm:px-8 sm:py-10">
-      <header className="mb-8 max-w-2xl">
-        <p className="eyebrow mb-3">{d.learned(summary.recordedDays)}</p>
-        <h1 className="font-display text-4xl leading-tight sm:text-5xl">{d.daysTitle}</h1>
-        <p className="mt-3 text-sm leading-7 text-cream/60">{d.daysBody}</p>
-      </header>
+      <PageHeader
+        title={d.daysTitle}
+        note={d.daysBody}
+        action={
+          <span className="rounded-full border border-white/12 px-3 py-1.5 text-xs text-cream/60">
+            {d.learned(summary.recordedDays)}
+          </span>
+        }
+      />
+      <ol className="mb-6 grid gap-2 sm:grid-cols-3">
+        {d.how.map((step, index) => (
+          <li
+            key={step}
+            className="flex items-start gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-[13px] leading-5 text-cream/65"
+          >
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-night-3 text-[11px] text-cream/80">
+              {index + 1}
+            </span>
+            {step}
+          </li>
+        ))}
+      </ol>
 
       <div className="grid gap-5 @4xl:grid-cols-[minmax(0,1fr)_340px]">
         <section className="surface self-start p-4 sm:p-6" aria-label={d.daysTitle}>
