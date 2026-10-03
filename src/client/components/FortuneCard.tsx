@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import type { LocaleCode } from "../i18n/messages";
 import { dailySign, type SignTier } from "../lib/daily-sign";
 import { guidanceText, type DailyGuidance } from "../lib/journal";
@@ -9,6 +10,10 @@ const copy: Record<
   LocaleCode,
   {
     tap: string;
+    chipDraw: string;
+    chipToday: string;
+    close: string;
+    dialog: string;
     again: string;
     good: string;
     avoid: string;
@@ -19,6 +24,10 @@ const copy: Record<
 > = {
   en: {
     tap: "Tap to draw today's card",
+    chipDraw: "Draw today's card",
+    chipToday: "Today",
+    close: "Close",
+    dialog: "Today's card",
     again: "Tap to turn it over",
     good: "Good for",
     avoid: "Avoid",
@@ -41,6 +50,10 @@ const copy: Record<
   },
   zh: {
     tap: "轻点抽取今日之签",
+    chipDraw: "抽取今日之签",
+    chipToday: "今日",
+    close: "关闭",
+    dialog: "今日之签",
     again: "轻点翻回背面",
     good: "宜",
     avoid: "忌",
@@ -55,6 +68,10 @@ const copy: Record<
   },
   ja: {
     tap: "タップして今日のカードを引く",
+    chipDraw: "今日のカードを引く",
+    chipToday: "今日",
+    close: "閉じる",
+    dialog: "今日のカード",
     again: "タップで裏返す",
     good: "宜",
     avoid: "忌",
@@ -133,15 +150,21 @@ export function FortuneCard({
   guidance,
   fit,
   locale,
-  locked
+  locked,
+  onDrawn,
+  size = "regular"
 }: {
   day: string;
   guidance: DailyGuidance | null;
   fit: "bright" | "steady" | "gentle" | "unknown";
   locale: LocaleCode;
   locked: boolean;
+  onDrawn?: () => void;
+  size?: "regular" | "large";
 }) {
   const c = copy[locale];
+  const large = size === "large";
+  const width = large ? "max-w-[300px]" : "max-w-[240px]";
   const [flipped, setFlipped] = useState(() => readDrawn(day));
   const [burst, setBurst] = useState(0);
   const [anticipate, setAnticipate] = useState(false);
@@ -179,6 +202,7 @@ export function FortuneCard({
         } catch {
           // The card simply asks to be drawn again next visit.
         }
+        onDrawn?.();
       }, 260),
       // Sparks fire as the face turns toward the viewer.
       window.setTimeout(() => setBurst((value) => value + 1), 560)
@@ -186,7 +210,7 @@ export function FortuneCard({
   }
 
   return (
-    <div className="relative mx-auto w-full max-w-[240px]">
+    <div className={`relative mx-auto w-full ${width}`}>
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10 rounded-[30px] blur-2xl transition-opacity duration-700"
@@ -221,9 +245,19 @@ export function FortuneCard({
             <span className="relative mt-1 text-[10px] uppercase tracking-[0.3em] opacity-60">
               {guidance.dayPillar}
             </span>
-            <span className="han relative mt-2 text-[58px] font-bold leading-none">{tier.han}</span>
-            <span className="relative mt-1 font-display text-xl italic">{tier.word}</span>
-            <span className="relative mt-2 text-[11.5px] leading-[1.45] opacity-80">
+            <span
+              className={`han relative font-bold leading-none ${large ? "mt-6 text-[92px]" : "mt-2 text-[58px]"}`}
+            >
+              {tier.han}
+            </span>
+            <span
+              className={`relative mt-1 font-display italic ${large ? "text-[30px]" : "text-xl"}`}
+            >
+              {tier.word}
+            </span>
+            <span
+              className={`relative opacity-80 ${large ? "mt-4 px-2 text-[15px] leading-[1.5]" : "mt-2 text-[11.5px] leading-[1.45]"}`}
+            >
               {tier.line}
             </span>
             <span className="relative mt-auto w-full space-y-1 border-t border-black/15 pt-2 text-left text-[11px] leading-4">
@@ -303,5 +337,150 @@ function CardEmblem({ dim = false }: { dim?: boolean }) {
       <span className="absolute inset-[26px] rounded-full bg-gold/15" />
       <span className="size-2.5 rounded-full bg-cream shadow-[0_0_14px_#f3f0e9]" />
     </span>
+  );
+}
+
+/**
+ * Today's card lives behind a small glowing chip: tapping it opens the card as a floating
+ * dialog where it is drawn with the burst; closing tucks it back into the chip, which then
+ * shows the result and reopens the drawn card.
+ */
+export function DailyCardLauncher({
+  day,
+  guidance,
+  fit,
+  locale
+}: {
+  day: string;
+  guidance: DailyGuidance;
+  fit: "bright" | "steady" | "gentle" | "unknown";
+  locale: LocaleCode;
+}) {
+  const c = copy[locale];
+  const [open, setOpen] = useState(false);
+  const [drawn, setDrawn] = useState(() => readDrawn(day));
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const sign = useMemo(() => dailySign(guidance, fit), [guidance, fit]);
+  const tier = c.tiers[sign.tier];
+  const style = tierStyle[sign.tier];
+
+  // The first visit of the day offers the card once; closing it leaves the chip as the reminder.
+  useEffect(() => {
+    if (drawn) return;
+    const key = `signatlas.card.offered.${day}`;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, "1");
+    } catch {
+      return;
+    }
+    const timer = window.setTimeout(() => setOpen(true), 700);
+    return () => window.clearTimeout(timer);
+  }, [day, drawn]);
+
+  useEffect(() => {
+    if (!open) return;
+    const openerNode = opener.current;
+    closeButton.current?.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+      openerNode?.focus({ preventScroll: true });
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={opener}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        className={`press-feedback group relative inline-flex h-11 items-center gap-2.5 rounded-full border pl-1.5 pr-4 text-sm transition-colors ${
+          drawn
+            ? "border-white/12 bg-white/[0.03] text-cream/80 hover:border-white/25"
+            : "fortune-chip-glow border-gold/45 bg-gold/[0.08] text-gold-light hover:bg-gold/[0.14]"
+        }`}
+      >
+        <span
+          aria-hidden
+          className={`relative grid h-8 w-6 place-items-center rounded-[6px] text-[13px] font-bold ${drawn ? `${style.face} ${style.ink}` : "border border-gold/50 bg-[linear-gradient(160deg,#1f2230_0%,#0d0e14_100%)]"}`}
+        >
+          {drawn ? (
+            <span className="han">{tier.han.slice(-1)}</span>
+          ) : (
+            <span className="size-1.5 rounded-full bg-cream shadow-[0_0_8px_#f3f0e9]" />
+          )}
+        </span>
+        {drawn ? (
+          <span>
+            {c.chipToday} · <span className="han">{tier.han}</span>{" "}
+            <span className="font-display italic">{tier.word}</span>
+          </span>
+        ) : (
+          <span>{c.chipDraw}</span>
+        )}
+        {!drawn && (
+          <span
+            aria-hidden
+            className="fortune-twinkle absolute -right-0.5 -top-0.5 size-2 rounded-full bg-gold-light"
+          />
+        )}
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={c.dialog}
+            className="fixed inset-0 z-[80] grid place-items-center p-6"
+          >
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={c.close}
+              onClick={() => setOpen(false)}
+              className="fortune-backdrop absolute inset-0 cursor-default bg-[#05060a]/80 backdrop-blur-md"
+            />
+            <div className="fortune-dialog relative w-full max-w-[300px]">
+              <button
+                ref={closeButton}
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label={c.close}
+                className="absolute -right-2 -top-14 grid size-11 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-cream/80 transition-colors hover:bg-white/[0.12] hover:text-cream"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+              <FortuneCard
+                day={day}
+                guidance={guidance}
+                fit={fit}
+                locale={locale}
+                locked={false}
+                onDrawn={() => setDrawn(true)}
+                size="large"
+              />
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 }

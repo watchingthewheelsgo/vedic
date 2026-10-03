@@ -477,6 +477,57 @@
   }
 }
 
+@keyframes fortune-chip-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(244 162 89 / 0%);
+  }
+  50% {
+    box-shadow: 0 0 24px 2px rgb(244 162 89 / 28%);
+  }
+}
+
+@keyframes fortune-twinkle {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes fortune-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fortune-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.86) rotate(-3deg);
+  }
+}
+
+.fortune-chip-glow {
+  animation: fortune-chip-glow 2.8s ease-in-out infinite;
+}
+
+.fortune-twinkle {
+  animation: fortune-twinkle 1.8s ease-in-out infinite;
+}
+
+.fortune-backdrop {
+  animation: fortune-fade-in 320ms ease-out both;
+}
+
+.fortune-dialog {
+  animation: fortune-dialog-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .fortune-float {
   animation: fortune-float 5s ease-in-out infinite;
 }

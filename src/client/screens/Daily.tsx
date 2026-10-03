@@ -9,7 +9,7 @@ import { api, ApiError } from "../api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { MoodMoon, MoodPicker } from "../components/MoodMoon";
-import { FortuneCard } from "../components/FortuneCard";
+import { DailyCardLauncher } from "../components/FortuneCard";
 import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
@@ -290,15 +290,9 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
         )}
 
         {hasChart === false ? (
-          <section className="rise-in mt-10 text-center">
-            <FortuneCard
-              day={data.today.day}
-              guidance={null}
-              fit="unknown"
-              locale={locale}
-              locked
-            />
-            <p className="mx-auto mt-6 max-w-sm text-sm leading-6 text-cream/60">{d.startBody}</p>
+          <section className="rise-in mt-8 rounded-3xl border border-gold/25 bg-gold/[0.05] p-6 text-center">
+            <p className="text-[15px] font-medium">{d.startTitle}</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-cream/60">{d.startBody}</p>
             <div className="mt-4 flex justify-center gap-2">
               <Link
                 to="/app/charts/new"
@@ -315,17 +309,16 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
             </div>
           </section>
         ) : (
-          <section className="rise-in mt-10" style={{ animationDelay: "80ms" }}>
-            {guidance && (
-              <FortuneCard
+          dayGuidance && (
+            <div className="rise-in mt-5 flex justify-center" style={{ animationDelay: "80ms" }}>
+              <DailyCardLauncher
                 day={data.today.day}
-                guidance={dayGuidance ?? null}
+                guidance={dayGuidance}
                 fit={todayReading.fit}
                 locale={locale}
-                locked={false}
               />
-            )}
-          </section>
+            </div>
+          )
         )}
 
         <section className="rise-in mt-10 text-center" style={{ animationDelay: "160ms" }}>
