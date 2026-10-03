@@ -546,21 +546,52 @@ class PlaceService:
         limit: int,
         locale: Literal["zh", "en", "ja"],
     ) -> list[PlaceOption]:
-        if not region_id:
-            return []
-        region = self.china_region_index.get(region_id)
-        if not region:
-            return []
-
         variants = self._query_variants(query)
+        if region_id:
+            region = self.china_region_index.get(region_id)
+            if not region:
+                return []
+            pool = [(region, child) for child in region.children]
+        elif variants:
+            # Single-box search (onboarding): every province's cities, matched by name.
+            pool = [
+                (region, child)
+                for region in self.china_region_index.values()
+                for child in region.children
+            ]
+        else:
+            return []
         items = []
-        for child in region.children:
+        for parent, child in pool:
             score = self._label_score(child.name, child.search_text, variants)
             if score <= 0:
                 continue
-            items.append((score, child.name, child.code, child))
+            items.append((score, child.name, child.code, child, parent))
         items.sort(key=lambda item: (-item[0], item[1], item[2]))
-        return [
+        city_regions: list[PlaceOption] = []
+        if not region_id:
+            # Municipalities and SARs are cities at province level (上海, 北京, 香港).
+            for region in self.china_region_index.values():
+                if not region.full_name.endswith(("市", "特别行政区")):
+                    continue
+                if self._label_score(region.name, region.search_text, variants) <= 0:
+                    continue
+                city_regions.append(
+                    PlaceOption(
+                        id=f"administrative-region:{region.id}",
+                        label=self._china_name(region.pinyin, region.full_name, locale),
+                        value=region.id,
+                        meta=self._country_display_name(self.china_country, locale),
+                        country=self.china_country,
+                        region=region.id,
+                        birth_place=region.id,
+                        latitude=region.latitude,
+                        longitude=region.longitude,
+                        timezone=self._timezone_for_china_region(region.code),
+                        searchText=region.search_text,
+                    )
+                )
+        return city_regions + [
             PlaceOption(
                 id=f"administrative-unit:{child.id}",
                 label=self._china_name(child.pinyin, child.full_name, locale),
@@ -574,7 +605,7 @@ class PlaceService:
                 timezone=self._timezone_for_china_region(region.code),
                 searchText=child.search_text,
             )
-            for _, _, _, child in items[:limit]
+            for _, _, _, child, region in items[:limit]
         ]
 
     @staticmethod

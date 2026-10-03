@@ -680,7 +680,7 @@ class MetadataStore:
     def _subject_json(self, session_dir: Path) -> dict[str, Any] | None:
         payload = self._read_json(session_dir / "chart_record.json")
         if not isinstance(payload, dict):
-            return None
+            return self._bazi_subject_json(session_dir)
         subject = payload.get("subject")
         birth_assertion = payload.get("birthAssertion")
         canonical_moment = payload.get("canonicalMoment")
@@ -696,6 +696,24 @@ class MetadataStore:
             "relationship": subject.get("relationshipStatus"),
             "timezone": canonical.get("timezoneId"),
             "resolvedPlace": place.get("label") if isinstance(place, dict) else None,
+        }
+
+    def _bazi_subject_json(self, session_dir: Path) -> dict[str, Any] | None:
+        """BaZi sessions keep the birth input in their chart record's subject."""
+        payload = self._read_json(session_dir / "bazi_chart_record.json")
+        subject = payload.get("subject") if isinstance(payload, dict) else None
+        if not isinstance(subject, dict) or not subject.get("birthDate"):
+            return None
+        context = payload.get("reportContext") if isinstance(payload, dict) else None
+        audience = context.get("audience") if isinstance(context, dict) else None
+        return {
+            "birthDate": subject.get("birthDate"),
+            "birthTime": subject.get("birthTime") or None,
+            "birthPlace": subject.get("birthPlace"),
+            "timePrecision": subject.get("timePrecision"),
+            "gender": subject.get("gender"),
+            "relationship": "self" if audience == "self" else None,
+            "timezone": subject.get("timezone"),
         }
 
     def _read_json(self, path: Path) -> dict[str, Any] | None:
@@ -726,6 +744,11 @@ class MetadataStore:
             return "error"
         if "consultation_report.md" in names:
             return "core_complete"
+        # BaZi sessions: same rule as SkillRuntime.load_session, so a re-index keeps them BaZi.
+        if "bazi_life_report.md" in names:
+            return "bazi_complete"
+        if "bazi_chart_foundation.md" in names or "bazi_chart_record.json" in names:
+            return "bazi_ready"
         if "user_context.md" in names or "reader_prevalidation.md" in names:
             return "reader_validation"
         if "chart_record.json" in names:

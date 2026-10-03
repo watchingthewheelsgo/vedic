@@ -243,3 +243,45 @@ def test_api_owner_scoped_prefers_bazi_record_and_falls_back(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         asyncio.run(read_daily_guidance(day, "Not/AZone", alice))
     assert exc.value.status_code == 422
+
+
+def test_bazi_sessions_summarize_their_birth_subject(tmp_path):
+    import json
+
+    from app.services.metadata_store import MetadataStore
+
+    (tmp_path / "bazi_chart_record.json").write_text(
+        json.dumps(
+            {
+                "subject": {
+                    "birthDate": "1992-05-18",
+                    "birthTime": "",
+                    "birthPlace": "CN-350100",
+                    "timePrecision": "unknown",
+                    "gender": "女",
+                    "timezone": "Asia/Shanghai",
+                },
+                "reportContext": {"audience": "self"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = object.__new__(MetadataStore)
+    subject = store._subject_json(tmp_path)
+    assert subject is not None
+    assert subject["birthPlace"] == "CN-350100"
+    assert subject["birthTime"] is None
+    assert subject["relationship"] == "self"
+    assert subject["gender"] == "女"
+
+
+def test_reindexed_bazi_sessions_stay_bazi(tmp_path):
+    from app.services.metadata_store import MetadataStore
+
+    store = object.__new__(MetadataStore)
+    files = [tmp_path / "bazi_chart_record.json", tmp_path / "bazi_chart_foundation.md"]
+    assert (
+        store._derive_stage(files, {"status": "bazi_calculator_complete"}, "draft") == "bazi_ready"
+    )
+    files.append(tmp_path / "bazi_life_report.md")
+    assert store._derive_stage(files, None, "completed") == "bazi_complete"
