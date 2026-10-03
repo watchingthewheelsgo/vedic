@@ -51,18 +51,18 @@ function WorkspaceShell() {
       mobile: true
     },
     { to: "/app/records", label: d.nav.journal, icon: NotebookPen, mobile: false },
+    { to: "/app/charts", label: w.readings, icon: Orbit, mobile: true, sidebar: false },
     { to: "/app/ask", label: d.nav.ask, icon: Sparkles, mobile: true },
-    { to: "/app/charts", label: w.charts, icon: Orbit, mobile: true },
     { to: "/app/discover", label: d.nav.discover, icon: Compass, mobile: true }
   ];
   const current = location.pathname.startsWith("/app/settings")
     ? w.settings
     : (links.find((item) =>
         item.end ? location.pathname === item.to : location.pathname.startsWith(item.to)
-      )?.label ?? w.charts);
+      )?.label ?? w.readings);
   const nav = (mobile = false): ReactNode =>
     links
-      .filter((item) => !mobile || item.mobile)
+      .filter((item) => (mobile ? item.mobile : item.sidebar !== false))
       .map(({ to, label, short, icon: Icon, end }) => (
         <NavLink
           key={to}
@@ -110,7 +110,7 @@ function WorkspaceShell() {
           <nav aria-label={w.space} className="space-y-0.5">
             {nav()}
           </nav>
-          <SidebarCharts />
+          <SidebarReadings />
           <div className="mt-auto pt-6">
             <SidebarAccount />
           </div>
@@ -183,44 +183,60 @@ function SidebarAccount() {
   );
 }
 
-function SidebarCharts() {
+/** The three traditions are first-class entries; recent charts sit under them. */
+function SidebarReadings() {
   const { locale } = useI18n();
   const d = daysCopy[locale];
   const w = workspaceCopy[locale];
   const { charts } = useAtlas();
+  const location = useLocation();
+  const tab = new URLSearchParams(location.search).get("tab") ?? "vedic";
+  const onCharts = location.pathname === "/app/charts";
+  const traditions = [
+    { key: "vedic", label: w.vedic, dot: "bg-gold" },
+    { key: "bazi", label: w.baziName, dot: "bg-jade" },
+    {
+      key: "tarot",
+      label: `${d.tarotTitle} · ${d.soon}`,
+      dot: "border border-dashed border-cream/40"
+    }
+  ];
+  const recent = uniqueCharts(charts).slice(0, 3);
   return (
-    <div className="mt-8 px-3">
-      <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-cream/35">{w.charts}</p>
+    <div className="mt-7">
+      <Link
+        to="/app/charts"
+        className="mb-1 block px-3.5 text-[11px] uppercase tracking-[0.14em] text-cream/35 hover:text-cream/70"
+      >
+        {w.readings}
+      </Link>
       <ul className="space-y-0.5">
-        {uniqueCharts(charts)
-          .slice(0, 4)
-          .map((chart) => (
+        {traditions.map((item) => (
+          <li key={item.key}>
+            <Link
+              to={`/app/charts?tab=${item.key}`}
+              className={`flex h-10 items-center gap-3 rounded-xl px-3.5 text-[14px] transition-colors ${onCharts && tab === item.key ? "bg-night-3 text-cream" : item.key === "tarot" ? "text-cream/35 hover:text-cream/60" : "text-cream/60 hover:bg-white/[0.04] hover:text-cream"}`}
+            >
+              <span className={`size-2 shrink-0 rounded-full ${item.dot}`} />
+              {item.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {recent.length > 0 && (
+        <ul className="mt-3 space-y-0.5 border-l border-white/[0.07] ml-[18px] pl-3">
+          {recent.map((chart) => (
             <li key={chart.sessionId}>
               <Link
                 to={`/app/charts/${encodeURIComponent(chart.sessionId)}`}
-                className="flex min-h-9 items-center gap-2.5 rounded-lg text-[13px] text-cream/55 hover:text-cream"
+                className="flex min-h-8 items-center gap-2 text-[12.5px] text-cream/45 hover:text-cream"
               >
-                <span
-                  className={`size-2 shrink-0 rounded-full ${chart.kind === "vedic" ? "bg-gold" : "bg-jade"}`}
-                />
                 <span className="truncate">{chart.label || chart.sessionId}</span>
               </Link>
             </li>
           ))}
-        <li>
-          <Link
-            to="/app/charts/new"
-            className="flex min-h-9 items-center gap-2.5 text-[13px] text-cream/45 hover:text-cream"
-          >
-            <span className="grid size-2 place-items-center text-[13px] leading-none">+</span>
-            {w.deep}
-          </Link>
-        </li>
-        <li className="flex min-h-9 items-center gap-2.5 text-[13px] text-cream/30">
-          <span className="size-2 shrink-0 rounded-full border border-dashed border-cream/35" />
-          {d.tarotTitle} · {d.soon}
-        </li>
-      </ul>
+        </ul>
+      )}
     </div>
   );
 }

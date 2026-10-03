@@ -9,6 +9,8 @@ import { api, ApiError } from "../api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { MoodMoon, MoodPicker } from "../components/MoodMoon";
+import { FortuneCard } from "../components/FortuneCard";
+import { ReadingsShowcase } from "../components/ReadingsShowcase";
 import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
@@ -305,15 +307,14 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           </div>
         )}
         <div className="grid gap-5 @4xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-          <section className="surface @container relative overflow-hidden p-6 sm:p-8">
+          <section className="surface @container relative p-6 sm:p-8">
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full border border-gold/20"
-            />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-8 -top-8 size-40 rounded-full border border-jade/20"
-            />
+              className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
+            >
+              <div className="absolute -right-24 -top-24 size-72 rounded-full border border-gold/20" />
+              <div className="absolute -right-8 -top-8 size-40 rounded-full border border-jade/20" />
+            </div>
             <div className="relative flex items-center justify-between gap-3">
               <p className="eyebrow">{d.yourDay}</p>
               <span
@@ -322,62 +323,82 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                 {d.fit[todayReading.fit]}
               </span>
             </div>
-            <div className="relative mt-4 flex flex-wrap items-end gap-x-5 gap-y-2">
-              <p className="han text-7xl font-bold leading-none sm:text-8xl">{data.today.pillar}</p>
-              <div className="pb-1.5">
-                <p className="text-sm text-cream/55">
-                  {d.elements[stemElement(data.today.stem)]} ·{" "}
-                  {d.elements[branchElement(data.today.branch)]}
-                </p>
-                {guidance?.guidance && (
-                  <p className="mt-1 font-display text-lg italic text-cream/85">
-                    {d.tenGodDay(guidance.guidance.facts.tenGod, guidance.guidance.facts.dayMaster)}
+            <div className="relative mt-4 grid gap-6 @xl:grid-cols-[minmax(0,1fr)_190px] @xl:items-start">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+                  <p className="han text-7xl font-bold leading-none sm:text-8xl">
+                    {data.today.pillar}
                   </p>
-                )}
-              </div>
-            </div>
+                  <div className="pb-1.5">
+                    <p className="text-sm text-cream/55">
+                      {d.elements[stemElement(data.today.stem)]} ·{" "}
+                      {d.elements[branchElement(data.today.branch)]}
+                    </p>
+                    {guidance?.guidance && (
+                      <p className="mt-1 font-display text-lg italic text-cream/85">
+                        {d.tenGodDay(
+                          guidance.guidance.facts.tenGod,
+                          guidance.guidance.facts.dayMaster
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </div>
 
-            {guidance?.guidance ? (
-              <div className="relative mt-6 grid gap-3 @lg:grid-cols-2">
-                <div className="rounded-2xl bg-night-3 p-4">
-                  <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
-                    <span className="grid size-6 place-items-center rounded-lg bg-paper text-[#16130e]">
-                      <Check size={13} strokeWidth={2.6} />
-                    </span>
-                    {d.goodFor}
-                  </p>
-                  <ul className="space-y-1 text-[15px] leading-6">
-                    {guidance.guidance.goodFor.map((item) => (
-                      <li key={item.id}>{guidanceText(item, locale)}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="rounded-2xl bg-night-3 p-4">
-                  <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
-                    <span className="grid size-6 place-items-center rounded-lg border border-cream/40 text-cream/70">
-                      <Minus size={13} strokeWidth={2.6} />
-                    </span>
-                    {d.avoid}
-                  </p>
-                  <ul className="space-y-1 text-[15px] leading-6 text-cream/80">
-                    {guidance.guidance.avoid.map((item) => (
-                      <li key={item.id}>{guidanceText(item, locale)}</li>
-                    ))}
-                  </ul>
-                </div>
+                {guidance?.guidance ? (
+                  <div className="relative mt-6 grid gap-3 @lg:grid-cols-2 @xl:grid-cols-1 @4xl:grid-cols-2">
+                    <div className="rounded-2xl bg-night-3 p-4">
+                      <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
+                        <span className="grid size-6 place-items-center rounded-lg bg-paper text-[#16130e]">
+                          <Check size={13} strokeWidth={2.6} />
+                        </span>
+                        {d.goodFor}
+                      </p>
+                      <ul className="space-y-1 text-[15px] leading-6">
+                        {guidance.guidance.goodFor.map((item) => (
+                          <li key={item.id}>{guidanceText(item, locale)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="rounded-2xl bg-night-3 p-4">
+                      <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
+                        <span className="grid size-6 place-items-center rounded-lg border border-cream/40 text-cream/70">
+                          <Minus size={13} strokeWidth={2.6} />
+                        </span>
+                        {d.avoid}
+                      </p>
+                      <ul className="space-y-1 text-[15px] leading-6 text-cream/80">
+                        {guidance.guidance.avoid.map((item) => (
+                          <li key={item.id}>{guidanceText(item, locale)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : guidance ? (
+                  <div className="relative mt-6 rounded-2xl border border-dashed border-white/20 p-4">
+                    <p className="text-[15px] font-medium">{d.addBirthTitle}</p>
+                    <p className="mt-1 text-sm leading-6 text-cream/60">{d.addBirthBody}</p>
+                    <Link
+                      to="/app/charts/new"
+                      className="mt-3 inline-flex h-9 items-center rounded-full bg-paper px-4 text-xs font-medium text-[#16130e]"
+                    >
+                      {d.addBirthAction}
+                    </Link>
+                  </div>
+                ) : null}
               </div>
-            ) : guidance ? (
-              <div className="relative mt-6 rounded-2xl border border-dashed border-white/20 p-4">
-                <p className="text-[15px] font-medium">{d.addBirthTitle}</p>
-                <p className="mt-1 text-sm leading-6 text-cream/60">{d.addBirthBody}</p>
-                <Link
-                  to="/app/charts/new"
-                  className="mt-3 inline-flex h-9 items-center rounded-full bg-paper px-4 text-xs font-medium text-[#16130e]"
-                >
-                  {d.addBirthAction}
-                </Link>
-              </div>
-            ) : null}
+              {guidance && (
+                <div className="order-first @xl:order-none">
+                  <FortuneCard
+                    day={data.today.day}
+                    guidance={guidance.guidance}
+                    fit={todayReading.fit}
+                    locale={locale}
+                    locked={hasChart === false}
+                  />
+                </div>
+              )}
+            </div>
 
             {hasChart && (
               <button
@@ -473,7 +494,11 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           </section>
         </div>
 
-        <div className="mt-5 grid gap-5 @3xl:grid-cols-2">
+        <div className="mt-8">
+          <ReadingsShowcase />
+        </div>
+
+        <div className="mt-8 grid gap-5 @3xl:grid-cols-2">
           <section className="surface p-6">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="font-display text-2xl">{d.nextBright}</h2>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { chartLabel } from "../lib/atlas";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Download, LoaderCircle, Plus, Sparkles } from "lucide-react";
 import { api } from "../api";
 import { useI18n } from "../i18n/provider";
@@ -33,8 +33,8 @@ const copy: Record<
   }
 > = {
   en: {
-    title: "Your charts",
-    body: "Each reading is calculated first, then explained. Open one to read it or ask Atlas about it.",
+    title: "Readings",
+    body: "Vedic, BaZi and soon Tarot. Each one is calculated first, then explained.",
     tabs: { vedic: "Vedic", bazi: "BaZi", tarot: "Tarot" },
     soon: "Soon",
     newVedic: "New Vedic reading",
@@ -61,8 +61,8 @@ const copy: Record<
     error: "Couldn't load your charts."
   },
   zh: {
-    title: "我的命盘",
-    body: "每份解读都先计算、再解释。打开即可阅读，或让 Atlas 为你讲解。",
+    title: "解读",
+    body: "吠陀占星、八字，塔罗即将推出。每一份都先精确计算，再解读。",
     tabs: { vedic: "Vedic", bazi: "八字", tarot: "塔罗" },
     soon: "即将推出",
     newVedic: "新建 Vedic 读盘",
@@ -88,8 +88,8 @@ const copy: Record<
     error: "暂时无法加载命盘。"
   },
   ja: {
-    title: "マイチャート",
-    body: "すべてのリーディングは計算してから解説します。開いて読むか、Atlas に質問できます。",
+    title: "リーディング",
+    body: "インド占星術、八字、そして近日タロット。どれもまず計算し、それから解説します。",
     tabs: { vedic: "Vedic", bazi: "八字", tarot: "タロット" },
     soon: "近日",
     newVedic: "Vedic リーディングを作成",
@@ -121,7 +121,14 @@ const isBazi = (session: AdminSessionSummary) => session.stage.startsWith("bazi_
 export function Charts() {
   const { locale, localeTag } = useI18n();
   const c = copy[locale];
-  const [tab, setTab] = useState<Tab>("vedic");
+  const [params] = useSearchParams();
+  const requested = params.get("tab");
+  const [tab, setTab] = useState<Tab>(
+    requested === "bazi" || requested === "tarot" ? requested : "vedic"
+  );
+  useEffect(() => {
+    if (requested === "vedic" || requested === "bazi" || requested === "tarot") setTab(requested);
+  }, [requested]);
   const [sessions, setSessions] = useState<AdminSessionSummary[] | null>(null);
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState("");
