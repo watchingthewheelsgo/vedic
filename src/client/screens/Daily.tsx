@@ -8,7 +8,7 @@ import { AtlasChartFirst, useAtlas } from "../components/Atlas";
 import { api, ApiError } from "../api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
-import { MoodPicker } from "../components/MoodMoon";
+import { MoodMoon, MoodPicker } from "../components/MoodMoon";
 import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
@@ -928,16 +928,27 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                           }}
                           className={`w-full rounded-2xl border p-3 text-left ${day === item.day ? "border-white/30 bg-night-3" : "border-white/[0.07] hover:bg-white/[0.04]"}`}
                         >
-                          <span className="flex justify-between text-sm">
-                            <span>{item.day}</span>
-                            <span className="text-gold">{item.calendar.pillar}</span>
+                          <span className="flex items-center gap-3">
+                            <span className="text-gold-light">
+                              <MoodMoon level={item.mood} size={22} />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-baseline justify-between gap-2">
+                                <span className="text-sm text-cream/85">{item.day}</span>
+                                <span className="han text-lg leading-none">
+                                  {item.calendar.pillar}
+                                </span>
+                              </span>
+                              <span className="block text-xs text-cream/45">
+                                {c.moods[item.mood - 1]} · {c.topics[topics.indexOf(item.topic)]}
+                              </span>
+                            </span>
                           </span>
-                          <span className="mt-1 block text-xs text-cream/65">
-                            {c.moods[item.mood - 1]} · {c.topics[topics.indexOf(item.topic)]}
-                          </span>
-                          <span className="mt-2 block truncate text-sm text-cream/80">
-                            {item.note}
-                          </span>
+                          {item.note && (
+                            <span className="mt-2 block truncate text-sm text-cream/70">
+                              {item.note}
+                            </span>
+                          )}
                         </button>
                       )
                     )

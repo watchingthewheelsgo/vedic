@@ -73,10 +73,10 @@ export function Methodology() {
     <section
       id="sources"
       aria-labelledby="sources-title"
-      className="scroll-mt-24 border-y border-gold/20 px-6 py-16 sm:px-10"
+      className="scroll-mt-24 border-y border-white/[0.07] px-6 py-16 sm:px-10"
     >
       <div className="mx-auto max-w-[1100px]">
-        <h2 id="sources-title" className="text-3xl font-medium text-cream">
+        <h2 id="sources-title" className="font-display text-[40px] leading-tight text-cream">
           {c.title}
         </h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-body">{c.intro}</p>
@@ -87,7 +87,7 @@ export function Methodology() {
             [c.ai, c.aiBody]
           ].map(([title, body]) => (
             <article key={title}>
-              <h3 className="text-lg font-medium text-gold">{title}</h3>
+              <h3 className="font-display text-2xl text-cream">{title}</h3>
               <p className="mt-3 text-sm leading-7 text-body">{body}</p>
             </article>
           ))}
@@ -110,7 +110,7 @@ export function Methodology() {
           ))}
         </div>
         <p className="mt-6 text-sm leading-7 text-body">{c.classical}</p>
-        <p className="mt-6 rounded-lg border border-gold/20 bg-gold/5 p-5 text-sm leading-7 text-cream/80">
+        <p className="mt-6 rounded-3xl border border-white/[0.08] bg-night-2 p-5 text-sm leading-7 text-cream/80">
           {c.limits}
         </p>
       </div>

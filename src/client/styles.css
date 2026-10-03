@@ -111,7 +111,6 @@
 
   .birth-input-screen {
     position: relative;
-    background: linear-gradient(180deg, #0b0a0a 0%, #12100e 100%);
   }
 
   .birth-input-display {
@@ -156,8 +155,8 @@
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel [role="combobox"]:focus,
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel button[aria-invalid]:focus {
     background: rgb(255 255 255 / 5.5%) !important;
-    border-color: rgb(201 169 110 / 72%) !important;
-    box-shadow: 0 0 0 2px rgb(201 169 110 / 14%) !important;
+    border-color: rgb(244 162 89 / 72%) !important;
+    box-shadow: 0 0 0 2px rgb(244 162 89 / 14%) !important;
   }
 
   .birth-input-screen[data-theme="cosmic"] .birth-input-form-panel .birth-input-readout {

@@ -31,7 +31,7 @@ export function Landing() {
 
   return (
     <div className="bg-cream text-ink">
-      <nav className="sticky top-0 z-50 border-b border-gold/25 bg-cream/95 px-4 backdrop-blur-xl sm:px-8 lg:px-12">
+      <nav className="sticky top-0 z-50 border-b border-white/[0.07] bg-night/85 px-4 backdrop-blur-xl sm:px-8 lg:px-12">
         <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-3">
           <button
             className="brand-logo shrink-0 border-0 bg-transparent"
@@ -110,10 +110,7 @@ export function Landing() {
 
       <section className="border-y border-white/8 px-6 py-16 sm:px-10">
         <div className="mx-auto max-w-[1120px]">
-          <p className="mb-3 text-xs tracking-widest text-gold">
-            SIGN ATLAS · {workspaceCopy[locale].space}
-          </p>
-          <h2 className="text-3xl font-medium">
+          <h2 className="max-w-3xl font-display text-[40px] leading-tight sm:text-[48px]">
             {locale === "zh"
               ? "生活的线索，慢慢连成自己的地图。"
               : locale === "ja"
@@ -123,8 +120,10 @@ export function Landing() {
           <div className="mt-10 grid gap-8 sm:grid-cols-3">
             {daysCopy[locale].landingSteps.map((step, i) => (
               <div key={step.title}>
-                <p className="mb-4 font-mono text-sm text-gold/70">0{i + 1}</p>
-                <h3 className="text-xl">{step.title}</h3>
+                <p className="mb-4 grid size-8 place-items-center rounded-full bg-night-3 text-sm text-cream/80">
+                  {i + 1}
+                </p>
+                <h3 className="font-display text-2xl">{step.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-cream/65">{step.body}</p>
               </div>
             ))}
@@ -152,7 +151,7 @@ export function Landing() {
             {(["vedic", "bazi", "tarot"] as const).map((path, index) => (
               <article
                 key={path}
-                className="flex flex-col rounded-lg border border-gold/25 bg-cream p-7 sm:p-8"
+                className="flex flex-col rounded-3xl border border-white/[0.08] bg-night-2 p-7 sm:p-8"
               >
                 <div className="mb-8 flex items-center justify-between text-gold">
                   <span aria-hidden="true" className="font-serif text-5xl">
@@ -206,7 +205,10 @@ export function Landing() {
       >
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature) => (
-            <div key={feature.id} className="rounded-md border border-gold/25 bg-cream px-6 py-8">
+            <div
+              key={feature.id}
+              className="rounded-3xl border border-white/[0.08] bg-night-2 px-6 py-8"
+            >
               <div className="mb-4 text-[22px] opacity-80">{feature.icon}</div>
               <h3 className="mb-2.5 text-[15px] font-semibold tracking-[0.5px]">
                 {t(`landing.feature.${feature.id}.title`)}
@@ -227,7 +229,7 @@ export function Landing() {
             subtitle={t("landing.sample.subtitle")}
             dark
           />
-          <div className="relative overflow-hidden rounded-lg border border-gold/20 bg-night-2 p-7 sm:p-10 after:absolute after:right-5 after:top-4 after:text-[10px] after:uppercase after:tracking-[3px] after:text-gold after:opacity-40 after:content-['SAMPLE_EXCERPT']">
+          <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-night-2 p-7 sm:p-10 after:absolute after:right-5 after:top-4 after:text-[10px] after:uppercase after:tracking-[3px] after:text-gold after:opacity-40 after:content-['SAMPLE_EXCERPT']">
             <div className="mb-3.5 text-[10px] uppercase tracking-[3px] text-gold">
               {t("landing.sample.badge")}
             </div>
@@ -269,8 +271,8 @@ export function Landing() {
 
       <section className="px-6 py-16 sm:px-10">
         <div className="mx-auto grid max-w-[1000px] gap-5 md:grid-cols-2">
-          <div className="rounded-2xl border border-gold/30 bg-gold/10 p-7">
-            <h2 className="text-2xl font-medium text-cream">{workspaceCopy[locale].space}</h2>
+          <div className="surface p-7">
+            <h2 className="font-display text-3xl text-cream">{workspaceCopy[locale].space}</h2>
             <p className="my-4 text-sm leading-7 text-cream/75">{journalCopy[locale].subtitle}</p>
             <p className="mb-6 text-sm leading-7 text-cream/65">
               {workspaceCopy[locale].homeAction} · {journalCopy[locale].history} ·{" "}
@@ -278,8 +280,8 @@ export function Landing() {
             </p>
             <Button onClick={() => navigate("/app")}>{workspaceCopy[locale].homeAction}</Button>
           </div>
-          <div className="rounded-2xl border border-white/15 bg-white/[0.035] p-7">
-            <h2 className="text-2xl font-medium text-cream">{t("landing.paths.vedic.title")}</h2>
+          <div className="surface p-7">
+            <h2 className="font-display text-3xl text-cream">{t("landing.paths.vedic.title")}</h2>
             <p className="my-4 text-sm leading-7 text-cream/75">{t("landing.paths.vedic.body")}</p>
             <p className="mb-6 text-sm text-cream/65">
               {locale === "zh"
@@ -303,7 +305,7 @@ export function Landing() {
       >
         <div className="mx-auto max-w-[700px]">
           {FAQS.map((item, index) => (
-            <div key={item} className="border-b border-gold/25 py-5">
+            <div key={item} className="border-b border-white/[0.08] py-5">
               <button
                 className="flex w-full items-center justify-between gap-4 bg-transparent text-left text-[15px] font-medium"
                 id={`faq-trigger-${item}`}
@@ -389,14 +391,11 @@ function SectionTitle({
 }) {
   return (
     <div className="mb-14 text-center">
-      <h2
-        className={`mb-3 text-[34px] font-light tracking-normal ${dark ? "text-cream" : "text-ink"}`}
-      >
-        {title} <strong className="font-semibold text-gold">{strong}</strong>
+      <h2 className="mb-3 font-display text-[40px] leading-tight tracking-normal text-cream sm:text-[48px]">
+        {title} {strong && <em className="text-gold">{strong}</em>}
       </h2>
-      <div className="mx-auto mt-4 h-px w-9 bg-gold" />
       {subtitle && (
-        <p className={`mt-2.5 text-[15px] ${dark ? "text-cream/55" : "text-body"}`}>{subtitle}</p>
+        <p className={`mt-2 text-[15px] ${dark ? "text-cream/55" : "text-cream/55"}`}>{subtitle}</p>
       )}
     </div>
   );

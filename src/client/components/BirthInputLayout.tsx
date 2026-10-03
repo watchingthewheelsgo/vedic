@@ -40,15 +40,15 @@ export function BirthInputLayout({
           className={cn(
             "mx-auto w-full max-w-[1280px]",
             visual &&
-              "birth-input-workspace overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#11100f]/80 shadow-[0_32px_90px_rgba(0,0,0,0.38)] lg:grid lg:grid-cols-[minmax(440px,0.92fr)_minmax(0,1.08fr)] lg:items-stretch"
+              "birth-input-workspace overflow-hidden rounded-3xl border border-white/[0.08] bg-night-2 lg:grid lg:min-h-[calc(100dvh-3.5rem)] lg:grid-cols-[minmax(440px,0.92fr)_minmax(0,1.08fr)] lg:items-stretch"
           )}
         >
           <section
             className={cn(
               "birth-input-form-panel mx-auto flex w-full flex-col p-5 text-cream sm:p-8",
               visual
-                ? "max-w-[680px] lg:min-h-[680px] lg:max-w-none lg:border-r lg:border-white/[0.07] lg:px-10 lg:py-9 xl:px-12"
-                : "rounded-[14px] border border-white/[0.08] bg-[#11100f]/88 shadow-[0_28px_80px_rgba(0,0,0,0.36)]",
+                ? "max-w-[680px] lg:max-w-none lg:border-r lg:border-white/[0.07] lg:px-10 lg:py-9 xl:px-12"
+                : "rounded-3xl border border-white/[0.08] bg-night-2",
               !visual && maxWidthClass
             )}
           >
@@ -63,7 +63,7 @@ export function BirthInputLayout({
                 {icon}
               </div>
               <div>
-                <h1 className="birth-input-display mb-1 text-[29px] font-normal leading-tight text-cream">
+                <h1 className="mb-1 font-display text-[34px] font-normal leading-tight text-cream">
                   {title}
                 </h1>
                 <p className="max-w-[470px] text-[13px] leading-relaxed text-cream/50">
@@ -75,7 +75,7 @@ export function BirthInputLayout({
             {children}
           </section>
           {visual ? (
-            <aside className="birth-input-visual hidden min-h-[680px] w-full min-w-0 place-items-center bg-[#0c0b0b]/45 lg:grid">
+            <aside className="birth-input-visual hidden w-full min-w-0 place-items-center bg-[radial-gradient(ellipse_70%_60%_at_50%_45%,rgba(244,162,89,0.07),transparent_70%)] bg-night lg:grid">
               {visual}
             </aside>
           ) : null}

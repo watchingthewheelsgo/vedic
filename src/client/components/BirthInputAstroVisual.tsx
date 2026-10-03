@@ -332,8 +332,8 @@ export function BirthInputAstroVisual({
         const bx = b.x + motion.panX * b.z;
         const by = b.y + motion.panY * b.z;
         ctx.strokeStyle = dark
-          ? `rgba(201,169,110,${0.06 + 0.05 * Math.sin(time + a.phase)})`
-          : `rgba(154,122,74,${0.04 + 0.04 * Math.sin(time + a.phase)})`;
+          ? `rgba(244,162,89,${0.06 + 0.05 * Math.sin(time + a.phase)})`
+          : `rgba(120,130,175,${0.04 + 0.04 * Math.sin(time + a.phase)})`;
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
@@ -349,7 +349,7 @@ export function BirthInputAstroVisual({
           const dx = px - centerX;
           const dy = py - centerY;
           const length = motion.warp * 0.3;
-          ctx.strokeStyle = `rgba(237,217,163,${alpha * 0.85})`;
+          ctx.strokeStyle = `rgba(248,196,142,${alpha * 0.85})`;
           ctx.lineWidth = star.radius;
           ctx.beginPath();
           ctx.moveTo(px, py);
@@ -374,8 +374,8 @@ export function BirthInputAstroVisual({
       ctx.save();
       ctx.translate(centerX, centerY);
       const halo = ctx.createRadialGradient(0, 0, globeRadius * 0.15, 0, 0, globeRadius * 1.2);
-      halo.addColorStop(0, dark ? "rgba(201,169,110,0.08)" : "rgba(201,169,110,0.10)");
-      halo.addColorStop(0.65, dark ? "rgba(201,169,110,0.05)" : "rgba(154,122,74,0.04)");
+      halo.addColorStop(0, dark ? "rgba(244,162,89,0.08)" : "rgba(244,162,89,0.10)");
+      halo.addColorStop(0.65, dark ? "rgba(244,162,89,0.05)" : "rgba(120,130,175,0.04)");
       halo.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = halo;
       ctx.beginPath();
@@ -395,14 +395,14 @@ export function BirthInputAstroVisual({
           ? 0.55 * (0.35 + 0.65 * rotatedZ) * (dark ? 1 : 0.78)
           : 0.1 * (0.5 + 0.5 * (rotatedZ + 1));
         ctx.fillStyle = front
-          ? `rgba(201,169,110,${alpha})`
+          ? `rgba(244,162,89,${alpha})`
           : `rgba(${dark ? "126,120,111" : "154,122,74"},${alpha})`;
         ctx.beginPath();
         ctx.arc(x * globeRadius, -rotatedY * globeRadius, (front ? 1.5 : 1.0) * dpr, 0, TAU);
         ctx.fill();
       }
 
-      ctx.strokeStyle = dark ? "rgba(201,169,110,0.32)" : "rgba(154,122,74,0.24)";
+      ctx.strokeStyle = dark ? "rgba(244,162,89,0.32)" : "rgba(120,130,175,0.24)";
       ctx.lineWidth = dpr * 1.1;
       ctx.beginPath();
       ctx.arc(0, 0, globeRadius, 0, TAU);
@@ -417,7 +417,7 @@ export function BirthInputAstroVisual({
 
         const sunriseAngle = (6 / 24) * TAU - Math.PI / 2;
         const sunsetAngle = (18 / 24) * TAU - Math.PI / 2;
-        ctx.strokeStyle = dark ? "rgba(237,217,163,0.17)" : "rgba(154,122,74,0.15)";
+        ctx.strokeStyle = dark ? "rgba(248,196,142,0.17)" : "rgba(120,130,175,0.15)";
         ctx.lineWidth = 0.8 * dpr;
         ctx.beginPath();
         ctx.moveTo(Math.cos(sunriseAngle) * outerRadius, Math.sin(sunriseAngle) * outerRadius);
@@ -429,8 +429,8 @@ export function BirthInputAstroVisual({
           const major = hour % 6 === 0;
           const inner = outerRadius - (major ? 10 : 5) * dpr;
           ctx.strokeStyle = dark
-            ? `rgba(237,217,163,${major ? 0.55 : 0.22})`
-            : `rgba(154,122,74,${major ? 0.42 : 0.18})`;
+            ? `rgba(248,196,142,${major ? 0.55 : 0.22})`
+            : `rgba(120,130,175,${major ? 0.42 : 0.18})`;
           ctx.lineWidth = (major ? 1.2 : 0.7) * dpr;
           ctx.beginPath();
           ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
@@ -492,14 +492,14 @@ export function BirthInputAstroVisual({
             ctx.fill();
           }
 
-          ctx.strokeStyle = `rgba(237,217,163,${0.28 * timeReveal})`;
+          ctx.strokeStyle = `rgba(248,196,142,${0.28 * timeReveal})`;
           ctx.lineWidth = dpr;
           ctx.beginPath();
           ctx.moveTo(0, 0);
           ctx.lineTo(-tipX * 0.24, -tipY * 0.24);
           ctx.stroke();
 
-          ctx.fillStyle = `rgba(237,217,163,${0.96 * timeReveal})`;
+          ctx.fillStyle = `rgba(248,196,142,${0.96 * timeReveal})`;
           ctx.beginPath();
           ctx.arc(0, 0, 3.2 * dpr, 0, TAU);
           ctx.fill();
@@ -551,7 +551,7 @@ export function BirthInputAstroVisual({
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(motion.spin + motion.cityAngle);
-      ctx.strokeStyle = dark ? "rgba(201,169,110,0.18)" : "rgba(154,122,74,0.16)";
+      ctx.strokeStyle = dark ? "rgba(244,162,89,0.18)" : "rgba(120,130,175,0.16)";
       ctx.lineWidth = dpr;
       ctx.beginPath();
       ctx.arc(0, 0, ringRadius, 0, TAU);
@@ -566,12 +566,12 @@ export function BirthInputAstroVisual({
         const angle = (index / 12) * TAU;
         const x = Math.cos(angle);
         const y = Math.sin(angle);
-        ctx.strokeStyle = dark ? "rgba(201,169,110,0.22)" : "rgba(154,122,74,0.16)";
+        ctx.strokeStyle = dark ? "rgba(244,162,89,0.22)" : "rgba(120,130,175,0.16)";
         ctx.beginPath();
         ctx.moveTo(x * ringRadius, y * ringRadius);
         ctx.lineTo(x * ringRadius * 0.93, y * ringRadius * 0.93);
         ctx.stroke();
-        ctx.fillStyle = dark ? "rgba(222,192,132,0.55)" : "rgba(154,122,74,0.36)";
+        ctx.fillStyle = dark ? "rgba(248,196,142,0.55)" : "rgba(120,130,175,0.36)";
         ctx.save();
         ctx.translate(x * ringRadius * 0.85, y * ringRadius * 0.85);
         ctx.rotate(-(motion.spin + motion.cityAngle));
@@ -593,17 +593,17 @@ export function BirthInputAstroVisual({
           const pulse = 0.5 + 0.5 * Math.sin(time * 3);
           const markerX = centerX + x * globeRadius;
           const markerY = centerY - rotatedY * globeRadius;
-          ctx.strokeStyle = `rgba(237,217,163,${0.5 * visible})`;
+          ctx.strokeStyle = `rgba(248,196,142,${0.5 * visible})`;
           ctx.lineWidth = dpr * 1.4;
           ctx.beginPath();
           ctx.moveTo(markerX, markerY);
           ctx.lineTo(markerX, markerY - (22 + 8 * pulse) * dpr);
           ctx.stroke();
-          ctx.strokeStyle = `rgba(237,217,163,${0.6 * visible * (1 - pulse)})`;
+          ctx.strokeStyle = `rgba(248,196,142,${0.6 * visible * (1 - pulse)})`;
           ctx.beginPath();
           ctx.arc(markerX, markerY, (4 + 11 * pulse) * dpr, 0, TAU);
           ctx.stroke();
-          ctx.fillStyle = `rgba(237,217,163,${0.22 * visible})`;
+          ctx.fillStyle = `rgba(248,196,142,${0.22 * visible})`;
           ctx.beginPath();
           ctx.arc(markerX, markerY, 9 * dpr, 0, TAU);
           ctx.fill();
@@ -623,7 +623,7 @@ export function BirthInputAstroVisual({
       if (motion.marker > 0.01) {
         const markerProgress = Math.max(0, Math.min(1, motion.marker));
         const markerRadius = Math.max(0, (1 - markerProgress) * ringRadius);
-        ctx.strokeStyle = `rgba(237,217,163,${motion.marker * 0.5})`;
+        ctx.strokeStyle = `rgba(248,196,142,${motion.marker * 0.5})`;
         ctx.lineWidth = dpr * 1.6;
         ctx.beginPath();
         ctx.arc(centerX, centerY, markerRadius, 0, TAU);

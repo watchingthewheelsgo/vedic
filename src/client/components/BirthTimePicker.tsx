@@ -224,11 +224,11 @@ function TimeWheel({
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[72px] bg-gradient-to-b from-[#151312] to-transparent"
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[72px] bg-gradient-to-b from-[#14161f] to-transparent"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[72px] bg-gradient-to-t from-[#151312] to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[72px] bg-gradient-to-t from-[#14161f] to-transparent"
         />
         <div
           ref={viewportRef}
