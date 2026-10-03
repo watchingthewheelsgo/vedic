@@ -10,7 +10,6 @@ import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { MoodMoon, MoodPicker } from "../components/MoodMoon";
 import { FortuneCard } from "../components/FortuneCard";
-import { ReadingsShowcase } from "../components/ReadingsShowcase";
 import { useWorkspaceDraft } from "../lib/workspace-draft";
 import { workspaceCopy } from "../lib/workspace";
 import { useI18n } from "../i18n/provider";
@@ -54,6 +53,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const [guidance, setGuidance] = useState<DailyGuidanceResponse | null>(null);
   const pendingQuestion = useRef<{ key: string; id: string } | null>(null);
   const [busy, setBusy] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const entry = data?.entries.find((item) => item.day === day);
@@ -254,9 +254,9 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   }
   if (view === "today" && data) {
     const todayReading = readDay(data.today.day, data.summary);
-    const ahead = upcoming(data.today.day, data.summary, 30);
-    const bright = ahead.filter((item) => item.fit === "bright").slice(0, 3);
-    const gentle = ahead.find((item) => item.fit === "gentle");
+    const nextBright = upcoming(data.today.day, data.summary, 30).find(
+      (item) => item.fit === "bright" && item.day !== data.today.day
+    );
     const dateLabel = new Intl.DateTimeFormat(localeTag, {
       weekday: "long",
       month: "long",
@@ -270,19 +270,36 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
         day: "numeric",
         timeZone: "UTC"
       }).format(parseDay(value));
+    const dayGuidance = guidance?.guidance;
     return (
-      <div className="mx-auto max-w-[1180px] px-5 py-8 sm:px-8 sm:py-10">
-        <PageHeader title={d.greeting(new Date().getHours(), user?.firstName)} note={dateLabel} />
-        {hasChart === false && (
-          <section className="rise-in mb-5 flex flex-wrap items-center gap-4 rounded-3xl border border-gold/30 bg-gold/[0.07] p-5">
-            <span className="grid size-11 shrink-0 place-items-center rounded-full bg-gold text-night">
-              <Sparkles size={18} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[15px] font-medium">{d.startTitle}</p>
-              <p className="mt-0.5 text-sm leading-6 text-cream/60">{d.startBody}</p>
-            </div>
-            <div className="flex gap-2">
+      <div className="mx-auto max-w-[640px] px-5 py-8 sm:py-12">
+        <header className="rise-in text-center">
+          <p className="text-sm text-cream/45">{dateLabel}</p>
+          <h1 className="mt-1 font-display text-[38px] leading-tight sm:text-[44px]">
+            {d.greeting(new Date().getHours(), user?.firstName)}
+          </h1>
+        </header>
+
+        {error && (
+          <div
+            role="alert"
+            className="mt-5 rounded-2xl border border-red/50 bg-red/10 p-4 text-sm text-[#ffb5a4]"
+          >
+            {error}
+          </div>
+        )}
+
+        {hasChart === false ? (
+          <section className="rise-in mt-10 text-center">
+            <FortuneCard
+              day={data.today.day}
+              guidance={null}
+              fit="unknown"
+              locale={locale}
+              locked
+            />
+            <p className="mx-auto mt-6 max-w-sm text-sm leading-6 text-cream/60">{d.startBody}</p>
+            <div className="mt-4 flex justify-center gap-2">
               <Link
                 to="/app/charts/new"
                 className="inline-flex h-10 items-center rounded-full bg-paper px-4 text-sm font-medium text-[#16130e]"
@@ -297,289 +314,169 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               </Link>
             </div>
           </section>
-        )}
-        {error && (
-          <div
-            role="alert"
-            className="mb-5 rounded-xl border border-red/50 bg-red/10 p-4 text-sm text-[#ffb5a4]"
-          >
-            {error}
-          </div>
-        )}
-        <div className="grid gap-5 @4xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-          <section className="surface @container relative p-6 sm:p-8">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
-            >
-              <div className="absolute -right-24 -top-24 size-72 rounded-full border border-gold/20" />
-              <div className="absolute -right-8 -top-8 size-40 rounded-full border border-jade/20" />
-            </div>
-            <div className="relative flex items-center justify-between gap-3">
-              <p className="eyebrow">{d.yourDay}</p>
-              <span
-                className={`rounded-full px-3 py-1 text-xs ${todayReading.fit === "bright" ? "bg-paper text-[#16130e]" : todayReading.fit === "gentle" ? "border border-dashed border-white/30 text-cream/70" : "bg-white/[0.07] text-cream/75"}`}
-              >
-                {d.fit[todayReading.fit]}
-              </span>
-            </div>
-            <div className="relative mt-4 grid gap-6 @xl:grid-cols-[minmax(0,1fr)_190px] @xl:items-start">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-                  <p className="han text-7xl font-bold leading-none sm:text-8xl">
-                    {data.today.pillar}
-                  </p>
-                  <div className="pb-1.5">
-                    <p className="text-sm text-cream/55">
-                      {d.elements[stemElement(data.today.stem)]} ·{" "}
-                      {d.elements[branchElement(data.today.branch)]}
-                    </p>
-                    {guidance?.guidance && (
-                      <p className="mt-1 font-display text-lg italic text-cream/85">
-                        {d.tenGodDay(
-                          guidance.guidance.facts.tenGod,
-                          guidance.guidance.facts.dayMaster
-                        )}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {guidance?.guidance ? (
-                  <div className="relative mt-6 grid gap-3 @lg:grid-cols-2 @xl:grid-cols-1 @4xl:grid-cols-2">
-                    <div className="rounded-2xl bg-night-3 p-4">
-                      <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
-                        <span className="grid size-6 place-items-center rounded-lg bg-paper text-[#16130e]">
-                          <Check size={13} strokeWidth={2.6} />
-                        </span>
-                        {d.goodFor}
-                      </p>
-                      <ul className="space-y-1 text-[15px] leading-6">
-                        {guidance.guidance.goodFor.map((item) => (
-                          <li key={item.id}>{guidanceText(item, locale)}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="rounded-2xl bg-night-3 p-4">
-                      <p className="mb-2 flex items-center gap-2 text-xs text-cream/55">
-                        <span className="grid size-6 place-items-center rounded-lg border border-cream/40 text-cream/70">
-                          <Minus size={13} strokeWidth={2.6} />
-                        </span>
-                        {d.avoid}
-                      </p>
-                      <ul className="space-y-1 text-[15px] leading-6 text-cream/80">
-                        {guidance.guidance.avoid.map((item) => (
-                          <li key={item.id}>{guidanceText(item, locale)}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ) : guidance ? (
-                  <div className="relative mt-6 rounded-2xl border border-dashed border-white/20 p-4">
-                    <p className="text-[15px] font-medium">{d.addBirthTitle}</p>
-                    <p className="mt-1 text-sm leading-6 text-cream/60">{d.addBirthBody}</p>
-                    <Link
-                      to="/app/charts/new"
-                      className="mt-3 inline-flex h-9 items-center rounded-full bg-paper px-4 text-xs font-medium text-[#16130e]"
-                    >
-                      {d.addBirthAction}
-                    </Link>
-                  </div>
-                ) : null}
-              </div>
-              {guidance && (
-                <div className="order-first @xl:order-none">
-                  <FortuneCard
-                    day={data.today.day}
-                    guidance={guidance.guidance}
-                    fit={todayReading.fit}
-                    locale={locale}
-                    locked={hasChart === false}
-                  />
-                </div>
-              )}
-            </div>
-
-            {hasChart && (
-              <button
-                type="button"
-                onClick={() => askAbout(d.askToday)}
-                className="press-feedback relative mt-4 inline-flex h-10 items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 text-sm text-cream/80 transition-colors hover:border-gold/50 hover:text-gold-light"
-              >
-                <Sparkles size={15} />
-                {d.askCta}
-              </button>
+        ) : (
+          <section className="rise-in mt-10" style={{ animationDelay: "80ms" }}>
+            {guidance && (
+              <FortuneCard
+                day={data.today.day}
+                guidance={dayGuidance ?? null}
+                fit={todayReading.fit}
+                locale={locale}
+                locked={false}
+              />
             )}
-            <div className="relative mt-5 border-t border-white/[0.07] pt-4">
-              <p className="eyebrow mb-1.5">{d.fromNotes}</p>
-              <p className="text-sm leading-6 text-cream/75">{d.fitLong[todayReading.fit]}</p>
-              {todayReading.signals.length > 0 && (
-                <ul className="mt-2 space-y-1 text-[13px] text-cream/55">
-                  {todayReading.signals.map((signal) => (
-                    <li key={signal.kind}>
-                      <span className={signal.delta >= 0 ? "text-jade" : "text-cream/40"}>● </span>
-                      {d.signal(signal.kind, signal.key, signal.averageMood, signal.count)}
-                    </li>
+          </section>
+        )}
+
+        <section className="rise-in mt-10 text-center" style={{ animationDelay: "160ms" }}>
+          <p className="han text-5xl font-bold leading-none">{data.today.pillar}</p>
+          <p className="mt-3 text-sm text-cream/50">
+            {d.elements[stemElement(data.today.stem)]} ·{" "}
+            {d.elements[branchElement(data.today.branch)]}
+            {dayGuidance && (
+              <>
+                {" · "}
+                <span className="font-display text-base italic text-cream/75">
+                  {d.tenGodDay(dayGuidance.facts.tenGod, dayGuidance.facts.dayMaster)}
+                </span>
+              </>
+            )}
+          </p>
+          {dayGuidance && (
+            <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-3xl border border-white/[0.07] bg-white/[0.07] text-left">
+              <div className="bg-night p-5">
+                <p className="mb-2 flex items-center gap-1.5 text-xs text-cream/50">
+                  <Check size={13} strokeWidth={2.4} className="text-jade" />
+                  {d.goodFor}
+                </p>
+                <ul className="space-y-1 text-[15px] leading-6">
+                  {dayGuidance.goodFor.map((item) => (
+                    <li key={item.id}>{guidanceText(item, locale)}</li>
                   ))}
                 </ul>
-              )}
+              </div>
+              <div className="bg-night p-5">
+                <p className="mb-2 flex items-center gap-1.5 text-xs text-cream/50">
+                  <Minus size={13} strokeWidth={2.4} className="text-cream/50" />
+                  {d.avoid}
+                </p>
+                <ul className="space-y-1 text-[15px] leading-6 text-cream/75">
+                  {dayGuidance.avoid.map((item) => (
+                    <li key={item.id}>{guidanceText(item, locale)}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
-          </section>
+          )}
+          {hasChart && (
+            <button
+              type="button"
+              onClick={() => askAbout(d.askToday)}
+              className="mt-4 inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-cream/60 transition-colors hover:text-gold-light"
+            >
+              <Sparkles size={14} />
+              {d.askCta}
+            </button>
+          )}
+        </section>
 
-          <section className="surface p-6 sm:p-7">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-display text-2xl">{d.quick}</h2>
-              <Link
-                to={`/app/records?day=${data.today.day}`}
-                className="text-sm text-cream/55 hover:text-gold"
-              >
-                {d.writeMore}
-              </Link>
-            </div>
-            <p className="mt-1 text-sm text-cream/50">{entry ? d.checkedIn : d.oneTap}</p>
+        <section
+          className="rise-in mt-10 border-t border-white/[0.07] pt-8"
+          style={{ animationDelay: "240ms" }}
+        >
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+            <h2 className="font-display text-2xl">{d.quick}</h2>
+            <span role="status" className="text-xs text-cream/45">
+              {entry ? d.checkedIn : d.oneTap}
+            </span>
+          </div>
+          <MoodPicker
+            labels={c.moods}
+            legend={c.mood}
+            value={entry || busy === "save" ? mood : null}
+            disabled={!!busy}
+            onPick={(next) => {
+              setMood(next);
+              void save(next);
+            }}
+          />
+          {noteOpen || note ? (
             <div className="mt-4">
-              <MoodPicker
-                labels={c.moods}
-                legend={c.mood}
-                value={entry || busy === "save" ? mood : null}
-                disabled={!!busy}
-                onPick={(next) => {
-                  setMood(next);
-                  void save(next);
-                }}
-              />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {topics.map((value, i) => (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={!!busy}
-                  aria-pressed={topic === value}
-                  onClick={() => setTopic(value)}
-                  className={`h-9 rounded-full border px-3.5 text-xs transition-colors ${topic === value ? "border-paper bg-paper text-[#16130e]" : "border-white/12 text-cream/60 hover:bg-white/5"}`}
-                >
-                  {c.topics[i]}
-                </button>
-              ))}
-            </div>
-            <label htmlFor="today-note" className="sr-only">
-              {c.note}
-            </label>
-            <Textarea
-              id="today-note"
-              value={note}
-              maxLength={4000}
-              disabled={!!busy}
-              onChange={(e) => {
-                setNote(e.target.value);
-                setNotice("");
-              }}
-              placeholder={c.placeholder}
-              className="mt-4 min-h-24 text-base"
-            />
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <span role="status" className="text-xs text-cream/55">
-                {notice ? d.quickSaved : ""}
-              </span>
-              <Button disabled={!!busy || !dirty} onClick={() => void save()}>
-                {busy === "save" ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <Check size={16} />
-                )}
-                {c.save}
-              </Button>
-            </div>
-          </section>
-        </div>
-
-        <div className="mt-8">
-          <ReadingsShowcase />
-        </div>
-
-        <div className="mt-8 grid gap-5 @3xl:grid-cols-2">
-          <section className="surface p-6">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-display text-2xl">{d.nextBright}</h2>
-              <Link to="/app/days" className="text-sm text-cream/55 hover:text-gold">
-                {d.nav.calendar} →
-              </Link>
-            </div>
-            {bright.length ? (
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {bright.map((item) => (
-                  <div key={item.day} className="rounded-2xl bg-white/[0.045] p-4">
-                    <p className="text-xs text-cream/50">{shortDate(item.day)}</p>
-                    <p className="mt-1 text-2xl font-semibold">{item.pillar}</p>
-                  </div>
-                ))}
-                {gentle && (
-                  <div className="rounded-2xl border border-dashed border-white/20 p-4">
-                    <p className="text-xs text-cream/50">
-                      {d.nextGentle} · {shortDate(gentle.day)}
-                    </p>
-                    <p className="mt-1 text-2xl font-semibold text-cream/60">{gentle.pillar}</p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="mt-4 text-sm leading-6 text-cream/55">{d.noForecast}</p>
-            )}
-          </section>
-
-          <section className="surface p-6">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-display text-2xl">{w.recent}</h2>
-              <Link to="/app/records" className="text-sm text-cream/55 hover:text-gold">
-                {w.all} →
-              </Link>
-            </div>
-            {data.entries.length ? (
-              <ul className="mt-3 divide-y divide-white/[0.06]">
-                {data.entries.slice(0, 4).map((item) => (
-                  <li key={item.day}>
-                    <Link
-                      to={`/app/records?day=${item.day}`}
-                      className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-4 py-3"
-                    >
-                      <span>
-                        <span className="block text-lg font-semibold">{item.calendar.pillar}</span>
-                        <span className="block text-[11px] text-cream/45">{item.day.slice(5)}</span>
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm text-cream/85">{item.note}</span>
-                        <span className="block text-xs text-cream/45">
-                          {c.moods[item.mood - 1]} · {c.topics[topics.indexOf(item.topic)]}
-                        </span>
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-4 text-sm leading-6 text-cream/55">{c.empty}</p>
-            )}
-            {charts.length > 0 && (
-              <div className="mt-4 border-t border-white/[0.07] pt-4">
-                <p className="eyebrow mb-2">{w.resume}</p>
-                {charts.slice(0, 2).map((chart) => (
-                  <Link
-                    key={chart.sessionId}
-                    to={`/app/charts/${encodeURIComponent(chart.sessionId)}`}
-                    className="block truncate py-1 text-sm text-gold"
+              <div className="mb-3 flex flex-wrap gap-2">
+                {topics.map((value, i) => (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={!!busy}
+                    aria-pressed={topic === value}
+                    onClick={() => setTopic(value)}
+                    className={`h-8 rounded-full border px-3 text-xs transition-colors ${topic === value ? "border-paper bg-paper text-[#16130e]" : "border-white/12 text-cream/60 hover:bg-white/5"}`}
                   >
-                    {chart.label} →
-                  </Link>
+                    {c.topics[i]}
+                  </button>
                 ))}
               </div>
+              <label htmlFor="today-note" className="sr-only">
+                {c.note}
+              </label>
+              <Textarea
+                id="today-note"
+                value={note}
+                maxLength={4000}
+                disabled={!!busy}
+                autoFocus={noteOpen && !note}
+                onChange={(e) => {
+                  setNote(e.target.value);
+                  setNotice("");
+                }}
+                placeholder={c.placeholder}
+                className="min-h-24 text-base"
+              />
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-xs text-cream/45">{notice ? d.quickSaved : ""}</span>
+                <Button size="sm" disabled={!!busy || !dirty} onClick={() => void save()}>
+                  {busy === "save" ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : (
+                    <Check size={15} />
+                  )}
+                  {c.save}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNoteOpen(true)}
+              className="mt-4 text-sm text-cream/50 transition-colors hover:text-cream"
+            >
+              + {d.addNote}
+            </button>
+          )}
+        </section>
+
+        <Link
+          to="/app/days"
+          className="rise-in mt-10 flex items-center justify-between gap-4 rounded-full border border-white/[0.07] px-5 py-3.5 text-sm text-cream/60 transition-colors hover:border-white/20 hover:text-cream"
+          style={{ animationDelay: "320ms" }}
+        >
+          <span className="min-w-0 truncate">
+            {nextBright ? (
+              <>
+                {d.nextBright} ·{" "}
+                <span className="text-cream">
+                  {shortDate(nextBright.day)} <span className="han">{nextBright.pillar}</span>
+                </span>
+              </>
+            ) : (
+              d.fitLong[todayReading.fit]
             )}
-          </section>
-        </div>
+          </span>
+          <span aria-hidden>→</span>
+        </Link>
       </div>
     );
   }
-
   return (
     <div className="min-h-screen text-cream">
       <main className="mx-auto max-w-[1240px] px-5 py-8 sm:px-8 sm:py-10">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { chartLabel } from "../lib/atlas";
+import { ReadingsShowcase } from "../components/ReadingsShowcase";
 import { Link, useSearchParams } from "react-router-dom";
 import { Download, LoaderCircle, Plus, Sparkles } from "lucide-react";
 import { api } from "../api";
@@ -164,6 +165,9 @@ export function Charts() {
   return (
     <div className="mx-auto max-w-[1080px] px-5 py-8 sm:px-8 sm:py-10">
       <PageHeader title={c.title} note={c.body} />
+      <div className="mb-8">
+        <ReadingsShowcase showTitle={false} />
+      </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-2" role="tablist">
         {(["vedic", "bazi", "tarot"] as const).map((key) => (

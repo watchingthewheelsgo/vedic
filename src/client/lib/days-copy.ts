@@ -26,6 +26,7 @@ type Copy = {
   startVedic: string;
   startBazi: string;
   askToday: string;
+  addNote: string;
   checkedIn: string;
   writeMore: string;
   nextBright: string;
@@ -132,6 +133,7 @@ const zh: Copy = {
   startVedic: "创建 Vedic 命盘",
   startBazi: "创建八字命盘",
   askToday: "结合我的命盘和今天的干支，今天我最该把精力放在哪里？",
+  addNote: "写几句今天的事",
   checkedIn: "今天已打卡。想补充几句也可以。",
   writeMore: "写下更多",
   nextBright: "接下来的顺日",
@@ -267,6 +269,7 @@ const en: Copy = {
   startVedic: "Create my Vedic chart",
   startBazi: "Create my BaZi chart",
   askToday: "Given my chart and today's stem-branch, where should I put my energy today?",
+  addNote: "Add a note about today",
   checkedIn: "You're checked in for today. Add a line if you like.",
   writeMore: "Write more",
   nextBright: "Your next bright days",
@@ -399,6 +402,7 @@ const ja: Copy = {
   startVedic: "Vedic チャートを作成",
   startBazi: "八字チャートを作成",
   askToday: "私のチャートと今日の干支から、今日はどこに力を注ぐべき？",
+  addNote: "今日のことをひとこと",
   checkedIn: "今日の記録は完了。ひとこと添えてもOK。",
   writeMore: "詳しく書く",
   nextBright: "次の吉日",

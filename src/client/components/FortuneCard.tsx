@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Link } from "react-router-dom";
 import type { LocaleCode } from "../i18n/messages";
 import { dailySign, type SignTier } from "../lib/daily-sign";
 import { guidanceText, type DailyGuidance } from "../lib/journal";
@@ -15,7 +14,6 @@ const copy: Record<
     avoid: string;
     why: (pillar: string, master: string) => string;
     locked: string;
-    lockedAction: string;
     tiers: Record<SignTier, TierCopy>;
   }
 > = {
@@ -26,7 +24,6 @@ const copy: Record<
     avoid: "Avoid",
     why: (pillar, master) => `Drawn from today's ${pillar} and your ${master} Day Master`,
     locked: "Your daily card is drawn from your own chart.",
-    lockedAction: "Create my chart",
     tiers: {
       radiant: {
         han: "大吉",
@@ -49,7 +46,6 @@ const copy: Record<
     avoid: "忌",
     why: (pillar, master) => `由今日 ${pillar} 与你的日主 ${master} 推出`,
     locked: "每日之签来自你自己的命盘。",
-    lockedAction: "创建命盘",
     tiers: {
       radiant: { han: "大吉", word: "上上签", line: "顺风顺水，适合开始一直想做的事。" },
       bright: { han: "吉", word: "上签", line: "今天气场不错，可以主动一点。" },
@@ -64,7 +60,6 @@ const copy: Record<
     avoid: "忌",
     why: (pillar, master) => `今日の${pillar}とあなたの日主${master}から`,
     locked: "毎日のカードはあなた自身のチャートから引かれます。",
-    lockedAction: "チャートを作成",
     tiers: {
       radiant: {
         han: "大吉",
@@ -157,17 +152,9 @@ export function FortuneCard({
 
   if (locked || !guidance || !sign) {
     return (
-      <div className="flex aspect-[11/16] w-full max-w-[220px] flex-col items-center justify-center gap-3 rounded-[22px] border border-dashed border-white/20 p-5 text-center">
+      <div className="mx-auto flex aspect-[11/16] w-full max-w-[240px] flex-col items-center justify-center gap-3 rounded-[22px] border border-dashed border-white/20 p-5 text-center">
         <CardEmblem dim />
         <p className="text-xs leading-5 text-cream/55">{c.locked}</p>
-        {locked && (
-          <Link
-            to="/app/charts/new"
-            className="inline-flex h-8 items-center rounded-full bg-paper px-3 text-xs font-medium text-[#16130e]"
-          >
-            {c.lockedAction}
-          </Link>
-        )}
       </div>
     );
   }
@@ -199,7 +186,7 @@ export function FortuneCard({
   }
 
   return (
-    <div className="relative mx-auto w-full max-w-[220px]">
+    <div className="relative mx-auto w-full max-w-[240px]">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10 rounded-[30px] blur-2xl transition-opacity duration-700"

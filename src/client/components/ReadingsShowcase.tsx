@@ -86,7 +86,7 @@ const accent: Record<Tradition, { dot: string; ring: string; glow: string }> = {
 };
 
 /** The three traditions and the engines behind them, with each one's next step. */
-export function ReadingsShowcase() {
+export function ReadingsShowcase({ showTitle = true }: { showTitle?: boolean }) {
   const { locale } = useI18n();
   const c = copy[locale];
   const { charts } = useAtlas();
@@ -117,13 +117,18 @@ export function ReadingsShowcase() {
   };
 
   return (
-    <section aria-labelledby="readings-title">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 id="readings-title" className="font-display text-2xl">
-          {c.title}
-        </h2>
-        <p className="text-xs text-cream/45">{c.note}</p>
-      </div>
+    <section
+      aria-labelledby={showTitle ? "readings-title" : undefined}
+      aria-label={showTitle ? undefined : c.title}
+    >
+      {showTitle && (
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 id="readings-title" className="font-display text-2xl">
+            {c.title}
+          </h2>
+          <p className="text-xs text-cream/45">{c.note}</p>
+        </div>
+      )}
       <div className="grid gap-3 @3xl:grid-cols-3">
         {(["vedic", "bazi", "tarot"] as const).map((kind) => {
           const next = target(kind);
