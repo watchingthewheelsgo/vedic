@@ -62,8 +62,8 @@ export type DailyGuidance = {
   };
   limitations: string[];
   natal: {
-    source: "bazi_chart_record" | "vedic_chart_record";
-    sessionId: string;
+    source: "profile" | "bazi_chart_record" | "vedic_chart_record";
+    sessionId: string | null;
     dayMaster: string;
     dayMasterElement: string | null;
     pillars: Record<"year" | "month" | "day", string> & { hour: string | null };

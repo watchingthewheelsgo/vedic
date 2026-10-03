@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { AdminSessionSummary, BirthTimePrecision } from "../../shared/domain";
+import type { Profile } from "./profile";
 
 export type OwnerBirth = {
   birthDate: Date;
@@ -51,13 +52,38 @@ export function ownerBirthFrom(sessions: AdminSessionSummary[]): OwnerBirth | nu
   };
 }
 
+/** The onboarding profile as form values (it is the owner's own statement). */
+export function ownerBirthFromProfile(profile: Profile): OwnerBirth | null {
+  return ownerBirthFrom([
+    {
+      sessionId: "profile",
+      status: "completed",
+      stage: "profile",
+      subject: {
+        birthDate: profile.birthDate,
+        birthTime: profile.birthTime,
+        birthPlace: profile.birthPlace,
+        timePrecision: profile.birthTime ? "exact" : "unknown",
+        gender: profile.gender,
+        relationship: "self"
+      }
+    } as AdminSessionSummary
+  ]);
+}
+
 export function useOwnerBirth(): OwnerBirth | null {
   const [owner, setOwner] = useState<OwnerBirth | null>(null);
   useEffect(() => {
     let alive = true;
+    // The profile first; owners from before onboarding fall back to their own charts.
     api
-      .listMySessions()
-      .then((result) => alive && setOwner(ownerBirthFrom(result.sessions)))
+      .getProfile()
+      .then((result) =>
+        result.profile
+          ? ownerBirthFromProfile(result.profile)
+          : api.listMySessions().then((sessions) => ownerBirthFrom(sessions.sessions))
+      )
+      .then((found) => alive && setOwner(found))
       .catch(() => {});
     return () => {
       alive = false;

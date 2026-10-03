@@ -281,6 +281,23 @@ export const api = {
       { requireAuth: true }
     );
   },
+  getProfile() {
+    return getJson<import("./lib/profile").ProfileResponse>("/api/me/profile", undefined, {
+      requireAuth: true
+    });
+  },
+  async saveProfile(input: import("./lib/profile").ProfileInput) {
+    const response = await fetch(resolveApiUrl("/api/me/profile"), {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...(await authHeaders({ requireToken: true }))
+      },
+      body: JSON.stringify(input)
+    });
+    if (!response.ok) await throwApiError(response);
+    return (await response.json()) as import("./lib/profile").ProfileResponse;
+  },
   getDailyGuidance(input: { timezone: string; day?: string }, signal?: AbortSignal) {
     const params = new URLSearchParams({ timezone: input.timezone });
     if (input.day) params.set("day", input.day);

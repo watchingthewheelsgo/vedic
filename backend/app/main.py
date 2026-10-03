@@ -75,6 +75,7 @@ async def lifespan(_: FastAPI):
 
 from app.services.atlas import router as atlas_router
 from app.services.daily_guidance import router as daily_guidance_router
+from app.services.user_profile import router as profile_router
 from app.services.daily_journal import router as journal_router
 from app.services.feedback import router as feedback_router
 from app.services.memberships import router as memberships_router
@@ -83,6 +84,7 @@ app = FastAPI(title="Vedic Skills Runtime API", version="0.1.0", lifespan=lifesp
 
 app.include_router(journal_router)
 app.include_router(daily_guidance_router)
+app.include_router(profile_router)
 app.include_router(atlas_router)
 
 app.include_router(feedback_router)

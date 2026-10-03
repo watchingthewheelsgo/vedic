@@ -145,9 +145,8 @@ const zh: Copy = {
   emptyTitle: "想聊点什么？",
   emptyBody: "Atlas 会结合你的命盘、今天的干支和你的记录来回答。",
   chartFirstTitle: "先认识你，再陪你聊",
-  chartFirstBody:
-    "Atlas 需要你的命盘才能给出属于你的回答。填一次出生信息，就能解锁对话、每日宜忌和顺日分析。",
-  chartFirstVedic: "创建 Vedic 命盘",
+  chartFirstBody: "Atlas 需要你的生日、出生地和性别，才能给出属于你的回答。",
+  chartFirstVedic: "补充出生信息",
   chartFirstBazi: "创建八字命盘",
   suggestions: {
     today: ["今天我该关注什么？", "这周哪几天适合做重要的事？"],
@@ -181,8 +180,8 @@ const en: Copy = {
   emptyBody: "Atlas answers from your chart, today's stem-branch and your journal.",
   chartFirstTitle: "Let Atlas get to know you",
   chartFirstBody:
-    "Atlas needs your chart to answer about you, not people in general. Add your birth details once to unlock chat, daily Good for / Avoid and your auspicious days.",
-  chartFirstVedic: "Create my Vedic chart",
+    "Atlas needs your birthday, birthplace and gender to answer about you, not people in general.",
+  chartFirstVedic: "Add my birth details",
   chartFirstBazi: "Create my BaZi chart",
   suggestions: {
     today: ["What should I focus on today?", "Which days this week suit big decisions?"],
@@ -222,9 +221,8 @@ const ja: Copy = {
   emptyTitle: "何を話しましょう？",
   emptyBody: "あなたのチャート、今日の干支、記録をもとに答えます。",
   chartFirstTitle: "まずはあなたのことを教えてください",
-  chartFirstBody:
-    "Atlas はあなたのチャートをもとに答えます。出生情報を一度入力すると、チャット、毎日の宜忌、吉日分析が使えるようになります。",
-  chartFirstVedic: "Vedic チャートを作成",
+  chartFirstBody: "Atlas はあなたの誕生日・出生地・性別をもとに答えます。",
+  chartFirstVedic: "出生情報を入力",
   chartFirstBazi: "八字チャートを作成",
   suggestions: {
     today: ["今日は何に集中すべき？", "今週、大事な決断に向く日は？"],

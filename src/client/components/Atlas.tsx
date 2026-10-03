@@ -24,6 +24,7 @@ import {
   type AtlasTurn
 } from "../lib/atlas";
 import type { AdminSessionSummary } from "../../shared/domain";
+import type { Profile, ProfileResponse } from "../lib/profile";
 
 export type WorkspaceChart = {
   sessionId: string;
@@ -43,8 +44,9 @@ type AtlasState = {
   askAbout: (message: string) => void;
   reset: () => void;
   charts: WorkspaceChart[];
-  /** null while loading; Atlas needs a chart (Vedic or BaZi) to speak about a person. */
-  hasChart: boolean | null;
+  /** null while loading; Atlas and the daily card need the owner's birth details. */
+  hasBirth: boolean | null;
+  profile: Profile | null;
   reading: WorkspaceChart | null;
   drawerOpen: boolean;
   setDrawerOpen: (value: boolean) => void;
@@ -72,7 +74,7 @@ export function AtlasProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [useNotes, setUseNotes] = useState(true);
   const [charts, setCharts] = useState<WorkspaceChart[]>([]);
-  const [chartsLoaded, setChartsLoaded] = useState(false);
+  const [birth, setBirth] = useState<ProfileResponse | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const turnsRef = useRef(turns);
   useEffect(() => {
@@ -87,8 +89,11 @@ export function AtlasProvider({ children }: { children: ReactNode }) {
       .then((result) => {
         if (!alive) return;
         setCharts(result.sessions.map((session) => chartFrom(session, localeTag)));
-        setChartsLoaded(true);
       })
+      .catch(() => {});
+    api
+      .getProfile()
+      .then((result) => alive && setBirth(result))
       .catch(() => {});
     return () => {
       alive = false;
@@ -153,12 +158,13 @@ export function AtlasProvider({ children }: { children: ReactNode }) {
         setError("");
       },
       charts,
-      hasChart: chartsLoaded ? charts.length > 0 : null,
+      hasBirth: birth ? birth.natalAvailable : null,
+      profile: birth?.profile ?? null,
       reading,
       drawerOpen,
       setDrawerOpen
     }),
-    [turns, busy, error, useNotes, ask, askAbout, charts, chartsLoaded, reading, drawerOpen]
+    [turns, busy, error, useNotes, ask, askAbout, charts, birth, reading, drawerOpen]
   );
   return <AtlasContext.Provider value={value}>{children}</AtlasContext.Provider>;
 }
@@ -428,18 +434,11 @@ export function AtlasChartFirst({ compact = false }: { compact?: boolean }) {
       <p className="mt-2 text-sm leading-6 text-cream/60">{copy.chartFirstBody}</p>
       <div className="mt-5 flex flex-wrap gap-2">
         <Link
-          to="/app/charts/new"
+          to="/app"
           onClick={() => setDrawerOpen(false)}
           className="inline-flex h-10 items-center rounded-full bg-paper px-4 text-sm font-medium text-[#16130e]"
         >
           {copy.chartFirstVedic}
-        </Link>
-        <Link
-          to="/app/charts/bazi"
-          onClick={() => setDrawerOpen(false)}
-          className="inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-sm text-cream/80 hover:bg-white/[0.05]"
-        >
-          {copy.chartFirstBazi}
         </Link>
       </div>
     </div>
@@ -450,7 +449,7 @@ export function AtlasChartFirst({ compact = false }: { compact?: boolean }) {
 export function AtlasPanel() {
   const { locale } = useI18n();
   const copy = atlasCopy[locale];
-  const { drawerOpen, setDrawerOpen, hasChart } = useAtlas();
+  const { drawerOpen, setDrawerOpen, hasBirth } = useAtlas();
   useEffect(() => {
     if (!drawerOpen) return;
     const close = (event: KeyboardEvent) => event.key === "Escape" && setDrawerOpen(false);
@@ -466,7 +465,7 @@ export function AtlasPanel() {
     >
       <div className="flex h-full flex-col gap-4 px-5 pb-5 pt-5">
         <AtlasHeader onClose={() => setDrawerOpen(false)} />
-        {hasChart === false ? (
+        {hasBirth === false ? (
           <AtlasChartFirst compact />
         ) : (
           <>

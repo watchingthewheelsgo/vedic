@@ -194,6 +194,17 @@ def _container(sessions: dict[str, list[tuple[str, str, str | None]]]):
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_profiles(monkeypatch):
+    """Chart-based tests run without a database: nobody has an onboarding profile."""
+    import app.services.user_profile as user_profile
+
+    async def none(owner_user_id):
+        return None
+
+    monkeypatch.setattr(user_profile, "load_profile", none)
+
+
 def test_api_owner_scoped_prefers_bazi_record_and_falls_back(monkeypatch):
     import app.container
 
@@ -285,3 +296,69 @@ def test_reindexed_bazi_sessions_stay_bazi(tmp_path):
     )
     files.append(tmp_path / "bazi_life_report.md")
     assert store._derive_stage(files, None, "completed") == "bazi_complete"
+
+
+def test_profile_is_saved_per_owner_and_drives_the_natal(monkeypatch, tmp_path):
+    import app.container
+    import app.services.user_profile as user_profile
+    from app.db.engine import close_db, init_db
+    from app.services.daily_guidance import resolve_natal
+
+    monkeypatch.undo()  # use the real profile store for this test
+    container = _container({})
+    monkeypatch.setattr(app.container, "get_container", lambda: container)
+    alice = AuthenticatedUser(user_id="alice", auth_mode="clerk")
+    bob = AuthenticatedUser(user_id="bob", auth_mode="clerk")
+
+    async def run():
+        await init_db(
+            SimpleNamespace(
+                database_url=f"sqlite+aiosqlite:///{tmp_path / 'profile.db'}", database_echo=False
+            )
+        )
+        try:
+            empty = await user_profile.read_profile(alice)
+            assert empty == {"profile": None, "natalAvailable": False}
+            saved = await user_profile.save_profile(
+                user_profile.ProfileInput(
+                    birthDate=date(1992, 5, 18),
+                    birthTime="",
+                    birthPlace="福州市, 福建省 | lat=26.07, lon=119.30, tz=Asia/Shanghai",
+                    placeLabel="福州市, 福建省",
+                    timezone="Asia/Shanghai",
+                    gender="女",
+                ),
+                alice,
+            )
+            assert saved["profile"]["birthTime"] is None
+            assert (await user_profile.read_profile(alice))["natalAvailable"] is True
+            assert (await user_profile.read_profile(bob))["profile"] is None
+            natal = await resolve_natal(container, "alice")
+            assert natal is not None and natal["source"] == "profile"
+            assert natal["pillars"]["hour"] is None
+        finally:
+            await close_db()
+
+    asyncio.run(run())
+
+
+def test_profile_input_rejects_implausible_values():
+    from pydantic import ValidationError
+
+    from app.services.user_profile import ProfileInput
+
+    base = {
+        "birthDate": "1992-05-18",
+        "birthPlace": "London, England",
+        "placeLabel": "London",
+        "timezone": "Europe/London",
+        "gender": "男",
+    }
+    for change in (
+        {"birthDate": "1800-01-01"},
+        {"birthTime": "25:00"},
+        {"timezone": "No/Zone"},
+        {"gender": "x"},
+    ):
+        with pytest.raises(ValidationError):
+            ProfileInput(**(base | change))

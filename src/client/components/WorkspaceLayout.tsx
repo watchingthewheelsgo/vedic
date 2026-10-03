@@ -28,10 +28,10 @@ function WorkspaceShell() {
   const d = daysCopy[locale];
   const location = useLocation();
   const onAsk = location.pathname.startsWith("/app/ask");
-  const { hasChart } = useAtlas();
+  const { hasBirth } = useAtlas();
   // Chart creation, existing charts and account settings stay reachable without a chart.
   const needsOnboarding =
-    hasChart === false && !/^\/app\/(charts\/.+|settings)/.test(location.pathname);
+    hasBirth === false && !/^\/app\/(charts\/.+|settings)/.test(location.pathname);
   const dirty = useRef(false);
   const setDirty = useCallback((value: boolean) => {
     dirty.current = value;

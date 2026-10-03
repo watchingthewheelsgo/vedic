@@ -90,8 +90,43 @@ def natal_from_vedic_record(record: dict[str, Any], session_id: str) -> dict[str
     }
 
 
+def natal_from_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    """Natal pillars from the owner's onboarding profile (civil time, like BaZi sessions)."""
+    birth_time = profile.get("birthTime") or ""
+    payload = calculate_bazi(
+        BaziInput(
+            birth_date=date.fromisoformat(profile["birthDate"]),
+            birth_time=birth_time,
+            birth_place=str(profile.get("placeLabel") or profile.get("birthPlace") or ""),
+            gender=str(profile.get("gender") or "未提供"),
+            calendar_type="solar",
+            time_precision="exact" if birth_time else "unknown",
+            timezone_name=str(profile.get("timezone") or "UTC"),
+            latitude=None,
+            longitude=None,
+            current_date=date.today(),
+            audience="self",
+            relationship="[not provided]",
+            topic="[not provided]",
+            day_boundary_sect=2,
+            luck_sect=2,
+            solar_time_policy="civil",
+        )
+    )
+    return {**natal_from_bazi_record(payload), "source": "profile", "sessionId": None}
+
+
 async def resolve_natal(container: Any, owner_user_id: str | None) -> dict[str, Any] | None:
-    """Prefer the newest self BaZi Chart Record; else derive from the newest self Vedic chart."""
+    """The owner's profile first; else the newest self BaZi Chart Record; else the newest
+    self Vedic chart."""
+    from app.services.user_profile import load_profile
+
+    profile = await load_profile(owner_user_id)
+    if profile:
+        try:
+            return natal_from_profile(profile)
+        except (ValueError, KeyError, TypeError):
+            logger.warning("daily guidance profile natal calc failed")
     summaries = await container.metadata_store.list_session_summaries(owner_user_id)
     bazi = [item for item in summaries if str(item.stage).startswith("bazi")]
     vedic = [item for item in summaries if not str(item.stage).startswith("bazi")]

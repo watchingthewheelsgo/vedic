@@ -35,7 +35,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
   const selectedDay = params.get("day");
   const { locale, localeTag } = useI18n();
   const { user } = useUser();
-  const { hasChart, askAbout } = useAtlas();
+  const { hasBirth, askAbout } = useAtlas();
   const c = journalCopy[locale];
   const w = workspaceCopy[locale];
   const d = daysCopy[locale];
@@ -289,7 +289,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           </div>
         )}
 
-        {guidance && hasChart && (
+        {guidance && hasBirth && (
           <div className="rise-in mt-5 flex justify-center" style={{ animationDelay: "80ms" }}>
             <DailyCardLauncher
               day={data.today.day}
@@ -298,26 +298,6 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               locale={locale}
             />
           </div>
-        )}
-        {hasChart === false && (
-          <section className="rise-in mt-8 rounded-3xl border border-gold/25 bg-gold/[0.05] p-6 text-center">
-            <p className="text-[15px] font-medium">{d.startTitle}</p>
-            <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-cream/60">{d.startBody}</p>
-            <div className="mt-4 flex justify-center gap-2">
-              <Link
-                to="/app/charts/new"
-                className="inline-flex h-10 items-center rounded-full bg-paper px-4 text-sm font-medium text-[#16130e]"
-              >
-                {d.startVedic}
-              </Link>
-              <Link
-                to="/app/charts/bazi"
-                className="inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-sm text-cream/80 hover:bg-white/[0.05]"
-              >
-                {d.startBazi}
-              </Link>
-            </div>
-          </section>
         )}
 
         <section className="rise-in mt-10 text-center" style={{ animationDelay: "160ms" }}>
@@ -360,7 +340,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               </div>
             </div>
           )}
-          {hasChart && (
+          {hasBirth && (
             <button
               type="button"
               onClick={() => askAbout(d.askToday)}
@@ -641,7 +621,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                     </div>
                   )}
                   <h2 className="mt-8 text-xl font-medium">{c.ask}</h2>
-                  {hasChart === false && (
+                  {hasBirth === false && (
                     <div className="mt-4">
                       <AtlasChartFirst compact />
                     </div>
@@ -679,7 +659,7 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
                   <p className="my-4 text-xs leading-relaxed text-cream/65">{c.consent}</p>
                   <Button
                     disabled={
-                      !!busy || question.trim().length < 3 || !entry || dirty || hasChart === false
+                      !!busy || question.trim().length < 3 || !entry || dirty || hasBirth === false
                     }
                     onClick={() => void ask()}
                   >

@@ -319,3 +319,20 @@ class JournalEntryRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now(), onupdate=func.now()
     )
+
+
+class UserProfileRecord(Base):
+    """The account owner's own birth details, collected once at onboarding."""
+
+    __tablename__ = "user_profiles"
+    owner_user_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    birth_date: Mapped[str] = mapped_column(String(10))
+    birth_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    birth_place: Mapped[str] = mapped_column(Text)
+    place_label: Mapped[str] = mapped_column(String(200))
+    timezone: Mapped[str] = mapped_column(String(80))
+    gender: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), onupdate=func.now()
+    )

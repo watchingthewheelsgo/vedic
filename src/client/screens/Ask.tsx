@@ -11,7 +11,7 @@ import { atlasCopy } from "../lib/atlas";
 export function Ask() {
   const { locale } = useI18n();
   const copy = atlasCopy[locale];
-  const { reading, useNotes, setUseNotes, turns, reset, hasChart } = useAtlas();
+  const { reading, useNotes, setUseNotes, turns, reset, hasBirth } = useAtlas();
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-9rem)] max-w-[760px] flex-col px-5 pt-8 sm:px-8 lg:min-h-[calc(100dvh-3rem)] lg:pt-10">
       <header className="flex items-center gap-3">
@@ -32,7 +32,7 @@ export function Ask() {
           </button>
         )}
       </header>
-      {hasChart === false ? (
+      {hasBirth === false ? (
         <AtlasChartFirst />
       ) : (
         <>
