@@ -289,7 +289,17 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
           </div>
         )}
 
-        {hasChart === false ? (
+        {guidance && hasChart && (
+          <div className="rise-in mt-5 flex justify-center" style={{ animationDelay: "80ms" }}>
+            <DailyCardLauncher
+              day={data.today.day}
+              guidance={dayGuidance ?? null}
+              fit={todayReading.fit}
+              locale={locale}
+            />
+          </div>
+        )}
+        {hasChart === false && (
           <section className="rise-in mt-8 rounded-3xl border border-gold/25 bg-gold/[0.05] p-6 text-center">
             <p className="text-[15px] font-medium">{d.startTitle}</p>
             <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-cream/60">{d.startBody}</p>
@@ -308,17 +318,6 @@ export function Daily({ view }: { view: "today" | "records" | "explore" }) {
               </Link>
             </div>
           </section>
-        ) : (
-          dayGuidance && (
-            <div className="rise-in mt-5 flex justify-center" style={{ animationDelay: "80ms" }}>
-              <DailyCardLauncher
-                day={data.today.day}
-                guidance={dayGuidance}
-                fit={todayReading.fit}
-                locale={locale}
-              />
-            </div>
-          )
         )}
 
         <section className="rise-in mt-10 text-center" style={{ animationDelay: "160ms" }}>

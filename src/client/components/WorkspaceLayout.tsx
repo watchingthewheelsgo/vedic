@@ -4,6 +4,7 @@ import { NavLink, Link, Outlet, useLocation } from "react-router-dom";
 import { Sun, NotebookPen, Sparkles, Orbit, CalendarDays, Compass } from "lucide-react";
 import { useUser } from "@clerk/clerk-react";
 import { AccountAvatar } from "./AccountAvatar";
+import { OnboardingGate } from "./OnboardingGate";
 import { AtlasLauncher, AtlasPanel, AtlasProvider, useAtlas } from "./Atlas";
 import { useI18n } from "../i18n/provider";
 import { DraftContext } from "../lib/workspace-draft";
@@ -27,6 +28,10 @@ function WorkspaceShell() {
   const d = daysCopy[locale];
   const location = useLocation();
   const onAsk = location.pathname.startsWith("/app/ask");
+  const { hasChart } = useAtlas();
+  // Chart creation, existing charts and account settings stay reachable without a chart.
+  const needsOnboarding =
+    hasChart === false && !/^\/app\/(charts\/.+|settings)/.test(location.pathname);
   const dirty = useRef(false);
   const setDirty = useCallback((value: boolean) => {
     dirty.current = value;
@@ -130,12 +135,13 @@ function WorkspaceShell() {
           </main>
         </div>
 
-        {!onAsk && (
+        {!onAsk && !needsOnboarding && (
           <>
             <AtlasPanel />
             <AtlasLauncher />
           </>
         )}
+        {needsOnboarding && <OnboardingGate />}
 
         <nav
           aria-label={w.space}

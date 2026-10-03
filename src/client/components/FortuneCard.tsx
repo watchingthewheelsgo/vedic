@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
 import type { LocaleCode } from "../i18n/messages";
 import { dailySign, type SignTier } from "../lib/daily-sign";
 import { guidanceText, type DailyGuidance } from "../lib/journal";
@@ -11,6 +12,9 @@ const copy: Record<
   {
     tap: string;
     chipDraw: string;
+    lockedTitle: string;
+    vedicCta: string;
+    baziCta: string;
     chipToday: string;
     close: string;
     dialog: string;
@@ -25,6 +29,9 @@ const copy: Record<
   en: {
     tap: "Tap to draw today's card",
     chipDraw: "Draw today's card",
+    lockedTitle: "Your card is waiting",
+    vedicCta: "Create my Vedic chart",
+    baziCta: "Create my BaZi chart",
     chipToday: "Today",
     close: "Close",
     dialog: "Today's card",
@@ -51,6 +58,9 @@ const copy: Record<
   zh: {
     tap: "轻点抽取今日之签",
     chipDraw: "抽取今日之签",
+    lockedTitle: "你的今日之签在等你",
+    vedicCta: "创建 Vedic 命盘",
+    baziCta: "创建八字命盘",
     chipToday: "今日",
     close: "关闭",
     dialog: "今日之签",
@@ -69,6 +79,9 @@ const copy: Record<
   ja: {
     tap: "タップして今日のカードを引く",
     chipDraw: "今日のカードを引く",
+    lockedTitle: "今日のカードが待っています",
+    vedicCta: "Vedic チャートを作成",
+    baziCta: "八字チャートを作成",
     chipToday: "今日",
     close: "閉じる",
     dialog: "今日のカード",
@@ -165,7 +178,8 @@ export function FortuneCard({
   const c = copy[locale];
   const large = size === "large";
   const width = large ? "max-w-[300px]" : "max-w-[240px]";
-  const [flipped, setFlipped] = useState(() => readDrawn(day));
+  const isLocked = locked || !guidance;
+  const [flipped, setFlipped] = useState(() => !isLocked && readDrawn(day));
   const [burst, setBurst] = useState(0);
   const [anticipate, setAnticipate] = useState(false);
   const timers = useRef<number[]>([]);
@@ -173,19 +187,11 @@ export function FortuneCard({
 
   useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
 
-  if (locked || !guidance || !sign) {
-    return (
-      <div className="mx-auto flex aspect-[11/16] w-full max-w-[240px] flex-col items-center justify-center gap-3 rounded-[22px] border border-dashed border-white/20 p-5 text-center">
-        <CardEmblem dim />
-        <p className="text-xs leading-5 text-cream/55">{c.locked}</p>
-      </div>
-    );
-  }
-
-  const tier = c.tiers[sign.tier];
-  const style = tierStyle[sign.tier];
-  const top = guidance.goodFor[0];
-  const caution = guidance.avoid[0];
+  // Without a chart the ritual still plays; the face invites the user to create one.
+  const tier = sign ? c.tiers[sign.tier] : { han: "", word: c.lockedTitle, line: c.locked };
+  const style = tierStyle[sign?.tier ?? "steady"];
+  const top = guidance?.goodFor[0];
+  const caution = guidance?.avoid[0];
 
   function draw() {
     if (flipped) {
@@ -197,6 +203,7 @@ export function FortuneCard({
       window.setTimeout(() => {
         setAnticipate(false);
         setFlipped(true);
+        if (isLocked) return;
         try {
           localStorage.setItem(storageKey(day), "1");
         } catch {
@@ -243,13 +250,19 @@ export function FortuneCard({
           >
             <span className="absolute inset-[7px] rounded-[16px] border border-black/15" />
             <span className="relative mt-1 text-[10px] uppercase tracking-[0.3em] opacity-60">
-              {guidance.dayPillar}
+              {guidance?.dayPillar ?? "Sign Atlas"}
             </span>
-            <span
-              className={`han relative font-bold leading-none ${large ? "mt-6 text-[92px]" : "mt-2 text-[58px]"}`}
-            >
-              {tier.han}
-            </span>
+            {sign ? (
+              <span
+                className={`han relative font-bold leading-none ${large ? "mt-6 text-[92px]" : "mt-2 text-[58px]"}`}
+              >
+                {tier.han}
+              </span>
+            ) : (
+              <span className={`relative ${large ? "mt-8" : "mt-4"}`}>
+                <CardEmblem />
+              </span>
+            )}
             <span
               className={`relative mt-1 font-display italic ${large ? "text-[30px]" : "text-xl"}`}
             >
@@ -260,7 +273,9 @@ export function FortuneCard({
             >
               {tier.line}
             </span>
-            <span className="relative mt-auto w-full space-y-1 border-t border-black/15 pt-2 text-left text-[11px] leading-4">
+            <span
+              className={`relative mt-auto w-full space-y-1 border-t border-black/15 pt-2 text-left text-[11px] leading-4 ${sign ? "" : "hidden"}`}
+            >
               {top && (
                 <span className="block truncate">
                   <b className="font-semibold">{c.good}</b> · {guidanceText(top, locale)}
@@ -290,19 +305,19 @@ export function FortuneCard({
             className="fortune-flash absolute inset-0 rounded-[22px]"
             style={{ background: style.spark }}
           />
-          {sign.tier !== "gentle" && (
+          {sign?.tier !== "gentle" && (
             <span
               className="fortune-ring absolute left-1/2 top-1/2 size-24 rounded-full border-2"
               style={{ borderColor: style.spark }}
             />
           )}
-          {sign.tier === "radiant" && (
+          {sign?.tier === "radiant" && (
             <span
               className="fortune-ring fortune-ring-late absolute left-1/2 top-1/2 size-24 rounded-full border"
               style={{ borderColor: style.spark }}
             />
           )}
-          {SPARKS.slice(0, sign.tier === "gentle" ? 14 : 36).map((spark, i) => (
+          {SPARKS.slice(0, sign?.tier === "gentle" ? 14 : 36).map((spark, i) => (
             <span
               key={i}
               className="fortune-spark absolute left-1/2 top-1/2 rounded-full"
@@ -323,8 +338,24 @@ export function FortuneCard({
       )}
 
       <p className="mt-3 text-center text-[11px] leading-4 text-cream/40">
-        {flipped ? c.why(guidance.dayPillar, guidance.facts.dayMaster) : "\u00a0"}
+        {flipped && guidance ? c.why(guidance.dayPillar, guidance.facts.dayMaster) : "\u00a0"}
       </p>
+      {isLocked && flipped && (
+        <div className="rise-in mt-3 flex flex-wrap justify-center gap-2">
+          <Link
+            to="/app/charts/new"
+            className="inline-flex h-10 items-center rounded-full bg-paper px-4 text-sm font-medium text-[#16130e]"
+          >
+            {c.vedicCta}
+          </Link>
+          <Link
+            to="/app/charts/bazi"
+            className="inline-flex h-10 items-center rounded-full border border-white/20 px-4 text-sm text-cream/85 hover:bg-white/[0.06]"
+          >
+            {c.baziCta}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
@@ -352,18 +383,18 @@ export function DailyCardLauncher({
   locale
 }: {
   day: string;
-  guidance: DailyGuidance;
+  guidance: DailyGuidance | null;
   fit: "bright" | "steady" | "gentle" | "unknown";
   locale: LocaleCode;
 }) {
   const c = copy[locale];
   const [open, setOpen] = useState(false);
-  const [drawn, setDrawn] = useState(() => readDrawn(day));
+  const [drawn, setDrawn] = useState(() => Boolean(guidance) && readDrawn(day));
   const closeButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const sign = useMemo(() => dailySign(guidance, fit), [guidance, fit]);
-  const tier = c.tiers[sign.tier];
-  const style = tierStyle[sign.tier];
+  const sign = useMemo(() => (guidance ? dailySign(guidance, fit) : null), [guidance, fit]);
+  const tier = c.tiers[sign?.tier ?? "steady"];
+  const style = tierStyle[sign?.tier ?? "steady"];
 
   // The first visit of the day offers the card once; closing it leaves the chip as the reminder.
   useEffect(() => {
